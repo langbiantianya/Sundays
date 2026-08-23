@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":engine"))
 
     implementation(compose.desktop.currentOs)
+    implementation(compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
 
     implementation(libs.compose.uiToolingPreview)
@@ -20,11 +21,11 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.kxxnzstdsw.idb_app.MainKt"
+        mainClass = "com.kxxnzstdsw.Sundays.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.kxxnzstdsw.idb_app"
+            packageName = "com.kxxnzstdsw.Sundays"
             packageVersion = "1.0.0"
         }
     }

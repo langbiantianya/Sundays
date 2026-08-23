@@ -1,4 +1,4 @@
-# idb_app — Kotlin 数据库管理端
+# Sundays — Kotlin 数据库管理端
 
 一个使用 Kotlin 编写、面向桌面端的**数据库管理工具**。前端是 **Kotlin Multiplatform + Compose Multiplatform** 桌面应用（`desktopApp/` 模块），后端是 v2.9 起支持**双模式架构**的无头引擎（`engine/` 模块）：
 
@@ -18,7 +18,7 @@
 ## 模块结构
 
 ```
-idb_app/
+Sundays/
 ├── api/                  公共 SPI 接口（DatabaseDialect + ConnectionType + DialectCapability，v2.8）
 ├── dialect-mysql/        MySQL 方言插件 JAR
 ├── dialect-postgresql/   PostgreSQL 方言插件 JAR
@@ -39,11 +39,14 @@ idb_app/
 │   │   └── loader/       ServiceLoader 动态加载 drivers/ + dialects/
 │   └── src/test/kotlin/  174 个 engine 测试（含 v2.9 新增 IdbEngineDirectTest 4 项）
 ├── shared/               KMP 共享代码（commonMain / jvmMain）
-│   ├── commonMain/       KMP 共享逻辑（与平台无关）
+│   ├── commonMain/       KMP 共享逻辑（与平台无关）—— 含 UI 组件（编辑器 / 表格 / 右键菜单）
+│   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单）
+│   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
+│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier）
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  dependencies 含 implementation(project(":engine")) — Direct 模式依赖
-    └── src/main/kotlin/com/kxxnzstdsw/idb_app/
+    └── src/main/kotlin/com/kxxnzstdsw/Sundays/
         └── main.kt       KMP Desktop 入口：IdbEngine() 直接持有、Compose UI 渲染
 ```
 
@@ -54,7 +57,7 @@ idb_app/
 **核心思路**：KMP Desktop 与引擎部署在**同一个 JVM 进程**，不通过 gRPC / IPC transport 通信，而是通过 `IdbEngine` facade **直接方法调用**。
 
 ```kotlin
-// desktopApp/src/main/kotlin/com/kxxnzstdsw/idb_app/main.kt
+// desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt
 import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.grpc.*
 import kotlinx.coroutines.flow.first
@@ -182,6 +185,94 @@ for {
 
 ---
 
+## 共享 UI 组件（`shared/` 模块）
+
+`shared/commonMain` 提供两个**面向 KMP Compose Desktop** 的可扩展 UI 组件，均与引擎无关、可单独使用：
+
+### `CodeEditor` —— 可扩展代码编辑器
+
+`com.kxxnzstdsw.Sundays.editor.ui.CodeEditor` / `CodeEditorWithToolbar`
+
+特性：
+- 语法高亮（基于 `CodeLanguageRegistry`，支持 SQL / Lua；新增语言只需 `registry.register(...)`）
+- **行号 gutter**（动态宽度，按行数位数自适应；与编辑区共用 `ScrollState`，滚动完全同步）
+- **工具栏**：`RowScope.() -> Unit` 插槽注入自定义按钮（"执行"、"清空"、"复制"…）
+- **语言切换下拉框**：可隐藏（`showLanguageSwitcher = false`）；语言可在实例化时直接指定
+- **格式化**：`CodeFormatterRegistry` 注册的格式化器自动启用
+- **右键菜单**：`@Composable (EditorContextMenuPayload?) -> Unit` 插槽注入菜单项
+
+#### 高度策略（v2.9+）
+
+| `maxLines` | 行为 |
+|---|---|
+| `null`（**默认**） | 不施加高度上限 — 编辑器**填充父容器剩余高度**，但不会超过父容器；超出可滚动 |
+| 传入整数 | 显式上下限（介于 `minHeight` 与 `maxHeight` 之间） |
+
+```kotlin
+// 默认行为 — 填充父容器高度（不超父容器）
+CodeEditor(
+    text = sql,
+    onTextChange = { sql = it },
+    languageId = "sql",
+)
+
+// 显式高度上限
+CodeEditor(
+    text = sql,
+    onTextChange = { sql = it },
+    languageId = "sql",
+    minLines = 5,
+    maxLines = 15,    // 超过则内部滚动
+)
+```
+
+### `DataTable` —— 虚拟滚动数据表格
+
+`com.kxxnzstdsw.Sundays.table.DataTable`
+
+特性：
+- **大量数据**：基于 `LazyColumn` 的虚拟滚动（item key = 主键）
+- **可配置表头**：`TableColumn(key, header, width, alignment, formatter, weight)`
+- **分页**：`PageSize` 枚举 — `S10` / `S20` / `S50` / `S100` / `S200` / `S300` / `S500` / `ALL`
+- **databind**：行数据由调用方管理 state 传入，变化自动重绘
+- **单行详情面板**：点击行 → 右侧详情面板（可隐藏；可自定义 `detailPanel` 插槽；`detailPanelRatio` 控制宽度比）
+- **单元格可选中**：每行包裹 `SelectionContainer`，可在单元格内拖拽选中
+- **右键菜单**：`@Composable (TableRow?) -> Unit` 插槽；通过 `ContextMenuState.targetRow` 拿目标行
+- **数据库主键**：`TableRow.id` 承载主键，详情面板 / 选中状态识别
+
+#### 高度策略（v2.9+）
+
+| `fillParentHeight` | 行为 |
+|---|---|
+| `true`（**默认**） | `fillMaxSize()` — 填满父容器剩余空间，**不会超出父容器** |
+| `false` | 按内容自适应高度（外部父容器需自己处理滚动 / 尺寸） |
+
+```kotlin
+DataTable(
+    columns = listOf(TableColumn("id", "ID"), TableColumn("name", "姓名")),
+    rows = rows,
+    pageSize = PageSize.S50,
+    onPageSizeChange = { ... },
+    currentPage = 1,
+    onPageChange = { ... },
+    // fillParentHeight 默认 true —— 填满父容器高度
+    contextMenuState = rememberContextMenuState(),
+    contextMenuItems = { row ->
+        DropdownMenuItem(text = { Text("删除 ${row?.id}") }, onClick = { ... })
+    },
+)
+```
+
+### 通用 UI 工具（`shared/.../ui/`）
+
+| 类型 | 用途 |
+|---|---|
+| `ContextMenuState<T : Any>` | 通用右键菜单状态（位置 + 可见性 + payload），被 `EditorContextMenuState` / 表格的 `ContextMenuState` 共用 |
+| `Modifier.onRightClick { Offset -> Unit }` | 鼠标右键检测 modifier（基于 `awaitPointerEventScope` + `event.buttons.isSecondaryPressed`） |
+| `rememberContextMenuState()` / `rememberEditorContextMenuState()` | Composable 工厂 |
+
+---
+
 ## 运行引擎 standalone
 
 ```bash
@@ -203,7 +294,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 ## 运行测试
 
 ```bash
-# 全部 380 测试
+# 全部 451 测试
 ./gradlew test
 
 # 单个方言模块
@@ -215,13 +306,14 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 ./gradlew :engine:test              # 174 测试（含 v2.9 新增 4 项 IdbEngineDirectTest）
 
 # Desktop App 共享代码测试
-./gradlew :shared:jvmTest
+./gradlew :shared:jvmTest           # 共享 UI / 逻辑测试（编辑器 + 表格 + 右键菜单，约 71 项）
 ```
 
 测试覆盖率：
 - **engine:test**（174 项）：IPC config + transport round-trip + HikariCP pool + DialectLoader + 11 个 handler 集成（typed proto builders）+ envelope options + DuckDB / SQLite 端到端 + LIST_DRIVERS + **Direct 模式契约（v2.9 新增）**
 - **dialect-h2 / -duckdb / -sqlite:test**：方言 SPI 方法全量覆盖（206 项）
-- **总计：380 测试，0 失败 / 0 错误（1 个 Windows-only IpcConfigTest 用例 skip）**
+- **shared:jvmTest**：Kotlin Multiplatform 共享代码 —— Lua tokenizer（30 项）+ SQL tokenizer（9 项）+ EditorIntegration（12 项）+ TableModels（18 项）+ SharedCommon / SharedLogicDesktop（各 1 项），合计 **71 项**
+- **总计：451 测试，0 失败 / 0 错误（1 个 Windows-only IpcConfigTest 用例 skip）**
 
 ---
 
@@ -255,7 +347,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 ## 架构升级历史
 
 | 版本 | 主要变化 |
-|---|---|
+| --- | --- |
 | v1.0 | stdin/stdout + 4-byte BE uint32 长度前缀 + 自定义 protobuf（旧管道协议） |
 | v2.0 | gRPC over HTTP/2 + 标准 google.protobuf.Value |
 | v2.1 | gRPC + IPC Transport SPI（TCP / UDS / Named Pipe） |
@@ -266,7 +358,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 | v2.6 | 表驱动 Dispatcher + 跨切面 Envelope Options（traceId / dryRun / timeoutMs）+ `SQL.EXPLAIN` 路由 |
 | v2.7 | DuckDB 方言插件（本地嵌入式 OLAP） |
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` |
-| **v2.9 (当前)** | **KMP Desktop Direct 模式 + 双模式架构** — 前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode <grpc\|direct>` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated* |
+| v2.9 | KMP Desktop Direct 模式 + 双模式架构：前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode grpc\|direct` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated*<br>CodeEditor / DataTable 高度策略统一：`CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限 |
 
 ---
 

@@ -1,4 +1,4 @@
-rootProject.name = "idb_app"
+rootProject.name = "Sundays"
 
 pluginManagement {
     repositories {
