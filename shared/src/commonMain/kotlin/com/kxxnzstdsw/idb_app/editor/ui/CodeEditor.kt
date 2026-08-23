@@ -209,32 +209,52 @@ private fun LineNumberGutter(
 
 /**
  * 带工具栏的代码编辑器 —— 在 [CodeEditor] 之上增加：
- * - 语言切换下拉框
+ * - 语言切换下拉框（**可隐藏** — 通过 [showLanguageSwitcher] 关闭）
  * - "格式化"按钮（自动检查 [CodeFormatterRegistry] 是否有可用 formatter）
  * - **可扩展 actions 插槽** — 调用方可注入任意自定义按钮（"执行"、"清空"、"复制" 等）
  *
  * 工具栏使用 [Row] 横向排列；调用方可包裹 [Column] / [Surface] 自定义外观。
  *
- * ## 扩展用法（actions 插槽）
+ * ## 三种典型用法
  *
- * 调用方在 `actions` lambda 内可以放任意 Composable（[Button] / [IconButton] / [AssistChip] / [Icon]...），
- * 它们会按声明顺序追加到内置按钮（语言切换 + 格式化）**之后**。
+ * ### 1. 完整工具栏（语言可切换 + 格式化 + 自定义按钮）
+ * ```kotlin
+ * var lang by remember { mutableStateOf("sql") }
+ * CodeEditorWithToolbar(
+ *     text = sql,
+ *     onTextChange = { sql = it },
+ *     languageId = lang,
+ *     onLanguageChange = { lang = it },
+ *     actions = { Button(onClick = { execute(sql) }) { Text("执行") } },
+ * )
+ * ```
  *
+ * ### 2. 固定语言（隐藏切换器，`onLanguageChange` 可省略）
  * ```kotlin
  * CodeEditorWithToolbar(
  *     text = sql,
  *     onTextChange = { sql = it },
- *     languageId = "sql",
- *     onLanguageChange = { ... },
- *     actions = {
- *         Button(onClick = { executeQuery(sql) }) { Text("执行") }
- *         Button(onClick = { sql = "" }) { Text("清空") }
- *         androidx.compose.material3.IconButton(onClick = { copyToClipboard(sql) }) {
- *             Icon(Icons.Default.ContentCopy, contentDescription = "复制")
- *         }
- *     },
+ *     languageId = "sql",  // 在实例化时直接指定，无需外部 state
+ *     // onLanguageChange 默认为空 lambda，工具栏不再暴露切换入口
+ *     showLanguageSwitcher = false,
  * )
  * ```
+ *
+ * ### 3. 纯文本模式 + 自定义按钮
+ * ```kotlin
+ * CodeEditorWithToolbar(
+ *     text = notes,
+ *     onTextChange = { notes = it },
+ *     languageId = "plain",
+ *     showLanguageSwitcher = false,
+ *     actions = { Button(onClick = { save() }) { Text("保存") } },
+ * )
+ * ```
+ *
+ * ## 扩展用法（actions 插槽）
+ *
+ * 调用方在 `actions` lambda 内可以放任意 Composable（[Button] / [androidx.compose.material3.IconButton] / [AssistChip] / [Icon]...），
+ * 它们会按声明顺序追加到内置按钮（语言切换 + 格式化）**之后**。
  *
  * ## 设计权衡
  *
@@ -242,14 +262,17 @@ private fun LineNumberGutter(
  *   选择 slot API，因为它和 Compose 生态一致（[androidx.compose.material3.TopAppBar] 等都是这种风格），
  *   调用方可以自由控制按钮的视觉/状态（`enabled` / `colors` / `icon`），无需预先枚举所有可能性。
  * - **位置**：内置按钮在前，自定义按钮在后 — 避免破坏现有调用方的视觉惯例。
+ * - **`onLanguageChange` 可选**：当 [showLanguageSwitcher] 关闭时，回调不会被调用，
+ *   因此设为默认空 lambda 让调用方按需重写，减少无意义样板代码。
  *
  * @param text 编辑器文本内容
  * @param onTextChange 文本变化回调
- * @param languageId 当前语言 ID
- * @param onLanguageChange 语言切换回调
+ * @param languageId 当前语言 ID（**在实例化时直接指定**即可初始化语言；如需切换则通过 [onLanguageChange] 接收新 ID）
+ * @param onLanguageChange 语言切换回调 — 当 [showLanguageSwitcher] = false 时不会被调用，可省略
  * @param modifier Compose modifier
  * @param theme 编辑器主题
  * @param showLineNumbers 是否显示行号（默认 true）
+ * @param showLanguageSwitcher 是否显示语言切换下拉框（默认 true；设为 false 时隐藏并允许省略 [onLanguageChange]）
  * @param minLines 最小显示行数
  * @param maxLines 最大显示行数（超过则内部滚动）；传 `null` 表示无限制
  * @param actions 自定义操作按钮插槽 — 渲染在内置按钮之后
@@ -259,13 +282,14 @@ fun CodeEditorWithToolbar(
     text: String,
     onTextChange: (String) -> Unit,
     languageId: String,
-    onLanguageChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     theme: CodeEditorTheme = CodeEditorTheme.default(),
     showLineNumbers: Boolean = true,
+    showLanguageSwitcher: Boolean = true,
     minLines: Int = 5,
     maxLines: Int? = 15,
     actions: @Composable RowScope.() -> Unit = {},
+    onLanguageChange: (String) -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         EditorToolbar(
@@ -282,6 +306,7 @@ fun CodeEditorWithToolbar(
                     }
                 }
             },
+            showLanguageSwitcher = showLanguageSwitcher,
             actions = actions,
         )
         CodeEditor(
@@ -300,7 +325,7 @@ fun CodeEditorWithToolbar(
  * 工具栏私有 Composable —— 由 [CodeEditorWithToolbar] 内部使用。
  *
  * 包含：
- * 1. 语言切换下拉框（[AssistChip]）
+ * 1. 语言切换下拉框（[AssistChip]）— 可通过 [showLanguageSwitcher] 隐藏
  * 2. 格式化按钮（自动根据 [CodeFormatterRegistry] 启用 / 禁用）
  * 3. 自定义 actions 插槽 — 调用方可在 [CodeEditorWithToolbar] 的 `actions` 参数中注入
  *
@@ -311,6 +336,7 @@ private fun EditorToolbar(
     languageId: String,
     onLanguageChange: (String) -> Unit,
     onFormat: () -> Unit,
+    showLanguageSwitcher: Boolean,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val languages = remember { CodeLanguageRegistry.all() }
@@ -324,27 +350,29 @@ private fun EditorToolbar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box {
-            AssistChip(
-                onClick = { dropdownExpanded = true },
-                label = {
-                    Text(
-                        CodeLanguageRegistry.get(languageId)?.displayName ?: languageId,
-                    )
-                },
-            )
-            DropdownMenu(
-                expanded = dropdownExpanded,
-                onDismissRequest = { dropdownExpanded = false },
-            ) {
-                languages.forEach { lang ->
-                    DropdownMenuItem(
-                        text = { Text(lang.displayName) },
-                        onClick = {
-                            onLanguageChange(lang.id)
-                            dropdownExpanded = false
-                        },
-                    )
+        if (showLanguageSwitcher) {
+            Box {
+                AssistChip(
+                    onClick = { dropdownExpanded = true },
+                    label = {
+                        Text(
+                            CodeLanguageRegistry.get(languageId)?.displayName ?: languageId,
+                        )
+                    },
+                )
+                DropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false },
+                ) {
+                    languages.forEach { lang ->
+                        DropdownMenuItem(
+                            text = { Text(lang.displayName) },
+                            onClick = {
+                                onLanguageChange(lang.id)
+                                dropdownExpanded = false
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -768,6 +796,57 @@ private fun CodeEditorWithToolbarCustomActionsPreview() {
                     Button(onClick = {}) {
                         Text("复制")
                     }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 隐藏语言切换器预览 —— `showLanguageSwitcher = false` 时不显示 [AssistChip] 下拉框，
+ * 只显示「格式化」按钮（如果有 formatter）。
+ *
+ * 此场景适合"固定语言"的编辑器：调用方在实例化时直接指定 `languageId`，
+ * `onLanguageChange` 可省略（默认空 lambda）。
+ */
+@Composable
+@Preview(name = "CodeEditorWithToolbar / Fixed Language", widthDp = 600, heightDp = 280)
+private fun CodeEditorWithToolbarFixedLanguagePreview() {
+    registerBuiltinEditors()
+    MaterialTheme(colorScheme = lightColorScheme()) {
+        Box(modifier = Modifier.padding(16.dp)) {
+            CodeEditorWithToolbar(
+                text = PREVIEW_SQL_SAMPLE,
+                onTextChange = {},
+                languageId = "sql",  // 在实例化时直接指定，固定为 SQL
+                // onLanguageChange 省略 —— 切换器已隐藏，不会被调用
+                theme = CodeEditorTheme.Light,
+                showLanguageSwitcher = false,  // 隐藏切换下拉框
+            )
+        }
+    }
+}
+
+/**
+ * 隐藏语言切换器 + 自定义 actions 预览 —— 综合演示：
+ * - 固定语言（实例化时指定，隐藏切换器）
+ * - 自定义 actions 插槽注入「保存」「执行」
+ */
+@Composable
+@Preview(name = "CodeEditorWithToolbar / Fixed Lang + Actions", widthDp = 700, heightDp = 280)
+private fun CodeEditorWithToolbarFixedLangActionsPreview() {
+    registerBuiltinEditors()
+    MaterialTheme(colorScheme = lightColorScheme()) {
+        Box(modifier = Modifier.padding(16.dp)) {
+            CodeEditorWithToolbar(
+                text = PREVIEW_LUA_SAMPLE,
+                onTextChange = {},
+                languageId = "lua",
+                theme = CodeEditorTheme.Light,
+                showLanguageSwitcher = false,
+                actions = {
+                    Button(onClick = {}) { Text("保存") }
+                    Button(onClick = {}) { Text("执行 ▶") }
                 },
             )
         }
