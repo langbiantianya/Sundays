@@ -126,7 +126,7 @@ enum class PageSize(val value: Int, val label: String) {
 // 右键菜单状态 (ContextMenuState) —— 表格专用别名
 // ============================================================================
 //
-// 表格的右键菜单 payload 是 [TableRow]；基于通用 [com.kxxnzstdsw.Sundays.ui.ContextMenuState]
+// 表格的右键菜单 payload 是 [TableRow]；基于通用 [com.kxxnzstdsw.sundays.ui.ContextMenuState]
 // 提供带类型的别名，便于调用方书写：
 //
 // ```kotlin

@@ -112,5 +112,5 @@ class MyTest {
 | 文档 | 内容 |
 |---|---|
 | [`api/README.md`](../api/README.md) | DatabaseDialect SPI 接口定义 |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) | 引擎如何消费方言 + DialectLoader |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎如何消费方言 + DialectLoader |
 | `engine/src/test/kotlin/integration/H2Fixture.kt` | 测试 fixture 实现 |

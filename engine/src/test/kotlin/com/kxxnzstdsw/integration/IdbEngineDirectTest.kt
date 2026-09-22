@@ -51,7 +51,7 @@ class IdbEngineDirectTest : H2Fixture() {
 
             assertTrue(response.success, "expected success=true but got error: ${response.error}")
             assertEquals("r-001", response.id)
-            // 非流式响应: stream=false, end=false (proto 默认值, 见 CLAUDE.md §4.2)
+            // 非流式响应: stream=false, end=false (proto 默认值, 见 ARCHITECTURE.md §4.2)
             assertTrue(!response.stream, "non-stream response should have stream=false")
             assertTrue(!response.end, "non-stream response should have end=false")
             assertNotNull(response.schema, "expected schema response body")

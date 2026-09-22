@@ -4,7 +4,7 @@ idb_engine 的 **MySQL 方言实现**，以 SPI 插件形式提供。引擎通�
 
 > **当前版本**：v2.9
 >
-> 架构与 SPI 接口定义见 [`api/README.md`](../api/README.md)。引擎如何消费方言见 [`engine/CLAUDE.md`](../engine/CLAUDE.md)。
+> 架构与 SPI 接口定义见 [`api/README.md`](../api/README.md)。引擎如何消费方言见 [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md)。
 
 ---
 
@@ -81,5 +81,5 @@ dialect-mysql/
 | 文档 | 内容 |
 |---|---|
 | [`api/README.md`](../api/README.md) | DatabaseDialect SPI 接口定义 |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) §5 | 引擎如何调用方言 + handler 矩阵 |
-| [根 `CLAUDE.md`](../CLAUDE.md) | 整体架构 + 双模式对比 |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) §5 | 引擎如何调用方言 + handler 矩阵 |
+| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | 整体架构 + 双模式对比 |

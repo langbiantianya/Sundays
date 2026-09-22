@@ -1,11 +1,11 @@
 # desktopApp — KMP Compose Desktop 客户端
 
-`desktopApp/` 是 `Sundays` 项目的 **前端模块**：使用 **Kotlin Multiplatform + Compose Multiplatform Desktop** 编写的桌面应用（当前启用 **JVM Desktop** 单平台目标，macOS / Linux / Windows 三端共享同一份 Compose Desktop 渲染）。
+`desktopApp/` 是 `sundays` 项目的 **前端模块**：使用 **Kotlin Multiplatform + Compose Multiplatform Desktop** 编写的桌面应用（当前启用 **JVM Desktop** 单平台目标，macOS / Linux / Windows 三端共享同一份 Compose Desktop 渲染）。
 
 它通过 **v2.9 Direct 直接模式** 与 `engine/` 模块集成 —— `IdbEngine()` facade 直接方法调用引擎，**不启动子进程、不建立 gRPC channel、不走 IPC transport**，typed proto 消息在同一 JVM 内直传，零序列化、零桥接开销。
 
 > **当前版本：v2.9** — KMP Desktop 前端 + Direct 模式
-> 详细架构设计见本目录的 [`CLAUDE.md`](./CLAUDE.md)；整体项目架构见 [根目录 `CLAUDE.md`](../CLAUDE.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
+> 详细架构设计见本目录的 [`../ARCHITECTURE.md`](./ARCHITECTURE.md)；整体项目架构见 [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
 
 ---
 
@@ -50,7 +50,7 @@ for i = 1, 100 do
 end
 ```
 
-> **来源**：[`shared/`](../shared/) 模块的 `editor/` 子包；具体 API 见 [`shared/CLAUDE.md`](../shared/CLAUDE.md)。
+> **来源**：[`shared/`](../shared/) 模块的 `editor/` 子包；具体 API 见 [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md)。
 
 ### Tab 2 — "数据表格"（演示 `DataTable` 组件）
 
@@ -101,7 +101,7 @@ fun main() = application {
             engineScope.coroutineContext[Job]?.cancel()
             exitApplication()
         },
-        title = "Sundays",
+        title = "sundays",
     ) {
         MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
             DemoApp()
@@ -139,11 +139,11 @@ fun main() = application {
 
 | 文档 | 内容 |
 |---|---|
-| [`desktopApp/CLAUDE.md`](./CLAUDE.md) | desktopApp 内部架构（KMP 工程结构 / Direct 模式集成 / 演示屏幕设计 / 生命周期管理） |
+| [`desktopApp/ARCHITECTURE.md`](./ARCHITECTURE.md) | desktopApp 内部架构（KMP 工程结构 / Direct 模式集成 / 演示屏幕设计 / 生命周期管理） |
 | [根目录 `README.md`](../README.md) | 项目总览、模块结构、Direct 模式详解、运行命令 |
-| [根目录 `CLAUDE.md`](../CLAUDE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
+| [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
 | [`engine/README.md`](../engine/README.md) | 引擎模块详细 README（CLI / 构建 / handler 路由 / API 参考） |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) | 引擎内部架构（`IdbEngine` facade 详解 / Dispatcher / Pool / Loader） |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎内部架构（`IdbEngine` facade 详解 / Dispatcher / Pool / Loader） |
 | [`shared/`](../shared/) | KMP 共享代码（`CodeEditor` / `DataTable` / 右键菜单） |
 
 ---

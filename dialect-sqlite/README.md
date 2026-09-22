@@ -112,5 +112,5 @@ SQLite 自增主键**必须**：
 | 文档 | 内容 |
 |---|---|
 | [`api/README.md`](../api/README.md) | DatabaseDialect SPI 接口定义 |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) §5.14 | SQLite 端到端集成测试 |
-| [根 `CLAUDE.md`](../CLAUDE.md) §10 v2.8 迁移日志 | SQLite 引入的设计决策 |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) §5.14 | SQLite 端到端集成测试 |
+| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) §10 v2.8 迁移日志 | SQLite 引入的设计决策 |

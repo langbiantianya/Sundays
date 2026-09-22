@@ -1,7 +1,7 @@
 # Engine Architecture (V2.9)
 
 > 引擎模块（`engine/`）的内部架构设计文档，供在引擎内部工作的开发者使用。
-> 完整模块拓扑、构建/运行 CLI 与用户级 API 示例见 `engine/README.md`，项目整体架构与版本演进历史见根目录 `CLAUDE.md`。
+> 完整模块拓扑、构建/运行 CLI 与用户级 API 示例见 `engine/README.md`，项目整体架构与版本演进历史见根目录 `../ARCHITECTURE.md`。
 
 ## 1. Overview
 

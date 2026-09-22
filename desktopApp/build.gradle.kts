@@ -21,11 +21,11 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.kxxnzstdsw.Sundays.MainKt"
+        mainClass = "com.kxxnzstdsw.sundays.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.kxxnzstdsw.Sundays"
+            packageName = "com.kxxnzstdsw.sundays"
             packageVersion = "1.0.0"
         }
     }

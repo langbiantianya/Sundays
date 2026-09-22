@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构设计文档
 
-> **版本**：v2.9（与根 `../CLAUDE.md` 同版本）
+> **版本**：v2.9（与根 `../ARCHITECTURE.md` 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 
@@ -681,10 +681,10 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 | 文档 | 内容 |
 |---|---|
-| [根 `../CLAUDE.md`](../../CLAUDE.md) | 整体架构（V2.9）、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
+| [根 `../ARCHITECTURE.md`](../../ARCHITECTURE.md) | 整体架构（V2.9）、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
-| [`engine/CLAUDE.md`](../../engine/CLAUDE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
+| [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
 | [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `CodeEditor` + `DataTable` + `ConnectionManagerScreen` 三个核心组件的端到端用法 |
 
 ---

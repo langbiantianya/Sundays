@@ -11,7 +11,7 @@
 
 > **当前版本：v2.9** — KMP Desktop 前端 + Direct 模式 + 双模式架构
 >
-> 详细架构设计见 [`CLAUDE.md`](CLAUDE.md)（V2.9），引擎 README 见 [`engine/README.md`](./engine/README.md)。
+> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)（V2.9），引擎 README 见 [`engine/README.md`](./engine/README.md)。
 
 ---
 
@@ -133,7 +133,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 java -jar idb-engine.jar --mode direct
 ```
 
-Go 客户端连接示例（`engine/README.md` §通信协议 与 `CLAUDE.md` §8.3 有完整代码）：
+Go 客户端连接示例（`engine/README.md` §通信协议 与 `ARCHITECTURE.md` §8.3 有完整代码）：
 ```go
 conn, _ := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 client := pb.NewIdbEngineClient(conn)
@@ -370,7 +370,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 
 | 文档 | 内容 |
 |---|---|
-| [`CLAUDE.md`](CLAUDE.md) | **架构设计文档（V2.9）** —— gRPC 协议、handler 矩阵、方言特性、envelope options、双模式架构、迁移历史 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **架构设计文档（V2.9）** —— gRPC 协议、handler 矩阵、方言特性、envelope options、双模式架构、迁移历史 |
 | [`engine/README.md`](./engine/README.md) | 引擎模块详细 README —— CLI、构建运行、handler 路由矩阵、API 参考、Direct 模式示例 |
 | [`shared/src/`](./shared/src) | KMP 共享代码 —— `commonMain/`（平台无关）/ `jvmMain/`（JVM 特定） |
 | [`engine/src/main/proto/idb_engine.proto`](./engine/src/main/proto/idb_engine.proto) | gRPC service 定义 + 全部 typed message schemas |

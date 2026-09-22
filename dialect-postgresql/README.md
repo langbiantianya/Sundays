@@ -82,5 +82,5 @@ dialect-postgresql/
 | 文档 | 内容 |
 |---|---|
 | [`api/README.md`](../api/README.md) | DatabaseDialect SPI 接口定义 |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) §5.5 | PG search_path 自动设置 + SQL 流式执行 |
-| [根 `CLAUDE.md`](../CLAUDE.md) | 整体架构 + 双模式对比 |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) §5.5 | PG search_path 自动设置 + SQL 流式执行 |
+| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | 整体架构 + 双模式对比 |

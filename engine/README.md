@@ -81,7 +81,7 @@ java -jar idb-engine.jar --ipc tcp --port 60000
 # 显式指定 Unix Domain Socket（路径可换）
 java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 
-# Windows 命名管道（客户端需 --ipc=pipe；服务端在 Windows 上 grpc-java 暂未开放公共 API，详见 CLAUDE.md §3.6）
+# Windows 命名管道（客户端需 --ipc=pipe；服务端在 Windows 上 grpc-java 暂未开放公共 API，详见 ARCHITECTURE.md §3.6）
 java -jar idb-engine.jar --ipc pipe --pipe-name idb-engine
 
 # Direct 直接模式（v2.9 新增）—— 仅 bootstrap drivers/dialects 后阻塞主线程；

@@ -111,5 +111,5 @@ DuckDB JDBC 不直接支持 `.xlsx`。`ExcelToDuckDbCache` 解决：
 | 文档 | 内容 |
 |---|---|
 | [`api/README.md`](../api/README.md) | DatabaseDialect SPI 接口定义 |
-| [`engine/CLAUDE.md`](../engine/CLAUDE.md) §5.14 | DuckDB 端到端集成测试覆盖 |
-| [根 `CLAUDE.md`](../CLAUDE.md) §10 v2.7 迁移日志 | DuckDB 引入的设计决策 |
+| [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) §5.14 | DuckDB 端到端集成测试覆盖 |
+| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) §10 v2.7 迁移日志 | DuckDB 引入的设计决策 |

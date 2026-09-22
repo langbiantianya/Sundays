@@ -127,10 +127,10 @@ api/
 
 | 文档 | 内容 |
 |---|---|
-| [`engine/CLAUDE.md`](../../engine/CLAUDE.md) | 引擎如何消费 SPI：`DialectLoader` + `ServiceLoader` + `SYSTEM.LIST_DRIVERS` |
+| [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) | 引擎如何消费 SPI：`DialectLoader` + `ServiceLoader` + `SYSTEM.LIST_DRIVERS` |
 | [`dialect-mysql/README.md`](../../dialect-mysql/README.md) | MySQL 方言实现（client-server 模式参考） |
 | [`dialect-postgresql/README.md`](../../dialect-postgresql/README.md) | PostgreSQL 方言（schema/cross-database 参考） |
 | [`dialect-h2/README.md`](../../dialect-h2/README.md) | H2 方言（in-memory 模式 + 集成测试载体） |
 | [`dialect-duckdb/README.md`](../../dialect-duckdb/README.md) | DuckDB 方言（v2.7 嵌入式 OLAP，Excel 预转换） |
 | [`dialect-sqlite/README.md`](../../dialect-sqlite/README.md) | SQLite 方言（v2.8 嵌入式关系型） |
-| [根 `CLAUDE.md`](../../CLAUDE.md) | 整体架构与方言矩阵 |
+| [根 `../ARCHITECTURE.md`](../../ARCHITECTURE.md) | 整体架构与方言矩阵 |
