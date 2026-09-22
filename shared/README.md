@@ -54,8 +54,8 @@ shared/
 ### 1. CodeEditor（编辑器）
 
 ```kotlin
-import com.kxxnzstdsw.Sundays.editor.ui.CodeEditorWithToolbar
-import com.kxxnzstdsw.Sundays.editor.ui.registerBuiltinEditors
+import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
+import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 
 registerBuiltinEditors()  // 注册 SQL / Lua + formatter（启动时调一次，幂等）
 
@@ -76,10 +76,10 @@ fun SqlEditor() {
 ### 2. DataTable（数据表格）
 
 ```kotlin
-import com.kxxnzstdsw.Sundays.table.DataTable
-import com.kxxnzstdsw.Sundays.table.TableColumn
-import com.kxxnzstdsw.Sundays.table.TableRow
-import com.kxxnzstdsw.Sundays.table.PageSize
+import com.kxxnzstdsw.sundays.table.DataTable
+import com.kxxnzstdsw.sundays.table.TableColumn
+import com.kxxnzstdsw.sundays.table.TableRow
+import com.kxxnzstdsw.sundays.table.PageSize
 
 @Composable
 fun UserTable() {
@@ -106,7 +106,7 @@ fun UserTable() {
 }
 ```
 
-完整 demo 见 [`desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt)。
+完整 demo 见 [`sundays`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt)。
 
 ---
 
@@ -166,4 +166,4 @@ fun UserTable() {
 | [根 `README.md`](../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`shared/CLAUDE.md`](./CLAUDE.md) | **内部架构设计**：高度策略、可扩展性、databind 模式、与引擎解耦边界 |
 | [`engine/CLAUDE.md`](../engine/CLAUDE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式下通过 `desktopApp/` 集成） |
-| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt) | 端到端演示：编辑器 + 表格 + 右键菜单删除 |
+| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：编辑器 + 表格 + 右键菜单删除 |

@@ -539,7 +539,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`engine/CLAUDE.md`](../../engine/CLAUDE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
-| [`desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt) | 演示 `CodeEditor` + `DataTable` 两个核心组件的端到端用法 |
+| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt) | 演示 `CodeEditor` + `DataTable` 两个核心组件的端到端用法 |
 
 ---
 
