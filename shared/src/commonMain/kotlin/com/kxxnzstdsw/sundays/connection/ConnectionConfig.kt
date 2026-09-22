@@ -1,0 +1,88 @@
+package com.kxxnzstdsw.sundays.connection
+
+import kotlinx.serialization.Serializable
+
+/**
+ * 连接配置数据模型 (v2.9).
+ *
+ * 支持五种数据库方言：
+ * - MySQL (CLIENT_SERVER, default port 3306)
+ * - PostgreSQL (CLIENT_SERVER, default port 5432)
+ * - H2 (IN_MEMORY / EMBEDDED)
+ * - DuckDB (EMBEDDED)
+ * - SQLite (FILE_BASED)
+ */
+@Serializable
+data class ConnectionConfig(
+    val id: String,                  // 唯一标识 (UUID)
+    val name: String,                // 连接名称（用户自定义）
+    val dialect: DialectType = DialectType.MYSQL,        // 数据库方言
+    val host: String = "",          // 主机地址 (CLIENT_SERVER)
+    val port: Int? = null,          // 端口 (CLIENT_SERVER)
+    val database: String = "",       // 数据库名
+    val username: String = "",       // 用户名
+    val password: String = "",       // 密码
+    val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
+    val filePath: String = "",       // 文件路径 (SQLite / H2 EMBEDDED)
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+) {
+    /** 获取显示用端口，CLIENT_SERVER 类型有默认值 */
+    val displayPort: Int
+        get() = port ?: when (dialect) {
+            DialectType.MYSQL -> 3306
+            DialectType.POSTGRESQL -> 5432
+            else -> 0
+        }
+
+    /** 是否为嵌入式数据库 */
+    val isEmbedded: Boolean
+        get() = connectionType == ConnectionType.EMBEDDED || connectionType == ConnectionType.IN_MEMORY || connectionType == ConnectionType.FILE_BASED
+
+    /** 生成连接字符串 (用于显示) */
+    fun connectionString(): String = when (connectionType) {
+        ConnectionType.CLIENT_SERVER -> "$host:$displayPort/$database"
+        ConnectionType.FILE_BASED -> filePath
+        ConnectionType.EMBEDDED -> database
+        ConnectionType.IN_MEMORY -> "mem:$database"
+        ConnectionType.UNKNOWN -> ""
+    }
+}
+
+/** 数据库方言类型 */
+@Serializable
+enum class DialectType {
+    MYSQL,
+    POSTGRESQL,
+    H2,
+    DUCKDB,
+    SQLITE,
+    UNKNOWN;
+
+    companion object {
+        fun fromString(value: String): DialectType =
+            entries.find { it.name.equals(value, ignoreCase = true) } ?: UNKNOWN
+    }
+}
+
+/** 连接类型 */
+@Serializable
+enum class ConnectionType {
+    CLIENT_SERVER,
+    EMBEDDED,
+    IN_MEMORY,
+    FILE_BASED,
+    UNKNOWN;
+
+    companion object {
+        fun fromString(value: String): ConnectionType =
+            entries.find { it.name.equals(value, ignoreCase = true) } ?: UNKNOWN
+    }
+}
+
+/** 连接配置列表 (用于 JSON 持久化) */
+@Serializable
+data class ConnectionList(
+    val connections: List<ConnectionConfig> = emptyList(),
+    val version: Int = 1,
+)

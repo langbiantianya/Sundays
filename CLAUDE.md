@@ -1,12 +1,12 @@
-# Sundays — Kotlin 数据库管理端架构导航（V2.9）
+# sundays — Kotlin 数据库管理端架构导航（V2.9）
 
-> **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `CLAUDE.md`（见下方"模块导航"）。
+> **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `AGENTS.md`（见下方"模块导航"）。
 
 ---
 
 ## 1. 项目定位
 
-`Sundays` 是一个**全 Kotlin** 实现的桌面数据库管理工具：
+`sundays` 是一个**全 Kotlin** 实现的桌面数据库管理工具：
 
 - **后端引擎**：以 **gRPC 服务端** 方式运行（默认 `:50051`）的无头数据库算力引擎；v2.9 起新增 **Direct 直接模式** facade
 - **前端客户端**：**Kotlin Multiplatform + Compose Multiplatform Desktop** 桌面应用（macOS / Linux / Windows 三端共享 Compose Desktop Skia 渲染）
@@ -44,7 +44,7 @@ gRPC 模式（跨进程 / 跨语言）:
 ## 3. 模块结构
 
 ```
-Sundays/
+sundays/
 ├── api/                      公共 SPI 接口（DatabaseDialect + ConnectionType + DialectCapability，v2.8）
 ├── dialect-mysql/            MySQL 方言插件 JAR
 ├── dialect-postgresql/       PostgreSQL 方言插件 JAR

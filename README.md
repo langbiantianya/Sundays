@@ -1,4 +1,4 @@
-# Sundays — Kotlin 数据库管理端
+# sundays — Kotlin 数据库管理端
 
 一个使用 Kotlin 编写、面向桌面端的**数据库管理工具**。前端是 **Kotlin Multiplatform + Compose Multiplatform** 桌面应用（`desktopApp/` 模块），后端是 v2.9 起支持**双模式架构**的无头引擎（`engine/` 模块）：
 
@@ -11,14 +11,14 @@
 
 > **当前版本：v2.9** — KMP Desktop 前端 + Direct 模式 + 双模式架构
 >
-> 详细架构设计见 [`CLAUDE.md`](./CLAUDE.md)（V2.9），引擎 README 见 [`engine/README.md`](./engine/README.md)。
+> 详细架构设计见 [`CLAUDE.md`](CLAUDE.md)（V2.9），引擎 README 见 [`engine/README.md`](./engine/README.md)。
 
 ---
 
 ## 模块结构
 
 ```
-Sundays/
+sundays/
 ├── api/                  公共 SPI 接口（DatabaseDialect + ConnectionType + DialectCapability，v2.8）
 ├── dialect-mysql/        MySQL 方言插件 JAR
 ├── dialect-postgresql/   PostgreSQL 方言插件 JAR
@@ -42,11 +42,12 @@ Sundays/
 │   ├── commonMain/       KMP 共享逻辑（与平台无关）—— 含 UI 组件（编辑器 / 表格 / 右键菜单）
 │   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单）
 │   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
+│   │   ├── connection/   ConnectionManagerScreen：连接管理（左侧连接列表 + 右侧 4 步向导，JSON 持久化到 ~/.config/sundays/connection.json）
 │   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier）
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  dependencies 含 implementation(project(":engine")) — Direct 模式依赖
-    └── src/main/kotlin/com/kxxnzstdsw/Sundays/
+    └── src/main/kotlin/com/kxxnzstdsw/sundays/
         └── main.kt       KMP Desktop 入口：IdbEngine() 直接持有、Compose UI 渲染
 ```
 
@@ -57,7 +58,7 @@ Sundays/
 **核心思路**：KMP Desktop 与引擎部署在**同一个 JVM 进程**，不通过 gRPC / IPC transport 通信，而是通过 `IdbEngine` facade **直接方法调用**。
 
 ```kotlin
-// desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt
+// desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt
 import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.grpc.*
 import kotlinx.coroutines.flow.first
@@ -187,11 +188,11 @@ for {
 
 ## 共享 UI 组件（`shared/` 模块）
 
-`shared/commonMain` 提供两个**面向 KMP Compose Desktop** 的可扩展 UI 组件，均与引擎无关、可单独使用：
+`shared/commonMain` 提供三个**面向 KMP Compose Desktop** 的可扩展 UI 组件，均与引擎无关、可单独使用：
 
 ### `CodeEditor` —— 可扩展代码编辑器
 
-`com.kxxnzstdsw.Sundays.editor.ui.CodeEditor` / `CodeEditorWithToolbar`
+`com.kxxnzstdsw.sundays.editor.ui.CodeEditor` / `CodeEditorWithToolbar`
 
 特性：
 - 语法高亮（基于 `CodeLanguageRegistry`，支持 SQL / Lua；新增语言只需 `registry.register(...)`）
@@ -228,7 +229,7 @@ CodeEditor(
 
 ### `DataTable` —— 虚拟滚动数据表格
 
-`com.kxxnzstdsw.Sundays.table.DataTable`
+`com.kxxnzstdsw.sundays.table.DataTable`
 
 特性：
 - **大量数据**：基于 `LazyColumn` 的虚拟滚动（item key = 主键）
@@ -270,6 +271,54 @@ DataTable(
 | `ContextMenuState<T : Any>` | 通用右键菜单状态（位置 + 可见性 + payload），被 `EditorContextMenuState` / 表格的 `ContextMenuState` 共用 |
 | `Modifier.onRightClick { Offset -> Unit }` | 鼠标右键检测 modifier（基于 `awaitPointerEventScope` + `event.buttons.isSecondaryPressed`） |
 | `rememberContextMenuState()` / `rememberEditorContextMenuState()` | Composable 工厂 |
+
+### `ConnectionManagerScreen` —— 连接管理
+
+`com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen`
+
+布局：**左侧连接列表 + 右侧引导式配置页面**。
+
+支持方言：MySQL / PostgreSQL / H2 / DuckDB / SQLite。
+
+两种独立流程：
+
+| 入口 | `WizardFlow` | 步骤序列 |
+|---|---|---|
+| 新建连接 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步) |
+| 编辑已有 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+
+特性：
+- **持久化**：`ConnectionStorage` 自动读写 `~/.config/sundays/connection.json`（`kotlinx.serialization` + JSON）
+- **原子状态更新**：`WizardState(editingConnection, wizardStep, flow)` data class，单次赋值保证三字段同步，避免 Compose recomposition 间隙 NPE
+- **步骤指示器自适应**：快速连接 3 段 / 普通 4 段
+
+```kotlin
+@Composable
+fun ConnectionManagerScreen(
+    connections: List<ConnectionConfig>,
+    selectedConnection: ConnectionConfig?,
+    editingConnection: ConnectionConfig?,
+    wizardStep: WizardStep,
+    wizardFlow: WizardFlow,
+    onSelectConnection: (ConnectionConfig?) -> Unit,
+    onNewConnection: () -> Unit,            // 普通流程入口
+    onQuickConnect: () -> Unit,             // 快速连接入口
+    onEditConnection: (ConnectionConfig) -> Unit,
+    onSaveConnection: (ConnectionConfig) -> Unit,
+    onDeleteConnection: (String) -> Unit,
+    onCancelEdit: () -> Unit,
+    onWizardNext: (WizardStep) -> Unit,
+    onWizardBack: () -> Unit,
+    onUpdateEditingConnection: (ConnectionConfig) -> Unit,
+)
+
+// 持久化 API
+ConnectionStorage.load()              // List<ConnectionConfig>
+ConnectionStorage.upsert(config)      // 新增或更新，返回最新列表
+ConnectionStorage.delete(id)          // 删除
+ConnectionStorage.get(id)             // 单个查询
+```
 
 ---
 
@@ -321,7 +370,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 
 | 文档 | 内容 |
 |---|---|
-| [`CLAUDE.md`](./CLAUDE.md) | **架构设计文档（V2.9）** —— gRPC 协议、handler 矩阵、方言特性、envelope options、双模式架构、迁移历史 |
+| [`CLAUDE.md`](CLAUDE.md) | **架构设计文档（V2.9）** —— gRPC 协议、handler 矩阵、方言特性、envelope options、双模式架构、迁移历史 |
 | [`engine/README.md`](./engine/README.md) | 引擎模块详细 README —— CLI、构建运行、handler 路由矩阵、API 参考、Direct 模式示例 |
 | [`shared/src/`](./shared/src) | KMP 共享代码 —— `commonMain/`（平台无关）/ `jvmMain/`（JVM 特定） |
 | [`engine/src/main/proto/idb_engine.proto`](./engine/src/main/proto/idb_engine.proto) | gRPC service 定义 + 全部 typed message schemas |
@@ -358,7 +407,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 | v2.6 | 表驱动 Dispatcher + 跨切面 Envelope Options（traceId / dryRun / timeoutMs）+ `SQL.EXPLAIN` 路由 |
 | v2.7 | DuckDB 方言插件（本地嵌入式 OLAP） |
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` |
-| v2.9 | KMP Desktop Direct 模式 + 双模式架构：前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode grpc\|direct` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated*<br>CodeEditor / DataTable 高度策略统一：`CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限 |
+| v2.9 | KMP Desktop Direct 模式 + 双模式架构：前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode grpc\|direct` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated*<br>CodeEditor / DataTable 高度策略统一：`CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限<br>`shared/connection/` —— 新增 `ConnectionManagerScreen`（左侧连接列表 + 右侧引导式配置）+ `ConnectionStorage` JSON 持久化到 `~/.config/sundays/connection.json`；支持 MySQL/PostgreSQL/H2/DuckDB/SQLite 五种方言；普通流程 4 步 + 快速连接 3 步两种独立引导（`WizardFlow` 标识） |
 
 ---
 

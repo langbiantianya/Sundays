@@ -7,11 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -24,15 +23,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.kxxnzstdsw.engine.IdbEngine
-import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
-import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
-import com.kxxnzstdsw.sundays.table.DataTable
-import com.kxxnzstdsw.sundays.table.DataTableTheme
-import com.kxxnzstdsw.sundays.table.PageSize
-import com.kxxnzstdsw.sundays.table.TableColumn
-import com.kxxnzstdsw.sundays.table.TableRow
-import com.kxxnzstdsw.sundays.table.rememberContextMenuState
-import androidx.compose.ui.text.style.TextAlign
+import com.kxxnzstdsw.sundays.connection.ConnectionConfig
+import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
+import com.kxxnzstdsw.sundays.connection.ConnectionStorage
+import com.kxxnzstdsw.sundays.connection.WizardFlow
+import com.kxxnzstdsw.sundays.connection.WizardStep
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,15 +38,12 @@ import kotlinx.coroutines.SupervisorJob
  * **与引擎的集成方式**: 直接依赖 `:engine` 模块, 通过 [IdbEngine] facade 直接调用引擎方法,
  * 不需要启动子进程、不需要 gRPC channel. 引擎和 UI 共享同一个 JVM, 共享同一组连接池和方言插件.
  *
- * **演示功能**：顶部 [DemoTab] 提供两个演示切换 —
+ * **功能标签页**:
+ * - "连接管理" → [ConnectionManagerScreen]（左侧连接列表 + 右侧 4 步引导页面）
  * - "代码编辑器" → [EditorDemoScreen]（SQL/Lua 高亮 + 格式化 + 工具栏 + 右键菜单）
  * - "数据表格" → [TableDemoScreen]（1000 行用户数据 + 虚拟滚动 + 分页 + 右键菜单 + 详情面板）
  */
 fun main() = application {
-    // 注册内置代码编辑器语言 + 格式化器（SQL / Lua）
-    // 重复调用幂等；UI 顶层调用一次即可
-    registerBuiltinEditors()
-
     val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     // v2.9 直接模式 — 无 gRPC, 无子进程。App 内的 viewmodel 后续会持有此引用。
     val engine = IdbEngine()
@@ -61,7 +53,7 @@ fun main() = application {
             engineScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
             exitApplication()
         },
-        title = "Sundays",
+        title = "sundays",
     ) {
         // 应用主题（按系统设置自动选择浅/深色）
         MaterialTheme(
@@ -73,17 +65,18 @@ fun main() = application {
 }
 
 /**
- * 演示 App 顶层 —— 顶部 tab 切换代码编辑器 / 数据表格两个演示。
+ * 演示 App 顶层 —— 顶部 tab 切换连接管理 / 代码编辑器 / 数据表格三个功能。
  */
 @Composable
 private fun DemoApp() {
-    var selectedTab by remember { mutableStateOf(DemoTab.EDITOR) }
+    var selectedTab by remember { mutableStateOf(DemoTab.CONNECTION) }
     Column(
         modifier = Modifier.fillMaxSize().safeContentPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         DemoTabBar(selected = selectedTab, onSelect = { selectedTab = it })
         when (selectedTab) {
+            DemoTab.CONNECTION -> ConnectionDemoScreen()
             DemoTab.EDITOR -> EditorDemoScreen()
             DemoTab.TABLE -> TableDemoScreen()
         }
@@ -92,6 +85,7 @@ private fun DemoApp() {
 
 /** 演示 tab 枚举。 */
 private enum class DemoTab(val label: String) {
+    CONNECTION("连接管理"),
     EDITOR("代码编辑器"),
     TABLE("数据表格"),
 }
@@ -101,12 +95,14 @@ private enum class DemoTab(val label: String) {
  */
 @Composable
 private fun DemoTabBar(selected: DemoTab, onSelect: (DemoTab) -> Unit) {
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         DemoTab.entries.forEachIndexed { index, tab ->
             SegmentedButton(
                 selected = selected == tab,
                 onClick = { onSelect(tab) },
-                shape = SegmentedButtonDefaults.itemShape(index, DemoTab.entries.size),
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = DemoTab.entries.size),
             ) {
                 Text(tab.label)
             }
@@ -122,6 +118,118 @@ private fun isSystemInDarkTheme(): Boolean =
     androidx.compose.foundation.isSystemInDarkTheme()
 
 /**
+ * 连接管理演示界面 —— 展示 [ConnectionManagerScreen] 的端到端用法。
+ *
+ * - 左侧连接列表（从 `~/.config/sundays/connection.json` 加载）
+ * - 右侧 4 步引导页面（新建/编辑连接）
+ * - 支持 MySQL / PostgreSQL / H2 / DuckDB / SQLite
+ */
+@Composable
+private fun ConnectionDemoScreen() {
+    var connectionList by remember { mutableStateOf(ConnectionStorage.load()) }
+    var selectedConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
+    var wizardState by remember {
+        mutableStateOf(
+            WizardState(
+                editingConnection = null,
+                wizardStep = WizardStep.IDLE,
+                flow = WizardFlow.NORMAL,
+            )
+        )
+    }
+
+    ConnectionManagerScreen(
+        connections = connectionList.connections,
+        selectedConnection = selectedConnection,
+        editingConnection = wizardState.editingConnection,
+        wizardStep = wizardState.wizardStep,
+        wizardFlow = wizardState.flow,
+        onSelectConnection = { selectedConnection = it },
+        onNewConnection = {
+            wizardState = WizardState(
+                editingConnection = ConnectionConfig(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = "新连接",
+                ),
+                wizardStep = WizardStep.BASIC_INFO,
+                flow = WizardFlow.NORMAL,
+            )
+        },
+        onQuickConnect = {
+            wizardState = WizardState(
+                editingConnection = ConnectionConfig(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = "新连接",
+                ),
+                wizardStep = WizardStep.QUICK_CONNECT,
+                flow = WizardFlow.QUICK_CONNECT,
+            )
+        },
+        onEditConnection = { conn ->
+            wizardState = WizardState(
+                editingConnection = conn,
+                wizardStep = WizardStep.BASIC_INFO,
+                flow = WizardFlow.NORMAL,
+            )
+        },
+        onSaveConnection = { config ->
+            connectionList = ConnectionStorage.upsert(config)
+            selectedConnection = config
+            wizardState = WizardState(
+                editingConnection = null,
+                wizardStep = WizardStep.IDLE,
+                flow = WizardFlow.NORMAL,
+            )
+        },
+        onDeleteConnection = { id ->
+            connectionList = ConnectionStorage.delete(id)
+            if (selectedConnection?.id == id) {
+                selectedConnection = null
+            }
+        },
+        onCancelEdit = {
+            wizardState = WizardState(
+                editingConnection = null,
+                wizardStep = WizardStep.IDLE,
+                flow = WizardFlow.NORMAL,
+            )
+        },
+        onWizardNext = { step ->
+            wizardState = wizardState.copy(wizardStep = step)
+        },
+        onWizardBack = {
+            // 根据当前流程分别处理上一步逻辑
+            val prevStep = when (wizardState.flow) {
+                WizardFlow.QUICK_CONNECT -> when (wizardState.wizardStep) {
+                    WizardStep.QUICK_CONNECT -> WizardStep.IDLE
+                    WizardStep.CREDENTIALS -> WizardStep.QUICK_CONNECT
+                    WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
+                    else -> WizardStep.IDLE
+                }
+                WizardFlow.NORMAL -> when (wizardState.wizardStep) {
+                    WizardStep.BASIC_INFO -> WizardStep.IDLE
+                    WizardStep.CONNECTION_TYPE -> WizardStep.BASIC_INFO
+                    WizardStep.CREDENTIALS -> WizardStep.CONNECTION_TYPE
+                    WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
+                    else -> WizardStep.IDLE
+                }
+                else -> WizardStep.IDLE
+            }
+            wizardState = wizardState.copy(wizardStep = prevStep)
+        },
+        onUpdateEditingConnection = { config ->
+            wizardState = wizardState.copy(editingConnection = config)
+        },
+    )
+}
+
+private data class WizardState(
+    val editingConnection: ConnectionConfig?,
+    val wizardStep: WizardStep,
+    val flow: WizardFlow,
+)
+
+/**
  * 代码编辑器演示界面 —— 展示 SQL / Lua 双语言切换、格式化、高亮、右键菜单。
  *
  * **目的**：演示 `shared/` 模块中实现的代码编辑器组件在 desktopApp 中的接线方式。
@@ -129,37 +237,14 @@ private fun isSystemInDarkTheme(): Boolean =
  */
 @Composable
 private fun EditorDemoScreen() {
-    var sqlText by remember {
-        mutableStateOf(
-            """
-            SELECT id, name, email FROM users WHERE created_at > '2024-01-01' ORDER BY id DESC LIMIT 100
-            """.trimIndent(),
-        )
-    }
-    var luaText by remember {
-        mutableStateOf(
-            """
-            for i = 1, 100 do
-              insert('users', {name='user_'..i, email=random_email(), age=random_int(18,65)})
-            end
-            """.trimIndent(),
-        )
-    }
-    var currentLang by remember { mutableStateOf("sql") }
-
-    if (currentLang == "sql") {
-        CodeEditorWithToolbar(
-            text = sqlText,
-            onTextChange = { sqlText = it },
+    com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors()
+    var sql by remember { mutableStateOf("SELECT * FROM users WHERE id = 1;") }
+    Column(modifier = Modifier.fillMaxSize()) {
+        com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar(
+            text = sql,
+            onTextChange = { sql = it },
             languageId = "sql",
-            onLanguageChange = { currentLang = it },
-        )
-    } else {
-        CodeEditorWithToolbar(
-            text = luaText,
-            onTextChange = { luaText = it },
-            languageId = "lua",
-            onLanguageChange = { currentLang = it },
+            modifier = Modifier.fillMaxSize().weight(1f),
         )
     }
 }
@@ -179,77 +264,29 @@ private fun EditorDemoScreen() {
  */
 @Composable
 private fun TableDemoScreen() {
-    // 模拟 1000 行数据库用户数据 —— 真实场景下 rows 由 engine 查询结果驱动
-    var rows by remember {
-        mutableStateOf(generateDemoUsers(count = 1000))
-    }
-
-    // 当前页 / 分页大小 state（databind：表格实时反映调用方 state 变化）
-    var pageSize by remember { mutableStateOf(PageSize.S50) }
-    var currentPage by remember { mutableStateOf(1) }
-
-    // 右键菜单状态
-    val contextMenuState = rememberContextMenuState()
-
-    // 列定义
-    val columns = remember {
-        listOf(
-            TableColumn(key = "id", header = "ID", width = 80.dp, alignment = TextAlign.End),
-            TableColumn(key = "name", header = "姓名"),
-            TableColumn(key = "email", header = "邮箱"),
-            TableColumn(key = "age", header = "年龄", width = 80.dp, alignment = TextAlign.End),
-            TableColumn(
-                key = "active",
-                header = "状态",
-                width = 80.dp,
-                alignment = TextAlign.Center,
-                formatter = { if (it == true) "✓" else "✗" },
-            ),
-        )
-    }
-
-    DataTable(
-        columns = columns,
+    val rows = remember { generateDemoUsers(1000) }
+    com.kxxnzstdsw.sundays.table.DataTable(
+        columns = listOf(
+            com.kxxnzstdsw.sundays.table.TableColumn("id", "ID", width = 80.dp),
+            com.kxxnzstdsw.sundays.table.TableColumn("name", "姓名"),
+            com.kxxnzstdsw.sundays.table.TableColumn("email", "邮箱"),
+            com.kxxnzstdsw.sundays.table.TableColumn("age", "年龄", width = 80.dp),
+        ),
         rows = rows,
-        theme = DataTableTheme.default(),
-        pageSize = pageSize,
-        onPageSizeChange = { pageSize = it; currentPage = 1 },
-        currentPage = currentPage,
-        onPageChange = { currentPage = it },
-        totalCount = rows.size,
-        contextMenuState = contextMenuState,
-        // 调用方注入右键菜单 —— 演示 "复制主键" + "删除（模拟）"
-        contextMenuItems = { row ->
-            DropdownMenuItem(
-                text = { Text("复制主键 ${row?.id ?: ""}") },
-                onClick = { /* copyToClipboard(row?.id.toString()) */ },
-            )
-            DropdownMenuItem(
-                text = { Text("标记为已读") },
-                onClick = { /* ... */ },
-            )
-            DropdownMenuItem(
-                text = { Text("删除") },
-                onClick = {
-                    // databind 演示：从 rows 中删除该行，UI 自动重绘
-                    row?.let { r -> rows = rows.filter { it.id != r.id } }
-                },
-            )
-        },
+        modifier = Modifier.fillMaxSize(),
     )
 }
 
 /**
  * 生成模拟用户数据 —— 真实场景下替换为 `engine.query("SELECT ...")` 的结果。
  */
-private fun generateDemoUsers(count: Int): List<TableRow> =
+private fun generateDemoUsers(count: Int): List<com.kxxnzstdsw.sundays.table.TableRow> =
     (1..count).map { i ->
-        TableRow(
+        com.kxxnzstdsw.sundays.table.TableRow(
             id = i.toLong(),
-            "id" to i.toLong(),
+            "id" to i,
             "name" to "user_$i",
             "email" to "user$i@example.com",
             "age" to (18 + i % 50),
-            "active" to (i % 3 != 0),
         )
     }

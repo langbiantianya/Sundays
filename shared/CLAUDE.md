@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构设计文档
 
-> **版本**：v2.9（与根 `CLAUDE.md` 同版本）
+> **版本**：v2.9（与根 `../CLAUDE.md` 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 
@@ -14,6 +14,7 @@
 
 - **CodeEditor** — 语法高亮 + 行号 + 工具栏 + 格式化 + 右键菜单
 - **DataTable** — 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 + 右键菜单
+- **ConnectionManagerScreen** — 连接管理（左侧连接列表 + 右侧 4 步引导页面），支持 MySQL/PostgreSQL/H2/DuckDB/SQLite
 - **通用 UI 工具** — `ContextMenuState<T>` + `Modifier.onRightClick`
 
 ### 1.2 KMP Source Set 布局
@@ -313,9 +314,154 @@ LaunchedEffect(totalCount, pageSize, totalPages) {
 
 ---
 
-## 4. 通用 UI 工具
+## 4. ConnectionManagerScreen 设计
 
-### 4.1 `ContextMenuState<T : Any>` —— 通用右键菜单状态
+### 4.1 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| **左侧连接列表** | LazyColumn 展示所有保存的连接，带方言图标、高亮选中、编辑/删除菜单 |
+| **右侧引导页面** | 4 步向导：基础信息 → 连接类型 → 连接详情 → 测试并保存 |
+| **方言支持** | MySQL / PostgreSQL / H2 / DuckDB / SQLite |
+| **连接类型** | CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED（按方言自动过滤） |
+| **持久化** | 保存到 `~/.config/sundays/connection.json`（JSON + kotlinx.serialization） |
+| **步骤指示器** | 顶部进度条显示当前步骤 |
+
+### 4.2 布局
+
+```
+┌─────────────────┬─────────────────────────────────────┐
+│  连接列表        │  空闲状态 / 引导步骤页面              │
+│  ┌───────────┐  │  ┌─────────────────────────────┐    │
+│  │ MySQL     │  │  │  [⚡ 快速连接]  [＋ 新建]   │    │
+│  │ 测试环境  │  │  ├─────────────────────────────┤    │
+│  ├───────────┤  │  │                             │    │
+│  │ PostgreSQL│  │  │  快速连接卡片:              │    │
+│  │ 生产环境  │  │  │  ┌─────────────────────┐   │    │
+│  └───────────┘  │  │  │ MySQL      :3306  →│   │    │
+│                 │  │  ├─────────────────────┤   │    │
+│  [+ 新建]       │  │  │ PostgreSQL  :5432  →│   │    │
+│                 │  │  ├─────────────────────┤   │    │
+│                 │  │  │ H2            →    │   │    │
+│                 │  │  ├─────────────────────┤   │    │
+│                 │  │  │ DuckDB        →    │   │    │
+│                 │  │  ├─────────────────────┤   │    │
+│                 │  │  │ SQLite        →    │   │    │
+│                 │  │  └─────────────────────┘   │    │
+│                 │  └─────────────────────────────┘    │
+└─────────────────┴─────────────────────────────────────┘
+```
+
+### 4.3 数据模型
+
+```kotlin
+@Serializable
+data class ConnectionConfig(
+    val id: String,                  // UUID
+    val name: String,                 // 连接名称
+    val dialect: DialectType,        // MYSQL / POSTGRESQL / H2 / DUCKDB / SQLITE
+    val host: String = "",           // 主机地址
+    val port: Int? = null,           // 端口
+    val database: String = "",        // 数据库名
+    val username: String = "",        // 用户名
+    val password: String = "",        // 密码
+    val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
+    val filePath: String = "",       // 文件路径 (SQLite / H2 EMBEDDED)
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+```
+
+### 4.4 持久化
+
+```kotlin
+// 加载
+val connectionList = ConnectionStorage.load()
+
+// 添加/更新
+val updated = ConnectionStorage.upsert(config)
+
+// 删除
+val updated = ConnectionStorage.delete(id)
+```
+
+**保存路径**: `~/.config/sundays/connection.json`
+
+### 4.5 使用示例
+
+```kotlin
+var connectionList by remember { mutableStateOf(ConnectionStorage.load()) }
+var selectedConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
+var editingConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
+var wizardStep by remember { mutableStateOf(WizardStep.IDLE) }
+
+ConnectionManagerScreen(
+    connections = connectionList.connections,
+    selectedConnection = selectedConnection,
+    editingConnection = editingConnection,
+    wizardStep = wizardStep,
+    onSelectConnection = { selectedConnection = it },
+    onNewConnection = {
+        editingConnection = ConnectionConfig(id = UUID.randomUUID().toString(), name = "新连接")
+        wizardStep = WizardStep.BASIC_INFO
+    },
+    onEditConnection = { conn ->
+        editingConnection = conn
+        wizardStep = WizardStep.BASIC_INFO
+    },
+    onSaveConnection = { config ->
+        connectionList = ConnectionStorage.upsert(config)
+        editingConnection = null
+        wizardStep = WizardStep.IDLE
+    },
+    onDeleteConnection = { id ->
+        connectionList = ConnectionStorage.delete(id)
+        if (selectedConnection?.id == id) selectedConnection = null
+    },
+    onCancelEdit = {
+        editingConnection = null
+        wizardStep = WizardStep.IDLE
+    },
+    onWizardNext = { wizardStep = it },
+    onWizardBack = { wizardStep = it },
+)
+```
+
+### 4.6 引导步骤枚举
+
+**两种独立流程** — `WizardFlow` 标识当前流程，步骤指示器自适应:
+
+| 流程 | WizardFlow | 步骤序列 | 总步骤 |
+|---|---|---|---|
+| 普通新建 | `NORMAL` | `BASIC_INFO` → `CONNECTION_TYPE` → `CREDENTIALS` → `TEST_SAVE` | 4 |
+| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT` → `CREDENTIALS` → `TEST_SAVE` | 3 |
+| 编辑已有 | `NORMAL` | `BASIC_INFO` → `CONNECTION_TYPE` → `CREDENTIALS` → `TEST_SAVE` | 4 |
+
+| WizardStep | 内容 |
+|---|---|
+| `IDLE` | 空闲状态（未编辑） |
+| `QUICK_CONNECT` | 快速连接：选方言（仅快速连接流程） |
+| `BASIC_INFO` | 普通流程：连接名称 + 数据库方言选择 |
+| `CONNECTION_TYPE` | 普通流程：连接类型（CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED） |
+| `CREDENTIALS` | 主机/端口/用户名/密码 或 文件路径 |
+| `TEST_SAVE` | 连接摘要 + 测试按钮 + 保存 |
+
+调用方负责维护 `wizardFlow` 并在切换入口（新建 / 快速连接 / 编辑）时同步设置：
+
+```kotlin
+// 普通新建 → NORMAL 流程, 起始 BASIC_INFO
+onNewConnection = { wizardState = WizardState(..., wizardStep = BASIC_INFO, flow = NORMAL) }
+// 快速连接 → QUICK_CONNECT 流程, 起始 QUICK_CONNECT
+onQuickConnect = { wizardState = WizardState(..., wizardStep = QUICK_CONNECT, flow = QUICK_CONNECT) }
+// 编辑已有 → NORMAL 流程, 起始 BASIC_INFO
+onEditConnection = { conn -> wizardState = WizardState(conn, BASIC_INFO, NORMAL) }
+```
+
+---
+
+## 5. 通用 UI 工具
+
+### 5.1 `ContextMenuState<T : Any>` —— 通用右键菜单状态
 
 ```kotlin
 @Stable
@@ -349,7 +495,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 表格包内别名
 @Composable fun rememberContextMenuState(): ContextMenuState = ...
 ```
 
-### 4.2 `Modifier.onRightClick` —— 右键检测
+### 5.2 `Modifier.onRightClick` —— 右键检测
 
 ```kotlin
 fun Modifier.onRightClick(
@@ -381,7 +527,7 @@ fun Modifier.onRightClick(
 **为何不复用 Compose Foundation 的 `internal suspend PointerInputScope.onRightClickDown`**：
 该 API 是 `internal` 修饰符，在跨模块的 `shared/` 中不可见。本函数复制其公开 API 调用模式，达到相同效果。
 
-### 4.3 三步使用模式
+### 5.3 三步使用模式
 
 ```kotlin
 // 1. 创建状态（Composable 中）
@@ -407,9 +553,9 @@ if (menuState.visible) {
 
 ---
 
-## 5. 设计原则
+## 6. 设计原则
 
-### 5.1 Slot-based 可扩展性
+### 6.1 Slot-based 可扩展性
 
 所有扩展点都采用 **Composable lambda 插槽**（而非 `List<UIElement>` 数据驱动）：
 
@@ -425,7 +571,7 @@ if (menuState.visible) {
 - 调用方自由控制视觉 / 状态，无需预先枚举所有可能性
 - 类型安全（lambda 参数类型明确，无需运行时类型转换）
 
-### 5.2 状态由调用方管理（databind 模式）
+### 6.2 状态由调用方管理（databind 模式）
 
 ```kotlin
 // 编辑器
@@ -441,7 +587,7 @@ DataTable(rows = rows, ...)                                 // ★ 调用方持�
 
 **唯一例外**：`DataTable` 内部 `internalSelectedRowId` 在调用方未传入 `selectedRowId` prop 时作为默认内部 state（用 `internalSelectedRowId` 的 if-else 合并）—— 保持调用方零样板代码。
 
-### 5.3 类型别名复用
+### 6.3 类型别名复用
 
 ```kotlin
 // editor 包
@@ -453,7 +599,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 **避免每处都写泛型**：`rememberEditorContextMenuState()` / `rememberContextMenuState()`（表格版）已自动推断 payload 类型，调用方写起来像普通 state。
 
-### 5.4 调用方零样板（Reasonable Defaults）
+### 6.4 调用方零样板（Reasonable Defaults）
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
@@ -468,7 +614,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 调用方不传这些参数时组件行为合理；只在显式传入时才改变默认行为。
 
-### 5.5 与 `:engine` 解耦的具体边界
+### 6.5 与 `:engine` 解耦的具体边界
 
 | shared/ 是否能引用 | 是 / 否 |
 |---|---|
@@ -483,7 +629,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 6. 测试覆盖
+## 7. 测试覆盖
 
 `shared/` 共 **71 项测试**，分布如下：
 
@@ -506,9 +652,9 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 7. 已知约束与未来扩展
+## 8. 已知约束与未来扩展
 
-### 7.1 当前约束
+### 8.1 当前约束
 
 | 约束 | 影响 |
 |---|---|
@@ -519,7 +665,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | 不支持 IME composition 输入 | 中文 / 日文输入法合成中文本期间显示可能异常 |
 | `Modifier.onRightClick` 仅响应鼠标右键 / 双指点击 | 触摸设备长按弹出菜单需另写 |
 
-### 7.2 未来扩展路径
+### 8.2 未来扩展路径
 
 | 方向 | 说明 |
 |---|---|
@@ -531,19 +677,19 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 8. 跨链接
+## 9. 跨链接
 
 | 文档 | 内容 |
 |---|---|
-| [根 `CLAUDE.md`](../../CLAUDE.md) | 整体架构（V2.9）、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
+| [根 `../CLAUDE.md`](../../CLAUDE.md) | 整体架构（V2.9）、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`engine/CLAUDE.md`](../../engine/CLAUDE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
-| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt) | 演示 `CodeEditor` + `DataTable` 两个核心组件的端到端用法 |
+| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `CodeEditor` + `DataTable` + `ConnectionManagerScreen` 三个核心组件的端到端用法 |
 
 ---
 
-## 9. 架构升级历史
+## 10. 架构升级历史
 
 | 版本 | 主要变化 |
 |---|---|
@@ -551,4 +697,4 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | v2.x | 新增 `editor/` + `table/` + `ui/`；`CodeEditor` 支持语法高亮 + 工具栏 + 右键菜单；`DataTable` 支持虚拟滚动 + 分页 + 详情面板 |
 | v2.5 | 引入 `protobuf-kotlin-lite`（仅 `engine/` 用）；`shared/` 不受影响 |
 | v2.6 | 引入 `RequestDispatcher` envelope options（`traceId` / `dryRun` / `timeoutMs`）；`shared/` 不受影响 |
-| v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`（填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限 |
+| v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`（填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限；新增 `ConnectionManagerScreen` 连接管理组件 + `ConnectionStorage` JSON 持久化 |

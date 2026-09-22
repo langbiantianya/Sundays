@@ -2,7 +2,7 @@
 
 ## 概述
 
-`desktopApp/` 是 `Sundays` 项目的**桌面客户端模块**。它使用 **Kotlin Multiplatform + Compose Multiplatform** 构建，**当前仅启用 JVM Desktop 单平台目标**（macOS / Linux / Windows 三端共享同一份 Compose Desktop (Skia) 渲染），通过 **v2.9 Direct 直接模式** 与引擎集成 —— `IdbEngine()` facade 直接方法调用，**typed proto 消息同 JVM 直传，零序列化、零子进程、零 gRPC channel、零 IPC transport**。
+`desktopApp/` 是 `sundays` 项目的**桌面客户端模块**。它使用 **Kotlin Multiplatform + Compose Multiplatform** 构建，**当前仅启用 JVM Desktop 单平台目标**（macOS / Linux / Windows 三端共享同一份 Compose Desktop (Skia) 渲染），通过 **v2.9 Direct 直接模式** 与引擎集成 —— `IdbEngine()` facade 直接方法调用，**typed proto 消息同 JVM 直传，零序列化、零子进程、零 gRPC channel、零 IPC transport**。
 
 **未来扩展路径**：KMP 工程结构天然支持后续启用 `androidMain` / `iosMain` / `wasmJsMain` source set —— 只需新增对应平台特定的子进程拉起逻辑（如 Android 的 `bindService`、iOS 的 `NSXPCConnection`），`commonMain` 中的业务层零修改复用。当前 v2.9 demo 阶段仅暴露 `main` 单一 source set。
 
@@ -10,7 +10,7 @@
 
 - **依赖方向**：`desktopApp` → `:shared`（UI 组件）+ `:engine`（业务引擎）。**反向依赖被严格禁止** —— 引擎与 shared 模块均不感知 desktopApp 存在。
 - **同进程集成**：`desktopApp` 与 `:engine` **必须部署在同一 JVM**（Kotlin / Java），Direct 模式无 IPC 跨进程语义。
-- **演示优先**：当前 `main.kt` 仅承载 **两个演示屏幕**（代码编辑器 + 数据表格），用于验证 `shared/` UI 组件在 desktopApp 中的接线方式；真正的数据库管理 UI（连接面板 / Schema 导航 / SQL 编辑器面板 / 查询结果表）将由后续迭代替换。
+- **演示优先**：当前 `main.kt` 仅承载 **三个演示屏幕**（连接管理 + 代码编辑器 + 数据表格），用于验证 `shared/` UI 组件在 desktopApp 中的接线方式；真正的数据库管理 UI（连接面板 / Schema 导航 / SQL 编辑器面板 / 查询结果表）将由后续迭代替换。
 
 ---
 
@@ -19,7 +19,7 @@
 ```text
 desktopApp/
 ├── build.gradle.kts    # composeMultiplatform + compose.material3 + :engine / :shared 依赖
-└── src/main/kotlin/com/kxxnzstdsw/Sundays/
+└── src/main/kotlin/com/kxxnzstdsw/sundays/
     └── main.kt         # 单一入口：main() + DemoApp() + DemoTabBar() + EditorDemoScreen() + TableDemoScreen()
 ```
 
@@ -28,7 +28,7 @@ desktopApp/
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `build.gradle.kts` | 31 | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 259 | 应用入口（`application { Window { DemoApp() } }`）；两个 demo 屏幕实现；演示数据生成函数 |
+| `main.kt` | 261 | 应用入口（`application { Window { DemoApp() } }`）；三个 demo 屏幕实现；演示数据生成函数 |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
@@ -36,12 +36,59 @@ desktopApp/
 |---|---|---|
 | `main()` | public | `application { ... }` 入口；注册内置编辑器、构造 `IdbEngine()`、创建 `Window`、安装主题 |
 | `DemoApp()` | private `@Composable` | 顶层 demo 应用：管理 `selectedTab` state、`DemoTabBar` + `when (selectedTab)` 切换 |
-| `DemoTab` | private enum | tab 枚举（`EDITOR` / `TABLE`） |
+| `DemoTab` | private enum | tab 枚举（`CONNECTION` / `EDITOR` / `TABLE`） |
 | `DemoTabBar()` | private `@Composable` | 顶部 `SingleChoiceSegmentedButtonRow` 渲染 |
 | `isSystemInDarkTheme()` | private `@Composable` | 包装 `androidx.compose.foundation.isSystemInDarkTheme()`（避免导入冲突） |
+| `ConnectionDemoScreen()` | private `@Composable` | 连接管理演示：加载 `~/.config/sundays/connection.json`，维护 `WizardState`(editingConnection + wizardStep + flow)，调用 `ConnectionManagerScreen` |
 | `EditorDemoScreen()` | private `@Composable` | 代码编辑器演示：`sqlText` / `luaText` / `currentLang` 三个 state，`when (currentLang)` 切换两套 `CodeEditorWithToolbar` |
 | `TableDemoScreen()` | private `@Composable` | 数据表格演示：`rows` / `pageSize` / `currentPage` state、列定义、`DataTable` + 注入 `contextMenuItems` |
 | `generateDemoUsers(count)` | private | 生成 1000 行模拟用户数据（id / name / email / age / active） |
+
+---
+
+## 连接管理演示 (`ConnectionDemoScreen`)
+
+演示 `shared/connection/ConnectionManagerScreen` 的端到端用法：
+
+- 从 `~/.config/sundays/connection.json` 加载连接列表
+- 维护 `WizardState`(editingConnection + wizardStep + flow) **data class** —— 单次赋值保证原子更新，避免 Compose recomposition 间隙 NPE
+- 三个入口：
+  - **左侧「快速连接」按钮**（⚡）→ `flow = QUICK_CONNECT`
+  - **左侧「新建连接」按钮**（＋）→ `flow = NORMAL`，起始 `BASIC_INFO`
+  - **列表项「编辑」菜单** → `flow = NORMAL`，起始 `BASIC_INFO`（保留原有配置）
+
+### 流程对照表
+
+| 入口 | flow | 步骤序列 |
+|---|---|---|
+| 新建 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步，跳过 BASIC_INFO / CONNECTION_TYPE) |
+| 编辑 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+
+调用方在每次切换入口时**同步**设置 `flow`，确保 `ConnectionWizardPanel` 的步骤指示器自适应总数（4 vs 3）。
+
+### 持久化路径
+
+```text
+~/.config/sundays/connection.json   ←  ConnectionStorage.load() / upsert() / delete()
+```
+
+### 状态原子更新模式
+
+```kotlin
+private data class WizardState(
+    val editingConnection: ConnectionConfig?,
+    val wizardStep: WizardStep,
+    val flow: WizardFlow,
+)
+
+// 边缘 —— 分两次赋值（崩溃风险：recomposition 间隙 editingConnection 为 null）
+editingConnection = newCfg
+wizardStep = WizardStep.QUICK_CONNECT
+
+// 边缘 —— 单次赋值（安全）
+wizardState = WizardState(editingConnection = newCfg, wizardStep = WizardStep.QUICK_CONNECT, flow = WizardFlow.QUICK_CONNECT)
+```
 
 ---
 
@@ -50,7 +97,7 @@ desktopApp/
 ### 核心契约
 
 ```kotlin
-// desktopApp/src/main/kotlin/com/kxxnzstdsw/Sundays/main.kt
+// desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt
 import com.kxxnzstdsw.engine.IdbEngine
 
 val engine = IdbEngine()                                          // 构造时自动 bootstrap（幂等）
@@ -272,7 +319,7 @@ Window(
         engineScope.coroutineContext[Job]?.cancel()                 // ② 取消应用级 coroutine scope
         exitApplication()                                           // ③ 退出 application{}
     },
-    title = "Sundays",
+    title = "sundays",
 ) { ... }
 ```
 
@@ -299,7 +346,7 @@ Window(
 | 文档 | 内容 |
 |---|---|
 | [`desktopApp/README.md`](./README.md) | desktopApp 用户级 README（运行命令 / 演示功能 / Direct 模式概述） |
-| [根目录 `CLAUDE.md`](../CLAUDE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
+| [根目录 `../CLAUDE.md`](../CLAUDE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
 | [`engine/CLAUDE.md`](../engine/CLAUDE.md) | 引擎内部架构（`IdbEngine` facade 详解 / `RequestDispatcher` / `PoolManager` / `Loader`） |
 | [`engine/README.md`](../engine/README.md) | 引擎用户级 README（CLI / 构建运行 / API 参考 / Direct 模式示例） |
 | [`shared/CLAUDE.md`](../shared/CLAUDE.md) | 共享 UI 组件架构（`CodeEditor` / `DataTable` / 右键菜单） |
