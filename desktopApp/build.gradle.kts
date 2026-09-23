@@ -13,7 +13,8 @@ dependencies {
     implementation(project(":engine"))
 
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
+    // 使用版本目录直连依赖：compose.material3 访问器已废弃（Gradle 10 移除）
+    implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
 
     implementation(libs.compose.uiToolingPreview)

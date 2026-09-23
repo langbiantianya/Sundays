@@ -24,6 +24,8 @@ data class ConnectionConfig(
     val password: String = "",       // 密码
     val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
     val filePath: String = "",       // 文件路径 (SQLite / H2 EMBEDDED)
+    val useJdbcUrl: Boolean = false, // 是否使用 JDBC URL 配置
+    val jdbcUrl: String = "",        // 自定义 JDBC URL (useJdbcUrl=true 时使用)
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 ) {

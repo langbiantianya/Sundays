@@ -379,7 +379,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 
 ## 技术栈
 
-- **Kotlin 2.4.0 / JDK 25**
+- **Kotlin 2.4.20 / JDK 25**
 - **Compose Multiplatform Desktop**（KMP Desktop 前端）
 - **gRPC 1.83.1** + grpc-kotlin 1.5.0（Kotlin 协程服务端 + Kotlin DSL 生成）
 - **protobuf-kotlin-lite 4.35.1**（DSL builder：`xxxRequest { ... }` / `request { ... }`）

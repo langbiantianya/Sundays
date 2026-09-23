@@ -379,6 +379,7 @@ private fun ConnectionWizardPanel(
                     onNext = { onWizardNext(WizardStep.TEST_SAVE) },
                     onBack = onWizardBack,
                     onCancel = onCancelEdit,
+                    onUpdateEditingConnection = onUpdateEditingConnection,
                 )
             }
             WizardStep.TEST_SAVE -> editingConnection?.let { config ->
@@ -852,6 +853,7 @@ private fun CredentialsStep(
     onNext: () -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
+    onUpdateEditingConnection: (ConnectionConfig) -> Unit,
 ) {
     var host by remember(editingConnection) { mutableStateOf(editingConnection.host) }
     var port by remember(editingConnection) { mutableStateOf(editingConnection.port?.toString() ?: "") }
@@ -859,6 +861,21 @@ private fun CredentialsStep(
     var username by remember(editingConnection) { mutableStateOf(editingConnection.username) }
     var password by remember(editingConnection) { mutableStateOf(editingConnection.password) }
     var filePath by remember(editingConnection) { mutableStateOf(editingConnection.filePath) }
+    var useJdbcUrl by remember(editingConnection) { mutableStateOf(editingConnection.useJdbcUrl) }
+    var jdbcUrl by remember(editingConnection) { mutableStateOf(editingConnection.jdbcUrl) }
+
+    fun applyHostPort() = onUpdateEditingConnection(
+        editingConnection.copy(
+            host = host,
+            port = port.toIntOrNull(),
+            database = database,
+            username = username,
+            password = password,
+            filePath = filePath,
+            useJdbcUrl = useJdbcUrl,
+            jdbcUrl = jdbcUrl,
+        )
+    )
 
     StepLayout(
         title = "连接详情",
@@ -868,67 +885,133 @@ private fun CredentialsStep(
     ) {
         when (editingConnection.connectionType) {
             ConnectionType.CLIENT_SERVER -> {
-                OutlinedTextField(
-                    value = host,
-                    onValueChange = { host = it },
-                    label = { Text("主机地址") },
-                    placeholder = { Text("例如: localhost 或 192.168.1.100") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Wifi, null) },
-                )
+                // JDBC URL 开关
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            useJdbcUrl = !useJdbcUrl
+                            applyHostPort()
+                        }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = useJdbcUrl,
+                        onCheckedChange = {
+                            useJdbcUrl = it
+                            applyHostPort()
+                        },
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("使用 JDBC URL", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "通过完整的 JDBC URL 配置连接，支持更多数据库特定选项",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                OutlinedTextField(
-                    value = port,
-                    onValueChange = { port = it.filter { c -> c.isDigit() } },
-                    label = { Text("端口") },
-                    placeholder = { Text(editingConnection.displayPort.toString()) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
+                if (useJdbcUrl) {
+                    OutlinedTextField(
+                        value = jdbcUrl,
+                        onValueChange = {
+                            jdbcUrl = it
+                            applyHostPort()
+                        },
+                        label = { Text("JDBC URL") },
+                        placeholder = { Text("例如: jdbc:mysql://localhost:3306/testdb?useSSL=false") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = false,
+                        minLines = 2,
+                        maxLines = 4,
+                        leadingIcon = { Icon(Icons.Default.Link, null) },
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = host,
+                        onValueChange = {
+                            host = it
+                            applyHostPort()
+                        },
+                        label = { Text("主机地址") },
+                        placeholder = { Text("例如: localhost 或 192.168.1.100") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Wifi, null) },
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
-                    value = database,
-                    onValueChange = { database = it },
-                    label = { Text("数据库名") },
-                    placeholder = { Text("例如: testdb") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Storage, null) },
-                )
+                    OutlinedTextField(
+                        value = port,
+                        onValueChange = {
+                            port = it.filter { c -> c.isDigit() }
+                            applyHostPort()
+                        },
+                        label = { Text("端口") },
+                        placeholder = { Text(editingConnection.displayPort.toString()) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("用户名") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Person, null) },
-                )
+                    OutlinedTextField(
+                        value = database,
+                        onValueChange = {
+                            database = it
+                            applyHostPort()
+                        },
+                        label = { Text("数据库名") },
+                        placeholder = { Text("例如: testdb") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Storage, null) },
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("密码") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Lock, null) },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = {
+                            username = it
+                            applyHostPort()
+                        },
+                        label = { Text("用户名") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Person, null) },
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = {
+                            password = it
+                            applyHostPort()
+                        },
+                        label = { Text("密码") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
             }
 
             ConnectionType.EMBEDDED, ConnectionType.IN_MEMORY -> {
                 OutlinedTextField(
                     value = database,
-                    onValueChange = { database = it },
+                    onValueChange = {
+                        database = it
+                        onUpdateEditingConnection(editingConnection.copy(database = database))
+                    },
                     label = { Text("数据库名称") },
                     placeholder = { Text("例如: testdb") },
                     modifier = Modifier.fillMaxWidth(),
@@ -940,7 +1023,10 @@ private fun CredentialsStep(
             ConnectionType.FILE_BASED -> {
                 OutlinedTextField(
                     value = filePath,
-                    onValueChange = { filePath = it },
+                    onValueChange = {
+                        filePath = it
+                        onUpdateEditingConnection(editingConnection.copy(filePath = filePath))
+                    },
                     label = { Text("文件路径") },
                     placeholder = { Text("例如: /path/to/database.db") },
                     modifier = Modifier.fillMaxWidth(),
@@ -952,7 +1038,10 @@ private fun CredentialsStep(
 
                 OutlinedTextField(
                     value = database,
-                    onValueChange = { database = it },
+                    onValueChange = {
+                        database = it
+                        onUpdateEditingConnection(editingConnection.copy(database = database))
+                    },
                     label = { Text("数据库名 (可选)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,

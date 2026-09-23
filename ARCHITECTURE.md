@@ -119,7 +119,7 @@ java -jar idb-engine.jar --mode direct
 
 ## 6. 技术栈（简表）
 
-- **Kotlin 2.4.0 / JDK 25**
+- **Kotlin 2.4.20 / JDK 25**
 - **KMP + Compose Multiplatform Desktop**（仅 `jvmMain` 单平台目标）
 - **gRPC 1.83.1** + grpc-kotlin 1.5.0（Kotlin 协程服务端 + Kotlin DSL 生成）
 - **protobuf-kotlin-lite 4.35.1**（DSL builder）
