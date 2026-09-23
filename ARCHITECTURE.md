@@ -1,4 +1,4 @@
-# sundays — Kotlin 数据库管理端架构导航（V2.9）
+# sundays — Kotlin 数据库管理端架构导航（V2.11）
 
 > **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `ARCHITECTURE.md`（见下方"模块导航"）。
 
@@ -12,7 +12,7 @@
 - **前端客户端**：**Kotlin Multiplatform + Compose Multiplatform Desktop** 桌面应用（macOS / Linux / Windows 三端共享 Compose Desktop Skia 渲染）
 - **整条工具链 Kotlin 一统**：共享 `protobuf-kotlin-lite` DSL 生成器 + `kotlinx-coroutines`，无语言边界、无桥接开销
 
-**当前版本：v2.9** — KMP Desktop 前端 + Direct 模式 + 双模式架构
+**当前版本：v2.11** — KMP Desktop 前端 + Direct 模式 + 双模式架构 + 仅凭 JDBC URL 初始化连接
 
 ---
 
@@ -24,6 +24,8 @@
 | **gRPC 模式（向后兼容）** | `IdbEngineServer`（gRPC server over IPC transport） | 任意 gRPC client | 跨进程、跨语言、子进程隔离、远程调试 |
 
 两条路径共享同一个 `RequestDispatcher`，envelope options（`traceId` / `dryRun` / `timeoutMs`）、流式 frame assembly、`if_exists` 语义等横切关注点完全一致。
+
+**v2.11 — 连接生命周期直连方法**：`IdbEngine` 新增 `testConnection(config)` / `testConnection(jdbcUrl, user, password)`，**直接调用** `SystemHandler`，旁路 `RequestDispatcher`（无 envelope 包装）。首次调用用 `config.jdbcUrl` 创建（或复用）HikariCP 连接池 —— 即**连接初始化**；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`，前缀由 `DatabaseDialect.jdbcUrlPrefix` 声明）。详见 [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) §3.1 / §4.1。
 
 **典型调用栈**：
 

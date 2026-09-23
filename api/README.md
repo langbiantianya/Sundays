@@ -2,9 +2,11 @@
 
 **零外部依赖的公共 SPI 模块** —— 定义方言插件必须实现的接口 + 连接元数据扩展枚举。引擎通过 `ServiceLoader<DatabaseDialect>` 自动发现并注册方言。
 
-> **当前版本**：v2.9
+> **当前版本**：v2.11
 >
 > 元数据扩展（v2.8）：`displayName` / `connectionType` / `requiresHost` / `defaultPort` / `capabilities` 等 11 个属性已纳入 SPI，前端通过 `SYSTEM.LIST_DRIVERS` 动态渲染连接表单。
+>
+> JDBC URL 反查（v2.11）：`jdbcUrlPrefix` 让引擎仅凭 JDBC URL 定位方言 —— 见下文「JDBC URL 反查」。
 
 ---
 
@@ -35,7 +37,7 @@ api/
 
 | 类别 | 方法/属性数 | 说明 |
 |---|---|---|
-| **驱动识别** | 3 | `driverName` / `jdbcDriverClassName` / `buildJdbcUrl(...)` |
+| **驱动识别** | 4 | `driverName` / `jdbcDriverClassName` / `buildJdbcUrl(...)` / `jdbcUrlPrefix`（v2.11） |
 | **连接元数据（v2.8）** | 11 | 决定前端表单字段显隐（详见下表） |
 | **流式查询配置** | 2 | `configureConnectionForStreaming` / `restoreConnectionAfterStreaming` |
 | **Schema 上下文** | 2 | `setSearchPath` / `buildSetSearchPathSql` |
@@ -71,6 +73,21 @@ api/
 | `capabilities` | `Set<DialectCapability>` | `emptySet()` | 方言能力标签（前端据此决定按钮显隐） |
 
 **用途**：`SYSTEM.LIST_DRIVERS` action 枚举所有已加载方言，调用方得到 `repeated DialectInfo`，前端据此**动态渲染"新建连接"表单**——无需硬编码每个 driver 的字段需求。
+
+---
+
+## JDBC URL 反查（v2.11 新增）
+
+`jdbcUrlPrefix`（默认 `"jdbc:${driverName.lowercase()}:"`）让引擎**仅凭 JDBC URL** 就能定位方言实例：
+
+```kotlin
+val dialect = DialectLoader.getDialectByJdbcUrl("jdbc:mysql://localhost:3306/db")   // → MySQLDialect
+```
+
+- 5 个内置方言**显式覆盖**该属性（不依赖 `driverName` 命名巧合）：`jdbc:mysql:` / `jdbc:postgresql:` / `jdbc:h2:` / `jdbc:duckdb:` / `jdbc:sqlite:`
+- 多个方言同时匹配时取**最长前缀**（预留 `jdbc:h2:` vs 更具体前缀的嵌套）
+- 用途：`PoolManager.resolveDialect(config)` 在 `connection.jdbc_url` 非空时按 URL 反查方言，忽略 `driver` / `host` / `port` / `database`；反查失败抛可读错误而**不回退** `driver`
+- 完整链路见 [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) §4.1（`jdbc_url` 字段）
 
 ---
 

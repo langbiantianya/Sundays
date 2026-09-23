@@ -188,7 +188,7 @@ for {
 
 ## 共享 UI 组件（`shared/` 模块）
 
-`shared/commonMain` 提供三个**面向 KMP Compose Desktop** 的可扩展 UI 组件，均与引擎无关、可单独使用：
+`shared/commonMain` 提供一组**面向 KMP Compose Desktop** 的可扩展 UI 组件（`CodeEditor` / `DataTable` / `ConnectionManagerScreen` + 通用 UI 工具），均与引擎无关、可单独使用：
 
 ### `CodeEditor` —— 可扩展代码编辑器
 
@@ -294,6 +294,7 @@ DataTable(
 - **步骤指示器自适应**：快速连接 3 段 / 普通 4 段
 - **JDBC URL 双向同步**：`CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤始终显示 5 个独立字段（host/port/database/username/password）+ JDBC URL 网格输入框；任一字段修改均通过 `buildJdbcUrl` 重建 URL 并显示在网格中，编辑网格后通过 `parseJdbcUrl` 反向同步字段；额外参数（`?useSSL=false&...`）始终保留不被动
 - **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步为「连接」而非「保存」，调用 `onQuickConnectDirect` 仅设置 `selectedConnection`，**不写入** `ConnectionStorage`
+- **测试连接**：`onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调注入；`TEST_SAVE` 步骤「测试连接」按钮真实调用引擎（回调为 null 时按钮禁用）。`shared` 仍**不依赖** `:engine` —— 由集成层直连 `IdbEngine.testConnection(jdbcUrl, user, password)`
 
 ```kotlin
 @Composable

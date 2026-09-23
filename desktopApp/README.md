@@ -4,7 +4,7 @@
 
 它通过 **v2.9 Direct 直接模式** 与 `engine/` 模块集成 —— `IdbEngine()` facade 直接方法调用引擎，**不启动子进程、不建立 gRPC channel、不走 IPC transport**，typed proto 消息在同一 JVM 内直传，零序列化、零桥接开销。
 
-> **当前版本：v2.9** — KMP Desktop 前端 + Direct 模式
+> **当前版本：v2.11** — KMP Desktop 前端 + Direct 模式 + 连接管理
 > 详细架构设计见本目录的 [`../ARCHITECTURE.md`](./ARCHITECTURE.md)；整体项目架构见 [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
 
 ---
@@ -28,46 +28,22 @@
 
 ---
 
-## 演示功能
+## 功能：连接管理（v2.11）
 
-应用启动后顶层为一个 `SingleChoiceSegmentedButtonRow` 顶栏，提供两个演示 Tab 切换：
+应用启动后**直接渲染** `ConnectionManagerScreen` —— 左侧连接列表 + 右侧引导式配置，**无顶层 Tab 切换**（v2.10 已移除演示 `DemoApp`）。
 
-### Tab 1 — "代码编辑器"（演示 `CodeEditor` 组件）
+- **方言**：MySQL / PostgreSQL / H2 / DuckDB / SQLite
+- **两种引导流程**（`WizardFlow` 标识，步骤指示器自适应）：
+  - 普通新建 / 编辑：`BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE`（4 步）
+  - 快速连接：`QUICK_CONNECT → CREDENTIALS → TEST_SAVE`（3 步）
+- **JDBC URL 双向同步**：`CREDENTIALS` 步骤同时显示 host / port / database / username / password 与 JDBC URL 输入框；任一方向修改实时映射，`?useSSL=false` 等额外参数始终保留
+- **测试连接**：「测试连接」按钮回调 `onTestConnection`，由本模块经 `engine.testConnection(jdbcUrl, username, password)` **直连引擎**（不走 gRPC）；首次调用即创建/复用 HikariCP 连接池
+- **持久化**：`ConnectionStorage` 读写 `~/.config/sundays/connection.json`，只落盘 `id` / `name` / `dialect` / `jdbcUrl` / `username` / `password` + 时间戳；`host` / `port` / `database` 等派生字段在加载时由 `parseJdbcUrl` 重建（v2 → v1 格式自动迁移）
+- **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步是「连接」而非「保存」，仅设为当前选中连接
 
-- **SQL / Lua 双语言切换**：`CodeLanguageRegistry` 注册的内置语法高亮
-- **行号 gutter**：与编辑区共用 `ScrollState`，滚动完全同步
-- **工具栏插槽**：演示 `RowScope.() -> Unit` 注入（格式化按钮、语言切换下拉框等）
-- **格式化**：`CodeFormatterRegistry` 自动应用（SQL 关键字大写化等）
-- **右键菜单**：编辑器内置 copy / cut / paste / 全选等默认菜单项
-
-演示数据：
-```sql
-SELECT id, name, email FROM users WHERE created_at > '2024-01-01' ORDER BY id DESC LIMIT 100
-```
-```lua
-for i = 1, 100 do
-  insert('users', {name='user_'..i, email=random_email(), age=random_int(18,65)})
-end
-```
-
-> **来源**：[`shared/`](../shared/) 模块的 `editor/` 子包；具体 API 见 [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md)。
-
-### Tab 2 — "数据表格"（演示 `DataTable` 组件）
-
-- **1000 行模拟用户数据**：`generateDemoUsers(count = 1000)` 生成的虚拟数据集
-- **5 列**：`id` (Long, 主键) / `name` (String) / `email` (String) / `age` (Int) / `active` (Boolean)
-- **虚拟滚动**：基于 `LazyColumn` 实现，item key = 主键，仅渲染可视区行
-- **行号 / 主键**：第一列作为主键列显示
-- **分页**：`PageSize` 枚举切换（S10 / S20 / S50 / S100 / S200 / S300 / S500 / ALL）
-- **单行详情面板**：点击行 → 右侧详情面板
-- **单元格可选中**：每行包裹 `SelectionContainer`，可在单元格内拖拽选中
-- **右键菜单**（调用方注入）：
-  - "复制主键 `<id>`"
-  - "标记为已读"
-  - "删除" —— 演示 **databind 自动重绘**（从 `rows` state 移除该行后，UI 自动更新）
-- **状态格式化**：`active` 列通过 `formatter = { if (it == true) "✓" else "✗" }` 自定义渲染
-
-> **来源**：[`shared/`](../shared/) 模块的 `table/` 子包。
+> **来源**：[`shared/`](../shared/) 模块的 `connection/` 子包；具体 API 见 [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) §4。
+>
+> `CodeEditor` / `DataTable` 组件仍在 `shared/` 中维护，待后续接入真正的 SQL 编辑器与查询结果面板。
 
 ---
 
@@ -82,9 +58,17 @@ dependencies {
     // 直接模式：Compose UI 与引擎同 JVM，通过 IdbEngine facade 直接调用
     // 不走 gRPC / 子进程 / IPC transport —— 详见 engine/README.md §Dual-Mode Architecture
     implementation(project(":engine"))
+
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
+    implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
+
+    // :engine 以 implementation 声明 protobuf/grpc，不向消费方编译类路径传递 ——
+    // 集成层需要 typed proto 类型才能调用 facade 的 Direct 模式 API，故显式补齐
+    implementation(libs.protobuf.java)
+    implementation(libs.protobuf.kotlin.lite)
+
+    implementation(libs.compose.uiToolingPreview)
 }
 ```
 
@@ -92,7 +76,6 @@ dependencies {
 
 ```kotlin
 fun main() = application {
-    registerBuiltinEditors()                                       // 注册 SQL/Lua 编辑器
     val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val engine = IdbEngine()                                       // 构造时自动 bootstrap（幂等）
     Window(
@@ -104,7 +87,7 @@ fun main() = application {
         title = "sundays",
     ) {
         MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-            DemoApp()
+            MainScreen(engine)                                     // 仅渲染 ConnectionManagerScreen
         }
     }
 }
@@ -125,13 +108,13 @@ fun main() = application {
 
 ---
 
-## 演示截图位置
+## 界面截图位置
 
 ```text
-待补充 —— 当前 desktopApp 的 demo 屏幕可视化展示
+待补充 —— 当前 desktopApp 的连接管理界面可视化展示
 ```
 
-> **注意**：当前桌面截图尚未归档。如需 GUI 视觉示例，可通过 `./gradlew :desktopApp:run` 启动后手动截取。
+> **注意**：当前界面截图尚未归档。如需 GUI 视觉示例，可通过 `./gradlew :desktopApp:run` 启动后手动截取。
 
 ---
 
@@ -139,12 +122,12 @@ fun main() = application {
 
 | 文档 | 内容 |
 |---|---|
-| [`desktopApp/ARCHITECTURE.md`](./ARCHITECTURE.md) | desktopApp 内部架构（KMP 工程结构 / Direct 模式集成 / 演示屏幕设计 / 生命周期管理） |
+| [`desktopApp/ARCHITECTURE.md`](./ARCHITECTURE.md) | desktopApp 内部架构（KMP 工程结构 / Direct 模式集成 / 连接管理与关键回调 / 生命周期管理） |
 | [根目录 `README.md`](../README.md) | 项目总览、模块结构、Direct 模式详解、运行命令 |
-| [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
+| [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.11 架构导航（双模式架构 / 模块结构 / 连接生命周期直连方法） |
 | [`engine/README.md`](../engine/README.md) | 引擎模块详细 README（CLI / 构建 / handler 路由 / API 参考） |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎内部架构（`IdbEngine` facade 详解 / Dispatcher / Pool / Loader） |
-| [`shared/`](../shared/) | KMP 共享代码（`CodeEditor` / `DataTable` / 右键菜单） |
+| [`shared/`](../shared/) | KMP 共享代码（`ConnectionManagerScreen` / `CodeEditor` / `DataTable` / 右键菜单） |
 
 ---
 
@@ -154,6 +137,7 @@ fun main() = application {
 - **Kotlin Multiplatform** + **Compose Multiplatform Desktop**（`jvmMain` 单平台目标）
 - **Material 3** 组件库（`androidx.compose.material3`）
 - **kotlinx-coroutines 1.11.0**（含 `coroutines-swing` 用于协程 UI dispatch）
-- **`:engine` 模块**（Direct 模式依赖）+ **`:shared` 模块**（CodeEditor / DataTable 组件）
+- **`:engine` 模块**（Direct 模式依赖）+ **`:shared` 模块**（`ConnectionManagerScreen` / `CodeEditor` / `DataTable` 组件）
+- **protobuf-java + protobuf-kotlin-lite**（消费 `:engine` 的 typed proto —— `:engine` 以 `implementation` 声明，不向消费方编译类路径传递）
 
 详细依赖见 [`desktopApp/build.gradle.kts`](./build.gradle.kts) 与根目录 [`gradle/libs.versions.toml`](../gradle/libs.versions.toml)。

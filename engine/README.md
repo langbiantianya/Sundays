@@ -183,7 +183,7 @@ for {
 | `id` | string | 请求唯一 ID |
 | `category` | enum | 12 个分类（详见下表） |
 | `action` | enum | 18 个操作（详见下表） |
-| `connection` | ConnectionConfig | 连接凭证（`driver`/`host`/`port`/`user`/`password`/`database`/`schema`/`use_ssl`/`properties`）；`driver` 可为 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite` |
+| `connection` | ConnectionConfig | 连接凭证（`driver`/`host`/`port`/`user`/`password`/`database`/`schema`/`use_ssl`/`properties`/**`jdbc_url`**）；`driver` 可为 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite`；`jdbc_url`（v2.11）非空时**只依赖 URL**，其余连接字段被忽略，方言由 URL scheme 反查 |
 | `body` | `oneof` | 12 个 Category 强类型 message（`system_request` / `schema_request` / `user_request` / `table_request` / `data_request` / `sql_request` / `function_request` / `view_request` / `index_request` / `foreign_key_request` / `trigger_request` / `export_request`） |
 
 每个 Category 消息内部也用 `oneof` 按 Action 派发（如 `TableRequest` → `list` / `column_list` / `create` / `update` / `get_ddl` / `rename` / `delete` / `truncate`）。每个 Action 子消息字段为 snake_case（protobuf 生成 camelCase getter）。`ColumnDef`、`GenerateTable` 等跨 Action 共享类型在顶层定义。
