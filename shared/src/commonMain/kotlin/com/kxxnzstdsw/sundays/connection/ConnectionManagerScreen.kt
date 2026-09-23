@@ -855,25 +855,32 @@ private fun CredentialsStep(
     onCancel: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
 ) {
-    var host by remember(editingConnection) { mutableStateOf(editingConnection.host) }
-    var port by remember(editingConnection) { mutableStateOf(editingConnection.port?.toString() ?: "") }
+    var host by remember(editingConnection) { mutableStateOf(editingConnection.host.ifBlank { "localhost" }) }
+    var port by remember(editingConnection) { mutableStateOf(editingConnection.port?.toString()?.ifBlank { editingConnection.displayPort.toString() } ?: editingConnection.displayPort.toString()) }
     var database by remember(editingConnection) { mutableStateOf(editingConnection.database) }
     var username by remember(editingConnection) { mutableStateOf(editingConnection.username) }
     var password by remember(editingConnection) { mutableStateOf(editingConnection.password) }
     var filePath by remember(editingConnection) { mutableStateOf(editingConnection.filePath) }
-    var jdbcUrl by remember(editingConnection) { mutableStateOf(editingConnection.jdbcUrl) }
+    var jdbcUrl by remember(editingConnection) {
+        mutableStateOf(
+            editingConnection.jdbcUrl.ifBlank {
+                buildJdbcUrl(editingConnection.dialect, "localhost", editingConnection.displayPort.toString(), "")
+            }
+        )
+    }
 
     /** 防止循环: 只在字段→URL 时为 true */
     var isSyncingFromFields by remember { mutableStateOf(false) }
     /** 防止循环: 只在 URL→字段 时为 true */
     var isSyncingFromUrl by remember { mutableStateOf(false) }
 
-    /** 从 individual fields 同步到 URL */
+    /** 从 individual fields 同步到 URL（保留已有的 ?额外参数） */
     fun syncToUrl() {
         if (isSyncingFromUrl) return
         isSyncingFromFields = true
-        val built = buildJdbcUrl(editingConnection.dialect, host, port, database)
-        jdbcUrl = built
+        val extraParams = jdbcUrl.substringAfter('?', "")
+        val base = buildJdbcUrl(editingConnection.dialect, host, port, database)
+        jdbcUrl = if (extraParams.isNotBlank()) "$base?$extraParams" else base
         isSyncingFromFields = false
     }
 
