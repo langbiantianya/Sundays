@@ -60,7 +60,8 @@ import androidx.compose.ui.unit.dp
  * @param onNewConnection 新建连接回调 (普通流程)
  * @param onQuickConnect 快速连接回调
  * @param onEditConnection 编辑已有连接回调
- * @param onSaveConnection 保存连接
+ * @param onSaveConnection 保存连接 (普通流程/快速连接均不直接调用)
+ * @param onQuickConnectDirect 快速连接（不保存到 ConnectionStorage）
  * @param onDeleteConnection 删除连接
  */
 @Composable
@@ -75,6 +76,7 @@ fun ConnectionManagerScreen(
     onQuickConnect: () -> Unit,
     onEditConnection: (ConnectionConfig) -> Unit,
     onSaveConnection: (ConnectionConfig) -> Unit,
+    onQuickConnectDirect: (ConnectionConfig) -> Unit,
     onDeleteConnection: (String) -> Unit,
     onCancelEdit: () -> Unit,
     onWizardNext: (WizardStep) -> Unit,
@@ -108,6 +110,7 @@ fun ConnectionManagerScreen(
             wizardStep = wizardStep,
             wizardFlow = wizardFlow,
             onSaveConnection = onSaveConnection,
+            onQuickConnectDirect = onQuickConnectDirect,
             onCancelEdit = onCancelEdit,
             onWizardNext = onWizardNext,
             onWizardBack = onWizardBack,
@@ -316,6 +319,7 @@ private fun ConnectionWizardPanel(
     wizardStep: WizardStep,
     wizardFlow: WizardFlow,
     onSaveConnection: (ConnectionConfig) -> Unit,
+    onQuickConnectDirect: (ConnectionConfig) -> Unit,
     onCancelEdit: () -> Unit,
     onWizardNext: (WizardStep) -> Unit,
     onWizardBack: () -> Unit,
@@ -387,7 +391,9 @@ private fun ConnectionWizardPanel(
                     editingConnection = config,
                     stepIndex = stepIndexOf(wizardStep, wizardFlow),
                     totalSteps = totalSteps,
+                    wizardFlow = wizardFlow,
                     onSave = onSaveConnection,
+                    onQuickConnectDirect = onQuickConnectDirect,
                     onBack = onWizardBack,
                     onCancel = onCancelEdit,
                 )
@@ -1169,10 +1175,16 @@ private fun TestSaveStep(
     editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
+    wizardFlow: WizardFlow,
     onSave: (ConnectionConfig) -> Unit,
+    onQuickConnectDirect: (ConnectionConfig) -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val isQuickConnect = wizardFlow == WizardFlow.QUICK_CONNECT
+    val confirmLabel = if (isQuickConnect) "连接" else "保存"
+    val onConfirm: (ConnectionConfig) -> Unit =
+        if (isQuickConnect) onQuickConnectDirect else onSave
     var testResult by remember { mutableStateOf<TestResult?>(null) }
     var isTesting by remember { mutableStateOf(false) }
 
@@ -1259,10 +1271,13 @@ private fun TestSaveStep(
         ) {
             TextButton(onClick = onBack) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { onSave(editingConnection) }) {
-                Icon(Icons.Default.Save, null)
+            Button(onClick = { onConfirm(editingConnection) }) {
+                Icon(
+                    imageVector = if (isQuickConnect) Icons.Default.Bolt else Icons.Default.Save,
+                    contentDescription = null,
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("保存")
+                Text(confirmLabel)
             }
         }
     }

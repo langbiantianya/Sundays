@@ -105,6 +105,15 @@ private fun MainScreen() {
                 flow = WizardFlow.NORMAL,
             )
         },
+        onQuickConnectDirect = { config ->
+            // 快速连接：不写入 ConnectionStorage，仅设为当前选中
+            selectedConnection = config
+            wizardState = WizardState(
+                editingConnection = null,
+                wizardStep = WizardStep.IDLE,
+                flow = WizardFlow.NORMAL,
+            )
+        },
         onDeleteConnection = { id ->
             connectionList = ConnectionStorage.delete(id)
             if (selectedConnection?.id == id) {
