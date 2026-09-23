@@ -321,10 +321,12 @@ LaunchedEffect(totalCount, pageSize, totalPages) {
 | 能力 | 说明 |
 |---|---|
 | **左侧连接列表** | LazyColumn 展示所有保存的连接，带方言图标、高亮选中、编辑/删除菜单 |
-| **右侧引导页面** | 4 步向导：基础信息 → 连接类型 → 连接详情 → 测试并保存 |
+| **右侧引导页面** | 普通 4 步 / 快速 3 步向导：基础信息 → 连接类型 → 连接详情 → 测试并保存（保存或连接） |
 | **方言支持** | MySQL / PostgreSQL / H2 / DuckDB / SQLite |
 | **连接类型** | CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED（按方言自动过滤） |
+| **JDBC URL 双向同步** | `CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤同时显示 5 个独立字段 + JDBC URL 文本框；`buildJdbcUrl` / `parseJdbcUrl` 互相转换；额外参数 (`?useSSL=false&...`) 始终保留 |
 | **持久化** | 保存到 `~/.config/sundays/connection.json`（JSON + kotlinx.serialization） |
+| **快速连接不持久化** | `QUICK_CONNECT` 流程最后一步「连接」（`Bolt` 图标）调用 `onQuickConnectDirect`，**不写入** `ConnectionStorage` |
 | **步骤指示器** | 顶部进度条显示当前步骤 |
 
 ### 4.2 布局
@@ -357,20 +359,26 @@ LaunchedEffect(totalCount, pageSize, totalPages) {
 ```kotlin
 @Serializable
 data class ConnectionConfig(
-    val id: String,                  // UUID
+    val id: String,                   // UUID
     val name: String,                 // 连接名称
-    val dialect: DialectType,        // MYSQL / POSTGRESQL / H2 / DUCKDB / SQLITE
-    val host: String = "",           // 主机地址
-    val port: Int? = null,           // 端口
+    val dialect: DialectType,         // MYSQL / POSTGRESQL / H2 / DUCKDB / SQLITE
+    val host: String = "",            // 主机地址 (CLIENT_SERVER)
+    val port: Int? = null,            // 端口 (CLIENT_SERVER)
     val database: String = "",        // 数据库名
     val username: String = "",        // 用户名
     val password: String = "",        // 密码
     val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
-    val filePath: String = "",       // 文件路径 (SQLite / H2 EMBEDDED)
+    val filePath: String = "",        // 文件路径 (SQLite / H2 EMBEDDED)
+    val jdbcUrl: String = "",         // 完整 JDBC URL (如 jdbc:mysql://user:pass@host:3306/db?params)
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
 ```
+
+`jdbcUrl` 始终在 `CREDENTIALS` 步骤中作为双向同步载体：
+- **字段 → URL**：通过 `buildJdbcUrl(dialect, host, port, database, username, password)` 重建标准格式 `scheme://user:pass@host:port/db`，原有 `?额外参数` 通过 `substringAfter('?')` 拼接保留
+- **URL → 字段**：通过 `parseJdbcUrl(url, dialect)` 解析 `host` / `port` / `database` / `username` / `password`，反向写入字段状态；解析后用 `buildJdbcUrl` 重建干净格式回填 `jdbcUrl`
+- **循环防护**通过 `isSyncingFromFields` / `isSyncingFromUrl` 两个 boolean flag 实现
 
 ### 4.4 持久化
 
@@ -443,8 +451,8 @@ ConnectionManagerScreen(
 | `QUICK_CONNECT` | 快速连接：选方言（仅快速连接流程） |
 | `BASIC_INFO` | 普通流程：连接名称 + 数据库方言选择 |
 | `CONNECTION_TYPE` | 普通流程：连接类型（CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED） |
-| `CREDENTIALS` | 主机/端口/用户名/密码 或 文件路径 |
-| `TEST_SAVE` | 连接摘要 + 测试按钮 + 保存 |
+| `CREDENTIALS` | 主机/端口/数据库名/用户名/密码（默认填入 `localhost` + 方言默认端口）+ JDBC URL 文本框（双向同步） |
+| `TEST_SAVE` | 连接摘要（含 JDBC URL 行）+ 测试按钮 + 「保存」（NORMAL）或「连接」（QUICK_CONNECT） |
 
 调用方负责维护 `wizardFlow` 并在切换入口（新建 / 快速连接 / 编辑）时同步设置：
 

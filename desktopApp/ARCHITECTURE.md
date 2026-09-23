@@ -1,4 +1,4 @@
-# desktopApp — KMP Compose Desktop 客户端内部架构（v2.9）
+# desktopApp — KMP Compose Desktop 客户端内部架构（v2.10）
 
 ## 概述
 
@@ -10,7 +10,7 @@
 
 - **依赖方向**：`desktopApp` → `:shared`（UI 组件）+ `:engine`（业务引擎）。**反向依赖被严格禁止** —— 引擎与 shared 模块均不感知 desktopApp 存在。
 - **同进程集成**：`desktopApp` 与 `:engine` **必须部署在同一 JVM**（Kotlin / Java），Direct 模式无 IPC 跨进程语义。
-- **演示优先**：当前 `main.kt` 仅承载 **三个演示屏幕**（连接管理 + 代码编辑器 + 数据表格），用于验证 `shared/` UI 组件在 desktopApp 中的接线方式；真正的数据库管理 UI（连接面板 / Schema 导航 / SQL 编辑器面板 / 查询结果表）将由后续迭代替换。
+- **连接管理优先**：v2.10 起 `main.kt` 直接渲染 `ConnectionManagerScreen`（v2.9 演示阶段的 `DemoApp` / `DemoTabBar` / `EditorDemoScreen` / `TableDemoScreen` 已删除），后续 SQL 编辑器 / 数据表格模块按需独立接入。
 
 ---
 
@@ -20,7 +20,7 @@
 desktopApp/
 ├── build.gradle.kts    # composeMultiplatform + compose.material3 + :engine / :shared 依赖
 └── src/main/kotlin/com/kxxnzstdsw/sundays/
-    └── main.kt         # 单一入口：main() + DemoApp() + DemoTabBar() + EditorDemoScreen() + TableDemoScreen()
+    └── main.kt         # 单一入口：main() + MainScreen() + WizardState + isSystemInDarkTheme()
 ```
 
 **文件清单**：
@@ -28,29 +28,24 @@ desktopApp/
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `build.gradle.kts` | 31 | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 261 | 应用入口（`application { Window { DemoApp() } }`）；三个 demo 屏幕实现；演示数据生成函数 |
+| `main.kt` | 158 | 应用入口（`application { Window { MainScreen() } }`）；`MainScreen` 维护 `WizardState` + `connectionList` + `selectedConnection` state；实现 `onSaveConnection` / `onQuickConnectDirect` / `onDeleteConnection` / `onUpdateEditingConnection` 等回调 |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `main()` | public | `application { ... }` 入口；注册内置编辑器、构造 `IdbEngine()`、创建 `Window`、安装主题 |
-| `DemoApp()` | private `@Composable` | 顶层 demo 应用：管理 `selectedTab` state、`DemoTabBar` + `when (selectedTab)` 切换 |
-| `DemoTab` | private enum | tab 枚举（`CONNECTION` / `EDITOR` / `TABLE`） |
-| `DemoTabBar()` | private `@Composable` | 顶部 `SingleChoiceSegmentedButtonRow` 渲染 |
+| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()` + `engineScope`、创建 `Window`、安装 `MaterialTheme`、渲染 `MainScreen` |
+| `MainScreen()` | private `@Composable` | 顶层屏幕：维护 `WizardState(editingConnection, wizardStep, flow)` + `connectionList` + `selectedConnection`，实现所有 `ConnectionManagerScreen` 回调，调用 `ConnectionManagerScreen` |
+| `WizardState` | private `data class` | 三字段原子更新容器：`ConnectionConfig?` + `WizardStep` + `WizardFlow` |
 | `isSystemInDarkTheme()` | private `@Composable` | 包装 `androidx.compose.foundation.isSystemInDarkTheme()`（避免导入冲突） |
-| `ConnectionDemoScreen()` | private `@Composable` | 连接管理演示：加载 `~/.config/sundays/connection.json`，维护 `WizardState`(editingConnection + wizardStep + flow)，调用 `ConnectionManagerScreen` |
-| `EditorDemoScreen()` | private `@Composable` | 代码编辑器演示：`sqlText` / `luaText` / `currentLang` 三个 state，`when (currentLang)` 切换两套 `CodeEditorWithToolbar` |
-| `TableDemoScreen()` | private `@Composable` | 数据表格演示：`rows` / `pageSize` / `currentPage` state、列定义、`DataTable` + 注入 `contextMenuItems` |
-| `generateDemoUsers(count)` | private | 生成 1000 行模拟用户数据（id / name / email / age / active） |
 
 ---
 
-## 连接管理演示 (`ConnectionDemoScreen`)
+## 连接管理演示 (`MainScreen`)
 
 演示 `shared/connection/ConnectionManagerScreen` 的端到端用法：
 
-- 从 `~/.config/sundays/connection.json` 加载连接列表
+- 从 `~/.config/sundays/connection.json` 加载连接列表（`ConnectionStorage.load()`）
 - 维护 `WizardState`(editingConnection + wizardStep + flow) **data class** —— 单次赋值保证原子更新，避免 Compose recomposition 间隙 NPE
 - 三个入口：
   - **左侧「快速连接」按钮**（⚡）→ `flow = QUICK_CONNECT`
@@ -59,11 +54,11 @@ desktopApp/
 
 ### 流程对照表
 
-| 入口 | flow | 步骤序列 |
-|---|---|---|
-| 新建 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
-| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步，跳过 BASIC_INFO / CONNECTION_TYPE) |
-| 编辑 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+| 入口 | flow | 步骤序列 | 最后一步 |
+|---|---|---|---|
+| 新建 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) | 「保存」 → `ConnectionStorage.upsert()` |
+| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步，跳过 BASIC_INFO / CONNECTION_TYPE) | 「连接」 → **仅设置 `selectedConnection`，不写入** `ConnectionStorage` |
+| 编辑 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) | 「保存」 → 覆盖原配置 |
 
 调用方在每次切换入口时**同步**设置 `flow`，确保 `ConnectionWizardPanel` 的步骤指示器自适应总数（4 vs 3）。
 
@@ -71,6 +66,9 @@ desktopApp/
 
 ```text
 ~/.config/sundays/connection.json   ←  ConnectionStorage.load() / upsert() / delete()
+                                              ↑
+                                       NORMAL 流程「保存」时调用
+                                       QUICK_CONNECT 流程「连接」时不调用
 ```
 
 ### 状态原子更新模式
@@ -89,6 +87,30 @@ wizardStep = WizardStep.QUICK_CONNECT
 // 边缘 —— 单次赋值（安全）
 wizardState = WizardState(editingConnection = newCfg, wizardStep = WizardStep.QUICK_CONNECT, flow = WizardFlow.QUICK_CONNECT)
 ```
+
+### 关键回调实现
+
+```kotlin
+ConnectionManagerScreen(
+        // ...
+        onSaveConnection = { config ->
+            connectionList = ConnectionStorage.upsert(config)
+            selectedConnection = config
+            wizardState = WizardState(null, WizardStep.IDLE, WizardFlow.NORMAL)
+        },
+        onQuickConnectDirect = { config ->
+            // 快速连接：不写入 ConnectionStorage，仅设为当前选中
+            selectedConnection = config
+            wizardState = WizardState(null, WizardStep.IDLE, WizardFlow.NORMAL)
+        },
+        onUpdateEditingConnection = { config ->
+            wizardState = wizardState.copy(editingConnection = config)
+        },
+        // ...
+    )
+```
+
+`onSaveConnection` 与 `onQuickConnectDirect` 区别在于是否持久化：前者走 JSON 持久化，后者仅在内存中设为 `selectedConnection`（适合临时调试、演示场景）。
 
 ---
 
@@ -172,142 +194,6 @@ engine.handle(request {
 
 ---
 
-## Demo 屏幕设计
-
-### 顶层 `DemoApp`
-
-```kotlin
-@Composable
-private fun DemoApp() {
-    var selectedTab by remember { mutableStateOf(DemoTab.EDITOR) }
-    Column(
-        modifier = Modifier.fillMaxSize().safeContentPadding().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        DemoTabBar(selected = selectedTab, onSelect = { selectedTab = it })
-        when (selectedTab) {
-            DemoTab.EDITOR -> EditorDemoScreen()
-            DemoTab.TABLE  -> TableDemoScreen()
-        }
-    }
-}
-```
-
-- **顶部 `SingleChoiceSegmentedButtonRow`**：`DemoTab.entries.forEachIndexed { ... SegmentedButton(...) }`，通过 `SegmentedButtonDefaults.itemShape(index, total)` 自动渲染首尾圆角、中段方角
-- **下方 `when`**：根据 `selectedTab` 渲染对应 demo 屏幕
-- **整体布局**：`Column.fillMaxSize().safeContentPadding().padding(16.dp)` + `Arrangement.spacedBy(12.dp)` —— 顶部 tab 与下方 demo 屏之间留 12dp 间隙
-
-### `EditorDemoScreen` — 代码编辑器演示
-
-**演示目的**：验证 `shared/editor/` 中 `CodeEditor` / `CodeEditorWithToolbar` 在桌面端的接线方式（语言切换、格式化、右键菜单、行号 gutter、工具栏插槽）。
-
-```kotlin
-@Composable
-private fun EditorDemoScreen() {
-    var sqlText by remember { mutableStateOf("SELECT id, name, ... LIMIT 100") }
-    var luaText by remember { mutableStateOf("for i = 1, 100 do ... end") }
-    var currentLang by remember { mutableStateOf("sql") }
-
-    if (currentLang == "sql") {
-        CodeEditorWithToolbar(
-            text = sqlText,
-            onTextChange = { sqlText = it },
-            languageId = "sql",
-            onLanguageChange = { currentLang = it },
-        )
-    } else {
-        CodeEditorWithToolbar(
-            text = luaText,
-            onTextChange = { luaText = it },
-            languageId = "lua",
-            onLanguageChange = { currentLang = it },
-        )
-    }
-}
-```
-
-**设计要点**：
-
-- **三个独立 state**：`sqlText`（SQL 编辑内容）、`luaText`（Lua 编辑内容）、`currentLang`（当前语言 id）。SQL 与 Lua 内容分离 —— 切换语言时不会丢失另一语言的编辑历史
-- **`when (currentLang)` 而非 `when` 表达式**：直接用 `if/else` + 渲染同一组件，避免 `CodeEditorWithToolbar` 在不同调用栈帧被 Compose 重组（保留各自的 state）
-- **预填示例数据**：分别对应"SQL 编辑器面板"和"Lua 造数脚本编辑器"的典型使用场景
-- **回调契约**：`onTextChange = { sqlText = it }` 把组件内部变化桥接到外层 state（**databind** 模式）
-
-### `TableDemoScreen` — 数据表格演示
-
-**演示目的**：验证 `shared/table/` 中 `DataTable` 在桌面端的接线方式（虚拟滚动、分页、详情面板、右键菜单、databind 重绘）。
-
-```kotlin
-@Composable
-private fun TableDemoScreen() {
-    // 模拟 1000 行数据库用户数据 —— 真实场景下 rows 由 engine 查询结果驱动
-    var rows by remember { mutableStateOf(generateDemoUsers(count = 1000)) }
-    var pageSize by remember { mutableStateOf(PageSize.S50) }
-    var currentPage by remember { mutableStateOf(1) }
-    val contextMenuState = rememberContextMenuState()
-
-    val columns = remember {
-        listOf(
-            TableColumn(key = "id",     header = "ID",   width = 80.dp, alignment = TextAlign.End),
-            TableColumn(key = "name",   header = "姓名"),
-            TableColumn(key = "email",  header = "邮箱"),
-            TableColumn(key = "age",    header = "年龄", width = 80.dp, alignment = TextAlign.End),
-            TableColumn(key = "active", header = "状态", width = 80.dp, alignment = TextAlign.Center,
-                        formatter = { if (it == true) "✓" else "✗" }),
-        )
-    }
-
-    DataTable(
-        columns = columns,
-        rows = rows,
-        theme = DataTableTheme.default(),
-        pageSize = pageSize,
-        onPageSizeChange = { pageSize = it; currentPage = 1 },
-        currentPage = currentPage,
-        onPageChange = { currentPage = it },
-        totalCount = rows.size,
-        contextMenuState = contextMenuState,
-        contextMenuItems = { row ->
-            DropdownMenuItem(text = { Text("复制主键 ${row?.id ?: ""}") }, onClick = { /* copyToClipboard */ })
-            DropdownMenuItem(text = { Text("标记为已读") },                onClick = { /* ... */ })
-            DropdownMenuItem(
-                text = { Text("删除") },
-                onClick = {
-                    // databind 演示：从 rows 中删除该行，UI 自动重绘
-                    row?.let { r -> rows = rows.filter { it.id != r.id } }
-                },
-            )
-        },
-    )
-}
-```
-
-**设计要点**：
-
-- **三个 state**：`rows`（模拟数据）、`pageSize`（分页大小）、`currentPage`（当前页）
-- **列定义 `remember`**：5 列定义包在 `remember { ... }` 中避免每次重组重建列表（性能优化 + Compose 跳过 key 匹配的稳定性）
-- **`formatter` 插槽**：`active` 列通过 `{ if (it == true) "✓" else "✗" }` 把 `Boolean` 渲染为可视化符号
-- **右键菜单注入**：调用方通过 `contextMenuItems = { row -> ... }` 插槽注入 3 个 `DropdownMenuItem`。**"删除" 演示 databind 自动重绘** —— 修改 `rows` state → `DataTable` 内部 `LazyColumn` 自动重排
-- **真实场景替换**：`generateDemoUsers(count = 1000)` 后续会被 `engine.query("SELECT * FROM users")` 的结果（typed `TableRow` 列表）替换
-
-**`generateDemoUsers` 函数**：
-
-```kotlin
-private fun generateDemoUsers(count: Int): List<TableRow> =
-    (1..count).map { i ->
-        TableRow(
-            id = i.toLong(),
-            "id"     to i.toLong(),
-            "name"   to "user_$i",
-            "email"  to "user$i@example.com",
-            "age"    to (18 + i % 50),
-            "active" to (i % 3 != 0),
-        )
-    }
-```
-
----
-
 ## 生命周期管理
 
 ### Window 关闭序列
@@ -349,13 +235,13 @@ Window(
 | [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎内部架构（`IdbEngine` facade 详解 / `RequestDispatcher` / `PoolManager` / `Loader`） |
 | [`engine/README.md`](../engine/README.md) | 引擎用户级 README（CLI / 构建运行 / API 参考 / Direct 模式示例） |
-| [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) | 共享 UI 组件架构（`CodeEditor` / `DataTable` / 右键菜单） |
+| [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) | 共享 UI 组件架构（`CodeEditor` / `DataTable` / `ConnectionManagerScreen` 含 JDBC URL 双向同步 / 右键菜单） |
 
 ---
 
-## 后续迭代方向（v2.10+）
+## 后续迭代方向（v2.11+）
 
-- **真正的数据库管理 UI**：连接面板（基于 `SYSTEM.LIST_DRIVERS` 动态渲染）/ Schema 导航 / SQL 编辑器面板（替换 `EditorDemoScreen`）/ 查询结果表（替换 `TableDemoScreen`）
+- **真正的数据库管理 UI**：连接面板（基于 `SYSTEM.LIST_DRIVERS` 动态渲染）/ Schema 导航 / SQL 编辑器面板（嵌入 `CodeEditor`）/ 查询结果表（嵌入 `DataTable`）
 - **多 Window 支持**：当前 `main()` 仅创建单个 `Window`；后续按需支持多 Window（每个连接一个 Window）
 - **KMP 平台扩展**：新增 `androidMain` / `iosMain` / `wasmJsMain` source set（共享 `commonMain` 业务层）
 - **设置持久化**：连接列表 / 编辑器偏好（KMP `MultiplatformSettings`）

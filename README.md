@@ -282,16 +282,18 @@ DataTable(
 
 两种独立流程：
 
-| 入口 | `WizardFlow` | 步骤序列 |
-|---|---|---|
-| 新建连接 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
-| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步) |
-| 编辑已有 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) |
+| 入口 | `WizardFlow` | 步骤序列 | 最后一步 |
+|---|---|---|---|
+| 新建连接 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) | 「保存」(持久化到 `connection.json`) |
+| 快速连接 | `QUICK_CONNECT` | `QUICK_CONNECT → CREDENTIALS → TEST_SAVE` (3 步) | 「连接」(直接连接，不持久化) |
+| 编辑已有 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) | 「保存」(覆盖原配置) |
 
 特性：
 - **持久化**：`ConnectionStorage` 自动读写 `~/.config/sundays/connection.json`（`kotlinx.serialization` + JSON）
 - **原子状态更新**：`WizardState(editingConnection, wizardStep, flow)` data class，单次赋值保证三字段同步，避免 Compose recomposition 间隙 NPE
 - **步骤指示器自适应**：快速连接 3 段 / 普通 4 段
+- **JDBC URL 双向同步**：`CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤始终显示 5 个独立字段（host/port/database/username/password）+ JDBC URL 网格输入框；任一字段修改均通过 `buildJdbcUrl` 重建 URL 并显示在网格中，编辑网格后通过 `parseJdbcUrl` 反向同步字段；额外参数（`?useSSL=false&...`）始终保留不被动
+- **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步为「连接」而非「保存」，调用 `onQuickConnectDirect` 仅设置 `selectedConnection`，**不写入** `ConnectionStorage`
 
 ```kotlin
 @Composable
@@ -302,10 +304,11 @@ fun ConnectionManagerScreen(
     wizardStep: WizardStep,
     wizardFlow: WizardFlow,
     onSelectConnection: (ConnectionConfig?) -> Unit,
-    onNewConnection: () -> Unit,            // 普通流程入口
-    onQuickConnect: () -> Unit,             // 快速连接入口
+    onNewConnection: () -> Unit,                  // 普通流程入口
+    onQuickConnect: () -> Unit,                   // 快速连接入口
     onEditConnection: (ConnectionConfig) -> Unit,
-    onSaveConnection: (ConnectionConfig) -> Unit,
+    onSaveConnection: (ConnectionConfig) -> Unit,  // NORMAL 流程的「保存」按钮
+    onQuickConnectDirect: (ConnectionConfig) -> Unit, // QUICK_CONNECT 流程的「连接」按钮
     onDeleteConnection: (String) -> Unit,
     onCancelEdit: () -> Unit,
     onWizardNext: (WizardStep) -> Unit,
@@ -408,6 +411,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 | v2.7 | DuckDB 方言插件（本地嵌入式 OLAP） |
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` |
 | v2.9 | KMP Desktop Direct 模式 + 双模式架构：前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode grpc\|direct` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated*<br>CodeEditor / DataTable 高度策略统一：`CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限<br>`shared/connection/` —— 新增 `ConnectionManagerScreen`（左侧连接列表 + 右侧引导式配置）+ `ConnectionStorage` JSON 持久化到 `~/.config/sundays/connection.json`；支持 MySQL/PostgreSQL/H2/DuckDB/SQLite 五种方言；普通流程 4 步 + 快速连接 3 步两种独立引导（`WizardFlow` 标识） |
+| v2.10 | 移除 `desktopApp` 演示 `DemoApp` 顶层 tab 切换，仅保留连接管理 (`ConnectionManagerScreen`)；`ConnectionConfig` 新增 `jdbcUrl` 字段支持标准 JDBC URL 持久化；`CredentialsStep` 实现字段 ↔ JDBC URL 双向同步（`buildJdbcUrl` / `parseJdbcUrl`），修改任一字段实时拼接/解析 URL，保留 `?额外参数`；默认填入 `host=localhost` 与方言默认端口（MySQL `3306` / PostgreSQL `5432`）；`ConnectionConfig` 新增 `username:password@` 凭据段拼接支持；快速连接流程（`WizardFlow.QUICK_CONNECT`）最后一步改为「连接」（`Bolt` 图标）调用 `onQuickConnectDirect`，**不写入** `ConnectionStorage`，仅设为 `selectedConnection`；`ConnectionSummary` 新增 `JDBC URL` 行 |
 
 ---
 
