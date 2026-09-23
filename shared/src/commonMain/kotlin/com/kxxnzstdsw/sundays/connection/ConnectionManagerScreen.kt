@@ -861,10 +861,34 @@ private fun CredentialsStep(
     var username by remember(editingConnection) { mutableStateOf(editingConnection.username) }
     var password by remember(editingConnection) { mutableStateOf(editingConnection.password) }
     var filePath by remember(editingConnection) { mutableStateOf(editingConnection.filePath) }
-    var useJdbcUrl by remember(editingConnection) { mutableStateOf(editingConnection.useJdbcUrl) }
     var jdbcUrl by remember(editingConnection) { mutableStateOf(editingConnection.jdbcUrl) }
 
-    fun applyHostPort() = onUpdateEditingConnection(
+    /** 防止循环: 只在字段→URL 时为 true */
+    var isSyncingFromFields by remember { mutableStateOf(false) }
+    /** 防止循环: 只在 URL→字段 时为 true */
+    var isSyncingFromUrl by remember { mutableStateOf(false) }
+
+    /** 从 individual fields 同步到 URL */
+    fun syncToUrl() {
+        if (isSyncingFromUrl) return
+        isSyncingFromFields = true
+        val built = buildJdbcUrl(editingConnection.dialect, host, port, database)
+        jdbcUrl = built
+        isSyncingFromFields = false
+    }
+
+    /** 从 URL 同步到 individual fields */
+    fun syncFromUrl(url: String) {
+        if (isSyncingFromFields) return
+        isSyncingFromUrl = true
+        val parsed = parseJdbcUrl(url, editingConnection.dialect)
+        host = parsed.host
+        port = parsed.port
+        database = parsed.database
+        isSyncingFromUrl = false
+    }
+
+    fun apply() = onUpdateEditingConnection(
         editingConnection.copy(
             host = host,
             port = port.toIntOrNull(),
@@ -872,7 +896,6 @@ private fun CredentialsStep(
             username = username,
             password = password,
             filePath = filePath,
-            useJdbcUrl = useJdbcUrl,
             jdbcUrl = jdbcUrl,
         )
     )
@@ -885,124 +908,97 @@ private fun CredentialsStep(
     ) {
         when (editingConnection.connectionType) {
             ConnectionType.CLIENT_SERVER -> {
-                // JDBC URL 开关
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            useJdbcUrl = !useJdbcUrl
-                            applyHostPort()
-                        }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = useJdbcUrl,
-                        onCheckedChange = {
-                            useJdbcUrl = it
-                            applyHostPort()
-                        },
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text("使用 JDBC URL", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "通过完整的 JDBC URL 配置连接，支持更多数据库特定选项",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = {
+                        host = it
+                        syncToUrl()
+                        apply()
+                    },
+                    label = { Text("主机地址") },
+                    placeholder = { Text("例如: localhost 或 192.168.1.100") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Wifi, null) },
+                )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                if (useJdbcUrl) {
-                    OutlinedTextField(
-                        value = jdbcUrl,
-                        onValueChange = {
-                            jdbcUrl = it
-                            applyHostPort()
-                        },
-                        label = { Text("JDBC URL") },
-                        placeholder = { Text("例如: jdbc:mysql://localhost:3306/testdb?useSSL=false") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = false,
-                        minLines = 2,
-                        maxLines = 4,
-                        leadingIcon = { Icon(Icons.Default.Link, null) },
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = host,
-                        onValueChange = {
-                            host = it
-                            applyHostPort()
-                        },
-                        label = { Text("主机地址") },
-                        placeholder = { Text("例如: localhost 或 192.168.1.100") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Wifi, null) },
-                    )
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = {
+                        port = it.filter { c -> c.isDigit() }
+                        syncToUrl()
+                        apply()
+                    },
+                    label = { Text("端口") },
+                    placeholder = { Text(editingConnection.displayPort.toString()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
-                        value = port,
-                        onValueChange = {
-                            port = it.filter { c -> c.isDigit() }
-                            applyHostPort()
-                        },
-                        label = { Text("端口") },
-                        placeholder = { Text(editingConnection.displayPort.toString()) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
+                OutlinedTextField(
+                    value = database,
+                    onValueChange = {
+                        database = it
+                        syncToUrl()
+                        apply()
+                    },
+                    label = { Text("数据库名") },
+                    placeholder = { Text("例如: testdb") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Storage, null) },
+                )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
-                        value = database,
-                        onValueChange = {
-                            database = it
-                            applyHostPort()
-                        },
-                        label = { Text("数据库名") },
-                        placeholder = { Text("例如: testdb") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Storage, null) },
-                    )
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = {
+                        username = it
+                        apply()
+                    },
+                    label = { Text("用户名") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Person, null) },
+                )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = {
-                            username = it
-                            applyHostPort()
-                        },
-                        label = { Text("用户名") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Person, null) },
-                    )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = {
+                        password = it
+                        apply()
+                    },
+                    label = { Text("密码") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = {
-                            password = it
-                            applyHostPort()
-                        },
-                        label = { Text("密码") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Lock, null) },
-                        visualTransformation = PasswordVisualTransformation(),
-                    )
-                }
+                OutlinedTextField(
+                    value = jdbcUrl,
+                    onValueChange = { url ->
+                        jdbcUrl = url
+                        syncFromUrl(url)
+                        apply()
+                    },
+                    label = { Text("JDBC URL") },
+                    placeholder = { Text("jdbc:mysql://host:3306/db?useSSL=false") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    minLines = 2,
+                    maxLines = 4,
+                    leadingIcon = { Icon(Icons.Default.Link, null) },
+                )
             }
 
             ConnectionType.EMBEDDED, ConnectionType.IN_MEMORY -> {
@@ -1065,6 +1061,60 @@ private fun CredentialsStep(
                 Icon(Icons.Default.ArrowForward, null)
             }
         }
+    }
+}
+
+/** 从 individual fields 构建 JDBC URL */
+private fun buildJdbcUrl(
+    dialect: DialectType,
+    host: String,
+    port: String,
+    database: String,
+): String {
+    if (host.isBlank()) return ""
+    val scheme = when (dialect) {
+        DialectType.MYSQL -> "jdbc:mysql"
+        DialectType.POSTGRESQL -> "jdbc:postgresql"
+        DialectType.H2 -> "jdbc:h2"
+        DialectType.DUCKDB -> "jdbc:duckdb"
+        DialectType.SQLITE -> "jdbc:sqlite"
+        DialectType.UNKNOWN -> "jdbc"
+    }
+    val portPart = if (port.isNotBlank()) ":$port" else ""
+    val dbPart = if (database.isNotBlank()) "/$database" else ""
+    return "$scheme://$host$portPart$dbPart"
+}
+
+/** 从 JDBC URL 解析 host / port / database（仅处理 MySQL / PostgreSQL） */
+private data class UrlParts(
+    val host: String,
+    val port: String,
+    val database: String,
+)
+
+private fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
+    if (url.isBlank()) return UrlParts("", "", "")
+    try {
+        val scheme = when (dialect) {
+            DialectType.MYSQL -> "jdbc:mysql"
+            DialectType.POSTGRESQL -> "jdbc:postgresql"
+            else -> return UrlParts("", "", "")
+        }
+        val withoutScheme = url.removePrefix(scheme).removePrefix("://")
+        val slashIdx = withoutScheme.indexOf('/')
+        val hostPart = if (slashIdx >= 0) withoutScheme.substring(0, slashIdx) else withoutScheme
+        val afterSlash = if (slashIdx >= 0) withoutScheme.substring(slashIdx + 1) else ""
+
+        val questionIdx = afterSlash.indexOf('?')
+        val dbPart = if (questionIdx >= 0) afterSlash.substring(0, questionIdx) else afterSlash
+
+        val colonIdx = hostPart.lastIndexOf(':')
+        val h = if (colonIdx >= 0) hostPart.substring(0, colonIdx) else hostPart
+        val p = if (colonIdx >= 0) hostPart.substring(colonIdx + 1) else ""
+
+        return UrlParts(h, p, dbPart)
+    } catch (_: Exception) {
+        return UrlParts("", "", "")
     }
 }
 
