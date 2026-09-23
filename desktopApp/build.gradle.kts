@@ -12,6 +12,20 @@ dependencies {
     // 不走 gRPC / 子进程 / IPC transport —— 详见 engine/README.md §Dual-Mode Architecture
     implementation(project(":engine"))
 
+    // 方言插件 + JDBC 驱动随应用类路径加载（Direct 模式不依赖外部 dialects/ drivers/ 目录）：
+    // DialectLoader.loadFromDir 会先扫一遍应用类路径上的 SPI（ServiceLoader），再让 dialects/ 目录覆盖同名方言。
+    // 缺了这些依赖，IdbEngine 将解析不出任何方言（"No dialect plugin matches JDBC URL"）。
+    runtimeOnly(project(":dialect-mysql"))
+    runtimeOnly(project(":dialect-postgresql"))
+    runtimeOnly(project(":dialect-h2"))
+    runtimeOnly(project(":dialect-duckdb"))
+    runtimeOnly(project(":dialect-sqlite"))
+    runtimeOnly(libs.mysql.connector)
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.h2)
+    runtimeOnly(libs.duckdb)
+    runtimeOnly(libs.sqlite)
+
     implementation(compose.desktop.currentOs)
     // 使用版本目录直连依赖：compose.material3 访问器已废弃（Gradle 10 移除）
     implementation(libs.compose.material3)
@@ -24,6 +38,13 @@ dependencies {
     implementation(libs.protobuf.kotlin.lite)
 
     implementation(libs.compose.uiToolingPreview)
+
+    // Compose UI 测试（runComposeUiTest）+ JUnit4：连接管理流程端到端验证见
+    // src/test/kotlin/com/kxxnzstdsw/sundays/ConnectionManagerFlowTest.kt
+    testImplementation(libs.compose.uiTest)
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlin.testJunit)
+    testImplementation(libs.junit)
 }
 
 compose.desktop {

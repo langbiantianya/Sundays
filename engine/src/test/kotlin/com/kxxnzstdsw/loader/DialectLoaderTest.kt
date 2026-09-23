@@ -52,6 +52,22 @@ class DialectLoaderTest {
     }
 
     @Test
+    fun `loadFromDir registers dialects from the application classpath when no directory exists`() {
+        // Direct 模式（desktopApp）：dialect-* 模块随应用类路径加载，磁盘上没有 dialects/ 目录
+        DialectLoader.loadFromDir(File("build/no-such-dialects-dir"))
+
+        val drivers = DialectLoader.getAllDialects().map { it.driverName }
+        assertEquals(
+            listOf("Duckdb", "H2", "Mysql", "Postgresql", "Sqlite"),
+            drivers,
+            "classpath SPI 应注册全部内置方言",
+        )
+        // 类路径方言同样支持 URL 反查 —— 仅凭 JDBC URL 建池的前提
+        assertEquals("Sqlite", DialectLoader.getDialectByJdbcUrl("jdbc:sqlite:/tmp/x.db")?.driverName)
+        assertEquals("H2", DialectLoader.getDialect("H2").driverName)
+    }
+
+    @Test
     fun `registerForTesting accepts arbitrary dialect and getDialect returns it`() {
         // H2Dialect 是个真实实现（继承所有抽象方法），把它当 "test dialect" 用
         DialectLoader.registerForTesting("H2", H2Dialect())

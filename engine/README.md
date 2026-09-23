@@ -252,6 +252,9 @@ class IdbEngine : AutoCloseable {
         password: String = "",
     ): SystemTestConnectionResponse
 
+    /** v2.12 直连：断开连接 —— 释放该配置的连接池（含各 schema 维度）；true = 确实关闭了池 */
+    suspend fun disconnect(config: ConnectionConfig): Boolean
+
     override fun close() { /* PoolManager.closeAll() + DriverLoader.closeAll() + DialectLoader.closeAll() */ }
 
     companion object {
@@ -268,6 +271,21 @@ class IdbEngine : AutoCloseable {
 dependencies {
     implementation(project(":shared"))
     implementation(project(":engine"))  // v2.9 直接模式
+
+    // v2.12：方言插件 + JDBC 驱动随应用类路径加载（Direct 模式不需要外部 dialects/ drivers/ 目录）。
+    // DialectLoader 先扫应用类路径 SPI（ServiceLoader），再用 dialects/ 目录覆盖同名方言；
+    // 缺了这些依赖引擎将解析不出任何方言（"No dialect plugin matches JDBC URL"）
+    runtimeOnly(project(":dialect-mysql"))
+    runtimeOnly(project(":dialect-postgresql"))
+    runtimeOnly(project(":dialect-h2"))
+    runtimeOnly(project(":dialect-duckdb"))
+    runtimeOnly(project(":dialect-sqlite"))
+    runtimeOnly(libs.mysql.connector)
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.h2)
+    runtimeOnly(libs.duckdb)
+    runtimeOnly(libs.sqlite)
+
     implementation(compose.desktop.currentOs)
 }
 ```
@@ -652,6 +670,8 @@ SYSTEM 还支持 `TEST_CONNECTION` / `SERVER_INFO` / **`LIST_DRIVERS`**（v2.8 �
 ```
 
 **v2.11 — 仅凭 JDBC URL**：`connection.jdbc_url` 非空时只依赖 URL（`driver`/`host`/`port`/`database` 全部忽略），方言由 URL scheme 反查；无匹配方言返回 `{"ok":false,"error":"No dialect plugin matches JDBC URL: ..."}`。
+
+**v2.12 — 对称的断开**：`IdbEngine.disconnect(config)` 释放 `config` 对应的连接池（含该配置下各 schema 维度的池，返回是否真的关闭）。注意传入的 `config` 需与建池时的字段一致（`jdbcUrl` / 凭据 / 库名参与 pool key），否则定位不到池。删除连接、或改过字段再保存时应显式断开，避免留下取不到的僵尸池。
 
 ```json
 {"id":"r25b","category":"SYSTEM","action":"TEST_CONNECTION","connection":{"jdbc_url":"jdbc:mysql://root:pass@localhost:3306/mysql?useSSL=false"},"payload":{}}
@@ -1076,4 +1096,6 @@ SQLite 方言支持：SCHEMA / TABLE（含自增 PK 走 inline `INTEGER PRIMARY 
 | v2.6 | 表驱动 Dispatcher + 跨切面 Envelope Options | `RequestDispatcher` 重构：9 个 `handleX` 函数 + 11 个 `wrapTypedResponse` when 分支 → 单个 typed `routes` map（`Pair<Category, Action>` → `Route`）；新 (Category, Action) 仅需一个 map 条目；消除 `wrapTypedResponse` 中静默 `else -> {}` 兜底；`SQL.EXPLAIN` 路由打通（之前 handler 存在但 dispatcher 未路由）。新增 `RequestOptions { trace_id, dry_run, timeout_ms }`：MDC 注入 `trace_id`；`dryRun=true` + write action 直接短路返回 success（不修改数据库）；`timeoutMs>0` 包 `withTimeoutOrNull` 超时返回 `error="timeout"`。`if_exists` / `if_not_exists` 在 SCHEMA/TABLE/INDEX/FOREIGN_KEY 路径下贯通（v2.6 之前仅 VIEW/FUNCTION.DELETE 支持）。191 测试全通过（128 engine + 63 H2）|
 | **v2.7** | **DuckDB 方言插件（本地嵌入式 OLAP）** | 新增 `dialect-duckdb` 模块（driver `Duckdb`，JDBC `org.duckdb.DuckDBDriver` 1.5.5.1），仅本地嵌入式（内存 / `.duckdb` / `.csv` / `.parquet` / `.json` / `.xlsx`）；`host`/`port` 完全忽略，`database` 字段即路径。Excel 走 Apache POI 5.5.1 预转换为临时 DuckDB（`ExcelToDuckDbCache` 缓存避免重复转换）。**自增主键**用 `SEQUENCE + DEFAULT nextval + 表级 PRIMARY KEY` 兜底（因 DuckDB 1.5.5.1 不接受 `IDENTITY`+表级 PK 组合，也不支持 `INTEGER PRIMARY KEY` ROWID 自填充）。**FK** 走 table-rebuild（因 DuckDB 不支持 `ALTER TABLE ADD/DROP CONSTRAINT` + 忽略 `CONSTRAINT fk_name`，自动生成 `<table>_<cols>_fkey`）。`SHOW CREATE TABLE/VIEW` 解析失败 → 手动从 `information_schema` 重建 DDL。`duckdb_functions()` MACRO 列名 `macro_definition`（不是 `definition`/`description`）。`duckdb_constraints()` 无 `column_name`，只有 `constraint_column_names` (LIST)。FK `ON DELETE/UPDATE CASCADE/SET NULL/SET DEFAULT` 不支持 → 全部改写为 `NO ACTION`。同文件不同连接配置冲突 → 测试 fixture 强制走 `PoolManager`（不混用 `DriverManager`）。**新 SPI 方法** `DatabaseDialect.buildPreCreateStatements(tableName, autoIncrementColumns): List<String>`（默认空实现）。gRPC 依赖 `1.76.0` → `1.83.1`，`grpc-kotlin-stub` `1.4.1` → `1.5.0`，`protobuf-kotlin-lite` `3.25.8` → `4.35.1`。299 测试全通过（81 DuckDB + 63 H2 + 155 engine）|
 | **v2.8** | **SQLite 方言插件 + SPI 连接元数据扩展 + SYSTEM.LIST_DRIVERS** | 新增 `dialect-sqlite` 模块（driver `Sqlite`，JDBC `org.sqlite.JDBC` 3.46.1.3），仅本地嵌入式（`:memory:` / `.db` 文件）；`host`/`port`/`user`/`password` 全部忽略，`database` 字段即路径。**自增主键**走 inline `INTEGER PRIMARY KEY AUTOINCREMENT`（必须 INTEGER 类型；`TableHandler.create` 检测到 `autoIncrementColumns` 时跳过表级 `PRIMARY KEY` 子句避免 "more than one primary key"）。**FK** 走 table-rebuild（CREATE temp AS SELECT → DROP → CREATE with FK → INSERT → DROP temp），`addForeignKey` 不支持 CONSTRAINT 子句名（SQLite CREATE TABLE 语法）。`MODIFY_COLUMN` 仅支持 RENAME（SQLite 无 ALTER COLUMN）。`TRUNCATE` 用 `DELETE FROM` + 重置 `sqlite_sequence`。多 database 走 `ATTACH/DETACH`。USER / PRIVILEGE / TRIGGER / FUNCTION（routines）抛 `UnsupportedOperationException`。SQL 危险关键词额外禁用 `ATTACH` / `DETACH` / `PRAGMA` / `REPLACE` / `VACUUM` / `REINDEX`。**SPI 元数据扩展**：`DatabaseDialect` 新增 `displayName` / `connectionType` / `requiresHost` / `requiresPort` / `defaultPort` / `supportsUser` / `supportsPassword` / `supportsSchema` / `supportsCrossDatabase` / `jdbcUrlExample` / `capabilities` 11 个属性（默认实现，**完全向后兼容**）。新增 `ConnectionType` 枚举（`CLIENT_SERVER` / `EMBEDDED` / `FILE_BASED` / `IN_MEMORY`）+ `DialectCapability` 枚举（12 个能力标签）。**`SYSTEM.LIST_DRIVERS` action（Action 18）**：枚举所有已加载方言并返回 `repeated DialectInfo` 元数据，供前端**动态渲染"新建连接"表单**；`RequestDispatcher` 表驱动新增 `(SYSTEM, LIST_DRIVERS) → Route` 一条；`DialectLoader.getAllDialects()` 提供枚举入口；`items` 按 `driverName` 字典序升序。**376 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 170 engine）|
-| **v2.9 (当前)** | **KMP Desktop Direct 模式 + 双模式架构** | 前端框架从 Wails（v3 gRPC 子进程）正式迁移到 **Kotlin Multiplatform Compose Desktop**（`desktopApp/` Gradle 模块），引擎与 UI 同 JVM 部署。为消除 gRPC channel / IPC transport / protobuf 序列化等冗余开销，新增 **`com.kxxnzstdsw.engine.IdbEngine` facade**：`handle(Request): Flow<Response>` 与 gRPC stub 同形，`invoke(connection, configure): Response` 为单条便捷方法；`IdbEngineImpl` 重构为 `IdbEngine.handle()` 的薄壳，两条路径共享 `RequestDispatcher` 与全部 envelope options（`traceId` / `dryRun` / `timeoutMs`）。新增 CLI 参数 `--mode <grpc\|direct>`：`direct` 模式仅 bootstrap drivers/dialects 后阻塞主线程，供 shell 测试 / 守护进程 / 嵌入式场景使用。**`RequestDispatcher.dispatch` catch 移到 `.catch{}` operator**（v2.9 修复）：原 `flow{}` 内部 try/catch 会错误捕获下游短路算子（如 `first()` / `takeWhile`）抛出的 `AbortFlowException` 并再次 emit，触发 *"Flow exception transparency violated"*；外置后 `AbortFlowException` 正常向上传播。`desktopApp/build.gradle.kts` 新增 `implementation(project(":engine"))`，UI 与引擎共享方言 / 驱动 / 连接池 / 线程池生命周期。**新增 IdbEngineDirectTest（4 项 direct 模式契约测试）**：非流式响应、`invoke` 便捷、错误传播、bootstrap 幂等性。**380 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 174 engine）|
+| **v2.9** | **KMP Desktop Direct 模式 + 双模式架构** | 前端框架从 Wails（v3 gRPC 子进程）正式迁移到 **Kotlin Multiplatform Compose Desktop**（`desktopApp/` Gradle 模块），引擎与 UI 同 JVM 部署。为消除 gRPC channel / IPC transport / protobuf 序列化等冗余开销，新增 **`com.kxxnzstdsw.engine.IdbEngine` facade**：`handle(Request): Flow<Response>` 与 gRPC stub 同形，`invoke(connection, configure): Response` 为单条便捷方法；`IdbEngineImpl` 重构为 `IdbEngine.handle()` 的薄壳，两条路径共享 `RequestDispatcher` 与全部 envelope options（`traceId` / `dryRun` / `timeoutMs`）。新增 CLI 参数 `--mode <grpc\|direct>`：`direct` 模式仅 bootstrap drivers/dialects 后阻塞主线程，供 shell 测试 / 守护进程 / 嵌入式场景使用。**`RequestDispatcher.dispatch` catch 移到 `.catch{}` operator**（v2.9 修复）：原 `flow{}` 内部 try/catch 会错误捕获下游短路算子（如 `first()` / `takeWhile`）抛出的 `AbortFlowException` 并再次 emit，触发 *"Flow exception transparency violated"*；外置后 `AbortFlowException` 正常向上传播。`desktopApp/build.gradle.kts` 新增 `implementation(project(":engine"))`，UI 与引擎共享方言 / 驱动 / 连接池 / 线程池生命周期。**新增 IdbEngineDirectTest（4 项 direct 模式契约测试）**：非流式响应、`invoke` 便捷、错误传播、bootstrap 幂等性。**380 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 174 engine）|
+| **v2.11** | **仅凭 JDBC URL 初始化连接 + 连接生命周期直连方法** | proto `ConnectionConfig` 新增 `jdbc_url`：非空时 `PoolManager` 直接用它建 HikariCP 池（`host`/`port`/`database` 忽略），pool key 纳入 `jdbc_url`。方言反查：`DatabaseDialect.jdbcUrlPrefix`（默认 `jdbc:<driverName 小写>:`）+ `DialectLoader.getDialectByJdbcUrl()` 最长前缀匹配；无匹配时 `PoolManager.resolveDialect` 抛可读错误而非回退 `driver`。`IdbEngine` facade 新增 `testConnection(config)` / `testConnection(jdbcUrl, user, password)` —— 不经 gRPC / IPC / `RequestDispatcher` envelope，直接调 `SystemHandler.testConnection`，首次调用即建/复用连接池（**连接初始化**）并做 JDBC `isValid(5)` |
+| **v2.12 (当前)** | **连接生命周期补全（disconnect）+ 方言装配双通道** | `IdbEngine.disconnect(config)` → `PoolManager.close(config)`：释放该配置下**所有** schema 维度的连接池，与 `testConnection` 构成对称生命周期；pool key 由单段 hash 改为两段式 `sha256(配置)#sha256(schema)`（单段 hash 无法按配置定位池），新增 `activePoolCount()` 供诊断 / 测试断言。`DialectLoader.loadFromDir` 新增**应用类路径 SPI**通道（`ServiceLoader<DatabaseDialect>`，用自身类加载器）并在其后用 `dialects/` 目录插件覆盖同名方言 —— Direct 模式（UI 与引擎同 JVM）无需外部 `dialects/` 目录，`desktopApp` 以 `runtimeOnly(project(":dialect-*"))` + 5 个 JDBC 驱动装配；修复了此前 Direct 模式下方言注册表为空、`testConnection` 必然报 `No dialect plugin matches JDBC URL` 的问题 |

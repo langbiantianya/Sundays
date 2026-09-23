@@ -289,12 +289,14 @@ DataTable(
 | 编辑已有 | `NORMAL` | `BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE` (4 步) | 「保存」(覆盖原配置) |
 
 特性：
-- **持久化**：`ConnectionStorage` 自动读写 `~/.config/sundays/connection.json`（`kotlinx.serialization` + JSON）
-- **原子状态更新**：`WizardState(editingConnection, wizardStep, flow)` data class，单次赋值保证三字段同步，避免 Compose recomposition 间隙 NPE
+- **持久化**：`ConnectionStorage` 自动读写 `~/.config/sundays/connection.json`（`kotlinx.serialization` + JSON；只落 `jdbcUrl` + 凭据，按 `version` 分派 v1/v2 并自动迁移）
+- **原子状态更新**：`WizardState(editingConnection, step, flow)` data class，单次赋值保证三字段同步，避免 Compose recomposition 间隙 NPE
 - **步骤指示器自适应**：快速连接 3 段 / 普通 4 段
-- **JDBC URL 双向同步**：`CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤始终显示 5 个独立字段（host/port/database/username/password）+ JDBC URL 网格输入框；任一字段修改均通过 `buildJdbcUrl` 重建 URL 并显示在网格中，编辑网格后通过 `parseJdbcUrl` 反向同步字段；额外参数（`?useSSL=false&...`）始终保留不被动
-- **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步为「连接」而非「保存」，调用 `onQuickConnectDirect` 仅设置 `selectedConnection`，**不写入** `ConnectionStorage`
-- **测试连接**：`onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调注入；`TEST_SAVE` 步骤「测试连接」按钮真实调用引擎（回调为 null 时按钮禁用）。`shared` 仍**不依赖** `:engine` —— 由集成层直连 `IdbEngine.testConnection(jdbcUrl, user, password)`
+- **JDBC URL 折算（真相源）**：`JdbcUrl.kt` 的 `buildJdbcUrl(config, extraQuery)` / `parseJdbcUrl(url, dialect)` 覆盖 5 个方言 × 连接类型 —— `CLIENT_SERVER` 显示 5 个独立字段（host/port/database/username/password）+ JDBC URL 输入框互为投影；嵌入式方言（H2 / DuckDB / SQLite）用单一目标字段折算 URL；额外参数（`?useSSL=false&...`）始终保留，MySQL 无显式参数时补方言默认参数
+- **URL 缺失不可放行**：字段不足以折算 URL 时「下一步」/「保存」/「连接」/「测试连接」全部禁用，保证交给引擎的配置一定有合法 URL
+- **连接总览与状态**：选中连接时右侧展示状态（未连接 / 连接中 / 已连接 / 失败）+ 连接信息 + 「连接」/「断开」/「编辑」/「删除」；列表项带状态色点
+- **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步为「连接」而非「保存」，调用 `onQuickConnectDirect` 仅设置 `selectedConnection` 并由集成层直接连库，**不写入** `ConnectionStorage`
+- **测试 / 连接 / 断开**：`onTestConnection` / `onConnect` / `onDisconnect` 回调注入 —— `shared` 仍**不依赖** `:engine`，由集成层（desktopApp）直连 `IdbEngine.testConnection`（建池 + `isValid`）与 `IdbEngine.disconnect`（释放该配置的连接池）
 
 ```kotlin
 @Composable
@@ -316,6 +318,9 @@ fun ConnectionManagerScreen(
     onWizardBack: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,  // 「测试连接」按钮
+    connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),        // 引擎侧会话状态（列表色点 + 总览）
+    onConnect: (ConnectionConfig) -> Unit = {},                            // 总览「连接」：建池 + isValid
+    onDisconnect: (ConnectionConfig) -> Unit = {},                         // 总览「断开」：释放连接池
 )
 
 // 持久化 API
@@ -415,6 +420,8 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 | v2.9 | KMP Desktop Direct 模式 + 双模式架构：前端从 Wails v3 gRPC 子进程迁移到 KMP Compose Desktop（`desktopApp/`），引擎与 UI 同 JVM；新增 `IdbEngine` facade（`handle()` / `invoke()`），`IdbEngineImpl` 薄壳化；CLI `--mode grpc\|direct` 切换；`RequestDispatcher.dispatch` catch 外置到 `.catch{}` operator 修复 *Flow exception transparency violated*<br>CodeEditor / DataTable 高度策略统一：`CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限<br>`shared/connection/` —— 新增 `ConnectionManagerScreen`（左侧连接列表 + 右侧引导式配置）+ `ConnectionStorage` JSON 持久化到 `~/.config/sundays/connection.json`；支持 MySQL/PostgreSQL/H2/DuckDB/SQLite 五种方言；普通流程 4 步 + 快速连接 3 步两种独立引导（`WizardFlow` 标识） |
 | v2.10 | 移除 `desktopApp` 演示 `DemoApp` 顶层 tab 切换，仅保留连接管理 (`ConnectionManagerScreen`)；`ConnectionConfig` 新增 `jdbcUrl` 字段支持标准 JDBC URL 持久化；`CredentialsStep` 实现字段 ↔ JDBC URL 双向同步（`buildJdbcUrl` / `parseJdbcUrl`），修改任一字段实时拼接/解析 URL，保留 `?额外参数`；默认填入 `host=localhost` 与方言默认端口（MySQL `3306` / PostgreSQL `5432`）；`ConnectionConfig` 新增 `username:password@` 凭据段拼接支持；快速连接流程（`WizardFlow.QUICK_CONNECT`）最后一步改为「连接」（`Bolt` 图标）调用 `onQuickConnectDirect`，**不写入** `ConnectionStorage`，仅设为 `selectedConnection`；`ConnectionSummary` 新增 `JDBC URL` 行 |
 | v2.11 | **引擎支持仅凭 JDBC URL 初始化连接 + 连接生命周期直连方法**<br>proto `ConnectionConfig` 新增 `jdbc_url` 字段；`PoolManager.createDataSource` 在 `jdbc_url` 非空时直接用它建 HikariCP 池（`host`/`port`/`database` 忽略），连接池 hash key 纳入 `jdbc_url`<br>方言反查：`DatabaseDialect` 新增 `jdbcUrlPrefix`（默认 `jdbc:<driverName 小写>:`，5 个内置方言显式覆盖），`DialectLoader.getDialectByJdbcUrl()` 按最长前缀匹配；无匹配时 `PoolManager.resolveDialect` 抛出可读错误而非静默回退<br>`IdbEngine` facade 新增直连方法 `testConnection(config)` / `testConnection(jdbcUrl, user, password)` —— 不经 gRPC server、不经 IPC、不经 `RequestDispatcher` envelope，直接调 `SystemHandler.testConnection`；首次调用即创建/复用连接池（**连接初始化**）并做 JDBC `isValid(5)` 校验<br>`SYSTEM.TEST_CONNECTION` 响应的 `driver` 改由 URL 反查出的方言决定（不再回显 `config.driver`）<br>`ConnectionManagerScreen` 新增 `onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调，`TestSaveStep` 的「测试连接」按钮从空操作改为真实调用；`desktopApp` 通过 `engine.testConnection(jdbcUrl, username, password)` 直连引擎 |
+
+| v2.12 | **连接管理流程与引擎打通：连接生命周期（连接 / 断开）+ 方言装配修复**<br>`IdbEngine` facade 新增 `disconnect(config)`（→ `PoolManager.close(config)`：释放该配置下**所有** schema 维度的连接池），与 `testConnection` 构成对称生命周期；pool key 改为两段式 `sha256(配置)#sha256(schema)` 以便按配置定位池，并新增 `activePoolCount()`（诊断 / 测试）<br>`DialectLoader` 新增**应用类路径 SPI**加载通道（`ServiceLoader`，`desktopApp` 用 `runtimeOnly` 引入 5 个方言插件 + 5 个 JDBC 驱动）—— 修复 Direct 模式下 `dialects/` 目录缺失导致 `No dialect plugin matches JDBC URL`、测试连接永远失败的问题<br>`shared/connection`：`JdbcUrl.kt` 独立出字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，MySQL 默认参数、H2 `mem:`/`file:`、DuckDB、SQLite），`ConnectionConfig` 删除死字段 `filePath` / `useJdbcUrl`（`database` 统一承载嵌入式 URL 主体），向导各步骤改为**直写调用方状态**（修复连接名称、连接类型选完即丢的问题），URL 折算不出时禁用放行按钮，新增**连接总览面板**（状态 + 连接/断开/编辑/删除）与列表状态色点；`ConnectionStorage` 按文件 `version` 分派 v1/v2 并真正迁移<br>`desktopApp`：连接列表 / 向导 / 引擎会话状态收敛到新的 `ConnectionSession` 状态机（`MainScreen` 只做绑定），新增 `ConnectionManagerFlowTest`（Compose UI 真点击 + 真引擎：选方言 → 填字段 → 测试连接 → 连接 → 断开，断言连接池建立与释放、`connection.json` 落盘） |
 
 ---
 

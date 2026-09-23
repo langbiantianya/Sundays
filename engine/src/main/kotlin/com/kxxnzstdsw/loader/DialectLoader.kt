@@ -24,9 +24,18 @@ object DialectLoader {
     }
 
     /**
-     * 加载指定目录下的方言插件，同时查找 JAR 同级 dialects/ 和 CWD dialects/
+     * 加载方言插件 — 两条来源，目录插件覆盖同名 classpath 方言：
+     *
+     * 1. **应用类路径 SPI**（[loadFromClasspath]）—— Direct 模式 / 开发运行场景：`dialect-*` 模块
+     *    作为普通依赖随应用类路径加载，服务文件位于 `META-INF/services/`。
+     * 2. **插件目录**—— JAR 分发场景：扫描 [dir] 与 JAR 同级 `dialects/` 目录中的插件 JAR。
+     *
+     * 幂等：重复调用不会重复注册（同名以最后一次加载为准）。未做任何注册（既无目录也无
+     * classpath 方言）时保持静默 —— 调用方在真正用到方言时才会拿到 `No dialect plugin ...` 错误。
      */
     fun loadFromDir(dir: File) {
+        loadFromClasspath()
+
         val jarDialects = File(getJarDir(), "dialects")
         val candidates = listOf(dir.absoluteFile, jarDialects).filter { it.isDirectory }
 
@@ -37,6 +46,36 @@ object DialectLoader {
 
         for (candidate in candidates) {
             loadFromSingleDir(candidate)
+        }
+    }
+
+    /**
+     * 从应用类路径发现方言（`ServiceLoader`，使用 [DialectLoader] 自身的类加载器）。
+     *
+     * 与目录加载的区别：这里不新建 `URLClassLoader`，方言类与 `DatabaseDialect` 接口由同一个
+     * 类加载器解析 —— Direct 模式下 UI 与引擎同 JVM 时必须走这条路径，否则接口类型不匹配。
+     * 已注册的同名方言不被覆盖（目录插件优先）。
+     */
+    private fun loadFromClasspath() {
+        val loader = DialectLoader::class.java.classLoader ?: return
+        val discovered = try {
+            ServiceLoader.load(DatabaseDialect::class.java, loader).toList()
+        } catch (e: Throwable) {
+            // ServiceConfigurationError 等 —— 单个坏插件不应阻断引擎启动
+            logger.warn("Classpath dialect scan failed: ${e.message}")
+            return
+        }
+
+        var count = 0
+        for (dialect in discovered) {
+            if (dialects.containsKey(dialect.driverName)) continue
+            dialects[dialect.driverName] = dialect
+            count++
+        }
+        if (count > 0) {
+            logger.info("Registered $count dialect plugin(s) from application classpath")
+        } else {
+            logger.debug("No dialect plugins found on application classpath")
         }
     }
 

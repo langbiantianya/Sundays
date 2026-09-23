@@ -12,7 +12,9 @@ import com.kxxnzstdsw.handlers.SystemHandler
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.loader.DriverLoader
 import com.kxxnzstdsw.pool.PoolManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.UUID
@@ -129,6 +131,19 @@ class IdbEngine(
             this.password = password
         }
     )
+
+    /**
+     * 断开连接 —— 关闭 [config] 对应的 HikariCP 连接池（含该配置下各 schema 维度的池），
+     * 与 [testConnection] 对称：`testConnection` 建池（“初始化连接”），`disconnect` 释放池。
+     *
+     * 池按 [PoolManager] 的 hash key 缓存，因此传入的 `config` 必须与建池时的字段
+     * （`jdbcUrl` / `host` / `port` / `user` / `password` / `database`）一致才能定位到同一个池。
+     * 其他配置的连接池不受影响；断开后再次 [testConnection] 会重建池。
+     *
+     * @return 是否真的关闭了连接池（false = 该配置当前没有活跃池）
+     */
+    suspend fun disconnect(config: ConnectionConfig): Boolean =
+        withContext(Dispatchers.IO) { PoolManager.close(config) }
 
     /**
      * 关闭资源 — 调用 PoolManager.closeAll() / DriverLoader.closeAll() / DialectLoader.closeAll()。

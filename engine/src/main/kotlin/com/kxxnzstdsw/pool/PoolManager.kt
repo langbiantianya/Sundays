@@ -20,7 +20,7 @@ object PoolManager {
      * 调用方负责必要时调用 [getConnection] 双参数版本或自行 setSearchPath。
      */
     fun getConnection(config: ConnectionConfig): Connection {
-        val hashKey = generateHashKey(config, "")
+        val hashKey = poolKey(config, "")
         val dataSource = pools.computeIfAbsent(hashKey) { createDataSource(config, "") }
         return dataSource.connection
     }
@@ -34,7 +34,7 @@ object PoolManager {
      */
     fun getConnection(config: ConnectionConfig, schema: String): Connection {
         val effectiveSchema = schema.ifBlank { config.schema }
-        val hashKey = generateHashKey(config, effectiveSchema)
+        val hashKey = poolKey(config, effectiveSchema)
         val dataSource = pools.computeIfAbsent(hashKey) { createDataSource(config, effectiveSchema) }
         val conn = dataSource.connection
         // 新建连接 (lazy 触发 createDataSource 中的 connectionInitSql) 需补 setSearchPath;
@@ -63,15 +63,56 @@ object PoolManager {
         }
 
     /**
-     * 池缓存 key — 包含 driver + jdbcUrl + host + port + user + password + database + schema。
+     * 池缓存 key 的**配置部分** — 包含 driver + jdbcUrl + host + port + user + password + database 的 SHA-256。
      *
-     * password / schema / jdbcUrl 都参与 hash：同一 user/host/db 在不同 password、schema 或
-     * JDBC URL（URL 上可能挂方言特定参数）下应使用不同连接池,避免凭据混淆或 search_path 串扰。
+     * password / jdbcUrl 都参与 hash：同一 user/host/db 在不同 password 或 JDBC URL（URL 上可能挂方言
+     * 特定参数）下应使用不同连接池,避免凭据混淆或参数串扰。摘要而非明文 —— key 不进日志也不含凭据。
      */
-    private fun generateHashKey(config: ConnectionConfig, schema: String): String {
-        val input = "${config.driver}:${config.jdbcUrl}:${config.host}:${config.port}:${config.user}:${config.password}:${config.database}:$schema"
-        val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(input.toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun configKey(config: ConnectionConfig): String {
+        val input = "${config.driver}:${config.jdbcUrl}:${config.host}:${config.port}:${config.user}:${config.password}:${config.database}"
+        return sha256(input)
+    }
+
+    /**
+     * 完整池 key = 配置摘要 [+ `#` + schema 摘要]。
+     *
+     * 结构化的两段式 key 让 [close] 能按配置前缀定位该配置下的**所有** schema 维度连接池
+     * （单段 hash 无法反查归属）。
+     */
+    private fun poolKey(config: ConnectionConfig, schema: String): String {
+        val base = configKey(config)
+        return if (schema.isBlank()) base else "$base#${sha256(schema)}"
+    }
+
+    private fun sha256(input: String): String =
+        MessageDigest.getInstance("SHA-256").digest(input.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /** 当前活跃连接池数量（诊断 / 集成测试用）。 */
+    fun activePoolCount(): Int = pools.size
+
+    /**
+     * 关闭 [config] 对应的所有连接池（含该配置下各 schema 维度的池）—— 即“断开连接”。
+     *
+     * 与 [getConnection] 对称：getConnection 按需建池，close 释放该配置的全部池。其他配置的池不受影响；
+     * 之后再次 [getConnection] 会重建池。
+     *
+     * @return 是否至少关闭了一个池（false = 该配置当前没有活跃池）
+     */
+    fun close(config: ConnectionConfig): Boolean {
+        val base = configKey(config)
+        val victims = pools.keys.filter { it == base || it.startsWith("$base#") }
+        var closed = false
+        for (key in victims) {
+            pools.remove(key)?.let {
+                it.close()
+                closed = true
+            }
+        }
+        if (closed) {
+            val target = config.jdbcUrl.ifBlank { "${config.host}:${config.port}/${config.database}" }
+            logger.info("Closed ${victims.size} pool(s) for $target")
+        }
+        return closed
     }
 
     private fun createDataSource(config: ConnectionConfig, schema: String): HikariDataSource {

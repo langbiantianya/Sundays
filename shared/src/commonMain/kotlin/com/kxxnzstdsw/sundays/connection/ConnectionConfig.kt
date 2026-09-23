@@ -19,13 +19,11 @@ data class ConnectionConfig(
     val dialect: DialectType = DialectType.MYSQL,        // 数据库方言
     val host: String = "",          // 主机地址 (CLIENT_SERVER)
     val port: Int? = null,          // 端口 (CLIENT_SERVER)
-    val database: String = "",       // 数据库名
+    val database: String = "",       // 数据库名 / 嵌入式库名 / 文件路径（引擎语义：CLIENT_SERVER = 库名，EMBEDDED 系 = URL 主体）
     val username: String = "",       // 用户名
     val password: String = "",       // 密码
     val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
-    val filePath: String = "",       // 文件路径 (SQLite / H2 EMBEDDED)
-    val useJdbcUrl: Boolean = false, // 是否使用 JDBC URL 配置
-    val jdbcUrl: String = "",        // 自定义 JDBC URL (useJdbcUrl=true 时使用)
+    val jdbcUrl: String = "",        // 完整 JDBC URL —— 连接的真相源（方言由 URL scheme 反查）
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
@@ -44,8 +42,8 @@ data class ConnectionConfig(
     /** 生成连接字符串 (用于显示) */
     fun connectionString(): String = when (connectionType) {
         ConnectionType.CLIENT_SERVER -> "$host:$displayPort/$database"
-        ConnectionType.FILE_BASED -> filePath
-        ConnectionType.EMBEDDED -> database
+        ConnectionType.FILE_BASED -> database.ifBlank { "(未指定文件)" }
+        ConnectionType.EMBEDDED -> database.ifBlank { "(内存库)" }
         ConnectionType.IN_MEMORY -> "mem:$database"
         ConnectionType.UNKNOWN -> ""
     }
@@ -61,7 +59,7 @@ data class ConnectionConfig(
             DialectType.UNKNOWN -> ConnectionType.UNKNOWN to null
         }
 
-        /** 方言切换时重置为该方言的默认配置 */
+        /** 方言切换时重置为该方言的默认配置（URL 由调用方经 JDBC URL 编解码器重建） */
         fun resetFor(newDialect: DialectType, existing: ConnectionConfig): ConnectionConfig {
             val (defaultType, defaultPort) = defaultsFor(newDialect)
             return existing.copy(
@@ -71,7 +69,6 @@ data class ConnectionConfig(
                 host = if (defaultType == ConnectionType.CLIENT_SERVER) existing.host.ifBlank { "localhost" } else "",
                 database = if (defaultType == ConnectionType.CLIENT_SERVER) existing.database else "",
                 password = "",
-                filePath = "",
                 jdbcUrl = "",
             )
         }
@@ -87,6 +84,20 @@ enum class DialectType {
     DUCKDB,
     SQLITE,
     UNKNOWN;
+
+    /**
+     * 该方言在前端可选的连接类型 —— 与引擎方言的 `connectionType` 元数据一致：
+     * `Mysql` / `Postgresql` = CLIENT_SERVER；`H2` = IN_MEMORY（`jdbc:h2:mem:`）或 FILE_BASED
+     * （`jdbc:h2:file:`）；`Duckdb` = EMBEDDED；`Sqlite` = FILE_BASED。
+     */
+    val supportedConnectionTypes: List<ConnectionType>
+        get() = when (this) {
+            MYSQL, POSTGRESQL -> listOf(ConnectionType.CLIENT_SERVER)
+            H2 -> listOf(ConnectionType.IN_MEMORY, ConnectionType.FILE_BASED)
+            DUCKDB -> listOf(ConnectionType.EMBEDDED)
+            SQLITE -> listOf(ConnectionType.FILE_BASED)
+            UNKNOWN -> emptyList()
+        }
 
     companion object {
         fun fromString(value: String): DialectType =
@@ -118,7 +129,7 @@ data class ConnectionList(
 
 /**
  * 持久化用的精简模型 —— 仅保存 id / name / dialect / jdbcUrl / username / password / 时间戳
- * `host` / `port` / `database` / `connectionType` / `filePath` 在加载后从 `jdbcUrl` 重新解析得出
+ * `host` / `port` / `database` / `connectionType` 在加载后从 `jdbcUrl` 重新解析得出
  */
 @Serializable
 data class PersistedConnectionConfig(
@@ -138,3 +149,17 @@ data class PersistedConnectionList(
     val connections: List<PersistedConnectionConfig> = emptyList(),
     val version: Int = 2,
 )
+
+/**
+ * 切换方言 —— 重置为该方言的默认连接类型 / 端口 / 清空凭据，并**立即折算 JDBC URL**。
+ *
+ * URL 是引擎侧的唯一真相源，因此向导进入 CREDENTIALS 步骤前配置必须已带合法 URL；
+ * 折算失败（字段不足）时 URL 为空串，由向导在该步骤内补齐。
+ */
+fun ConnectionConfig.withDialect(newDialect: DialectType): ConnectionConfig =
+    ConnectionConfig.resetFor(newDialect, this).let { it.copy(jdbcUrl = buildJdbcUrl(it)) }
+
+/** 切换连接类型 —— URL 形状随类型变化（如 H2 `mem:` ↔ `file:`），用当前字段立即重新折算 */
+fun ConnectionConfig.withConnectionType(newType: ConnectionType): ConnectionConfig =
+    copy(connectionType = newType).let { it.copy(jdbcUrl = buildJdbcUrl(it)) }
+

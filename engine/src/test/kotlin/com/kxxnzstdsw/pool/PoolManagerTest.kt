@@ -133,6 +133,39 @@ class PoolManagerTest {
     }
 
     @Test
+    fun `close releases the pools of one config only`() {
+        val a = cfg(database = TestIds.uniqueName("pmcloseA"))
+        val b = cfg(database = TestIds.uniqueName("pmcloseB"))
+        PoolManager.getConnection(a).close()
+        PoolManager.getConnection(b).close()
+        assertEquals(2, PoolManager.activePoolCount())
+
+        assertTrue(PoolManager.close(a), "该配置有活跃池时应返回 true")
+        assertEquals(1, PoolManager.activePoolCount())
+
+        // 断开不是永久禁用：再次借用会重建池
+        PoolManager.getConnection(a).close()
+        assertEquals(2, PoolManager.activePoolCount())
+
+        // 从未建过池的配置 → 没有可关的池
+        assertFalse(PoolManager.close(cfg(database = TestIds.uniqueName("pmnever"))))
+    }
+
+    @Test
+    fun `close also releases schema scoped pools of the same config`() {
+        val c = cfg(database = dbName)
+        // 无 schema 池 + 指定 schema 池 → 两个池，同属一个 config
+        PoolManager.getConnection(c).use { conn ->
+            conn.createStatement().use { it.execute("CREATE SCHEMA my_schema") }
+        }
+        PoolManager.getConnection(c, "MY_SCHEMA").close()
+        assertEquals(2, PoolManager.activePoolCount())
+
+        assertTrue(PoolManager.close(c))
+        assertEquals(0, PoolManager.activePoolCount(), "同一配置的 schema 维度池应一并释放")
+    }
+
+    @Test
     fun `getConnection with schema invokes setSearchPath`() {
         val c = cfg(database = dbName)
         // 先建 schema，再用 getConnection(schema="MY_SCHEMA") 触发 SET SCHEMA

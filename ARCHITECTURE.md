@@ -27,6 +27,8 @@
 
 **v2.11 — 连接生命周期直连方法**：`IdbEngine` 新增 `testConnection(config)` / `testConnection(jdbcUrl, user, password)`，**直接调用** `SystemHandler`，旁路 `RequestDispatcher`（无 envelope 包装）。首次调用用 `config.jdbcUrl` 创建（或复用）HikariCP 连接池 —— 即**连接初始化**；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`，前缀由 `DatabaseDialect.jdbcUrlPrefix` 声明）。详见 [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) §3.1 / §4.1。
 
+**v2.12 — 连接管理流程与引擎打通**：`IdbEngine` 新增 `disconnect(config)`（释放该配置的连接池，含各 schema 维度），`PoolManager` 的 pool key 改为两段式（`sha256(配置)#sha256(schema)`）以支持按配置定位；`DialectLoader` 支持**应用类路径 SPI**（Direct 模式下方言插件随 `desktopApp` 的 `runtimeOnly` 依赖加载，无需外部 `dialects/` 目录）。前端侧 `shared/connection` 的 JDBC URL 折算覆盖全部 5 个方言，新增连接总览（连接 / 断开）与状态回显，`desktopApp` 以 `ConnectionSession` 承载状态机并新增端到端 UI 测试。详见 [`README.md` §架构升级历史](./README.md#架构升级历史)。
+
 **典型调用栈**：
 
 ```
@@ -150,6 +152,7 @@ java -jar idb-engine.jar --mode direct
 | v2.7 | DuckDB 方言插件（本地嵌入式 OLAP） | 详细：[`dialect-duckdb/README.md`](./dialect-duckdb/README.md) |
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` | 详细：[`dialect-sqlite/README.md`](./dialect-sqlite/README.md) + [`api/README.md`](./api/README.md) |
 | **v2.9** | **KMP Desktop 前端 + 双模式架构（gRPC + Direct）** | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) + [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) |
+| **v2.12** | **连接管理流程与引擎打通**（连接 / 断开生命周期 + 方言装配修复 + JDBC URL 折算覆盖全方言） | 详细：[`README.md` 架构升级历史](./README.md#架构升级历史) + [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §4 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
 
 > **v2.9 关键设计补充**：CodeEditor / DataTable 统一高度策略 —— `CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器。详细见 [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md)。
 

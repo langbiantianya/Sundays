@@ -21,9 +21,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 /**
- * 连接管理器主界面 (v2.9).
+ * 连接管理器主界面 (v2.12).
  *
- * 布局: 左侧连接列表 + 右侧连接信息引导页面
+ * 布局: 左侧连接列表 + 右侧连接信息引导页面 / 选中连接总览
  *
  * ## 引导流程
  *
@@ -52,19 +52,33 @@ import kotlinx.coroutines.launch
  * )
  * ```
  *
+ * ## 引擎耦合点（组件本身不依赖引擎）
+ *
+ * | 关注点 | 注入方式 |
+ * |---|---|
+ * | 测试连接 | [onTestConnection] —— 调用方直连 `IdbEngine.testConnection` |
+ * | 连接 / 断开 | [onConnect] / [onDisconnect] —— 调用方直连 `IdbEngine.testConnection` / `IdbEngine.disconnect` |
+ * | 连接状态 | [connectionStatuses] —— 调用方从引擎侧维护后回传（列表项状态点 + 总览面板） |
+ *
+ * URL 真相源：[JdbcUrl] 负责字段 ↔ JDBC URL 双向折算，覆盖全部方言与连接类型；组件内的所有编辑
+ * 都通过 [onUpdateEditingConnection] 回写调用方，调用方持有唯一真相（不回写则向导内的输入丢失）。
+ *
  * @param connections 所有保存的连接配置
- * @param selectedConnection 当前选中的连接 (用于左侧列表高亮)
+ * @param selectedConnection 当前选中的连接 (用于左侧列表高亮 + 总览面板)
  * @param editingConnection 当前正在编辑的连接 (null = 未编辑)
  * @param wizardStep 当前引导步骤
  * @param wizardFlow 当前引导流程类型 (用于步骤指示器自适应)
+ * @param connectionStatuses 各连接 (按 id) 的引擎侧会话状态；缺省视为未连接
  * @param onSelectConnection 选择连接
  * @param onNewConnection 新建连接回调 (普通流程)
  * @param onQuickConnect 快速连接回调
  * @param onEditConnection 编辑已有连接回调
  * @param onSaveConnection 保存连接 (普通流程/快速连接均不直接调用)
- * @param onQuickConnectDirect 快速连接（不保存到 ConnectionStorage）
+ * @param onQuickConnectDirect 快速连接（不保存到 ConnectionStorage，由调用方直接连库）
  * @param onTestConnection 测试连接回调 —— 由调用方直连引擎实现（如 `IdbEngine.testConnection`）；
  *   null 时“测试连接”按钮禁用
+ * @param onConnect 建立连接回调（总览面板「连接」按钮）
+ * @param onDisconnect 断开连接回调（总览面板「断开」按钮）
  * @param onDeleteConnection 删除连接
  */
 @Composable
@@ -86,6 +100,9 @@ fun ConnectionManagerScreen(
     onWizardBack: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
+    connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
+    onConnect: (ConnectionConfig) -> Unit = {},
+    onDisconnect: (ConnectionConfig) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.fillMaxSize()) {
@@ -93,6 +110,7 @@ fun ConnectionManagerScreen(
         ConnectionListPanel(
             connections = connections,
             selectedConnection = selectedConnection,
+            connectionStatuses = connectionStatuses,
             onSelectConnection = onSelectConnection,
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
@@ -108,9 +126,11 @@ fun ConnectionManagerScreen(
             color = MaterialTheme.colorScheme.outlineVariant,
         )
 
-        // 右侧: 连接信息引导页面
+        // 右侧: 连接总览 / 连接信息引导页面
         ConnectionWizardPanel(
             editingConnection = editingConnection,
+            selectedConnection = selectedConnection,
+            connectionStatus = selectedConnection?.let { connectionStatuses[it.id] } ?: ConnectionStatus(),
             wizardStep = wizardStep,
             wizardFlow = wizardFlow,
             onSaveConnection = onSaveConnection,
@@ -122,12 +142,41 @@ fun ConnectionManagerScreen(
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
             onTestConnection = onTestConnection,
+            onConnect = onConnect,
+            onDisconnect = onDisconnect,
+            onEditConnection = onEditConnection,
+            onDeleteConnection = onDeleteConnection,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
         )
     }
 }
+
+/** 引擎侧连接会话状态 */
+enum class ConnectionState {
+    /** 未建立连接（无连接池） */
+    DISCONNECTED,
+
+    /** 正在建池 / 校验 */
+    CONNECTING,
+
+    /** 连接池已就绪且校验通过 */
+    CONNECTED,
+
+    /** 建池或校验失败 */
+    FAILED,
+}
+
+/**
+ * 单个连接的会话状态 + 说明（失败原因 / 成功时报告的方言驱动名）。
+ *
+ * 由集成层维护（`IdbEngine.testConnection` / `disconnect` 的结果），组件只做展示。
+ */
+data class ConnectionStatus(
+    val state: ConnectionState = ConnectionState.DISCONNECTED,
+    val message: String = "",
+)
 
 /** 引导步骤 */
 enum class WizardStep {
@@ -155,6 +204,7 @@ private fun totalStepsFor(flow: WizardFlow): Int = when (flow) {
 private fun ConnectionListPanel(
     connections: List<ConnectionConfig>,
     selectedConnection: ConnectionConfig?,
+    connectionStatuses: Map<String, ConnectionStatus>,
     onSelectConnection: (ConnectionConfig?) -> Unit,
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
@@ -212,6 +262,7 @@ private fun ConnectionListPanel(
                     ConnectionListItem(
                         connection = conn,
                         isSelected = conn.id == selectedConnection?.id,
+                        status = connectionStatuses[conn.id] ?: ConnectionStatus(),
                         onClick = { onSelectConnection(conn) },
                         onEdit = { onEditConnection(conn) },
                         onDelete = { onDeleteConnection(conn.id) },
@@ -229,6 +280,7 @@ private fun ConnectionListPanel(
 private fun ConnectionListItem(
     connection: ConnectionConfig,
     isSelected: Boolean,
+    status: ConnectionStatus,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -270,12 +322,16 @@ private fun ConnectionListItem(
             Spacer(modifier = Modifier.width(8.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = connection.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ConnectionStatusDot(status.state)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = connection.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     text = "${connection.dialect.name} • ${connection.connectionString()}",
                     style = MaterialTheme.typography.bodySmall,
@@ -315,12 +371,40 @@ private fun ConnectionListItem(
     }
 }
 
+/** 连接状态色点 —— 列表项 / 总览面板共用 */
+@Composable
+internal fun ConnectionStatusDot(state: ConnectionState, size: androidx.compose.ui.unit.Dp = 8.dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .background(connectionStateColor(state), androidx.compose.foundation.shape.CircleShape),
+    )
+}
+
+@Composable
+private fun connectionStateColor(state: ConnectionState) = when (state) {
+    ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
+    ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+    ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+    ConnectionState.FAILED -> MaterialTheme.colorScheme.error
+}
+
+/** 连接状态文案 */
+private fun connectionStateLabel(state: ConnectionState): String = when (state) {
+    ConnectionState.DISCONNECTED -> "未连接"
+    ConnectionState.CONNECTING -> "连接中"
+    ConnectionState.CONNECTED -> "已连接"
+    ConnectionState.FAILED -> "连接失败"
+}
+
 /**
  * 右侧连接信息引导面板.
  */
 @Composable
 private fun ConnectionWizardPanel(
     editingConnection: ConnectionConfig?,
+    selectedConnection: ConnectionConfig?,
+    connectionStatus: ConnectionStatus,
     wizardStep: WizardStep,
     wizardFlow: WizardFlow,
     onSaveConnection: (ConnectionConfig) -> Unit,
@@ -331,7 +415,11 @@ private fun ConnectionWizardPanel(
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
+    onEditConnection: (ConnectionConfig) -> Unit,
+    onDeleteConnection: (String) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
+    onConnect: (ConnectionConfig) -> Unit = {},
+    onDisconnect: (ConnectionConfig) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -345,17 +433,28 @@ private fun ConnectionWizardPanel(
     ) {
         // 使用 safe render 避免 editingConnection 为 null 时崩溃
         when (wizardStep) {
-            WizardStep.IDLE -> IdlePanel(
-                onNewConnection = onNewConnection,
-                onQuickConnect = onQuickConnect,
-            )
+            WizardStep.IDLE -> if (selectedConnection != null) {
+                ConnectionOverviewPanel(
+                    connection = selectedConnection,
+                    status = connectionStatus,
+                    onConnect = { onConnect(selectedConnection) },
+                    onDisconnect = { onDisconnect(selectedConnection) },
+                    onEdit = { onEditConnection(selectedConnection) },
+                    onDelete = { onDeleteConnection(selectedConnection.id) },
+                )
+            } else {
+                IdlePanel(
+                    onNewConnection = onNewConnection,
+                    onQuickConnect = onQuickConnect,
+                )
+            }
             WizardStep.QUICK_CONNECT -> editingConnection?.let { config ->
                 QuickConnectStep(
                     editingConnection = config,
                     stepIndex = 1,
                     totalSteps = totalSteps,
-                    onSelectDialect = { newConfig ->
-                        onUpdateEditingConnection(newConfig)
+                    onSelectDialect = { dialect ->
+                        onUpdateEditingConnection(config.withDialect(dialect))
                         onWizardNext(WizardStep.CREDENTIALS)
                     },
                     onBack = onWizardBack,
@@ -367,10 +466,9 @@ private fun ConnectionWizardPanel(
                     editingConnection = config,
                     stepIndex = stepIndexOf(wizardStep, wizardFlow),
                     totalSteps = totalSteps,
+                    onNameChange = { onUpdateEditingConnection(config.copy(name = it)) },
                     onDialectChange = { newDialect ->
-                        onUpdateEditingConnection(
-                            ConnectionConfig.resetFor(newDialect, config)
-                        )
+                        onUpdateEditingConnection(config.withDialect(newDialect))
                     },
                     onNext = { onWizardNext(WizardStep.CONNECTION_TYPE) },
                     onCancel = onCancelEdit,
@@ -381,6 +479,7 @@ private fun ConnectionWizardPanel(
                     editingConnection = config,
                     stepIndex = stepIndexOf(wizardStep, wizardFlow),
                     totalSteps = totalSteps,
+                    onConnectionTypeChange = { onUpdateEditingConnection(config.withConnectionType(it)) },
                     onNext = { onWizardNext(WizardStep.CREDENTIALS) },
                     onBack = onWizardBack,
                     onCancel = onCancelEdit,
@@ -428,6 +527,125 @@ private fun stepIndexOf(step: WizardStep, flow: WizardFlow): Int = when (flow) {
         WizardStep.CREDENTIALS -> 3
         WizardStep.TEST_SAVE -> 4
         else -> 0
+    }
+}
+
+/**
+ * 选中连接总览 (`wizardStep == IDLE` 且已选中连接时取代空闲引导页).
+ *
+ * 展示引擎侧会话状态与连接信息，并提供 连接 / 断开 / 编辑 / 删除 操作 —— 「连接」的语义是
+ * 让引擎用该配置建连接池并做 `isValid` 校验（`IdbEngine.testConnection`），
+ * 「断开」是释放该配置的连接池（`IdbEngine.disconnect`）。
+ */
+@Composable
+private fun ConnectionOverviewPanel(
+    connection: ConnectionConfig,
+    status: ConnectionStatus,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // 历史配置可能没有 jdbcUrl（v2.11 之前保存的空 URL）—— 引擎侧无法建池，先引导去补全
+        val connectable = buildJdbcUrl(connection).isNotBlank()
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ConnectionStatusDot(status.state, 12.dp)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(connection.name, style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = "${connection.dialect.name} • ${connection.connectionType.name}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("连接状态", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ConnectionStatusDot(status.state)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = connectionStateLabel(status.state),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (status.state == ConnectionState.FAILED) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (status.message.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = status.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (status.state == ConnectionState.FAILED) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("连接信息", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                ConnectionSummary(connection)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDelete) { Text("删除") }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("编辑")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            when (status.state) {
+                ConnectionState.CONNECTED -> OutlinedButton(onClick = onDisconnect) {
+                    Icon(Icons.Default.LinkOff, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("断开")
+                }
+                ConnectionState.CONNECTING -> Button(onClick = {}, enabled = false) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("连接中...")
+                }
+                ConnectionState.DISCONNECTED, ConnectionState.FAILED -> Column(
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    Button(onClick = onConnect, enabled = connectable) {
+                        Icon(Icons.Default.Bolt, null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("连接")
+                    }
+                    if (!connectable) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "缺少 JDBC URL —— 请先「编辑」补全连接信息",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -480,7 +698,7 @@ private fun QuickConnectStep(
     editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
-    onSelectDialect: (ConnectionConfig) -> Unit,
+    onSelectDialect: (DialectType) -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -505,35 +723,35 @@ private fun QuickConnectStep(
                 description = "客户端-服务器模式",
                 port = 3306,
                 icon = Icons.Default.Storage,
-                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.MYSQL, editingConnection)) },
+                onClick = { onSelectDialect(DialectType.MYSQL) },
             )
             QuickConnectCard(
                 title = "PostgreSQL",
                 description = "客户端-服务器模式",
                 port = 5432,
                 icon = Icons.Default.Storage,
-                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.POSTGRESQL, editingConnection)) },
+                onClick = { onSelectDialect(DialectType.POSTGRESQL) },
             )
             QuickConnectCard(
                 title = "H2",
                 description = "内存数据库",
                 port = null,
                 icon = Icons.Default.Memory,
-                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.H2, editingConnection)) },
+                onClick = { onSelectDialect(DialectType.H2) },
             )
             QuickConnectCard(
                 title = "DuckDB",
                 description = "嵌入式 OLAP",
                 port = null,
                 icon = Icons.Default.Analytics,
-                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.DUCKDB, editingConnection)) },
+                onClick = { onSelectDialect(DialectType.DUCKDB) },
             )
             QuickConnectCard(
                 title = "SQLite",
                 description = "文件数据库",
                 port = null,
                 icon = Icons.Default.FolderOpen,
-                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.SQLITE, editingConnection)) },
+                onClick = { onSelectDialect(DialectType.SQLITE) },
             )
         }
 
@@ -609,19 +827,17 @@ private fun QuickConnectCard(
     }
 }
 
-/** 普通流程步骤 1: 基础信息 (名称 + 方言选择) */
+/** 普通流程步骤 1: 基础信息 (名称 + 方言选择) —— 编辑直接回写调用方，不保留本地副本 */
 @Composable
 private fun BasicInfoStep(
     editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
+    onNameChange: (String) -> Unit,
     onDialectChange: (DialectType) -> Unit,
     onNext: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var name by remember(editingConnection) { mutableStateOf(editingConnection.name) }
-    var dialect by remember(editingConnection) { mutableStateOf(editingConnection.dialect) }
-
     StepLayout(
         title = "基础信息",
         step = stepIndex,
@@ -629,8 +845,8 @@ private fun BasicInfoStep(
         onCancel = onCancel,
     ) {
         OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
+            value = editingConnection.name,
+            onValueChange = onNameChange,
             label = { Text("连接名称") },
             placeholder = { Text("例如: 测试环境 MySQL") },
             modifier = Modifier.fillMaxWidth(),
@@ -646,13 +862,8 @@ private fun BasicInfoStep(
             DialectType.entries.filter { it != DialectType.UNKNOWN }.forEach { d ->
                 DialectOption(
                     dialect = d,
-                    isSelected = dialect == d,
-                    onClick = {
-                        if (d != dialect) {
-                            dialect = d
-                            onDialectChange(d)
-                        }
-                    },
+                    isSelected = editingConnection.dialect == d,
+                    onClick = { if (d != editingConnection.dialect) onDialectChange(d) },
                 )
             }
         }
@@ -667,7 +878,7 @@ private fun BasicInfoStep(
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = onNext,
-                enabled = name.isNotBlank(),
+                enabled = editingConnection.name.isNotBlank(),
             ) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
@@ -721,27 +932,18 @@ private fun DialectOption(
     }
 }
 
-/** 普通流程步骤 2: 连接类型 */
+/** 普通流程步骤 2: 连接类型 —— 选项来自 [DialectType.supportedConnectionTypes]，选择直接回写调用方 */
 @Composable
 private fun ConnectionTypeStep(
     editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
+    onConnectionTypeChange: (ConnectionType) -> Unit,
     onNext: () -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var connectionType by remember(editingConnection) {
-        mutableStateOf(editingConnection.connectionType)
-    }
-
-    val availableTypes = when (editingConnection.dialect) {
-        DialectType.MYSQL, DialectType.POSTGRESQL -> listOf(ConnectionType.CLIENT_SERVER)
-        DialectType.H2 -> listOf(ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED)
-        DialectType.DUCKDB -> listOf(ConnectionType.EMBEDDED)
-        DialectType.SQLITE -> listOf(ConnectionType.FILE_BASED)
-        DialectType.UNKNOWN -> emptyList()
-    }
+    val availableTypes = editingConnection.dialect.supportedConnectionTypes
 
     StepLayout(
         title = "连接类型",
@@ -756,8 +958,8 @@ private fun ConnectionTypeStep(
             availableTypes.forEach { ct ->
                 ConnectionTypeOption(
                     connectionType = ct,
-                    isSelected = connectionType == ct,
-                    onClick = { connectionType = ct },
+                    isSelected = editingConnection.connectionType == ct,
+                    onClick = { if (editingConnection.connectionType != ct) onConnectionTypeChange(ct) },
                 )
             }
         }
@@ -831,7 +1033,17 @@ private fun ConnectionTypeOption(
     }
 }
 
-/** 认证信息步骤 (普通流程 3 / 快速连接 2) */
+/**
+ * 认证信息步骤 (普通流程 3 / 快速连接 2) —— 所有编辑经 [onUpdateEditingConnection] 立即回写调用方，
+ * 字段与 JDBC URL 始终同步（URL 由 [buildJdbcUrl] 从字段折算，显式 query 参数原样保留）。
+ *
+ * 按连接类型渲染：
+ * - `CLIENT_SERVER`：主机 / 端口 / 数据库 / 用户名 / 密码 + JDBC URL 输入框（双向同步）
+ * - `IN_MEMORY` / `EMBEDDED` / `FILE_BASED`：单个目标字段（库名 or 文件路径，写入 `database`），
+ *   URL 由方言规则折算（H2 `mem:` / `file:`、DuckDB、SQLite）
+ *
+ * 字段不足（折算 URL 为空串）时「下一步」禁用 —— 保证向导不会把无 URL 的配置带进引擎。
+ */
 @Composable
 private fun CredentialsStep(
     editingConnection: ConnectionConfig,
@@ -842,76 +1054,28 @@ private fun CredentialsStep(
     onCancel: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
 ) {
-    var host by remember(editingConnection) { mutableStateOf(editingConnection.host.ifBlank { "localhost" }) }
-    var port by remember(editingConnection) { mutableStateOf(editingConnection.port?.toString()?.ifBlank { editingConnection.displayPort.toString() } ?: editingConnection.displayPort.toString()) }
-    var database by remember(editingConnection) { mutableStateOf(editingConnection.database) }
-    var username by remember(editingConnection) { mutableStateOf(editingConnection.username) }
-    var password by remember(editingConnection) { mutableStateOf(editingConnection.password) }
-    var filePath by remember(editingConnection) { mutableStateOf(editingConnection.filePath) }
-    var jdbcUrl by remember(editingConnection) {
-        mutableStateOf(
-            editingConnection.jdbcUrl.ifBlank {
-                buildJdbcUrl(
-                    editingConnection.dialect,
-                    "localhost",
-                    editingConnection.displayPort.toString(),
-                    "",
-                    "",
-                    "",
-                )
-            }
-        )
+    val canProceed = buildJdbcUrl(editingConnection).isNotBlank()
+
+    /** 回写字段变更并重建 URL —— 显式 query 参数（`?useSSL=false&...`）原样保留 */
+    fun apply(next: ConnectionConfig) {
+        val query = editingConnection.jdbcUrl.substringAfter('?', "")
+        onUpdateEditingConnection(next.copy(jdbcUrl = buildJdbcUrl(next, query)))
     }
 
-    /** 防止循环: 只在字段→URL 时为 true */
-    var isSyncingFromFields by remember { mutableStateOf(false) }
-    /** 防止循环: 只在 URL→字段 时为 true */
-    var isSyncingFromUrl by remember { mutableStateOf(false) }
-
-    /** 从 individual fields 同步到 URL（保留已有的 ?额外参数） */
-    fun syncToUrl() {
-        if (isSyncingFromUrl) return
-        isSyncingFromFields = true
-        val extraParams = jdbcUrl.substringAfter('?', "")
-        val base = buildJdbcUrl(editingConnection.dialect, host, port, database, username, password)
-        jdbcUrl = if (extraParams.isNotBlank()) "$base?$extraParams" else base
-        isSyncingFromFields = false
-    }
-
-    /** 从 URL 同步到 individual fields，并重建 URL 格式 */
-    fun syncFromUrl(url: String) {
-        if (isSyncingFromFields) return
-        isSyncingFromUrl = true
-        val extraParams = url.substringAfter('?', "")
-        val parsed = parseJdbcUrl(url, editingConnection.dialect)
-        host = parsed.host
-        port = parsed.port
-        database = parsed.database
-        username = parsed.username
-        password = parsed.password
-        val rebuilt = buildJdbcUrl(
-            editingConnection.dialect,
-            parsed.host,
-            parsed.port,
-            parsed.database,
-            parsed.username,
-            parsed.password,
+    /** JDBC URL 输入框 → 字段：解析出的 host / port / database / 凭据回写，URL 保持用户输入原样 */
+    fun applyUrl(url: String) {
+        val parts = parseJdbcUrl(url, editingConnection.dialect)
+        onUpdateEditingConnection(
+            editingConnection.copy(
+                jdbcUrl = url,
+                host = parts.host,
+                port = parts.port.toIntOrNull(),
+                database = parts.database,
+                username = parts.username,
+                password = parts.password,
+            )
         )
-        jdbcUrl = if (extraParams.isNotBlank()) "$rebuilt?$extraParams" else rebuilt
-        isSyncingFromUrl = false
     }
-
-    fun apply() = onUpdateEditingConnection(
-        editingConnection.copy(
-            host = host,
-            port = port.toIntOrNull(),
-            database = database,
-            username = username,
-            password = password,
-            filePath = filePath,
-            jdbcUrl = jdbcUrl,
-        )
-    )
 
     StepLayout(
         title = "连接详情",
@@ -922,12 +1086,8 @@ private fun CredentialsStep(
         when (editingConnection.connectionType) {
             ConnectionType.CLIENT_SERVER -> {
                 OutlinedTextField(
-                    value = host,
-                    onValueChange = {
-                        host = it
-                        syncToUrl()
-                        apply()
-                    },
+                    value = editingConnection.host,
+                    onValueChange = { apply(editingConnection.copy(host = it)) },
                     label = { Text("主机地址") },
                     placeholder = { Text("例如: localhost 或 192.168.1.100") },
                     modifier = Modifier.fillMaxWidth(),
@@ -938,12 +1098,8 @@ private fun CredentialsStep(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = port,
-                    onValueChange = {
-                        port = it.filter { c -> c.isDigit() }
-                        syncToUrl()
-                        apply()
-                    },
+                    value = editingConnection.port?.takeIf { it > 0 }?.toString() ?: "",
+                    onValueChange = { apply(editingConnection.copy(port = it.filter(Char::isDigit).toIntOrNull())) },
                     label = { Text("端口") },
                     placeholder = { Text(editingConnection.displayPort.toString()) },
                     modifier = Modifier.fillMaxWidth(),
@@ -953,12 +1109,8 @@ private fun CredentialsStep(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = database,
-                    onValueChange = {
-                        database = it
-                        syncToUrl()
-                        apply()
-                    },
+                    value = editingConnection.database,
+                    onValueChange = { apply(editingConnection.copy(database = it)) },
                     label = { Text("数据库名") },
                     placeholder = { Text("例如: testdb") },
                     modifier = Modifier.fillMaxWidth(),
@@ -969,12 +1121,8 @@ private fun CredentialsStep(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = username,
-                    onValueChange = {
-                        username = it
-                        syncToUrl()
-                        apply()
-                    },
+                    value = editingConnection.username,
+                    onValueChange = { apply(editingConnection.copy(username = it)) },
                     label = { Text("用户名") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -984,12 +1132,8 @@ private fun CredentialsStep(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        syncToUrl()
-                        apply()
-                    },
+                    value = editingConnection.password,
+                    onValueChange = { apply(editingConnection.copy(password = it)) },
                     label = { Text("密码") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1000,12 +1144,8 @@ private fun CredentialsStep(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
                 OutlinedTextField(
-                    value = jdbcUrl,
-                    onValueChange = { url ->
-                        jdbcUrl = url
-                        syncFromUrl(url)
-                        apply()
-                    },
+                    value = editingConnection.jdbcUrl,
+                    onValueChange = ::applyUrl,
                     label = { Text("JDBC URL") },
                     placeholder = { Text("jdbc:mysql://host:3306/db?useSSL=false") },
                     modifier = Modifier.fillMaxWidth(),
@@ -1016,51 +1156,47 @@ private fun CredentialsStep(
                 )
             }
 
-            ConnectionType.EMBEDDED, ConnectionType.IN_MEMORY -> {
-                OutlinedTextField(
-                    value = database,
-                    onValueChange = {
-                        database = it
-                        onUpdateEditingConnection(editingConnection.copy(database = database))
-                    },
-                    label = { Text("数据库名称") },
-                    placeholder = { Text("例如: testdb") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Storage, null) },
-                )
-            }
-
-            ConnectionType.FILE_BASED -> {
-                OutlinedTextField(
-                    value = filePath,
-                    onValueChange = {
-                        filePath = it
-                        onUpdateEditingConnection(editingConnection.copy(filePath = filePath))
-                    },
-                    label = { Text("文件路径") },
-                    placeholder = { Text("例如: /path/to/database.db") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
+            ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED -> {
+                val (label, placeholder, icon) = embeddedFieldSpec(editingConnection)
 
                 OutlinedTextField(
-                    value = database,
-                    onValueChange = {
-                        database = it
-                        onUpdateEditingConnection(editingConnection.copy(database = database))
-                    },
-                    label = { Text("数据库名 (可选)") },
+                    value = editingConnection.database,
+                    onValueChange = { apply(editingConnection.copy(database = it)) },
+                    label = { Text(label) },
+                    placeholder = { Text(placeholder) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Label, null) },
+                    leadingIcon = { Icon(icon, null) },
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("JDBC URL（由上方字段折算）", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text = editingConnection.jdbcUrl.ifBlank { "（待补齐字段）" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
             }
 
             ConnectionType.UNKNOWN -> {}
+        }
+
+        if (!canProceed) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "请补齐必填字段 —— 连接必须能折算出一条合法的 JDBC URL",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -1071,7 +1207,7 @@ private fun CredentialsStep(
         ) {
             TextButton(onClick = onBack) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onNext) {
+            Button(onClick = onNext, enabled = canProceed) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
             }
@@ -1079,75 +1215,26 @@ private fun CredentialsStep(
     }
 }
 
-/** 从 individual fields 构建 JDBC URL */
-internal fun buildJdbcUrl(
-    dialect: DialectType,
-    host: String,
-    port: String,
-    database: String,
-    username: String,
-    password: String,
-): String {
-    if (host.isBlank()) return ""
-    val scheme = when (dialect) {
-        DialectType.MYSQL -> "jdbc:mysql"
-        DialectType.POSTGRESQL -> "jdbc:postgresql"
-        DialectType.H2 -> "jdbc:h2"
-        DialectType.DUCKDB -> "jdbc:duckdb"
-        DialectType.SQLITE -> "jdbc:sqlite"
-        DialectType.UNKNOWN -> "jdbc"
+/** 嵌入式 / 内存 / 文件型连接的单个目标字段描述（label / placeholder / 图标） */
+private fun embeddedFieldSpec(
+    connection: ConnectionConfig,
+): Triple<String, String, androidx.compose.ui.graphics.vector.ImageVector> = when (connection.dialect) {
+    DialectType.H2 -> if (connection.connectionType == ConnectionType.FILE_BASED) {
+        Triple("数据库文件路径", "例如: /path/to/data（H2 自动补 .mv.db）", Icons.Default.FolderOpen)
+    } else {
+        Triple("数据库名称", "例如: testdb", Icons.Default.Storage)
     }
-    val portPart = if (port.isNotBlank()) ":$port" else ""
-    val dbPart = if (database.isNotBlank()) "/$database" else ""
-    val credPart = if (username.isNotBlank()) "$username${if (password.isNotBlank()) ":$password" else ""}@" else ""
-    return "$scheme://$credPart$host$portPart$dbPart"
-}
-
-/** 从 JDBC URL 解析 host / port / database（仅处理 MySQL / PostgreSQL） */
-internal data class UrlParts(
-    val host: String,
-    val port: String,
-    val database: String,
-    val username: String,
-    val password: String,
-)
-
-internal fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
-    if (url.isBlank()) return UrlParts("", "", "", "", "")
-    try {
-        val scheme = when (dialect) {
-            DialectType.MYSQL -> "jdbc:mysql"
-            DialectType.POSTGRESQL -> "jdbc:postgresql"
-            else -> return UrlParts("", "", "", "", "")
-        }
-        val withoutScheme = url.removePrefix(scheme).removePrefix("://")
-
-        // 提取 hostPart (credentials@host:port 或 host:port)
-        val slashIdx = withoutScheme.indexOf('/')
-        val hostPart = if (slashIdx >= 0) withoutScheme.substring(0, slashIdx) else withoutScheme
-        val afterSlash = if (slashIdx >= 0) withoutScheme.substring(slashIdx + 1) else ""
-
-        // 提取 ? 前的数据库部分
-        val questionIdx = afterSlash.indexOf('?')
-        val dbPart = if (questionIdx >= 0) afterSlash.substring(0, questionIdx) else afterSlash
-
-        // 解析 host:port
-        val atIdx = hostPart.indexOf('@')
-        val credPart = if (atIdx >= 0) hostPart.substring(0, atIdx) else ""
-        val hostColonPort = if (atIdx >= 0) hostPart.substring(atIdx + 1) else hostPart
-        val colonIdx = hostColonPort.lastIndexOf(':')
-        val h = if (colonIdx >= 0) hostColonPort.substring(0, colonIdx) else hostColonPort
-        val p = if (colonIdx >= 0) hostColonPort.substring(colonIdx + 1) else ""
-
-        // 解析 username:password
-        val colonCredIdx = credPart.indexOf(':')
-        val u = if (colonCredIdx >= 0) credPart.substring(0, colonCredIdx) else credPart
-        val pw = if (colonCredIdx >= 0) credPart.substring(colonCredIdx + 1) else ""
-
-        return UrlParts(h, p, dbPart, u, pw)
-    } catch (_: Exception) {
-        return UrlParts("", "", "", "", "")
-    }
+    DialectType.DUCKDB -> Triple(
+        "数据库文件路径（留空 = 内存库）",
+        "例如: /path/to/data.duckdb",
+        Icons.Default.FolderOpen,
+    )
+    DialectType.SQLITE -> Triple(
+        "数据库文件路径（留空 = 内存库）",
+        "例如: /path/to/data.db",
+        Icons.Default.FolderOpen,
+    )
+    else -> Triple("数据库", "例如: testdb", Icons.Default.Storage)
 }
 
 /** 测试 & 保存步骤 (普通流程 4 / 快速连接 3) */
@@ -1167,6 +1254,7 @@ private fun TestSaveStep(
     val confirmLabel = if (isQuickConnect) "连接" else "保存"
     val onConfirm: (ConnectionConfig) -> Unit =
         if (isQuickConnect) onQuickConnectDirect else onSave
+    val canConfirm = buildJdbcUrl(editingConnection).isNotBlank()
     val scope = rememberCoroutineScope()
     var testResult by remember { mutableStateOf<TestResult?>(null) }
     var isTesting by remember { mutableStateOf(false) }
@@ -1210,7 +1298,7 @@ private fun TestSaveStep(
                         isTesting = false
                     }
                 },
-                enabled = !isTesting && onTestConnection != null,
+                enabled = !isTesting && onTestConnection != null && canConfirm,
             ) {
                 if (isTesting) {
                     CircularProgressIndicator(
@@ -1265,7 +1353,10 @@ private fun TestSaveStep(
         ) {
             TextButton(onClick = onBack) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { onConfirm(editingConnection) }) {
+            Button(
+                onClick = { onConfirm(editingConnection) },
+                enabled = canConfirm,
+            ) {
                 Icon(
                     imageVector = if (isQuickConnect) Icons.Default.Bolt else Icons.Default.Save,
                     contentDescription = null,
@@ -1287,15 +1378,12 @@ private fun ConnectionSummary(connection: ConnectionConfig) {
         if (connection.connectionType == ConnectionType.CLIENT_SERVER) {
             SummaryRow("主机", connection.host)
             SummaryRow("端口", connection.displayPort.toString())
-        }
-        if (connection.database.isNotBlank()) {
-            SummaryRow("数据库", connection.database)
-        }
-        if (connection.connectionType == ConnectionType.CLIENT_SERVER) {
+            if (connection.database.isNotBlank()) {
+                SummaryRow("数据库", connection.database)
+            }
             SummaryRow("用户", connection.username)
-        }
-        if (connection.filePath.isNotBlank()) {
-            SummaryRow("文件路径", connection.filePath)
+        } else if (connection.database.isNotBlank()) {
+            SummaryRow(if (connection.connectionType == ConnectionType.IN_MEMORY) "数据库" else "目标", connection.database)
         }
         if (connection.jdbcUrl.isNotBlank()) {
             SummaryRow("JDBC URL", connection.jdbcUrl)

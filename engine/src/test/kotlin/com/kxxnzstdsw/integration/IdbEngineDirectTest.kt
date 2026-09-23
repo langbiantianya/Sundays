@@ -6,6 +6,7 @@ import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.SchemaRequest
 import com.kxxnzstdsw.grpc.SystemRequest
 import com.kxxnzstdsw.grpc.schemaListRequest
+import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.testutil.H2Fixture
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
@@ -88,6 +89,33 @@ class IdbEngineDirectTest : H2Fixture() {
 
             assertTrue(result.ok, "direct testConnection should succeed: ${result.error}")
             assertEquals("H2", result.driver)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun `IdbEngine disconnect releases the config pool and allows reconnecting`() = runBlocking {
+        val engine = newEngine()
+        try {
+            // 注意 DSL 内的 `jdbcUrl = jdbcUrl` 会自赋值到 builder 属性 —— 先取出局部值
+            val url = jdbcUrl
+            val urlOnly = com.kxxnzstdsw.grpc.connectionConfig {
+                jdbcUrl = url
+                user = "sa"
+            }
+
+            val first = engine.testConnection(urlOnly)
+            assertTrue(first.ok, "首次连接应成功: ${first.error}")
+            assertEquals(1, PoolManager.activePoolCount())
+
+            assertTrue(engine.disconnect(urlOnly), "disconnect 应释放 testConnection 建的池")
+            assertEquals(0, PoolManager.activePoolCount())
+
+            // 断开后仍可重连（池按需重建）
+            val second = engine.testConnection(urlOnly)
+            assertTrue(second.ok, "断开后重连应成功: ${second.error}")
+            assertEquals(1, PoolManager.activePoolCount())
         } finally {
             engine.close()
         }

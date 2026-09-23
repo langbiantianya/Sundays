@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构设计文档
 
-> **版本**：v2.9（与根 `../ARCHITECTURE.md` 同版本）
+> **版本**：v2.12（与根 `../ARCHITECTURE.md` 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 
@@ -320,14 +320,16 @@ LaunchedEffect(totalCount, pageSize, totalPages) {
 
 | 能力 | 说明 |
 |---|---|
-| **左侧连接列表** | LazyColumn 展示所有保存的连接，带方言图标、高亮选中、编辑/删除菜单 |
-| **右侧引导页面** | 普通 4 步 / 快速 3 步向导：基础信息 → 连接类型 → 连接详情 → 测试并保存（保存或连接） |
+| **左侧连接列表** | LazyColumn 展示所有保存的连接，带方言图标、状态色点（未连接 / 连接中 / 已连接 / 失败）、高亮选中、编辑/删除菜单 |
+| **右侧引导页面** | 普通 4 步 / 快速 3 步向导：基础信息 → 连接类型 → 连接详情 → 测试并保存（保存或连接）；`IDLE` 且有选中连接时改为**连接总览面板** |
+| **连接总览** | 选中连接的状态 + 连接信息 + 「连接」/「断开」/「编辑」/「删除」操作（`onConnect` / `onDisconnect` 回调注入） |
 | **方言支持** | MySQL / PostgreSQL / H2 / DuckDB / SQLite |
-| **连接类型** | CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED（按方言自动过滤） |
-| **JDBC URL 双向同步** | `CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤同时显示 5 个独立字段 + JDBC URL 文本框；`buildJdbcUrl` / `parseJdbcUrl` 互相转换；额外参数 (`?useSSL=false&...`) 始终保留 |
-| **持久化** | 保存到 `~/.config/sundays/connection.json`（JSON + kotlinx.serialization） |
+| **连接类型** | CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED（由 `DialectType.supportedConnectionTypes` 按方言过滤） |
+| **JDBC URL 折算（真相源）** | `JdbcUrl.kt` 的 `buildJdbcUrl(config, extraQuery)` / `parseJdbcUrl(url, dialect)` 覆盖全部 5 个方言；`CLIENT_SERVER` 显示 5 个字段 + URL 文本框双向同步，嵌入式方言用单一「目标」字段折算 URL；显式参数 (`?useSSL=false&...`) 始终保留，MySQL 无显式参数时补方言默认参数 |
+| **URL 缺失不可放行** | 字段不足以折算 URL 时「下一步」/「保存」/「连接」/「测试连接」全部禁用 —— 保证交给引擎的配置一定有合法 URL |
+| **持久化** | 保存到 `~/.config/sundays/connection.json`（JSON + kotlinx.serialization，仅落 `jdbcUrl` + 凭据，按 `version` 分派 v1/v2 并自动迁移） |
 | **快速连接不持久化** | `QUICK_CONNECT` 流程最后一步「连接」（`Bolt` 图标）调用 `onQuickConnectDirect`，**不写入** `ConnectionStorage` |
-| **测试连接** | `onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调注入；`TEST_SAVE` 步骤的「测试连接」按钮调用它（回调为 null 时按钮禁用）。组件本身**不依赖引擎** —— 由调用方在集成层（desktopApp）直连 `IdbEngine.testConnection` |
+| **测试连接** | `onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调注入；`TEST_SAVE` 步骤的「测试连接」按钮调用它（回调为 null 或 URL 非法时按钮禁用）。组件本身**不依赖引擎** —— 由调用方在集成层（desktopApp）直连 `IdbEngine` |
 | **步骤指示器** | 顶部进度条显示当前步骤 |
 
 ### 4.2 布局
@@ -365,26 +367,33 @@ data class ConnectionConfig(
     val dialect: DialectType,         // MYSQL / POSTGRESQL / H2 / DUCKDB / SQLITE
     val host: String = "",            // 主机地址 (CLIENT_SERVER)
     val port: Int? = null,            // 端口 (CLIENT_SERVER)
-    val database: String = "",        // 数据库名
+    val database: String = "",        // 库名 / 嵌入式库名 / 文件路径（引擎语义：EMBEDDED 系 URL 主体）
     val username: String = "",        // 用户名
     val password: String = "",        // 密码
     val connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
-    val filePath: String = "",        // 文件路径 (SQLite / H2 EMBEDDED)
-    val jdbcUrl: String = "",         // 完整 JDBC URL (如 jdbc:mysql://user:pass@host:3306/db?params)
+    val jdbcUrl: String = "",         // 完整 JDBC URL (如 jdbc:mysql://user:pass@host:3306/db?params) —— 真相源
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
 ```
 
-`jdbcUrl` 始终在 `CREDENTIALS` 步骤中作为双向同步载体：
-- **字段 → URL**：通过 `buildJdbcUrl(dialect, host, port, database, username, password)` 重建标准格式 `scheme://user:pass@host:port/db`，原有 `?额外参数` 通过 `substringAfter('?')` 拼接保留
-- **URL → 字段**：通过 `parseJdbcUrl(url, dialect)` 解析 `host` / `port` / `database` / `username` / `password`，反向写入字段状态；解析后用 `buildJdbcUrl` 重建干净格式回填 `jdbcUrl`
-- **循环防护**通过 `isSyncingFromFields` / `isSyncingFromUrl` 两个 boolean flag 实现
+`jdbcUrl` 是**唯一真相源**：引擎侧 `PoolManager` 收到非空 `jdbc_url` 时直接用它建池、方言由 URL scheme 反查，
+因此 UI 的所有字段编辑都必须折算到 URL 上（`JdbcUrl.kt`）：
+
+- **字段 → URL**：`buildJdbcUrl(config, extraQuery = "")` 按方言产出 URL
+  - `CLIENT_SERVER`：`scheme://[user[:pass]@]host[:port][/db][?params]`；无显式参数时补 MySQL 方言默认参数（`useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC`），显式参数（`extraQuery`）完全替代默认值
+  - `H2`：`jdbc:h2:mem:<db>;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE` / `jdbc:h2:file:<path>`
+  - `DuckDB`：`jdbc:duckdb:<path>`（空 = 内存库）；`SQLite`：`jdbc:sqlite:<path>`（空 = `:memory:`）
+  - 字段不足（CLIENT_SERVER 缺 host、H2 缺库名）→ **空串**，向导据此禁用放行按钮
+- **URL → 字段**：`parseJdbcUrl(url, dialect)` 解析 `host` / `port` / `database` / `username` / `password` /
+  `connectionType`（由 URL 形状反推，不识别时为 `UNKNOWN` → 加载端回退方言默认类型）
+- **与引擎的一致性**：URL 形状镜像 `engine` 侧方言的 `DatabaseDialect.buildJdbcUrl`；新增方言或改动 URL 规则时**两处同步**（`JdbcUrl.kt` 顶部有对照表）
+- **单调状态**：向导各步骤不再持有本地字段副本（名称 / 连接类型 / 凭据均经 `onUpdateEditingConnection` 直写调用方状态），因此不存在「字段改了但配置没变」的丢失路径；URL 文本框与字段互为投影，不需要循环防护 flag
 
 ### 4.4 持久化
 
 ```kotlin
-// 加载
+// 加载（按文件内 version 分派：2 = 精简格式；1 = 历史完整格式 → 折算 URL 后回写迁移）
 val connectionList = ConnectionStorage.load()
 
 // 添加/更新
@@ -396,6 +405,9 @@ val updated = ConnectionStorage.delete(id)
 
 **保存路径**: `~/.config/sundays/connection.json`
 
+落盘结构 `PersistedConnectionList`（v2）只含 `id` / `name` / `dialect` / `jdbcUrl` / `username` / `password` + 时间戳；
+`host` / `port` / `database` / `connectionType` 在加载时由 `parseJdbcUrl` 重建。
+
 ### 4.5 使用示例
 
 ```kotlin
@@ -403,15 +415,19 @@ var connectionList by remember { mutableStateOf(ConnectionStorage.load()) }
 var selectedConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
 var editingConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
 var wizardStep by remember { mutableStateOf(WizardStep.IDLE) }
+var statuses by remember { mutableStateOf<Map<String, ConnectionStatus>>(emptyMap()) }
 
 ConnectionManagerScreen(
     connections = connectionList.connections,
     selectedConnection = selectedConnection,
     editingConnection = editingConnection,
     wizardStep = wizardStep,
+    connectionStatuses = statuses,                 // 引擎侧会话状态（列表色点 + 总览）
     onSelectConnection = { selectedConnection = it },
     onNewConnection = {
+        // withDialect 立即套用方言默认值 + 折算 URL（新配置进入凭据步骤前即带合法 URL）
         editingConnection = ConnectionConfig(id = UUID.randomUUID().toString(), name = "新连接")
+            .withDialect(DialectType.MYSQL)
         wizardStep = WizardStep.BASIC_INFO
     },
     onEditConnection = { conn ->
@@ -423,16 +439,19 @@ ConnectionManagerScreen(
         editingConnection = null
         wizardStep = WizardStep.IDLE
     },
-    onDeleteConnection = { id ->
-        connectionList = ConnectionStorage.delete(id)
-        if (selectedConnection?.id == id) selectedConnection = null
+    onQuickConnectDirect = { config ->
+        // 快速连接不落盘：选中 + 由集成层直接连库
+        selectedConnection = config
     },
+    onDeleteConnection = { id -> connectionList = ConnectionStorage.delete(id) },
     onCancelEdit = {
         editingConnection = null
         wizardStep = WizardStep.IDLE
     },
     onWizardNext = { wizardStep = it },
     onWizardBack = { wizardStep = it },
+    onConnect = { config -> /* 集成层：IdbEngine.testConnection(config) */ },
+    onDisconnect = { config -> /* 集成层：IdbEngine.disconnect(config) */ },
     onTestConnection = { config ->
         // 集成层直连引擎（shared 不依赖 engine）：只传 URL + 凭据
         val resp = engine.testConnection(config.jdbcUrl, config.username, config.password)
@@ -453,23 +472,26 @@ ConnectionManagerScreen(
 
 | WizardStep | 内容 |
 |---|---|
-| `IDLE` | 空闲状态（未编辑） |
+| `IDLE` | 空闲状态：无选中连接时显示引导面板；有选中连接时显示**连接总览**（状态 + 连接/断开/编辑/删除） |
 | `QUICK_CONNECT` | 快速连接：选方言（仅快速连接流程） |
-| `BASIC_INFO` | 普通流程：连接名称 + 数据库方言选择 |
-| `CONNECTION_TYPE` | 普通流程：连接类型（CLIENT_SERVER / EMBEDDED / IN_MEMORY / FILE_BASED） |
-| `CREDENTIALS` | 主机/端口/数据库名/用户名/密码（默认填入 `localhost` + 方言默认端口）+ JDBC URL 文本框（双向同步） |
-| `TEST_SAVE` | 连接摘要（含 JDBC URL 行）+ 测试按钮 + 「保存」（NORMAL）或「连接」（QUICK_CONNECT） |
+| `BASIC_INFO` | 普通流程：连接名称 + 数据库方言选择（编辑直写 `editingConnection`，切换方言经 `withDialect` 重置并折算 URL） |
+| `CONNECTION_TYPE` | 普通流程：连接类型（选项来自 `DialectType.supportedConnectionTypes`；切换经 `withConnectionType` 重算 URL 形状） |
+| `CREDENTIALS` | `CLIENT_SERVER`：主机/端口/数据库名/用户名/密码 + JDBC URL 文本框（互为投影）；嵌入式系：单一目标字段（库名或文件路径）+ 只读折算 URL。缺字段时「下一步」禁用 |
+| `TEST_SAVE` | 连接摘要（含 JDBC URL 行）+ 测试按钮 + 「保存」（NORMAL）或「连接」（QUICK_CONNECT）；URL 非法时两者均禁用 |
 
-调用方负责维护 `wizardFlow` 并在切换入口（新建 / 快速连接 / 编辑）时同步设置：
+调用方负责维护 `wizardFlow` 并在切换入口（新建 / 快速连接 / 编辑）时同步设置 —— 三个入口回调本身就是「同时设置 flow」的地方：
 
 ```kotlin
-// 普通新建 → NORMAL 流程, 起始 BASIC_INFO
-onNewConnection = { wizardState = WizardState(..., wizardStep = BASIC_INFO, flow = NORMAL) }
+// 普通新建 → NORMAL 流程, 起始 BASIC_INFO（withDialect 套用默认值 + 折算 URL）
+onNewConnection = { wizard = WizardState(draft().withDialect(MYSQL), BASIC_INFO, NORMAL) }
 // 快速连接 → QUICK_CONNECT 流程, 起始 QUICK_CONNECT
-onQuickConnect = { wizardState = WizardState(..., wizardStep = QUICK_CONNECT, flow = QUICK_CONNECT) }
-// 编辑已有 → NORMAL 流程, 起始 BASIC_INFO
-onEditConnection = { conn -> wizardState = WizardState(conn, BASIC_INFO, NORMAL) }
+onQuickConnect = { wizard = WizardState(draft().withDialect(MYSQL), QUICK_CONNECT, QUICK_CONNECT) }
+// 编辑已有 → NORMAL 流程, 起始 BASIC_INFO（保留原配置）
+onEditConnection = { conn -> wizard = WizardState(conn, BASIC_INFO, NORMAL) }
 ```
+
+> 参考实现：`desktopApp/.../ConnectionSession.kt` 的 `newConnection()` / `quickConnect()` / `edit(config)`
+> 就是这三条语句（外加连接列表与引擎会话状态的管理）。
 
 ---
 
@@ -645,17 +667,19 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ## 7. 测试覆盖
 
-`shared/` 共 **71 项测试**，分布如下：
+`shared/` 共 **101 项测试**，分布如下：
 
 | 测试类 | 路径 | 项数 | 说明 |
 |---|---|---|---|
 | `LuaTokenizerTest` | `commonTest/.../editor/LuaTokenizerTest.kt` | 30 | Lua 关键字 / 字符串 / 注释 / 数字 tokenize |
-| `SqlTokenizerTest` | `commonTest/.../editor/SqlTokenizerTest.kt` | 9 | SQL 关键字 / 字符串 / 注释 tokenize |
-| `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 菜单） |
-| `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 18 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` 行为 |
+| `SqlTokenizerTest` | `commonTest/.../editor/SqlTokenizerTest.kt` | 23 | SQL 关键字 / 字符串 / 注释 tokenize |
+| `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
+| `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 18 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
+| `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SharedCommonTest` | `commonTest/.../SharedCommonTest.kt` | 1 | KMP 公共冒烟测试 |
+| `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `SharedLogicDesktopTest` | `jvmTest/.../SharedLogicDesktopTest.kt` | 1 | JVM 平台特定冒烟测试 |
-| **合计** | | **71** | **0 失败 / 0 错误** |
+| **合计** | | **101** | **0 失败 / 0 错误** |
 
 运行命令：
 

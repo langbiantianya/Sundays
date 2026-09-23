@@ -2,7 +2,7 @@
 
 面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库，与 `:engine` 解耦 —— 可在不带引擎依赖的情况下独立使用与测试。
 
-> **当前版本**：v2.11
+> **当前版本**：v2.12
 >
 > 内部架构与设计决策见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md)
 
@@ -26,9 +26,10 @@ shared/
 │   │   ├── DataTable.kt              主 composable（DataTable + 高度策略）
 │   │   └── TableModels.kt            TableColumn / TableRow / PageSize / DataTableTheme / ContextMenuState
 │   ├── connection/      连接管理（ConnectionManagerScreen + 配置持久化）
-│   │   ├── ConnectionManagerScreen.kt   主 composable（左侧列表 + 4 步 / 3 步引导向导 + 测试连接回调）
-│   │   ├── ConnectionConfig.kt          ConnectionConfig / DialectType / ConnectionType + 持久化精简模型
-│   │   └── ConnectionStorage.kt         ~/.config/sundays/connection.json（v2 格式，自动迁移 v1）
+│   │   ├── ConnectionManagerScreen.kt   主 composable（左侧列表 + 4 步 / 3 步引导向导 + 连接总览 + 状态点）
+│   │   ├── ConnectionConfig.kt          ConnectionConfig / DialectType / ConnectionType + 持久化精简模型 + withDialect/withConnectionType
+│   │   ├── JdbcUrl.kt                   字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，URL 为真相源）
+│   │   └── ConnectionStorage.kt         ~/.config/sundays/connection.json（按 version 分派 v1/v2，自动迁移）
 │   └── ui/              通用 UI 工具
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
@@ -50,8 +51,9 @@ shared/
 | `DataTable` | `commonMain/.../table/DataTable.kt` | 虚拟滚动数据表格；主键承载（数据库行标识） |
 | `ContextMenuState<T>` | `commonMain/.../ui/ContextMenu.kt` | 通用右键菜单状态（被 editor / table 共用） |
 | `Modifier.onRightClick` | `commonMain/.../ui/RightClick.kt` | 鼠标右键检测 modifier（基于 `awaitPointerEventScope`） |
-| `ConnectionManagerScreen` | `commonMain/.../connection/ConnectionManagerScreen.kt` | 连接管理（左侧列表 + 引导式配置向导）；回调注入，**不依赖 `:engine`** |
+| `ConnectionManagerScreen` | `commonMain/.../connection/ConnectionManagerScreen.kt` | 连接管理（左侧列表 + 引导式配置向导 + 连接总览）；回调注入，**不依赖 `:engine`** |
 | `ConnectionStorage` | `commonMain/.../connection/ConnectionStorage.kt` | 连接配置 JSON 持久化（`~/.config/sundays/connection.json`） |
+| `buildJdbcUrl` / `parseJdbcUrl` | `commonMain/.../connection/JdbcUrl.kt` | 连接字段 ↔ JDBC URL 折算（URL 是引擎侧真相源） |
 
 ---
 
@@ -126,6 +128,7 @@ var selected by remember { mutableStateOf<ConnectionConfig?>(null) }
 var editingConfig by remember { mutableStateOf<ConnectionConfig?>(null) }
 var wizardStep by remember { mutableStateOf(WizardStep.IDLE) }
 var wizardFlow by remember { mutableStateOf(WizardFlow.NORMAL) }
+var statuses by remember { mutableStateOf<Map<String, ConnectionStatus>>(emptyMap()) }
 
 ConnectionManagerScreen(
     connections = list.connections,
@@ -133,10 +136,17 @@ ConnectionManagerScreen(
     editingConnection = editingConfig,
     wizardStep = wizardStep,
     wizardFlow = wizardFlow,
+    connectionStatuses = statuses,                          // 引擎侧会话状态：列表色点 + 连接总览
     onSelectConnection = { selected = it },
-    onNewConnection = { /* editingConfig = 新配置; wizardStep = BASIC_INFO; flow = NORMAL */ },
-    onQuickConnect = { /* editingConfig = 新配置; wizardStep = QUICK_CONNECT; flow = QUICK_CONNECT */ },
-    onEditConnection = { /* editingConfig = it; wizardStep = BASIC_INFO; flow = NORMAL */ },
+    onNewConnection = {
+        // withDialect 套用方言默认值 + 折算 URL（进入凭据步骤即有合法 URL）
+        editingConfig = ConnectionConfig(id = UUID.randomUUID().toString(), name = "新连接")
+            .withDialect(DialectType.MYSQL)
+        wizardStep = WizardStep.BASIC_INFO
+        wizardFlow = WizardFlow.NORMAL
+    },
+    onQuickConnect = { /* 同上，wizardStep = QUICK_CONNECT; wizardFlow = QUICK_CONNECT */ },
+    onEditConnection = { /* editingConfig = it; wizardStep = BASIC_INFO; wizardFlow = NORMAL */ },
     onSaveConnection = { list = ConnectionStorage.upsert(it) },
     onQuickConnectDirect = { selected = it },              // 快速连接：不落盘
     onDeleteConnection = { list = ConnectionStorage.delete(it) },
@@ -144,6 +154,8 @@ ConnectionManagerScreen(
     onWizardNext = { wizardStep = it },
     onWizardBack = { /* 依 flow 计算上一步 */ },
     onUpdateEditingConnection = { editingConfig = it },
+    onConnect = { /* 集成层：IdbEngine.testConnection(cfg) —— 建池 + isValid */ },
+    onDisconnect = { /* 集成层：IdbEngine.disconnect(cfg) —— 释放连接池 */ },
     onTestConnection = { cfg ->
         // 由集成层直连引擎 —— shared 不依赖 :engine；回调为 null 时按钮禁用
         val resp = engine.testConnection(cfg.jdbcUrl, cfg.username, cfg.password)
@@ -153,6 +165,8 @@ ConnectionManagerScreen(
 ```
 
 > 调用方需自行维护 `WizardState(editingConnection, wizardStep, flow)`，并在切换入口（新建 / 快速连接 / 编辑）时**同步**设置 `flow` —— 详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §4.6。
+>
+> 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开」全链路。
 
 端到端 demo：连接管理见 [`main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt)（desktopApp 当前顶层仅渲染 `ConnectionManagerScreen`）。
 
@@ -177,7 +191,7 @@ ConnectionManagerScreen(
 # 构建（KMP：当前编译 jvm 目标）
 ./gradlew :shared:build
 
-# 跑测试（71 项）
+# 跑测试（101 项）
 ./gradlew :shared:jvmTest
 
 # 跑测试（等价）
@@ -186,9 +200,11 @@ ConnectionManagerScreen(
 
 测试分布：
 - `LuaTokenizerTest` — 30 项（Lua 关键字 / 字符串 / 注释 / 数字 tokenize）
-- `SqlTokenizerTest` — 9 项（SQL tokenize）
+- `SqlTokenizerTest` — 23 项（SQL tokenize）
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
 - `TableModelsTest` — 18 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
+- `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
+- `ConnectionStorageTest` — 4 项（jvmTest：持久化往返重建派生字段、upsert/delete、v1 → v2 迁移回写）
 - `SharedCommonTest` / `SharedLogicDesktopTest` — 各 1 项（KMP 冒烟测试）
 
 ---

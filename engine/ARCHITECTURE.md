@@ -1,4 +1,4 @@
-# Engine Architecture (V2.9)
+# Engine Architecture (V2.12)
 
 > 引擎模块（`engine/`）的内部架构设计文档，供在引擎内部工作的开发者使用。
 > 完整模块拓扑、构建/运行 CLI 与用户级 API 示例见 `engine/README.md`，项目整体架构与版本演进历史见根目录 `../ARCHITECTURE.md`。
@@ -78,13 +78,20 @@ class IdbEngine : AutoCloseable {
     suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse
     suspend fun testConnection(jdbcUrl: String, user: String = "", password: String = ""): SystemTestConnectionResponse
 
+    // v2.12 直连方法 —— 断开连接 = 释放该配置的连接池（含各 schema 维度）
+    suspend fun disconnect(config: ConnectionConfig): Boolean
+
     override fun close()
 }
 ```
 
 `IdbEngineImpl.handle`（gRPC 路径）在 v2.9 重构为**薄壳** — 直接桥接 `IdbEngine.handle`，消除重复路由路径。两条路径共享 `RequestDispatcher`，因此 envelope options（`traceId`/`dryRun`/`timeoutMs`）、stream frame assembly、`if_exists` 语义等横切关注点完全一致。
 
-**v2.11 — 连接生命周期直连方法**：`testConnection` 旁路 `handle()`，直接调 `SystemHandler.testConnection`，跳过 envelope 包装。首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— **这一步即“初始化连接”**；随后借一条连接做 JDBC `isValid(5)` 校验。池按 `PoolManager` 的 hash key（含 `jdbc_url`）缓存，重复调用不会重复建池。
+**v2.11 — 连接生命周期直连方法**：`testConnection` 旁路 `handle()`，直接调 `SystemHandler.testConnection`，跳过 envelope 包装。首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— **这一步即“初始化连接”**；随后借一条连接做 JDBC `isValid(5)` 校验。池按 `PoolManager` 的 pool key（含 `jdbc_url`）缓存，重复调用不会重复建池。
+
+**v2.12 — `disconnect` 与连接池可定位性**：`disconnect(config)` 直接调 `PoolManager.close(config)`，关闭该配置下**所有** schema 维度的池；与 `testConnection` 构成对称的连接生命周期（建池 / 释放池）。为此 pool key 由单段 hash 改为两段式 `sha256(配置)#sha256(schema)` —— 单段 hash 无法反查池归属（同一配置的 schema 池无法枚举），两段式让 `close(config)` 能按配置前缀定位。`PoolManager.activePoolCount()` 暴露当前活跃池数供诊断 / 集成测试断言。
+
+**v2.12 — 方言来源双通道**：`DialectLoader.loadFromDir` 先扫**应用类路径**（`ServiceLoader<DatabaseDialect>`，用 `DialectLoader` 自身类加载器），再扫 `dialects/` 目录（`URLClassLoader`，同名方言覆盖）。Direct 模式下 UI 与引擎同 JVM，方言插件作为普通依赖随应用类路径加载（`desktopApp` 的 `runtimeOnly(project(":dialect-*"))`），必须由同一类加载器解析 `DatabaseDialect` 接口实例；JAR 分发场景仍走目录加载。
 
 **v2.9 修复**：`RequestDispatcher.dispatch` 之前把 try/catch 放在 `flow{}` 内部，导致下游 `first()` / `takeWhile` 等短路算子取消时抛出的 `AbortFlowException` 被错误捕获并再次 emit，触发 *"Flow exception transparency violated"*。v2.9 把 try/catch 移到 `.catch{}` operator 外置，`AbortFlowException` 现在能正常向上传播，direct 调用方与 gRPC 调用方都受益。
 
@@ -96,11 +103,16 @@ class IdbEngine : AutoCloseable {
 
 为了解决无状态带来的频繁 TCP 握手开销，引擎内部实现基于 SHA-256 Hash Key 的智能缓存连接池。
 
-1. **连接复用**：根据传入的凭证（driver + host + port + user + password + database）生成 SHA-256 Hash，若缓存中已有对应的 HikariCP 实例且活跃，则直接复用。
+1. **连接复用**：根据传入的凭证生成 SHA-256 Hash，若缓存中已有对应的 HikariCP 实例且活跃，则直接复用。
+   pool key 为**两段式**：`sha256(driver:jdbcUrl:host:port:user:password:database)[#sha256(schema)]` ——
+   单段 hash 无法反查池归属，两段式让 `PoolManager.close(config)` 能按配置前缀定位该配置下**所有** schema 维度的池
+   （即 `IdbEngine.disconnect` 的实现基础）。
 2. **资源自动回收**：`idleTimeout` 设为 10 分钟，`minimumIdle` 为 0。若某个库 10 分钟无操作，该连接池将自动缩容直至完全销毁。
 3. **极限并发**：最大连接数 (`maximumPoolSize`) 限制为 5。
 4. **连接超时**：`connectionTimeout` 设为 5 秒。
 5. **最大生命周期**：`maxLifetime` 为 30 分钟。
+6. **显式断开**：`close(config)` 释放单个配置的全部池并返回是否真的关闭；`activePoolCount()` 报告当前活跃池数（诊断 / 测试）。
+   列表里删除连接、或编辑后字段变化时，调用方应显式断开，否则旧池（按旧字段建 key）将无法再被取用，只会随 `idleTimeout` 或进程退出回收。
 
 ### 3.4 导出子进程隔离机制 (Export Subprocess Isolation)
 
@@ -299,7 +311,7 @@ class IdbEngine : AutoCloseable {
 
 - **DatabaseDialect SPI**（`api` 模块）：定义所有数据库特定操作的抽象方法 + 连接元数据扩展（v2.8）
 - **MySQLDialect / PostgreSQLDialect / H2Dialect / DuckDBDialect（v2.7）/ SQLiteDialect（v2.8）**（独立插件模块）：具体方言实现
-- **DialectLoader**（`engine` 模块）：启动时扫描 `dialects/` 目录，通过 `ServiceLoader<DatabaseDialect>` 自动发现并注册；提供 `getAllDialects()` 返回所有已加载方言供 `SYSTEM.LIST_DRIVERS` 路由使用
+- **DialectLoader**（`engine` 模块）：通过 `ServiceLoader<DatabaseDialect>` 发现并注册方言，来源两条：**应用类路径**（Direct 模式 / 开发运行的方言插件随类路径加载）与 **`dialects/` 目录**（JAR 分发的插件 JAR，同名覆盖类路径版本）；提供 `getAllDialects()` 返回所有已加载方言供 `SYSTEM.LIST_DRIVERS` 路由使用
 
 **关键事实**（v2.8）：五个方言均完整实现了 SPI 接口的**全部方法**（`listRoutines`、`getRoutineInfo`、`callRoutine`、`validateRoutineDDL`、`debugRoutine`、`createRoutine`、`dropRoutine` 等），不再有占位实现；并且**全部声明**各自连接元数据（`displayName` / `connectionType` / `requiresHost` / `defaultPort` / `capabilities` 等）。
 
@@ -719,7 +731,7 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 
 ## 7. Implementation Status — Engine Tests
 
-**`engine:test` — 174 测试全通过（0 失败 / 0 错误；v2.9 新增 IdbEngineDirectTest 4 项）**：
+**`engine:test` — 182 测试全通过（0 失败 / 0 错误；1 项 Windows-only 跳过）**：
 
 | 测试套件 | 数量 | 范围 |
 |---|---|---|
@@ -728,8 +740,8 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 | `ipc/TcpIpcTransportIntegrationTest` | 1 | TCP loopback + gRPC round-trip |
 | `ipc/UnixSocketIpcTransportIntegrationTest` | 2 | UDS + gRPC round-trip（`@EnabledOnOs(LINUX, MAC, FREEBSD)`） |
 | `ipc/NamedPipeIpcTransportIntegrationTest` | 2 | 客户端 channel + serverBuilder 限制 |
-| `pool/PoolManagerTest` | 11 | SHA-256 key + closeAll |
-| `loader/DialectLoaderTest` | 7 | SPI 自动发现 + JDBC URL 前缀反查 |
+| `pool/PoolManagerTest` | 13 | pool key 隔离 + `close(config)` 按配置释放（可定位 schema 维度池）+ closeAll |
+| `loader/DialectLoaderTest` | 8 | SPI 自动发现（类路径 + 目录）+ JDBC URL 前缀反查 |
 | `integration/*HandlerIntegrationTest` | 62 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler） |
 | `integration/TypedRequestEnvelopeIntegrationTest` | 7 | 端到端 typed Request → dispatcher → typed Response |
 | `integration/UserGrantsIntegrationTest` | 2 | USER.GRANTS 路由，H2 限制场景 |
@@ -740,7 +752,7 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 | `integration/DuckDBHandlerIntegrationTest` | 27 | DuckDB 端到端：SCHEMA/TABLE/DATA/SQL/VIEW/INDEX/FK/FUNCTION/SYSTEM/LOCAL FILES/EXPORT（v2.7 新增） |
 | `integration/SQLiteHandlerIntegrationTest` | 7 | SQLite 端到端：SCHEMA/TABLE/DATA/VIEW/INDEX/SYSTEM（v2.8 新增） |
 | `integration/SystemListDriversIntegrationTest` | 8 | LIST_DRIVERS 元数据枚举 + 5 方言分别验证（v2.8 新增） |
-| `integration/IdbEngineDirectTest` | 4 | Direct 模式 facade 契约测试：非流式 / `invoke` 便捷 / 错误传播 / bootstrap 幂等（v2.9 新增） |
-| **合计** | **174** | — |
+| `integration/IdbEngineDirectTest` | 5 | Direct 模式 facade 契约测试：非流式 / `invoke` 便捷 / URL-only 建池 / 错误传播 / `disconnect` 释放池 / bootstrap 幂等 |
+| **合计** | **182** | — |
 
-> **方言插件测试**（位于 `dialect-*/test/`，不属于 `engine:test`）：`dialect-h2` 63 项 / `dialect-duckdb` 81 项（v2.7 新增）/ `dialect-sqlite` 62 项（v2.8 新增）。完整跨模块统计：**380 测试全通过**（1 个 Windows-only skip）。
+> **方言插件测试**（位于 `dialect-*/test/`，不属于 `engine:test`）：`dialect-h2` 63 项 / `dialect-duckdb` 81 项（v2.7 新增）/ `dialect-sqlite` 62 项（v2.8 新增）。完整跨模块统计：**388 测试全通过**（1 个 Windows-only skip）；另有 `desktopApp` 的 3 项 Compose UI 端到端测试（`ConnectionManagerFlowTest`：连接流程 / 名称与 URL 落盘 / 无 URL 的遗留配置不可连接）。
