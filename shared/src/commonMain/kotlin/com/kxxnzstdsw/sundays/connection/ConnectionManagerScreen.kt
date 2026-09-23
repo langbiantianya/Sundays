@@ -985,6 +985,7 @@ private fun CredentialsStep(
                     value = username,
                     onValueChange = {
                         username = it
+                        syncToUrl()
                         apply()
                     },
                     label = { Text("用户名") },
@@ -999,6 +1000,7 @@ private fun CredentialsStep(
                     value = password,
                     onValueChange = {
                         password = it
+                        syncToUrl()
                         apply()
                     },
                     label = { Text("密码") },
