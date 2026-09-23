@@ -1288,6 +1288,9 @@ private fun ConnectionSummary(connection: ConnectionConfig) {
         if (connection.filePath.isNotBlank()) {
             SummaryRow("文件路径", connection.filePath)
         }
+        if (connection.jdbcUrl.isNotBlank()) {
+            SummaryRow("JDBC URL", connection.jdbcUrl)
+        }
     }
 }
 
