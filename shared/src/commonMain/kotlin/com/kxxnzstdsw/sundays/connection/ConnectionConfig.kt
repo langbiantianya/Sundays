@@ -115,3 +115,26 @@ data class ConnectionList(
     val connections: List<ConnectionConfig> = emptyList(),
     val version: Int = 1,
 )
+
+/**
+ * 持久化用的精简模型 —— 仅保存 id / name / dialect / jdbcUrl / username / password / 时间戳
+ * `host` / `port` / `database` / `connectionType` / `filePath` 在加载后从 `jdbcUrl` 重新解析得出
+ */
+@Serializable
+data class PersistedConnectionConfig(
+    val id: String,
+    val name: String,
+    val dialect: DialectType,
+    val jdbcUrl: String,
+    val username: String = "",
+    val password: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+/** 持久化列表 wrapper */
+@Serializable
+data class PersistedConnectionList(
+    val connections: List<PersistedConnectionConfig> = emptyList(),
+    val version: Int = 2,
+)

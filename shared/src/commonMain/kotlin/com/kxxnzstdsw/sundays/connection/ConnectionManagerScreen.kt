@@ -1073,7 +1073,7 @@ private fun CredentialsStep(
 }
 
 /** 从 individual fields 构建 JDBC URL */
-private fun buildJdbcUrl(
+internal fun buildJdbcUrl(
     dialect: DialectType,
     host: String,
     port: String,
@@ -1097,7 +1097,7 @@ private fun buildJdbcUrl(
 }
 
 /** 从 JDBC URL 解析 host / port / database（仅处理 MySQL / PostgreSQL） */
-private data class UrlParts(
+internal data class UrlParts(
     val host: String,
     val port: String,
     val database: String,
@@ -1105,7 +1105,7 @@ private data class UrlParts(
     val password: String,
 )
 
-private fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
+internal fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
     if (url.isBlank()) return UrlParts("", "", "", "", "")
     try {
         val scheme = when (dialect) {
