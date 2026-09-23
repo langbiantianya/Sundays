@@ -361,6 +361,11 @@ private fun ConnectionWizardPanel(
                     editingConnection = config,
                     stepIndex = stepIndexOf(wizardStep, wizardFlow),
                     totalSteps = totalSteps,
+                    onDialectChange = { newDialect ->
+                        onUpdateEditingConnection(
+                            ConnectionConfig.resetFor(newDialect, config)
+                        )
+                    },
                     onNext = { onWizardNext(WizardStep.CONNECTION_TYPE) },
                     onCancel = onCancelEdit,
                 )
@@ -493,72 +498,35 @@ private fun QuickConnectStep(
                 description = "客户端-服务器模式",
                 port = 3306,
                 icon = Icons.Default.Storage,
-                onClick = {
-                    onSelectDialect(
-                        editingConnection.copy(
-                            dialect = DialectType.MYSQL,
-                            connectionType = ConnectionType.CLIENT_SERVER,
-                            port = 3306,
-                        )
-                    )
-                },
+                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.MYSQL, editingConnection)) },
             )
             QuickConnectCard(
                 title = "PostgreSQL",
                 description = "客户端-服务器模式",
                 port = 5432,
                 icon = Icons.Default.Storage,
-                onClick = {
-                    onSelectDialect(
-                        editingConnection.copy(
-                            dialect = DialectType.POSTGRESQL,
-                            connectionType = ConnectionType.CLIENT_SERVER,
-                            port = 5432,
-                        )
-                    )
-                },
+                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.POSTGRESQL, editingConnection)) },
             )
             QuickConnectCard(
                 title = "H2",
                 description = "内存数据库",
                 port = null,
                 icon = Icons.Default.Memory,
-                onClick = {
-                    onSelectDialect(
-                        editingConnection.copy(
-                            dialect = DialectType.H2,
-                            connectionType = ConnectionType.IN_MEMORY,
-                        )
-                    )
-                },
+                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.H2, editingConnection)) },
             )
             QuickConnectCard(
                 title = "DuckDB",
                 description = "嵌入式 OLAP",
                 port = null,
                 icon = Icons.Default.Analytics,
-                onClick = {
-                    onSelectDialect(
-                        editingConnection.copy(
-                            dialect = DialectType.DUCKDB,
-                            connectionType = ConnectionType.EMBEDDED,
-                        )
-                    )
-                },
+                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.DUCKDB, editingConnection)) },
             )
             QuickConnectCard(
                 title = "SQLite",
                 description = "文件数据库",
                 port = null,
                 icon = Icons.Default.FolderOpen,
-                onClick = {
-                    onSelectDialect(
-                        editingConnection.copy(
-                            dialect = DialectType.SQLITE,
-                            connectionType = ConnectionType.FILE_BASED,
-                        )
-                    )
-                },
+                onClick = { onSelectDialect(ConnectionConfig.resetFor(DialectType.SQLITE, editingConnection)) },
             )
         }
 
@@ -640,6 +608,7 @@ private fun BasicInfoStep(
     editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
+    onDialectChange: (DialectType) -> Unit,
     onNext: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -671,7 +640,12 @@ private fun BasicInfoStep(
                 DialectOption(
                     dialect = d,
                     isSelected = dialect == d,
-                    onClick = { dialect = d },
+                    onClick = {
+                        if (d != dialect) {
+                            dialect = d
+                            onDialectChange(d)
+                        }
+                    },
                 )
             }
         }

@@ -49,6 +49,33 @@ data class ConnectionConfig(
         ConnectionType.IN_MEMORY -> "mem:$database"
         ConnectionType.UNKNOWN -> ""
     }
+
+    companion object {
+        /** 方言 → 默认连接类型 + 默认端口 */
+        fun defaultsFor(dialect: DialectType): Pair<ConnectionType, Int?> = when (dialect) {
+            DialectType.MYSQL -> ConnectionType.CLIENT_SERVER to 3306
+            DialectType.POSTGRESQL -> ConnectionType.CLIENT_SERVER to 5432
+            DialectType.H2 -> ConnectionType.IN_MEMORY to null
+            DialectType.DUCKDB -> ConnectionType.EMBEDDED to null
+            DialectType.SQLITE -> ConnectionType.FILE_BASED to null
+            DialectType.UNKNOWN -> ConnectionType.UNKNOWN to null
+        }
+
+        /** 方言切换时重置为该方言的默认配置 */
+        fun resetFor(newDialect: DialectType, existing: ConnectionConfig): ConnectionConfig {
+            val (defaultType, defaultPort) = defaultsFor(newDialect)
+            return existing.copy(
+                dialect = newDialect,
+                connectionType = defaultType,
+                port = defaultPort,
+                host = if (defaultType == ConnectionType.CLIENT_SERVER) existing.host.ifBlank { "localhost" } else "",
+                database = if (defaultType == ConnectionType.CLIENT_SERVER) existing.database else "",
+                password = "",
+                filePath = "",
+                jdbcUrl = "",
+            )
+        }
+    }
 }
 
 /** 数据库方言类型 */
