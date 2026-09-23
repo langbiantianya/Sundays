@@ -23,6 +23,14 @@ interface DatabaseDialect {
      */
     fun buildJdbcUrl(host: String, port: Int, database: String): String
 
+    /**
+     * 该方言的 JDBC URL 前缀（如 `jdbc:mysql:`）—— 用于从裸 JDBC URL 反查方言实例。
+     *
+     * 默认按 `jdbc:<driverName 小写>:` 推导；不满足该约定的方言**必须**显式覆盖，
+     * 否则仅凭 URL 无法定位方言。
+     */
+    val jdbcUrlPrefix: String get() = "jdbc:${driverName.lowercase()}:"
+
     // region ─────── 连接元数据（v2.8，前端表单渲染用） ───────
 
     /**

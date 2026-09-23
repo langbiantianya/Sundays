@@ -9,6 +9,7 @@ class PostgreSQLDialect : DatabaseDialect {
     private val logger = LoggerFactory.getLogger(PostgreSQLDialect::class.java)
     override val driverName = "Postgresql"
     override val jdbcDriverClassName = "org.postgresql.Driver"
+    override val jdbcUrlPrefix = "jdbc:postgresql:"
 
     // v2.8: 前端连接表单元数据
     override val displayName = "PostgreSQL"

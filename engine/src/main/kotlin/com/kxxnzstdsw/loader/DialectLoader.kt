@@ -82,6 +82,20 @@ object DialectLoader {
     }
 
     /**
+     * 通过 JDBC URL 前缀反查方言实例（无匹配返回 null）。
+     *
+     * 前缀由 [DatabaseDialect.jdbcUrlPrefix] 声明；多个方言同时匹配时取**最长前缀**，
+     * 以支持前缀嵌套（如 `jdbc:h2:` 与更具体的 `jdbc:h2:tcp:`）。
+     */
+    fun getDialectByJdbcUrl(jdbcUrl: String): DatabaseDialect? {
+        val url = jdbcUrl.trim()
+        if (url.isEmpty()) return null
+        return dialects.values
+            .filter { it.jdbcUrlPrefix.isNotBlank() && url.startsWith(it.jdbcUrlPrefix, ignoreCase = true) }
+            .maxByOrNull { it.jdbcUrlPrefix.length }
+    }
+
+    /**
      * 列出所有已加载的方言实例（v2.8 新增 — 用于前端动态渲染连接表单）。
      *
      * 返回的是当前快照，按 driverName 排序保证稳定顺序。

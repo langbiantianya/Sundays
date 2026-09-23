@@ -17,6 +17,7 @@ import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStorage
+import com.kxxnzstdsw.sundays.connection.TestResult
 import com.kxxnzstdsw.sundays.connection.WizardFlow
 import com.kxxnzstdsw.sundays.connection.WizardStep
 import kotlinx.coroutines.CoroutineScope
@@ -43,13 +44,13 @@ fun main() = application {
         MaterialTheme(
             colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
         ) {
-            MainScreen()
+            MainScreen(engine)
         }
     }
 }
 
 @Composable
-private fun MainScreen() {
+private fun MainScreen(engine: IdbEngine) {
     var connectionList by remember { mutableStateOf(ConnectionStorage.load()) }
     var selectedConnection by remember { mutableStateOf<ConnectionConfig?>(null) }
     var wizardState by remember {
@@ -151,6 +152,16 @@ private fun MainScreen() {
         },
         onUpdateEditingConnection = { config ->
             wizardState = wizardState.copy(editingConnection = config)
+        },
+        onTestConnection = { config ->
+            // 直连引擎（非 gRPC / 非子进程）：启用/复用连接池并做一次 isValid 校验。
+            // 只传 jdbcUrl + 凭据，方言由 URL scheme 反查。
+            val result = engine.testConnection(
+                jdbcUrl = config.jdbcUrl,
+                user = config.username,
+                password = config.password,
+            )
+            TestResult(success = result.ok, message = result.error)
         },
         modifier = Modifier.fillMaxSize().safeContentPadding(),
     )

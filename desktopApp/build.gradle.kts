@@ -17,6 +17,12 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
 
+    // :engine 以 implementation 声明 protobuf/grpc，不传递给消费方编译类路径。
+    // 集成层需要 typed proto 类型（ConnectionConfig / SystemTestConnectionResponse / Response）
+    // 才能调用 facade 的 Direct 模式 API —— 见 engine/README.md §Dual-Mode Architecture。
+    implementation(libs.protobuf.java)
+    implementation(libs.protobuf.kotlin.lite)
+
     implementation(libs.compose.uiToolingPreview)
 }
 

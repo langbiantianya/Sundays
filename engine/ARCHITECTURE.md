@@ -73,11 +73,18 @@ class IdbEngine : AutoCloseable {
     constructor(driversDir: File = File("drivers"), dialectsDir: File = File("dialects"))
     fun handle(request: Request): Flow<Response>
     suspend fun invoke(connection: ConnectionConfig, configure: RequestKt.Dsl.() -> Unit): Response
+
+    // v2.11 直连方法 —— 不经 gRPC / IPC，也不经 RequestDispatcher envelope
+    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse
+    suspend fun testConnection(jdbcUrl: String, user: String = "", password: String = ""): SystemTestConnectionResponse
+
     override fun close()
 }
 ```
 
 `IdbEngineImpl.handle`（gRPC 路径）在 v2.9 重构为**薄壳** — 直接桥接 `IdbEngine.handle`，消除重复路由路径。两条路径共享 `RequestDispatcher`，因此 envelope options（`traceId`/`dryRun`/`timeoutMs`）、stream frame assembly、`if_exists` 语义等横切关注点完全一致。
+
+**v2.11 — 连接生命周期直连方法**：`testConnection` 旁路 `handle()`，直接调 `SystemHandler.testConnection`，跳过 envelope 包装。首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— **这一步即“初始化连接”**；随后借一条连接做 JDBC `isValid(5)` 校验。池按 `PoolManager` 的 hash key（含 `jdbc_url`）缓存，重复调用不会重复建池。
 
 **v2.9 修复**：`RequestDispatcher.dispatch` 之前把 try/catch 放在 `flow{}` 内部，导致下游 `first()` / `takeWhile` 等短路算子取消时抛出的 `AbortFlowException` 被错误捕获并再次 emit，触发 *"Flow exception transparency violated"*。v2.9 把 try/catch 移到 `.catch{}` operator 外置，`AbortFlowException` 现在能正常向上传播，direct 调用方与 gRPC 调用方都受益。
 
@@ -230,6 +237,7 @@ class IdbEngine : AutoCloseable {
 | `schema` | `string` | 可选 — PG search_path 上下文；H2 视为 schema 名；MySQL 忽略 |
 | `use_ssl` | `bool` | 是否启用 SSL |
 | `properties` | `map<string,string>` | JDBC 扩展参数 / SSH 配置 |
+| `jdbc_url` | `string` | **v2.11** — 完整 JDBC URL。非空时 `PoolManager` 直接用它建池，`host`/`port`/`database` 被忽略；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`）。允许调用方仅凭 URL 初始化连接 |
 
 ### 4.2 统一响应体 (Response Envelope)
 
@@ -483,6 +491,10 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 
 成功 Response: `{"ok":true,"driver":"Mysql","host":"127.0.0.1","port":3306,"database":"mysql"}`；失败 Response: `{"ok":false,"error":"Communications link failure..."}`
 
+**v2.11 — 仅凭 JDBC URL**：`connection.jdbc_url` 非空时**只依赖 URL**，`driver`/`host`/`port`/`database` 全部忽略；响应中的 `driver` 取自 URL 反查出的方言。URL 前缀无匹配方言时返回 `{"ok":false,"error":"No dialect plugin matches JDBC URL: ..."}`。
+
+**直连调用**：KMP Desktop 可跳过 gRPC 与 `RequestDispatcher`，直接调 `IdbEngine.testConnection(jdbcUrl, user, password)`；该调用同时完成连接池初始化。
+
 #### LIST_DRIVERS — 枚举已加载方言的连接元数据（v2.8 起新增，无需 connection）
 
 返回所有 `DialectLoader` 注册的方言的连接配置元数据，**供前端动态渲染"新建连接"表单**——不需要硬编码 driver / port / 是否需要 user 等信息。
@@ -717,8 +729,8 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 | `ipc/UnixSocketIpcTransportIntegrationTest` | 2 | UDS + gRPC round-trip（`@EnabledOnOs(LINUX, MAC, FREEBSD)`） |
 | `ipc/NamedPipeIpcTransportIntegrationTest` | 2 | 客户端 channel + serverBuilder 限制 |
 | `pool/PoolManagerTest` | 11 | SHA-256 key + closeAll |
-| `loader/DialectLoaderTest` | 5 | SPI 自动发现 |
-| `integration/*HandlerIntegrationTest` | 60 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler） |
+| `loader/DialectLoaderTest` | 7 | SPI 自动发现 + JDBC URL 前缀反查 |
+| `integration/*HandlerIntegrationTest` | 62 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler） |
 | `integration/TypedRequestEnvelopeIntegrationTest` | 7 | 端到端 typed Request → dispatcher → typed Response |
 | `integration/UserGrantsIntegrationTest` | 2 | USER.GRANTS 路由，H2 限制场景 |
 | `integration/DataGenerateIntegrationTest` | 2 | DATA.GENERATE 流式进度 + 错误路径 |

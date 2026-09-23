@@ -36,6 +36,7 @@ class DuckDBDialect : DatabaseDialect {
 
     override val driverName = "Duckdb"
     override val jdbcDriverClassName = "org.duckdb.DuckDBDriver"
+    override val jdbcUrlPrefix = "jdbc:duckdb:"
 
     // v2.8: 前端连接表单元数据
     override val displayName = "DuckDB (Embedded OLAP)"

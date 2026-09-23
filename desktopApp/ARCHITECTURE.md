@@ -27,15 +27,15 @@ desktopApp/
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `build.gradle.kts` | 31 | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 158 | 应用入口（`application { Window { MainScreen() } }`）；`MainScreen` 维护 `WizardState` + `connectionList` + `selectedConnection` state；实现 `onSaveConnection` / `onQuickConnectDirect` / `onDeleteConnection` / `onUpdateEditingConnection` 等回调 |
+| `build.gradle.kts` | 38 | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖 + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；原生分发目标 `Dmg` + `Msi` + `Deb` |
+| `main.kt` | 178 | 应用入口（`application { Window { MainScreen(engine) } }`）；`MainScreen` 维护 `WizardState` + `connectionList` + `selectedConnection` state；实现 `onSaveConnection` / `onQuickConnectDirect` / `onTestConnection` / `onDeleteConnection` / `onUpdateEditingConnection` 等回调 |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()` + `engineScope`、创建 `Window`、安装 `MaterialTheme`、渲染 `MainScreen` |
-| `MainScreen()` | private `@Composable` | 顶层屏幕：维护 `WizardState(editingConnection, wizardStep, flow)` + `connectionList` + `selectedConnection`，实现所有 `ConnectionManagerScreen` 回调，调用 `ConnectionManagerScreen` |
+| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()` + `engineScope`、创建 `Window`、安装 `MaterialTheme`、渲染 `MainScreen(engine)` |
+| `MainScreen(engine)` | private `@Composable` | 顶层屏幕：维护 `WizardState(editingConnection, wizardStep, flow)` + `connectionList` + `selectedConnection`，实现所有 `ConnectionManagerScreen` 回调（含 `onTestConnection` 直连引擎），调用 `ConnectionManagerScreen` |
 | `WizardState` | private `data class` | 三字段原子更新容器：`ConnectionConfig?` + `WizardStep` + `WizardFlow` |
 | `isSystemInDarkTheme()` | private `@Composable` | 包装 `androidx.compose.foundation.isSystemInDarkTheme()`（避免导入冲突） |
 
@@ -106,11 +106,23 @@ ConnectionManagerScreen(
         onUpdateEditingConnection = { config ->
             wizardState = wizardState.copy(editingConnection = config)
         },
+        onTestConnection = { config ->
+            // 直连引擎（非 gRPC / 非子进程）：首次调用建连接池并做 isValid 校验。
+            // 只传 jdbcUrl + 凭据，方言由 URL scheme 反查。
+            val result = engine.testConnection(
+                jdbcUrl = config.jdbcUrl,
+                user = config.username,
+                password = config.password,
+            )
+            TestResult(success = result.ok, message = result.error)
+        },
         // ...
     )
 ```
 
 `onSaveConnection` 与 `onQuickConnectDirect` 区别在于是否持久化：前者走 JSON 持久化，后者仅在内存中设为 `selectedConnection`（适合临时调试、演示场景）。
+
+`onTestConnection` 是**连接初始化**的唯一入口 —— `IdbEngine.testConnection` 旁路 gRPC 与 `RequestDispatcher`，直接调 `SystemHandler`；首次调用用 `jdbc_url` 建 HikariCP 池（这一步就是“初始化连接”），之后按 hash key 复用。
 
 ---
 
@@ -144,6 +156,11 @@ Window(
 
 ```kotlin
 implementation(project(":engine"))    // 直接依赖，无 IPC transport 依赖
+// :engine 以 implementation 声明 protobuf/grpc，不传递给消费方编译类路径 —— 集成层
+// 需要 typed proto 类型（ConnectionConfig / SystemTestConnectionResponse / Response）才能
+// 调用 facade 的 Direct 模式 API，因此显式补齐：
+implementation(libs.protobuf.java)
+implementation(libs.protobuf.kotlin.lite)
 ```
 
 引擎作为**库**被引入，与 Compose UI **共享同一个 JVM、同一组类加载器、同一个 GC 堆**。调用方只需：

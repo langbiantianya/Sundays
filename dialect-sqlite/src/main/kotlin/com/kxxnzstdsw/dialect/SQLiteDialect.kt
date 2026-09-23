@@ -33,6 +33,7 @@ class SQLiteDialect : DatabaseDialect {
 
     override val driverName = "Sqlite"
     override val jdbcDriverClassName = "org.sqlite.JDBC"
+    override val jdbcUrlPrefix = "jdbc:sqlite:"
 
     // v2.8: 前端连接表单元数据
     override val displayName = "SQLite (Embedded)"

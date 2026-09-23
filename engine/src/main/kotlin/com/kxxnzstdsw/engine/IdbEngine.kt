@@ -5,7 +5,10 @@ import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.grpc.Request
 import com.kxxnzstdsw.grpc.RequestKt
 import com.kxxnzstdsw.grpc.Response
+import com.kxxnzstdsw.grpc.SystemTestConnectionResponse
+import com.kxxnzstdsw.grpc.connectionConfig
 import com.kxxnzstdsw.grpc.request
+import com.kxxnzstdsw.handlers.SystemHandler
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.loader.DriverLoader
 import com.kxxnzstdsw.pool.PoolManager
@@ -98,6 +101,34 @@ class IdbEngine(
         }
         return result ?: error("No terminal response received")
     }
+
+    /**
+     * 测试 / 初始化连接 —— **直连**：不经 gRPC server、不经 IPC transport，也不经
+     * [RequestDispatcher] 的 envelope（无 traceId / dryRun / timeoutMs 包装），
+     * 直接调用 [SystemHandler.testConnection]。
+     *
+     * 首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— 这一步即“初始化连接”；
+     * 随后借出一条连接做 JDBC `isValid(5)` 校验。池按 [PoolManager] 的 hash key 缓存，
+     * 重复调用不会重复建池。
+     *
+     * `config.jdbcUrl` 非空时**只依赖 URL**：方言由 URL scheme 反查，
+     * `driver` / `host` / `port` / `database` 均被忽略。
+     */
+    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse =
+        SystemHandler.testConnection(config)
+
+    /** [testConnection] 的便捷重载 —— 仅凭 JDBC URL + 凭据（driver 由 URL scheme 反查）。 */
+    suspend fun testConnection(
+        jdbcUrl: String,
+        user: String = "",
+        password: String = "",
+    ): SystemTestConnectionResponse = testConnection(
+        connectionConfig {
+            this.jdbcUrl = jdbcUrl
+            this.user = user
+            this.password = password
+        }
+    )
 
     /**
      * 关闭资源 — 调用 PoolManager.closeAll() / DriverLoader.closeAll() / DialectLoader.closeAll()。

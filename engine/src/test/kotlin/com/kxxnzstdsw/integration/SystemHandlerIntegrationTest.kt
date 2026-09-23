@@ -1,10 +1,12 @@
 package com.kxxnzstdsw.integration
 
+import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.handlers.SystemHandler
 import com.kxxnzstdsw.testutil.H2Fixture
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -31,6 +33,35 @@ class SystemHandlerIntegrationTest : H2Fixture() {
         assertTrue(result.ok)
         assertEquals("H2", result.driver)
         assertEquals("", result.error, "no error on success")
+    }
+
+    @Test
+    fun `testConnection works with JDBC-URL-only config`() = runBlocking {
+        // 只给 jdbcUrl + 凭据 —— driver/host/port/database 全空，方言由 URL scheme 反查
+        val urlOnly = ConnectionConfig.newBuilder()
+            .setJdbcUrl(jdbcUrl)
+            .setUser("sa")
+            .build()
+
+        val result = SystemHandler.testConnection(urlOnly)
+
+        assertTrue(result.ok, "URL-only config should connect: ${result.error}")
+        assertEquals("H2", result.driver, "driver is reported from the URL-resolved dialect")
+    }
+
+    @Test
+    fun `testConnection fails with readable error when url matches no dialect`() = runBlocking {
+        val bogus = ConnectionConfig.newBuilder()
+            .setJdbcUrl("jdbc:oracle:thin:@localhost:1521/xe")
+            .build()
+
+        val result = SystemHandler.testConnection(bogus)
+
+        assertFalse(result.ok)
+        assertTrue(
+            result.error.contains("No dialect plugin matches"),
+            "expected dialect-resolution error, got: ${result.error}",
+        )
     }
 
     @Test

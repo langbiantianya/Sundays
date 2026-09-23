@@ -7,6 +7,7 @@ import java.sql.Connection
 class MySQLDialect : DatabaseDialect {
     override val driverName = "Mysql"
     override val jdbcDriverClassName = "com.mysql.cj.jdbc.Driver"
+    override val jdbcUrlPrefix = "jdbc:mysql:"
 
     // v2.8: 前端连接表单元数据
     override val displayName = "MySQL"

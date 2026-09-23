@@ -61,6 +61,11 @@ message ConnectionConfig {
   string schema    = 7;
   bool   use_ssl   = 8;
   map<string, string> properties = 9;
+
+  // v2.11: 完整 JDBC URL（如 "jdbc:mysql://user@host:3306/db?useSSL=false"）。
+  // 非空时 PoolManager 直接用它建立连接池，host/port/database 被忽略，
+  // 方言由 URL scheme 反查（DialectLoader.getDialectByJdbcUrl）。
+  string jdbc_url  = 10;
 }
 
 // Column definition used by TABLE.CREATE and TABLE.UPDATE.

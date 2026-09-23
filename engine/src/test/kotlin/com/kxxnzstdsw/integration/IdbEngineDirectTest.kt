@@ -79,6 +79,21 @@ class IdbEngineDirectTest : H2Fixture() {
     }
 
     @Test
+    fun `IdbEngine testConnection initializes pool from jdbcUrl only`() = runBlocking {
+        val engine = newEngine()
+        try {
+            // 只传 JDBC URL + 凭据：driver/host/port/database 全空，方言由 URL scheme 反查。
+            // 直连路径（不经 gRPC / IPC / RequestDispatcher），首次调用即创建连接池。
+            val result = engine.testConnection(jdbcUrl = jdbcUrl, user = "sa")
+
+            assertTrue(result.ok, "direct testConnection should succeed: ${result.error}")
+            assertEquals("H2", result.driver)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
     fun `IdbEngine propagate error from handler as success=false`() = runBlocking {
         val engine = newEngine()
         try {

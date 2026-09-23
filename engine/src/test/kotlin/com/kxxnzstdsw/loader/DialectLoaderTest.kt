@@ -1,11 +1,16 @@
 package com.kxxnzstdsw.loader
 
+import com.kxxnzstdsw.dialect.DuckDBDialect
 import com.kxxnzstdsw.dialect.H2Dialect
+import com.kxxnzstdsw.dialect.MySQLDialect
+import com.kxxnzstdsw.dialect.PostgreSQLDialect
+import com.kxxnzstdsw.dialect.SQLiteDialect
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -86,5 +91,30 @@ class DialectLoaderTest {
         val second = H2Dialect()
         DialectLoader.registerForTesting("H2", second)
         assertEquals(second, DialectLoader.getDialect("H2"))
+    }
+
+    @Test
+    fun `getDialectByJdbcUrl resolves every registered dialect from its own prefix`() {
+        listOf(H2Dialect(), MySQLDialect(), PostgreSQLDialect(), DuckDBDialect(), SQLiteDialect())
+            .forEach { DialectLoader.registerForTesting(it.driverName, it) }
+
+        val cases = mapOf(
+            "jdbc:h2:mem:x;DB_CLOSE_DELAY=-1" to "H2",
+            "jdbc:mysql://localhost:3306/db?useSSL=false" to "Mysql",
+            "jdbc:postgresql://localhost:5432/db" to "Postgresql",
+            "jdbc:duckdb:/tmp/x.duckdb" to "Duckdb",
+            "jdbc:sqlite:/tmp/x.db" to "Sqlite",
+        )
+        cases.forEach { (url, expected) ->
+            assertEquals(expected, DialectLoader.getDialectByJdbcUrl(url)?.driverName, "URL: $url")
+        }
+    }
+
+    @Test
+    fun `getDialectByJdbcUrl returns null for unknown or blank url`() {
+        DialectLoader.registerForTesting("H2", H2Dialect())
+        assertNull(DialectLoader.getDialectByJdbcUrl("jdbc:oracle:thin:@localhost:1521/xe"))
+        assertNull(DialectLoader.getDialectByJdbcUrl(""))
+        assertNull(DialectLoader.getDialectByJdbcUrl("   "))
     }
 }

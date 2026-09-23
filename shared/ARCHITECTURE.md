@@ -327,6 +327,7 @@ LaunchedEffect(totalCount, pageSize, totalPages) {
 | **JDBC URL 双向同步** | `CLIENT_SERVER` 类型在 `CREDENTIALS` 步骤同时显示 5 个独立字段 + JDBC URL 文本框；`buildJdbcUrl` / `parseJdbcUrl` 互相转换；额外参数 (`?useSSL=false&...`) 始终保留 |
 | **持久化** | 保存到 `~/.config/sundays/connection.json`（JSON + kotlinx.serialization） |
 | **快速连接不持久化** | `QUICK_CONNECT` 流程最后一步「连接」（`Bolt` 图标）调用 `onQuickConnectDirect`，**不写入** `ConnectionStorage` |
+| **测试连接** | `onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调注入；`TEST_SAVE` 步骤的「测试连接」按钮调用它（回调为 null 时按钮禁用）。组件本身**不依赖引擎** —— 由调用方在集成层（desktopApp）直连 `IdbEngine.testConnection` |
 | **步骤指示器** | 顶部进度条显示当前步骤 |
 
 ### 4.2 布局
@@ -432,6 +433,11 @@ ConnectionManagerScreen(
     },
     onWizardNext = { wizardStep = it },
     onWizardBack = { wizardStep = it },
+    onTestConnection = { config ->
+        // 集成层直连引擎（shared 不依赖 engine）：只传 URL + 凭据
+        val resp = engine.testConnection(config.jdbcUrl, config.username, config.password)
+        TestResult(success = resp.ok, message = resp.error)
+    },
 )
 ```
 

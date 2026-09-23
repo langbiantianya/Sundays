@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 /**
  * 连接管理器主界面 (v2.9).
@@ -62,6 +63,8 @@ import androidx.compose.ui.unit.dp
  * @param onEditConnection 编辑已有连接回调
  * @param onSaveConnection 保存连接 (普通流程/快速连接均不直接调用)
  * @param onQuickConnectDirect 快速连接（不保存到 ConnectionStorage）
+ * @param onTestConnection 测试连接回调 —— 由调用方直连引擎实现（如 `IdbEngine.testConnection`）；
+ *   null 时“测试连接”按钮禁用
  * @param onDeleteConnection 删除连接
  */
 @Composable
@@ -82,6 +85,7 @@ fun ConnectionManagerScreen(
     onWizardNext: (WizardStep) -> Unit,
     onWizardBack: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
+    onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.fillMaxSize()) {
@@ -117,6 +121,7 @@ fun ConnectionManagerScreen(
             onUpdateEditingConnection = onUpdateEditingConnection,
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
+            onTestConnection = onTestConnection,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
@@ -326,6 +331,7 @@ private fun ConnectionWizardPanel(
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
+    onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -399,6 +405,7 @@ private fun ConnectionWizardPanel(
                     wizardFlow = wizardFlow,
                     onSave = onSaveConnection,
                     onQuickConnectDirect = onQuickConnectDirect,
+                    onTestConnection = onTestConnection,
                     onBack = onWizardBack,
                     onCancel = onCancelEdit,
                 )
@@ -1152,6 +1159,7 @@ private fun TestSaveStep(
     wizardFlow: WizardFlow,
     onSave: (ConnectionConfig) -> Unit,
     onQuickConnectDirect: (ConnectionConfig) -> Unit,
+    onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
     onBack: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -1159,6 +1167,7 @@ private fun TestSaveStep(
     val confirmLabel = if (isQuickConnect) "连接" else "保存"
     val onConfirm: (ConnectionConfig) -> Unit =
         if (isQuickConnect) onQuickConnectDirect else onSave
+    val scope = rememberCoroutineScope()
     var testResult by remember { mutableStateOf<TestResult?>(null) }
     var isTesting by remember { mutableStateOf(false) }
 
@@ -1189,8 +1198,19 @@ private fun TestSaveStep(
             horizontalArrangement = Arrangement.Center,
         ) {
             Button(
-                onClick = { isTesting = true },
-                enabled = !isTesting,
+                onClick = {
+                    val probe = onTestConnection ?: return@Button
+                    scope.launch {
+                        isTesting = true
+                        testResult = try {
+                            probe(editingConnection)
+                        } catch (e: Exception) {
+                            TestResult(success = false, message = e.message ?: "Unknown error")
+                        }
+                        isTesting = false
+                    }
+                },
+                enabled = !isTesting && onTestConnection != null,
             ) {
                 if (isTesting) {
                     CircularProgressIndicator(

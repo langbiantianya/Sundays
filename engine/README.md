@@ -242,6 +242,16 @@ class IdbEngine : AutoCloseable {
         configure: RequestKt.Dsl.() -> Unit,
     ): Response
 
+    /** v2.11 直连：测试 / 初始化连接（不经 gRPC / IPC / RequestDispatcher envelope） */
+    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse
+
+    /** v2.11 直连便捷重载：仅凭 JDBC URL + 凭据，driver 由 URL scheme 反查 */
+    suspend fun testConnection(
+        jdbcUrl: String,
+        user: String = "",
+        password: String = "",
+    ): SystemTestConnectionResponse
+
     override fun close() { /* PoolManager.closeAll() + DriverLoader.closeAll() + DialectLoader.closeAll() */ }
 
     companion object {
@@ -641,6 +651,22 @@ SYSTEM 还支持 `TEST_CONNECTION` / `SERVER_INFO` / **`LIST_DRIVERS`**（v2.8 �
 // Failure: {"ok":false,"error":"Communications link failure..."}
 ```
 
+**v2.11 — 仅凭 JDBC URL**：`connection.jdbc_url` 非空时只依赖 URL（`driver`/`host`/`port`/`database` 全部忽略），方言由 URL scheme 反查；无匹配方言返回 `{"ok":false,"error":"No dialect plugin matches JDBC URL: ..."}`。
+
+```json
+{"id":"r25b","category":"SYSTEM","action":"TEST_CONNECTION","connection":{"jdbc_url":"jdbc:mysql://root:pass@localhost:3306/mysql?useSSL=false"},"payload":{}}
+```
+
+**直连（推荐，同 JVM）**：KMP Desktop 无需构造 `Request`，直接调 facade —— 该调用同时完成**连接池初始化**（首次调用建池，之后复用）：
+
+```kotlin
+val result = engine.testConnection(
+    jdbcUrl = "jdbc:mysql://localhost:3306/mysql?useSSL=false",
+    user = "root", password = "pass",
+)
+if (result.ok) println("connected via ${result.driver}") else println(result.error)
+```
+
 #### SERVER_INFO — 数据库服务器信息
 
 ```json
@@ -931,8 +957,8 @@ SYSTEM 还支持 `TEST_CONNECTION` / `SERVER_INFO` / **`LIST_DRIVERS`**（v2.8 �
 | └ `ipc/UnixSocketIpcTransportIntegrationTest` | 2 | UDS + gRPC round-trip（`@EnabledOnOs(LINUX, MAC, FREEBSD)`） |
 | └ `ipc/NamedPipeIpcTransportIntegrationTest` | 2 | 客户端 channel + serverBuilder 限制 |
 | └ `pool/PoolManagerTest` | 11 | SHA-256 key + closeAll |
-| └ `loader/DialectLoaderTest` | 5 | SPI 自动发现 |
-| └ `integration/*HandlerIntegrationTest` | 60 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler） |
+| └ `loader/DialectLoaderTest` | 7 | SPI 自动发现 + JDBC URL 前缀反查 |
+| └ `integration/*HandlerIntegrationTest` | 62 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler） |
 | └ `integration/TypedRequestEnvelopeIntegrationTest` | 7 | 端到端 typed Request → dispatcher → typed Response |
 | └ `integration/UserGrantsIntegrationTest` | 2 | USER.GRANTS 路由，H2 限制场景 |
 | └ `integration/DataGenerateIntegrationTest` | 2 | DATA.GENERATE 流式进度 + 错误路径 |

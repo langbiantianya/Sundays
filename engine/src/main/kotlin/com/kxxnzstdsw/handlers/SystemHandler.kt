@@ -56,12 +56,15 @@ object SystemHandler {
      */
     suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse = withContext(Dispatchers.IO) {
         try {
+            // 仅凭 JDBC URL 也能测试 —— 方言由 URL scheme 反查（PoolManager.resolveDialect）。
+            // 解析失败会抛出可读错误，被下面的 catch 转成 ok=false。
+            val driverName = PoolManager.resolveDialect(config).driverName
             val connection = PoolManager.getConnection(config)
             connection.use { conn ->
                 val ok = conn.isValid(5)
                 systemTestConnectionResponse {
                     this.ok = ok
-                    driver = config.driver
+                    driver = driverName
                     host = config.host
                     port = config.port
                     database = config.database
