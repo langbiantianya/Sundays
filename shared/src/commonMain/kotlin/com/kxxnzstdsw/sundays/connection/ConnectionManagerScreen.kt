@@ -891,16 +891,26 @@ private fun CredentialsStep(
         isSyncingFromFields = false
     }
 
-    /** 从 URL 同步到 individual fields */
+    /** 从 URL 同步到 individual fields，并重建 URL 格式 */
     fun syncFromUrl(url: String) {
         if (isSyncingFromFields) return
         isSyncingFromUrl = true
+        val extraParams = url.substringAfter('?', "")
         val parsed = parseJdbcUrl(url, editingConnection.dialect)
         host = parsed.host
         port = parsed.port
         database = parsed.database
         username = parsed.username
         password = parsed.password
+        val rebuilt = buildJdbcUrl(
+            editingConnection.dialect,
+            parsed.host,
+            parsed.port,
+            parsed.database,
+            parsed.username,
+            parsed.password,
+        )
+        jdbcUrl = if (extraParams.isNotBlank()) "$rebuilt?$extraParams" else rebuilt
         isSyncingFromUrl = false
     }
 
