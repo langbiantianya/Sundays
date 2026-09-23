@@ -191,9 +191,21 @@ class ConnectionSession(
             .withDialect(DialectType.MYSQL)
 }
 
-/** UI 连接配置 → 引擎 proto 配置：只传 JDBC URL + 凭据，方言由 URL scheme 反查（v2.11） */
+/**
+ * UI 连接配置 → 引擎 proto 配置。
+ *
+ * `jdbcUrl` 是连接真相源（`PoolManager` 优先按 URL scheme 反查方言），但 `driver` 也必须带上：
+ * `SchemaHandler` / `TableHandler` 等 handler 直接按 `config.driver` 取方言实例，缺了会报
+ * `No dialect plugin loaded for driver:`。取 [DialectType.engineDriverName] 而非 `Enum.name`
+ * （引擎用 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite`）。
+ *
+ * `database` 一并写入：它参与连接池 key，且 `TableHandler` 会按它做 catalog 过滤 ——
+ * 与 `DatabaseBrowserState.engineConn` 保持同构，避免同一连接出现多个不相干的池。
+ */
 private fun engineConfig(config: ConnectionConfig) = connectionConfig {
+    driver = config.dialect.engineDriverName
     jdbcUrl = config.jdbcUrl
     user = config.username
     password = config.password
+    database = config.database
 }

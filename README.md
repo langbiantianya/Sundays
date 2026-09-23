@@ -48,7 +48,10 @@ sundays/
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  dependencies 含 implementation(project(":engine")) — Direct 模式依赖
     └── src/main/kotlin/com/kxxnzstdsw/sundays/
-        └── main.kt       KMP Desktop 入口：IdbEngine() 直接持有、Compose UI 渲染
+        ├── main.kt                  KMP Desktop 入口：IdbEngine() 直接持有、顶层导航 + 目标分派
+        ├── Navigation.kt            AppDestination（连接管理 / 数据库浏览）
+        ├── ConnectionSession.kt     连接列表 / 向导 / 引擎会话状态机
+        └── DatabaseBrowserScreen.kt 数据库浏览第二屏（库表树 + 表数据预览标签页）
 ```
 
 ---
@@ -422,6 +425,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 | v2.11 | **引擎支持仅凭 JDBC URL 初始化连接 + 连接生命周期直连方法**<br>proto `ConnectionConfig` 新增 `jdbc_url` 字段；`PoolManager.createDataSource` 在 `jdbc_url` 非空时直接用它建 HikariCP 池（`host`/`port`/`database` 忽略），连接池 hash key 纳入 `jdbc_url`<br>方言反查：`DatabaseDialect` 新增 `jdbcUrlPrefix`（默认 `jdbc:<driverName 小写>:`，5 个内置方言显式覆盖），`DialectLoader.getDialectByJdbcUrl()` 按最长前缀匹配；无匹配时 `PoolManager.resolveDialect` 抛出可读错误而非静默回退<br>`IdbEngine` facade 新增直连方法 `testConnection(config)` / `testConnection(jdbcUrl, user, password)` —— 不经 gRPC server、不经 IPC、不经 `RequestDispatcher` envelope，直接调 `SystemHandler.testConnection`；首次调用即创建/复用连接池（**连接初始化**）并做 JDBC `isValid(5)` 校验<br>`SYSTEM.TEST_CONNECTION` 响应的 `driver` 改由 URL 反查出的方言决定（不再回显 `config.driver`）<br>`ConnectionManagerScreen` 新增 `onTestConnection: (suspend (ConnectionConfig) -> TestResult)?` 回调，`TestSaveStep` 的「测试连接」按钮从空操作改为真实调用；`desktopApp` 通过 `engine.testConnection(jdbcUrl, username, password)` 直连引擎 |
 
 | v2.12 | **连接管理流程与引擎打通：连接生命周期（连接 / 断开）+ 方言装配修复**<br>`IdbEngine` facade 新增 `disconnect(config)`（→ `PoolManager.close(config)`：释放该配置下**所有** schema 维度的连接池），与 `testConnection` 构成对称生命周期；pool key 改为两段式 `sha256(配置)#sha256(schema)` 以便按配置定位池，并新增 `activePoolCount()`（诊断 / 测试）<br>`DialectLoader` 新增**应用类路径 SPI**加载通道（`ServiceLoader`，`desktopApp` 用 `runtimeOnly` 引入 5 个方言插件 + 5 个 JDBC 驱动）—— 修复 Direct 模式下 `dialects/` 目录缺失导致 `No dialect plugin matches JDBC URL`、测试连接永远失败的问题<br>`shared/connection`：`JdbcUrl.kt` 独立出字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，MySQL 默认参数、H2 `mem:`/`file:`、DuckDB、SQLite），`ConnectionConfig` 删除死字段 `filePath` / `useJdbcUrl`（`database` 统一承载嵌入式 URL 主体），向导各步骤改为**直写调用方状态**（修复连接名称、连接类型选完即丢的问题），URL 折算不出时禁用放行按钮，新增**连接总览面板**（状态 + 连接/断开/编辑/删除）与列表状态色点；`ConnectionStorage` 按文件 `version` 分派 v1/v2 并真正迁移<br>`desktopApp`：连接列表 / 向导 / 引擎会话状态收敛到新的 `ConnectionSession` 状态机（`MainScreen` 只做绑定），新增 `ConnectionManagerFlowTest`（Compose UI 真点击 + 真引擎：选方言 → 填字段 → 测试连接 → 连接 → 断开，断言连接池建立与释放、`connection.json` 落盘） |
+| v2.13 | **顶层导航 + 数据库浏览第二屏**<br>`desktopApp`：新增 `Navigation.kt`（`AppDestination` 枚举）与 `MainScreen` 顶层导航条（`TopNavBar` / `NavChip`），在「连接管理」与「数据库浏览」之间切换；连接列表仍由 `ConnectionSession` 持有（位于导航之上），切换不丢连接<br>新增 `DatabaseBrowserScreen.kt`：**左侧**库/表树（`SCHEMA.LIST level=database` 拉库 → 展开时懒加载 `TABLE.LIST`）+ **右侧** `SecondaryScrollableTabRow` 标签页与 `DataTable` 预览。**双击**表名打开预览标签页（`DATA.LIST`，`page=1` / `pageSize=100`），同一张表以 `schema::table` 为唯一键**去重** —— 重复双击只激活已有标签页、不重复加载；标签可逐页关闭且选中索引自动回退<br>`DatabaseBrowserState`：连接切换时清空全部派生状态（库 / 展开节点 / 表缓存 / 标签页）并自增**会话代次** `generation`，三个异步入口在挂起点后比对代次、**丢弃跨连接的过期响应**<br>注意点：proto `ConnectionConfig.driver` 是各 handler 取方言的必填字段；库名**不写入** `schema` 字段（否则 H2 `SET SCHEMA <dbname>` 失败）；`DATA.LIST` 的 `pageSize = 0` 是流式哨兵，预览请求侧 `coerceAtLeast(1)`<br>测试：`DatabaseBrowserFlowTest`（状态机全链路）、`DatabaseBrowserUiTest`（真点击 + `Role=TAB` 标签数恒为 1）、`MainScreenNavTest`（导航切换）<br>详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) §数据库浏览 |
 
 ---
 

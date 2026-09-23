@@ -29,6 +29,9 @@ dependencies {
     implementation(compose.desktop.currentOs)
     // 使用版本目录直连依赖：compose.material3 访问器已废弃（Gradle 10 移除）
     implementation(libs.compose.material3)
+    // Material Icons Extended —— DatabaseBrowserScreen 用到的图标（Storage / Folder /
+    // TableChart / Refresh / ChevronRight / ExpandMore / Close 等）
+    implementation(libs.material.icons.extended)
     implementation(libs.kotlinx.coroutinesSwing)
 
     // :engine 以 implementation 声明 protobuf/grpc，不传递给消费方编译类路径。
@@ -45,6 +48,11 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.testJunit)
     testImplementation(libs.junit)
+    // DatabaseBrowserFlowTest 烟雾测试用 H2 内存库 + H2 dialect 直接注册:
+    // 把方言插件放到 testImplementation 是为了让测试源码可见 H2Dialect 构造器.
+    // H2 JDBC 驱动已经在上面的 runtimeOnly(libs.h2) 提供运行时加载.
+    testImplementation(project(":dialect-h2"))
+    testImplementation(project(":api"))
 }
 
 compose.desktop {

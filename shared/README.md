@@ -54,6 +54,7 @@ shared/
 | `ConnectionManagerScreen` | `commonMain/.../connection/ConnectionManagerScreen.kt` | 连接管理（左侧列表 + 引导式配置向导 + 连接总览）；回调注入，**不依赖 `:engine`** |
 | `ConnectionStorage` | `commonMain/.../connection/ConnectionStorage.kt` | 连接配置 JSON 持久化（`~/.config/sundays/connection.json`） |
 | `buildJdbcUrl` / `parseJdbcUrl` | `commonMain/.../connection/JdbcUrl.kt` | 连接字段 ↔ JDBC URL 折算（URL 是引擎侧真相源） |
+| `DialectType.engineDriverName` | `commonMain/.../connection/ConnectionConfig.kt` | 方言枚举 → 引擎 `DatabaseDialect.driverName`（`MYSQL` → `Mysql`；proto `ConnectionConfig.driver` 必须填这个，**不能用 `Enum.name`**） |
 
 ---
 

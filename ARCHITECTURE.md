@@ -1,4 +1,4 @@
-# sundays — Kotlin 数据库管理端架构导航（V2.11）
+# sundays — Kotlin 数据库管理端架构导航（V2.13）
 
 > **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `ARCHITECTURE.md`（见下方"模块导航"）。
 
@@ -57,7 +57,7 @@ sundays/
 ├── dialect-sqlite/           SQLite 方言插件 JAR（v2.8 新增，嵌入式关系型）
 ├── engine/                   主引擎模块（gRPC server + Direct facade + 13 个 handler + 5 方言 loader）
 ├── shared/                   KMP 共享 UI 组件（CodeEditor / DataTable / 右键菜单）
-└── desktopApp/               KMP Compose Desktop 应用（v2.9 新前端，Direct 模式集成）
+└── desktopApp/               KMP Compose Desktop 应用（v2.9 新前端，Direct 模式集成；v2.13 顶层导航 + 数据库浏览第二屏）
 ```
 
 ### 模块导航
@@ -72,7 +72,7 @@ sundays/
 | **dialect-duckdb/** | [`dialect-duckdb/README.md`](./dialect-duckdb/README.md) | — | DuckDB 嵌入式 OLAP / Excel 预转换 / FK table-rebuild / 已知约束 |
 | **dialect-sqlite/** | [`dialect-sqlite/README.md`](./dialect-sqlite/README.md) | — | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
 | **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
-| **desktopApp/** | [`desktopApp/README.md`](./desktopApp/README.md) | [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | KMP 工程结构 / Direct 模式集成 / Demo 屏幕 / 生命周期管理 |
+| **desktopApp/** | [`desktopApp/README.md`](./desktopApp/README.md) | [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | KMP 工程结构 / Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览第二屏 / 生命周期管理 |
 | **历史文档** | [`docs/architecture-history-v2.9.md`](./docs/architecture-history-v2.9.md) | — | v2.9 之前的根级完整架构设计（已归档保留） |
 
 ---
@@ -117,7 +117,7 @@ cd engine/build/libs && java -jar idb-engine.jar
 java -jar idb-engine.jar --mode direct
 ```
 
-详细 CLI 参数、IPC transport 切换、Demo 屏幕说明见 [`engine/README.md`](./engine/README.md) 与 [`desktopApp/README.md`](./desktopApp/README.md)。
+详细 CLI 参数、IPC transport 切换、前端屏幕说明见 [`engine/README.md`](./engine/README.md) 与 [`desktopApp/README.md`](./desktopApp/README.md)。
 
 ---
 
@@ -153,6 +153,7 @@ java -jar idb-engine.jar --mode direct
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` | 详细：[`dialect-sqlite/README.md`](./dialect-sqlite/README.md) + [`api/README.md`](./api/README.md) |
 | **v2.9** | **KMP Desktop 前端 + 双模式架构（gRPC + Direct）** | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) + [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) |
 | **v2.12** | **连接管理流程与引擎打通**（连接 / 断开生命周期 + 方言装配修复 + JDBC URL 折算覆盖全方言） | 详细：[`README.md` 架构升级历史](./README.md#架构升级历史) + [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §4 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
+| **v2.13** | **顶层导航 + 数据库浏览第二屏**（库/表树 + 双击开表预览标签页 + 标签页去重 + 会话代次丢弃过期响应） | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) §数据库浏览 + [`desktopApp/README.md`](./desktopApp/README.md) |
 
 > **v2.9 关键设计补充**：CodeEditor / DataTable 统一高度策略 —— `CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器。详细见 [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md)。
 

@@ -4,7 +4,7 @@
 
 它通过 **v2.9 Direct 直接模式** 与 `engine/` 模块集成 —— `IdbEngine()` facade 直接方法调用引擎，**不启动子进程、不建立 gRPC channel、不走 IPC transport**，typed proto 消息在同一 JVM 内直传，零序列化、零桥接开销。
 
-> **当前版本：v2.12** — KMP Desktop 前端 + Direct 模式 + 连接管理（连接生命周期直连引擎）
+> **当前版本：v2.13** — KMP Desktop 前端 + Direct 模式 + 连接管理 + **顶层导航与数据库浏览第二屏**
 > 详细架构设计见本目录的 [`./ARCHITECTURE.md`](./ARCHITECTURE.md)；整体项目架构见 [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
 
 ---
@@ -25,20 +25,39 @@
 打包产物位于 `desktopApp/build/compose/binaries/`（按目标平台分子目录：`dmg/`、`msi/`、`deb/`）。
 
 ```bash
-# 连接管理流程端到端测试（Compose UI 测试 + 真引擎；H2 内存库，无需外部数据库）
+# 前端端到端 / UI 测试（Compose UI 测试 + 真引擎；H2 内存库，无需外部数据库）
 ./gradlew :desktopApp:test
 ```
 
-`ConnectionManagerFlowTest` 以 `runComposeUiTest` 真实点击向导，并断言引擎侧效果（连接池建立 / 释放、状态流转、
-`connection.json` 落盘内容）；测试把 `user.home` 指向临时目录，不触碰真实配置。
+| 测试 | 覆盖 |
+|---|---|
+| `ConnectionManagerFlowTest` | 真实点击向导；断言引擎侧效果（连接池建立 / 释放、状态流转、`connection.json` 落盘内容） |
+| `DatabaseBrowserFlowTest` | 浏览状态机：拉库列表 → 展开取表 → 打开预览（行数据核对）→ 标签页去重 → `closeTab` 选中回退 |
+| `DatabaseBrowserUiTest` | 真实双击表名 → 预览标签页出现且 `Role=TAB` 节点数恒为 1（重复双击不新增） |
+| `MainScreenNavTest` | 顶层导航：默认落在连接管理，点击「数据库浏览」切到第二屏 |
+| `DialectNameContractTest` | `DialectType.engineDriverName` 与引擎 `SYSTEM.LIST_DRIVERS` 注册名逐一比对（防 `MYSQL` vs `Mysql` 这类漂移） |
+
+测试把 `user.home` 指向临时目录，不触碰真实配置。
 
 > **前置条件**：JDK 25、Kotlin 2.4.0、Compose Multiplatform 插件已就绪。`./gradlew :desktopApp:run` 会自动编译 `engine/`、`shared/` 模块及其方言插件（MySQL / PostgreSQL / H2 / DuckDB / SQLite），无需手动构建引擎。
 
 ---
 
+## 顶层导航（v2.13）
+
+`main.kt` 的 `MainScreen` 渲染**顶层导航条** + 当前目标屏幕，两个目标：
+
+| 目标 | 屏幕 | 职责 |
+|---|---|---|
+| `CONNECTIONS`（默认） | `ConnectionManagerScreen` | 连接列表 / 向导 / 连接生命周期 |
+| `DATABASE` | `DatabaseBrowserScreen` | 数据库 / 表浏览 + 表数据预览标签页 |
+
+导航状态由 `MainScreen` 持有的 `AppDestination` 决定；连接列表 / 会话状态由 `ConnectionSession`
+持有（位于导航之上），因此**切换目标不会丢失连接**。
+
 ## 功能：连接管理（v2.12）
 
-应用启动后**直接渲染** `ConnectionManagerScreen` —— 左侧连接列表 + 右侧引导式配置 / 连接总览，**无顶层 Tab 切换**（v2.10 已移除演示 `DemoApp`）。
+应用启动后落在 `ConnectionManagerScreen` —— 左侧连接列表 + 右侧引导式配置 / 连接总览（v2.10 已移除演示 `DemoApp`）。
 
 - **方言**：MySQL / PostgreSQL / H2 / DuckDB / SQLite（方言插件 + JDBC 驱动随应用类路径加载，见下）
 - **两种引导流程**（`WizardFlow` 标识，步骤指示器自适应）：
@@ -55,8 +74,33 @@
 - **测试覆盖**：`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试连接 → 连接 → 断开」全链路（`./gradlew :desktopApp:test`）
 
 > **来源**：[`shared/`](../shared/) 模块的 `connection/` 子包；具体 API 见 [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) §4。
->
-> `CodeEditor` / `DataTable` 组件仍在 `shared/` 中维护，待后续接入真正的 SQL 编辑器与查询结果面板。
+
+## 功能：数据库浏览（v2.13）
+
+第二个界面 `DatabaseBrowserScreen` —— **左侧数据库 / 表树 + 右侧表数据预览标签页**。
+
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│ 当前连接 [下拉选择]   已连接 · H2     ⟳    [断开]                            │
+├──────────────────────┬─────────────────────────────────────────────────────┤
+│ 数据库 / 表           │  [ users ×] [ orders ×]                             │
+│  ▾ PUBLIC            ├─────────────────────────────────────────────────────┤
+│     · users          │  PUBLIC · USERS    共 2 行 · 第 1 页 · 每页 100       │
+│     · orders         ├─────────────────────────────────────────────────────┤
+│  ▸ OTHER_DB          │  ID │ NAME                                          │
+│                      │  1  │ Alice                                         │
+└──────────────────────┴─────────────────────────────────────────────────────┘
+```
+
+- **左侧树**：连接就绪（`ConnectionState.CONNECTED`）后自动调用 `SCHEMA.LIST level=database` 拉库列表；点击库节点展开时按需调用 `TABLE.LIST` 拉表列表（懒加载，见 `DatabaseBrowserState.loadTables`）
+- **打开预览**：**双击**表名 → 右侧新增一个预览标签页，调用 `DATA.LIST`（`page = 1`，`pageSize = 100`）取首页数据，用 `shared` 的 `DataTable` 渲染
+- **标签页去重**：标签页主键为 `schema::table`；重复双击同一张表只**激活**已有标签页，不会新增（`DatabaseBrowserState.openTab` 先查 key 再决定是否追加）
+- **关闭 / 切换**：标签条支持逐页关闭（关闭后 `selectedTabIndex` 自动回退到最后一张或 `-1`）；切换标签页只切显示，不重新拉数据
+- **连接切换**：`bindConnection` 在连接 id 变化时清空库列表 / 展开状态 / 表缓存 / 全部标签页，并自增会话代次；in-flight 查询在挂起点后比对代次，**过期响应直接丢弃**，避免上一连接的旧数据落到新连接
+- **连接池归属**：浏览另一个 catalog 会用到另一份 proto config（`database` 参与池 key），所以连接管理页的「断开」只释放它自己那份池。本屏用 `releasePools()` 释放自己建立的池 —— 触发点：切换连接、会话断开 / 失败；窗口关闭由 `IdbEngine.close()` 兜底。释放是异步的，因此状态机由 `MainScreen` 持有一个长生命周期 `CoroutineScope`（组件自身的 scope 在 dispose 时已取消，会把释放动作丢掉）
+- **状态归属**：`DatabaseBrowserState` 在 `MainScreen` 中 `remember`，**不在屏幕内部** —— 因此切到「连接管理」再切回来时已打开的标签页不丢失，同一份状态机也可脱离 UI 直接驱动
+- **引擎耦合法**：`IdbEngine.invoke(connection, { category/action/… })` 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST`，与连接管理一致（Direct 模式，无 gRPC）。请求的 `driver` 填 `DialectType.engineDriverName`（引擎注册键是 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite`，与枚举常量名大小写不同）
+- **测试覆盖**：`DatabaseBrowserFlowTest`（状态机：拉库 → 展开表 → 开标签页 → 去重 → 关闭）、`DatabaseBrowserUiTest`（真点击：双击开标签页 + 断言 `Role=Tab` 数量恒为 1）、`MainScreenNavTest`（顶层导航切换）、`DialectNameContractTest`（`engineDriverName` ↔ 引擎 `SYSTEM.LIST_DRIVERS` 一致性）
 
 ---
 

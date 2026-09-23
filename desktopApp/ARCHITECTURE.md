@@ -1,8 +1,10 @@
-# desktopApp — KMP Compose Desktop 客户端内部架构（v2.12）
+# desktopApp — KMP Compose Desktop 客户端内部架构（v2.13）
 
 ## 概述
 
 `desktopApp/` 是 `sundays` 项目的**桌面客户端模块**。它使用 **Kotlin Multiplatform + Compose Multiplatform** 构建，**当前仅启用 JVM Desktop 单平台目标**（macOS / Linux / Windows 三端共享同一份 Compose Desktop (Skia) 渲染），通过 **v2.9 Direct 直接模式** 与引擎集成 —— `IdbEngine()` facade 直接方法调用，**typed proto 消息同 JVM 直传，零序列化、零子进程、零 gRPC channel、零 IPC transport**。
+
+**v2.13 顶层导航**：`MainScreen` 渲染导航条（`AppDestination.CONNECTIONS` / `AppDestination.DATABASE`）+ 当前目标屏幕。连接列表由 `ConnectionSession` 持有（位于导航之上），切换目标不丢连接；`DatabaseBrowserScreen` 提供数据库 / 表浏览与表数据预览标签页。
 
 **未来扩展路径**：KMP 工程结构天然支持后续启用 `androidMain` / `iosMain` / `wasmJsMain` source set —— 只需新增对应平台特定的子进程拉起逻辑（如 Android 的 `bindService`、iOS 的 `NSXPCConnection`），`commonMain` 中的业务层零修改复用。当前 v2.9 demo 阶段仅暴露 `main` 单一 source set。
 
@@ -10,7 +12,7 @@
 
 - **依赖方向**：`desktopApp` → `:shared`（UI 组件）+ `:engine`（业务引擎）。**反向依赖被严格禁止** —— 引擎与 shared 模块均不感知 desktopApp 存在。
 - **同进程集成**：`desktopApp` 与 `:engine` **必须部署在同一 JVM**（Kotlin / Java），Direct 模式无 IPC 跨进程语义。
-- **连接管理优先**：v2.10 起 `main.kt` 直接渲染 `ConnectionManagerScreen`（v2.9 演示阶段的 `DemoApp` / `DemoTabBar` / `EditorDemoScreen` / `TableDemoScreen` 已删除），后续 SQL 编辑器 / 数据表格模块按需独立接入。
+- **连接管理 + 数据库浏览双屏**：v2.10 起启动落在 `ConnectionManagerScreen`（v2.9 演示阶段的 `DemoApp` / `DemoTabBar` / `EditorDemoScreen` / `TableDemoScreen` 已删除）；v2.13 增顶层导航条 + `DatabaseBrowserScreen`，后续 SQL 编辑器模块按需独立接入。
 
 ---
 
@@ -21,28 +23,64 @@ desktopApp/
 ├── build.gradle.kts    # composeMultiplatform + compose.material3 + :engine / :shared + 方言/驱动 runtimeOnly 依赖
 └── src/
     ├── main/kotlin/com/kxxnzstdsw/sundays/
-    │   ├── main.kt             # 入口：main() + MainScreen() + isSystemInDarkTheme()
-    │   └── ConnectionSession.kt # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
+    │   ├── main.kt                    # 入口：main() + MainScreen()（导航条 + 目标分派）+ isSystemInDarkTheme()
+    │   ├── Navigation.kt              # AppDestination 枚举（CONNECTIONS / DATABASE）
+    │   ├── ConnectionSession.kt       # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
+    │   └── DatabaseBrowserScreen.kt   # 第二屏 UI + DatabaseBrowserState / TablePreviewTab 状态机
     └── test/kotlin/com/kxxnzstdsw/sundays/
-        └── ConnectionManagerFlowTest.kt  # Compose UI 端到端测试（真引擎 + 真点击）
+        ├── ConnectionManagerFlowTest.kt  # 连接流程端到端（真引擎 + 真点击）
+        ├── DatabaseBrowserFlowTest.kt    # 浏览状态机：拉库 → 展开表 → 开标签页 → 去重 → 关闭
+        ├── DatabaseBrowserUiTest.kt      # 浏览屏幕真点击：双击开标签页 + Role=Tab 数量恒为 1
+        └── MainScreenNavTest.kt          # 顶层导航切换（连接管理 ↔ 数据库浏览）
 ```
 
 **文件清单**：
 
 | 文件 | 职责 |
 |---|---|
-| `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖 + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`compose.uiTest` + JUnit4 测试依赖；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 应用入口（`application { Window { MainScreen(engine) } }`）；`MainScreen` 只把 `ConnectionSession` 绑定到 `ConnectionManagerScreen` |
+| `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖 + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
+| `main.kt` | 应用入口（`application { Window { MainScreen(engine) } }`）；`MainScreen` 持有 `AppDestination`、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `TopNavBar` + 当前目标屏幕 |
+| `Navigation.kt` | `AppDestination(label)` 枚举 —— 顶层导航目标（`CONNECTIONS` / `DATABASE`） |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
+| `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`） |
 | `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine` + 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
+| `DatabaseBrowserFlowTest.kt` | 状态机测试（H2 内存库）：库列表 / 表列表 / 预览行数据 / 标签页去重 / `closeTab` 选中回退 |
+| `DatabaseBrowserUiTest.kt` | 真点击测试：展开库 → 双击表 → 预览标签页出现且 `Role=TAB` 数量恒为 1 |
+| `MainScreenNavTest.kt` | 顶层导航测试：默认连接管理，点「数据库浏览」切换后第二屏出现 |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
 | `main()` | public | `application { ... }` 入口；构造 `IdbEngine()`、创建 `Window`、安装 `MaterialTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
-| `MainScreen(engine)` | private `@Composable` | `remember { ConnectionSession(engine, rememberCoroutineScope()) }`，把会话状态与全部回调透传给 `ConnectionManagerScreen`（无业务逻辑） |
+| `MainScreen(engine)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
+| `TopNavBar(current, onSelect)` | private `@Composable` | 导航条：遍历 `AppDestination.entries` 渲染 `NavChip`，当前目标高亮 |
+| `NavChip(destination, selected, onClick)` | private `@Composable` | 单个导航 chip（图标 + 文案；选中态用 `primary` / `onPrimary`） |
 | `isSystemInDarkTheme()` | private `@Composable` | 包装 `androidx.compose.foundation.isSystemInDarkTheme()`（避免导入冲突） |
+
+**`DatabaseBrowserScreen.kt` 内符号分解**：
+
+| 符号 | 可见性 | 职责 |
+|---|---|---|
+| `DatabaseBrowserScreen(browser, connections, selectedConnection, status, onSelectConnection, onConnect, onDisconnect, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方注入）。`LaunchedEffect(selectedConnection?.id, status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools` |
+| `ConnectionBar` / `ConnectionPicker` / `StatusChip` | private `@Composable` | 顶部连接选择条：下拉选连接 + 状态 chip + 刷新 / 连接 / 断开按钮 |
+| `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
+| `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
+| `EmptyHint(title, description, modifier)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位 |
+| `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize`；`key = "$schema::$tableName"` 为去重主键 |
+| `DatabaseBrowserState(engine, scope)` | public class | 状态机：`databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex`；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools`；`generation` 代次用于丢弃跨连接过期响应，`activeDatabases` 记录本屏建过池的 catalog 维度 |
+
+**`DatabaseBrowserState` 引擎调用矩阵**：
+
+| 动作 | (Category, Action) | 请求负载 | 结果去向 |
+|---|---|---|---|
+| `refreshDatabases` | `SCHEMA.LIST` | `schemaListRequest { level = "database" }` | `databases`（失败 → `errorMessage`） |
+| `toggleDatabase`（首次展开） | `TABLE.LIST` | `tableListRequest {}` | `tablesByDatabase[db]`（失败 → `tableLoadError[db]`） |
+| `openTab`（新表） | `DATA.LIST` | `dataListRequest { tableName; page = 1; pageSize = tab.pageSize }` | `TablePreviewTab.columns` / `.rows` / `.total` |
+
+> **注意** `pageSize = 0` 在 `DATA.LIST` 中是**流式哨兵**（逐行 `DataRowFrame`，无 paged body）；预览固定走分页路径，故请求侧 `coerceAtLeast(1)`。
+>
+> **注意** proto `ConnectionConfig.driver` 是各 handler 的必填字段（`SchemaHandler.list` / `ExportEngine` 先按 `driver` 取方言），因此 `engineConn` 必须同时写 `driver = cfg.dialect.name`、`jdbcUrl` 与凭据；**不要把库名写进 `schema` 字段** —— H2 会执行 `SET SCHEMA <dbname>` 并失败（H2 的 schema 是 `PUBLIC`，与 catalog 名无关）。
 
 **`ConnectionSession.kt` 内符号分解**：
 
@@ -54,9 +92,95 @@ desktopApp/
 
 ---
 
+## 数据库浏览 (`DatabaseBrowserScreen` / `DatabaseBrowserState`)
+
+第二屏。`DatabaseBrowserScreen` 是纯展示组件（除内部 `remember` 的 `DatabaseBrowserState`），
+全部数据获取与标签页管理落在 `DatabaseBrowserState`，因此可脱离 UI 直接驱动（见 `DatabaseBrowserFlowTest`）。
+
+### 布局与交互
+
+| 区域 | 组件 | 行为 |
+|---|---|---|
+| 顶部 | `ConnectionBar` | 下拉选择连接；展示 `ConnectionStatus`；`CONNECTED` 时提供刷新 / 断开，否则提供连接 |
+| 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab` |
+| 右侧 | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
+
+### 标签页去重契约
+
+```kotlin
+fun openTab(schema: String, tableName: String) {
+    val tabKey = "$schema::$tableName"
+    val existingIndex = tabs.indexOfFirst { it.key == tabKey }
+    if (existingIndex >= 0) {         // 已打开 —— 只激活，不重复加载
+        selectedTabIndex = existingIndex
+        return
+    }
+    val tab = TablePreviewTab(schema = schema, tableName = tableName)
+    tabs = tabs + tab
+    selectedTabIndex = tabs.size - 1
+    loadTabPreview(tab)
+}
+```
+
+`TablePreviewTab.key` 是**唯一去重依据**（`schema::table`），与 `TableRow.id`（行主键）不是一回事。
+
+### 会话代次（丢弃过期响应）
+
+```kotlin
+fun bindConnection(config: ConnectionConfig?) {
+    if (currentConnection?.id == config?.id) return   // 同连接是空操作
+    currentConnection = config
+    generation++                                      // 使所有 in-flight 响应作废
+    databases = emptyList(); expandedDatabases.clear()
+    _tablesByDatabase.clear(); loadingTables.clear(); _tableLoadError.clear()
+    tabs = emptyList(); selectedTabIndex = -1
+}
+
+private fun loadTables(database: String) {
+    val requestGeneration = generation                 // 捕获发起时代次
+    …
+    scope.launch {
+        val result = runCatching { engine.invoke(…) }
+        if (requestGeneration != generation) return@launch   // 连接已切换 → 丢弃
+        …
+    }
+}
+```
+
+三个异步入口（`refreshDatabases` / `loadTables` / `loadTabPreview`）都套用同一模式：
+**发起时捕获 `generation`，挂起点之后比对，不一致则直接返回**，避免旧连接的结果污染新连接的已清空状态。
+
+### 连接池生命周期（浏览场景）
+
+浏览另一个 catalog 会用到另一份 proto config（`database` 参与池 key），因此**连接管理页的「断开」
+只释放它自己那份池**；本屏必须释放自己建立的池：
+
+| 触发 | 动作 |
+|---|---|
+| 切换到另一个连接（`bindConnection` 检测 id 变化） | `releasePools()`（针对**旧**连接） |
+| 会话状态变为断开 / 失败（`LaunchedEffect` 的 `else` 分支） | `releasePools()` |
+| 窗口关闭 | `IdbEngine.close()` → `PoolManager.closeAll()`（兜底全部） |
+
+`activeDatabases` 记录本屏请求过的 catalog 维度（含 `""` = 默认），`releasePools` 逐个
+`engine.disconnect(engineConnFor(config, database))`。
+
+> **必须由调用方的 scope 执行**：`releasePools` 是异步的（`engine.disconnect` 内部 `withContext(IO)`）。
+> 若用组件自己的 `rememberCoroutineScope()`，`onDispose` 时该 scope 已被取消 —— 释放动作会被丢弃。
+> 因此 `DatabaseBrowserState` 在 `MainScreen` 中创建并复用其 `rememberCoroutineScope()`，这同时带来
+> 第二个好处：切到「连接管理」再切回来时标签页仍在。
+
+### H2 列名归一
+
+H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持小写。预览行的主键承载因此做
+**大小写不敏感**匹配（`k.equals("id", ignoreCase = true)`），找不到时退化为行号。
+引擎 `DataHandler.buildRow` 对非 LOB 列一律 `rs.getString` —— 单元格值在 UI 侧都是字符串。
+
+---
+
 ## 连接管理 (`ConnectionSession` + `MainScreen`)
 
-`MainScreen` 只做绑定：`ConnectionSession` 持有全部状态与行为，`ConnectionManagerScreen` 是纯展示组件。
+`ConnectionSession` 持有全部状态与行为，`ConnectionManagerScreen` 是纯展示组件；
+`MainScreen` 负责顶层导航（`AppDestination`）并把会话状态透传给两个屏幕。
 
 - 从 `~/.config/sundays/connection.json` 加载连接列表（`ConnectionStorage.load()`，`ConnectionSession` 初始化时读取）
 - 维护 `WizardState(editingConnection, step, flow)` **data class** —— 单次赋值保证原子更新，避免 Compose recomposition 间隙 NPE

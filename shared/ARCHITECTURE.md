@@ -390,6 +390,34 @@ data class ConnectionConfig(
 - **与引擎的一致性**：URL 形状镜像 `engine` 侧方言的 `DatabaseDialect.buildJdbcUrl`；新增方言或改动 URL 规则时**两处同步**（`JdbcUrl.kt` 顶部有对照表）
 - **单调状态**：向导各步骤不再持有本地字段副本（名称 / 连接类型 / 凭据均经 `onUpdateEditingConnection` 直写调用方状态），因此不存在「字段改了但配置没变」的丢失路径；URL 文本框与字段互为投影，不需要循环防护 flag
 
+#### `DialectType.engineDriverName` —— 跨模块的名字契约
+
+```kotlin
+enum class DialectType {
+    MYSQL, POSTGRESQL, H2, DUCKDB, SQLITE, UNKNOWN;
+
+    /** 引擎 `DatabaseDialect.driverName` —— proto `ConnectionConfig.driver` 必须填这个 */
+    val engineDriverName: String
+        get() = when (this) {
+            MYSQL -> "Mysql"; POSTGRESQL -> "Postgresql"; H2 -> "H2"
+            DUCKDB -> "Duckdb"; SQLITE -> "Sqlite"
+            UNKNOWN -> name   // 无可映射名 —— 原样交给引擎报可读错误
+        }
+}
+```
+
+**为什么需要它**：`PoolManager` 建池时优先按 `jdbcUrl` scheme 反查方言，但 `SchemaHandler` /
+`TableHandler` / `ExportEngine` 等**直接按 `config.driver` 取方言实例**（`DialectLoader.getDialect`），
+而引擎的注册键是 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite` —— 与本枚举**常量名大小写不同**，
+`Enum.name`（`MYSQL`）会让引擎抛 `No dialect plugin loaded for driver: MYSQL`。
+只有 `H2` 两侧同名，所以这个坑在只测 H2 时不会被发现。
+
+**契约校验**：`desktopApp` 的 `DialectNameContractTest` 把每个 `engineDriverName` 与引擎
+`SYSTEM.LIST_DRIVERS` 的实际注册名逐一比对，任一侧改名即失败。
+
+> `shared` 不依赖 `:engine`，这个映射是**纯字符串**，因此不会引入依赖；但它镜像了引擎的
+> `driverName`，属于「两处同步」的约定之一（同 `JdbcUrl.kt` 与引擎 `buildJdbcUrl` 的关系）。
+
 ### 4.4 持久化
 
 ```kotlin

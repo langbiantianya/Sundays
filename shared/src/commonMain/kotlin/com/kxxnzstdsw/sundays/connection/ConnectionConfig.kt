@@ -99,6 +99,30 @@ enum class DialectType {
             UNKNOWN -> emptyList()
         }
 
+    /**
+     * 引擎 `DatabaseDialect.driverName` —— proto `ConnectionConfig.driver` 必须填这个名字。
+     *
+     * 引擎以 `driverName` 为键注册方言（`DialectLoader.getDialect`），5 个内置方言的取值是
+     * `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite` —— 与本枚举**常量名大小写不同**，
+     * 因此**不能直接用 `Enum.name`**（`MYSQL` 会让引擎报 `No dialect plugin loaded for driver`）。
+     *
+     * 注意只有部分 handler 需要它：`PoolManager` 会优先按 `jdbcUrl` scheme 反查方言，但
+     * `SchemaHandler` / `TableHandler` 等直接按 `config.driver` 取方言，所以请求必须带上正确值。
+     *
+     * 两侧一致性由 `desktopApp` 的 `DialectNameContractTest` 对照引擎 `SYSTEM.LIST_DRIVERS`
+     * 的真实返回值校验 —— 任一侧改名都会让测试失败。
+     */
+    val engineDriverName: String
+        get() = when (this) {
+            MYSQL -> "Mysql"
+            POSTGRESQL -> "Postgresql"
+            H2 -> "H2"
+            DUCKDB -> "Duckdb"
+            SQLITE -> "Sqlite"
+            // 未知方言没有可映射的引擎名 —— 原样返回让引擎报出可读错误，而不是静默套用某个方言
+            UNKNOWN -> name
+        }
+
     companion object {
         fun fromString(value: String): DialectType =
             entries.find { it.name.equals(value, ignoreCase = true) } ?: UNKNOWN
