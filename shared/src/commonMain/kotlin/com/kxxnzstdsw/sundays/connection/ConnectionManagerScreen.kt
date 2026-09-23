@@ -864,7 +864,14 @@ private fun CredentialsStep(
     var jdbcUrl by remember(editingConnection) {
         mutableStateOf(
             editingConnection.jdbcUrl.ifBlank {
-                buildJdbcUrl(editingConnection.dialect, "localhost", editingConnection.displayPort.toString(), "")
+                buildJdbcUrl(
+                    editingConnection.dialect,
+                    "localhost",
+                    editingConnection.displayPort.toString(),
+                    "",
+                    "",
+                    "",
+                )
             }
         )
     }
@@ -879,7 +886,7 @@ private fun CredentialsStep(
         if (isSyncingFromUrl) return
         isSyncingFromFields = true
         val extraParams = jdbcUrl.substringAfter('?', "")
-        val base = buildJdbcUrl(editingConnection.dialect, host, port, database)
+        val base = buildJdbcUrl(editingConnection.dialect, host, port, database, username, password)
         jdbcUrl = if (extraParams.isNotBlank()) "$base?$extraParams" else base
         isSyncingFromFields = false
     }
@@ -892,6 +899,8 @@ private fun CredentialsStep(
         host = parsed.host
         port = parsed.port
         database = parsed.database
+        username = parsed.username
+        password = parsed.password
         isSyncingFromUrl = false
     }
 
@@ -1077,6 +1086,8 @@ private fun buildJdbcUrl(
     host: String,
     port: String,
     database: String,
+    username: String,
+    password: String,
 ): String {
     if (host.isBlank()) return ""
     val scheme = when (dialect) {
@@ -1089,7 +1100,8 @@ private fun buildJdbcUrl(
     }
     val portPart = if (port.isNotBlank()) ":$port" else ""
     val dbPart = if (database.isNotBlank()) "/$database" else ""
-    return "$scheme://$host$portPart$dbPart"
+    val credPart = if (username.isNotBlank()) "$username${if (password.isNotBlank()) ":$password" else ""}@" else ""
+    return "$scheme://$credPart$host$portPart$dbPart"
 }
 
 /** 从 JDBC URL 解析 host / port / database（仅处理 MySQL / PostgreSQL） */
@@ -1097,31 +1109,45 @@ private data class UrlParts(
     val host: String,
     val port: String,
     val database: String,
+    val username: String,
+    val password: String,
 )
 
 private fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
-    if (url.isBlank()) return UrlParts("", "", "")
+    if (url.isBlank()) return UrlParts("", "", "", "", "")
     try {
         val scheme = when (dialect) {
             DialectType.MYSQL -> "jdbc:mysql"
             DialectType.POSTGRESQL -> "jdbc:postgresql"
-            else -> return UrlParts("", "", "")
+            else -> return UrlParts("", "", "", "", "")
         }
         val withoutScheme = url.removePrefix(scheme).removePrefix("://")
+
+        // 提取 hostPart (credentials@host:port 或 host:port)
         val slashIdx = withoutScheme.indexOf('/')
         val hostPart = if (slashIdx >= 0) withoutScheme.substring(0, slashIdx) else withoutScheme
         val afterSlash = if (slashIdx >= 0) withoutScheme.substring(slashIdx + 1) else ""
 
+        // 提取 ? 前的数据库部分
         val questionIdx = afterSlash.indexOf('?')
         val dbPart = if (questionIdx >= 0) afterSlash.substring(0, questionIdx) else afterSlash
 
-        val colonIdx = hostPart.lastIndexOf(':')
-        val h = if (colonIdx >= 0) hostPart.substring(0, colonIdx) else hostPart
-        val p = if (colonIdx >= 0) hostPart.substring(colonIdx + 1) else ""
+        // 解析 host:port
+        val atIdx = hostPart.indexOf('@')
+        val credPart = if (atIdx >= 0) hostPart.substring(0, atIdx) else ""
+        val hostColonPort = if (atIdx >= 0) hostPart.substring(atIdx + 1) else hostPart
+        val colonIdx = hostColonPort.lastIndexOf(':')
+        val h = if (colonIdx >= 0) hostColonPort.substring(0, colonIdx) else hostColonPort
+        val p = if (colonIdx >= 0) hostColonPort.substring(colonIdx + 1) else ""
 
-        return UrlParts(h, p, dbPart)
+        // 解析 username:password
+        val colonCredIdx = credPart.indexOf(':')
+        val u = if (colonCredIdx >= 0) credPart.substring(0, colonCredIdx) else credPart
+        val pw = if (colonCredIdx >= 0) credPart.substring(colonCredIdx + 1) else ""
+
+        return UrlParts(h, p, dbPart, u, pw)
     } catch (_: Exception) {
-        return UrlParts("", "", "")
+        return UrlParts("", "", "", "", "")
     }
 }
 
