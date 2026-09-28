@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
@@ -178,5 +179,48 @@ class ConnectionManagerFlowTest {
         val json = File(tempHome, ".config/sundays/connection.json").readText()
         assertTrue(json.contains("本地 MySQL"), "连接应写入 connection.json: $json")
         assertTrue(json.contains("jdbc:mysql://localhost:3306/shop"), "connection.json: $json")
+    }
+
+    /**
+     * 回归：在向导流程中（普通 / 快速）点列表里的已保存连接，应退出向导并切到该连接的详情面板，
+     * 而不是继续渲染当前向导步骤。覆盖 [ConnectionSession.select] 在 wizard != Idle 时重置为 Idle 的契约。
+     */
+    @Test
+    fun `selecting a saved connection while in wizard exits the wizard to overview`() = runComposeUiTest {
+        ConnectionStorage.upsert(
+            ConnectionConfig(
+                id = "saved-1",
+                name = "本地 H2",
+                dialect = DialectType.H2,
+                database = "shop",
+            )
+        )
+        val session = newSession()
+        setContent { MaterialTheme { Screen(session) } }
+
+        // 普通向导：BASIC_INFO 步骤，渲染「下一步」
+        onNodeWithText("新建连接").performClick()
+        onNodeWithText("下一步").assertExists()
+        assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.BASIC_INFO, session.wizard.step)
+        assertNotNull(session.wizard.editingConnection)
+
+        // 点列表里的已保存连接 → 退出向导，右面板切到 ConnectionOverviewPanel
+        onNodeWithText("本地 H2").performClick()
+        assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.IDLE, session.wizard.step)
+        assertEquals(null, session.wizard.editingConnection)
+        // 总览面板上才有的「连接」按钮出现，向导的「下一步」按钮消失
+        onNodeWithText("连接").assertExists()
+        onNodeWithText("下一步").assertDoesNotExist()
+
+        // 快速连接向导同样适用 —— 列表头的快速连接按钮是 Icon(contentDescription = "快速连接")
+        onNodeWithContentDescription("快速连接").performClick()
+        // QUICK_CONNECT 步骤选方言 → 直接跳到 CREDENTIALS，才有「下一步」
+        onNodeWithText("H2").performClick()
+        onNodeWithText("下一步").assertExists()
+        assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.CREDENTIALS, session.wizard.step)
+        onNodeWithText("本地 H2").performClick()
+        assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.IDLE, session.wizard.step)
+        onNodeWithText("连接").assertExists()
+        onNodeWithText("下一步").assertDoesNotExist()
     }
 }

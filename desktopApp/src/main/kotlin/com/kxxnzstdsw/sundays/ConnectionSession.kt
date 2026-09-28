@@ -72,6 +72,11 @@ class ConnectionSession(
 
     fun select(config: ConnectionConfig?) {
         selectedConnection = config
+        // 选中已保存连接 → 退出向导，右面板切到 ConnectionOverviewPanel
+        // （向导进行中点列表不会自动退出，会卡在 BASIC_INFO / QUICK_CONNECT 等步骤）
+        if (config != null && wizard != WizardState.Idle) {
+            wizard = WizardState.Idle
+        }
     }
 
     fun newConnection() {
