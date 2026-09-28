@@ -1,9 +1,16 @@
 package com.kxxnzstdsw.integration
 
-import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.handlers.SystemHandler
+import com.kxxnzstdsw.dispatcher.RequestDispatcher
+import com.kxxnzstdsw.grpc.Action
+import com.kxxnzstdsw.grpc.ConnectionConfig
+import com.kxxnzstdsw.grpc.Category
+import com.kxxnzstdsw.grpc.RequestOptions
+import com.kxxnzstdsw.grpc.SystemRequest
+import com.kxxnzstdsw.grpc.request
 import com.kxxnzstdsw.testutil.H2Fixture
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.toList
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -77,5 +84,66 @@ class SystemHandlerIntegrationTest : H2Fixture() {
         val struct = extrasObj.structValue.fieldsMap
         assertTrue(struct["product"]?.stringValue?.contains("H2") == true)
         assertTrue(struct["url"]?.stringValue?.startsWith("jdbc:h2") == true)
+    }
+
+    @Test
+    fun `disconnect closes pools created by testConnection and is idempotent`() = runBlocking {
+        assertTrue(SystemHandler.testConnection(config).ok, "precondition: pool must exist")
+
+        val first = SystemHandler.disconnect(config)
+        val second = SystemHandler.disconnect(config)
+
+        assertTrue(first.closed, "first disconnect must report a closed pool")
+        assertFalse(second.closed, "second disconnect must report no active pool")
+    }
+
+    @Test
+    fun `disconnect of unknown config is a no-op`() = runBlocking {
+        val unknown = ConnectionConfig.newBuilder()
+            .setJdbcUrl("jdbc:h2:mem:never_used_${System.nanoTime()}")
+            .setUser("sa")
+            .build()
+
+        assertFalse(SystemHandler.disconnect(unknown).closed)
+    }
+
+    @Test
+    fun `SYSTEM DISCONNECT is routed through the dispatcher`() = runBlocking {
+        assertTrue(SystemHandler.testConnection(config).ok, "precondition: pool must exist")
+
+        val resp = RequestDispatcher.dispatch(
+            request {
+                id = "r-disc-1"
+                category = Category.SYSTEM
+                action = Action.DISCONNECT
+                connection = config
+                systemRequest = SystemRequest.getDefaultInstance()
+            }
+        ).toList().single()
+
+        assertTrue(resp.success, "expected success, got: ${resp.error}")
+        assertTrue(resp.hasSystem() && resp.system.hasDisconnect(), "expected disconnect body")
+        assertTrue(resp.system.disconnect.closed, "dispatched disconnect must close the pool")
+    }
+
+    @Test
+    fun `dryRun short-circuits DISCONNECT so the pool survives`() = runBlocking {
+        assertTrue(SystemHandler.testConnection(config).ok, "precondition: pool must exist")
+
+        val resp = RequestDispatcher.dispatch(
+            request {
+                id = "r-disc-2"
+                category = Category.SYSTEM
+                action = Action.DISCONNECT
+                connection = config
+                systemRequest = SystemRequest.getDefaultInstance()
+                options = RequestOptions.newBuilder().setDryRun(true).build()
+            }
+        ).toList().single()
+
+        assertTrue(resp.success, "dryRun write should still return success: ${resp.error}")
+        assertTrue(resp.error.contains("dryRun"), "error must indicate dryRun: ${resp.error}")
+        // 池必须仍在：dryRun 不得真的断开用户的连接
+        assertTrue(SystemHandler.disconnect(config).closed, "pool must survive a dryRun DISCONNECT")
     }
 }

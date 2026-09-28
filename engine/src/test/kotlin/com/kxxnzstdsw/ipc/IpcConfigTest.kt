@@ -122,6 +122,21 @@ class IpcConfigTest {
     }
 
     @Test
+    fun `--mode flag is accepted and ignored so the documented startup command works`() {
+        // IdbEngineServer.parseMode 先消费 --mode，但 argv 里它仍然存在；
+        // fromArgs 必须跳过而不是报「未知参数」，否则 README 里的启动命令会直接退出。
+        val cfg = IpcConfig.fromArgs(arrayOf("--mode", "grpc", "--ipc", "tcp", "--port", "50951"))
+        assertEquals(IpcKind.TCP, cfg.kind)
+        assertEquals(50951, cfg.tcpPort)
+    }
+
+    @Test
+    fun `--mode with no value is rejected`() {
+        val e = assertThrows<IllegalStateException> { IpcConfig.fromArgs(arrayOf("--mode")) }
+        assertTrue(e.message!!.contains("--mode requires a value"))
+    }
+
+    @Test
     fun `multiple flags all parse correctly`() {
         val cfg = IpcConfig.fromArgs(
             arrayOf("--ipc", "tcp", "--port", "12345")

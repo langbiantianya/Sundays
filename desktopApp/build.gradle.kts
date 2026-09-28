@@ -8,9 +8,13 @@ plugins {
 
 dependencies {
     implementation(project(":shared"))
-    // 直接模式：Compose UI 与引擎同 JVM，通过 IdbEngine facade 直接调用
-    // 不走 gRPC / 子进程 / IPC transport —— 详见 engine/README.md §Dual-Mode Architecture
+    // 调用层抽象：UI 只面向 EngineClient 接口编程（来自 :engine-protocol，经 :engine 以 api 传递）。
+    // 两个实现都在装配点可选：
+    //   :engine            → IdbEngine（同进程直调，默认；不启动子进程 / 不建 gRPC channel）
+    //   :engine-grpc-client → GrpcEngineClient（跨进程 gRPC；-Dsundays.engine.endpoint=host:port 启用）
+    // 选择逻辑见 main.kt 的 createEngineClient()。
     implementation(project(":engine"))
+    implementation(project(":engine-grpc-client"))
 
     // 方言插件 + JDBC 驱动随应用类路径加载（Direct 模式不依赖外部 dialects/ drivers/ 目录）：
     // DialectLoader.loadFromDir 会先扫一遍应用类路径上的 SPI（ServiceLoader），再让 dialects/ 目录覆盖同名方言。

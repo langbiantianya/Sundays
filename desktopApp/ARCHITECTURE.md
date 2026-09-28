@@ -1,8 +1,19 @@
-# desktopApp — KMP Compose Desktop 客户端内部架构（v2.14）
+# desktopApp — KMP Compose Desktop 客户端内部架构（v2.15）
 
 ## 概述
 
-`desktopApp/` 是 `sundays` 项目的**桌面客户端模块**。它使用 **Kotlin Multiplatform + Compose Multiplatform** 构建，**当前仅启用 JVM Desktop 单平台目标**（macOS / Linux / Windows 三端共享同一份 Compose Desktop (Skia) 渲染），通过 **v2.9 Direct 直接模式** 与引擎集成 —— `IdbEngine()` facade 直接方法调用，**typed proto 消息同 JVM 直传，零序列化、零子进程、零 gRPC channel、零 IPC transport**。
+`desktopApp/` 是 `sundays` 项目的**桌面客户端模块**。它使用 **Kotlin Multiplatform + Compose Multiplatform** 构建，**当前仅启用 JVM Desktop 单平台目标**（macOS / Linux / Windows 三端共享同一份 Compose Desktop (Skia) 渲染），通过 **v2.15 调用层抽象** 与引擎集成 —— UI 只面向 `:engine-protocol` 的 `EngineClient` 接口编程，**默认绑定同进程 `IdbEngine`（`:engine`，typed proto 消息同 JVM 直传：零序列化、零子进程、零 gRPC channel、零 IPC transport）**；设置系统属性 `-Dsundays.engine.endpoint` 时改绑 `GrpcEngineClient`（`:engine-grpc-client`，跨进程 gRPC）。实现的选择集中在 `main.kt` 的 `createEngineClient()`，对下游状态机完全透明。
+
+**引擎实现选择**（`createEngineClient()` 读取 `System.getProperty("sundays.engine.endpoint")` 并 `trim()`）：
+
+| 端点属性 | 实现 | 模块 | 通道 |
+|---|---|---|---|
+| 未设置 / 空白（**默认**） | `IdbEngine` | `:engine` | 同 JVM 直接方法调用 |
+| `host:port` / `tcp://host:port` / `unix:///path/to.sock` / `pipe:name` | `GrpcEngineClient` | `:engine-grpc-client` | gRPC over TCP / UDS / 命名管道 |
+
+> 端点写法非法时 `GrpcClientConfig.fromTarget` 抛 `IllegalArgumentException` —— **不会静默回落**到本地引擎。
+> gRPC 模式需先启动引擎进程：`java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051`，
+> 再运行应用：`./gradlew :desktopApp:run -Dsundays.engine.endpoint=localhost:50051`。
 
 **v2.13 顶层导航**：`MainScreen` 渲染导航条（`AppDestination.CONNECTIONS` / `AppDestination.DATABASE`）+ 当前目标屏幕。连接列表由 `ConnectionSession` 持有（位于导航之上），切换目标不丢连接；`DatabaseBrowserScreen` 提供数据库 / 表浏览与表数据预览标签页。
 
@@ -10,8 +21,8 @@
 
 **关键设计原则**：
 
-- **依赖方向**：`desktopApp` → `:shared`（UI 组件）+ `:engine`（业务引擎）。**反向依赖被严格禁止** —— 引擎与 shared 模块均不感知 desktopApp 存在。
-- **同进程集成**：`desktopApp` 与 `:engine` **必须部署在同一 JVM**（Kotlin / Java），Direct 模式无 IPC 跨进程语义。
+- **依赖方向**：`desktopApp` → `:shared`（UI 组件）+ `:engine-protocol`（`EngineClient` 调用层契约）+ `:engine` / `:engine-grpc-client`（两个实现，装配点二选一）。**反向依赖被严格禁止** —— 引擎与 shared 模块均不感知 desktopApp 存在。
+- **默认同进程**：`desktopApp` 与 `:engine` 默认部署在同一 JVM（Kotlin / Java），Direct 绑定无 IPC 跨进程语义；显式配置端点时改为跨进程 gRPC 调用，调用代码不变。
 - **连接管理 + 数据库浏览双屏**：v2.10 起启动落在 `ConnectionManagerScreen`（v2.9 演示阶段的 `DemoApp` / `DemoTabBar` / `EditorDemoScreen` / `TableDemoScreen` 已删除）；v2.13 增顶层导航条 + `DatabaseBrowserScreen`，后续 SQL 编辑器模块按需独立接入。
 
 ---
@@ -20,10 +31,10 @@
 
 ```text
 desktopApp/
-├── build.gradle.kts    # composeMultiplatform + compose.material3 + :engine / :shared + 方言/驱动 runtimeOnly 依赖
+├── build.gradle.kts    # composeMultiplatform + compose.material3 + :shared + :engine / :engine-grpc-client（两个引擎实现）+ 方言/驱动 runtimeOnly 依赖
 └── src/
     ├── main/kotlin/com/kxxnzstdsw/sundays/
-    │   ├── main.kt                    # 入口：main()（Window + SundaysTheme）+ MainScreen()（目标分派）
+    │   ├── main.kt                    # 入口：main()（Window + SundaysTheme）+ createEngineClient()（引擎实现装配点）+ MainScreen()（目标分派）
     │   │                              # 导航条（TopNavBar）与 AppDestination 已上移 :shared/commonMain
     │   ├── ConnectionSession.kt       # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
     │   └── DatabaseBrowserScreen.kt   # 第二屏 UI + DatabaseBrowserState / TablePreviewTab 状态机
@@ -31,31 +42,37 @@ desktopApp/
         ├── ConnectionManagerFlowTest.kt  # 连接流程端到端（真引擎 + 真点击）
         ├── DatabaseBrowserFlowTest.kt    # 浏览状态机：拉库 → 展开表 → 开标签页 → 去重 → 关闭
         ├── DatabaseBrowserUiTest.kt      # 浏览屏幕真点击：双击开标签页 + Role=Tab 数量恒为 1
-        └── MainScreenNavTest.kt          # 顶层导航切换（连接管理 ↔ 数据库浏览）
+        ├── MainScreenNavTest.kt          # 顶层导航切换（连接管理 ↔ 数据库浏览）
+        └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
+
+desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` 等）。
 
 **文件清单**：
 
 | 文件 | 职责 |
 |---|---|
-| `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖 + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `:shared` 的 `TopNavBar` + 当前目标屏幕 |
+| `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:shared` 依赖 + **`:engine`（默认实现）与 `:engine-grpc-client`（端点实现）同时引入** + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
+| `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `:shared` 的 `TopNavBar` + 当前目标屏幕。`main.kt` 同时是**唯一的引擎装配点**（`createEngineClient()`） |
 | （已上移 `:shared`） | `AppDestination` / `TopNavBar` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt)。三者不引用 `:engine`，故可跨平台复用 |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
 | `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`） |
-| `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine` + 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
+| `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine`（按 `EngineClient` 传入）+ 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
 | `DatabaseBrowserFlowTest.kt` | 状态机测试（H2 内存库）：库列表 / 表列表 / 预览行数据 / 标签页去重 / `closeTab` 选中回退 |
 | `DatabaseBrowserUiTest.kt` | 真点击测试：展开库 → 双击表 → 预览标签页出现且 `Role=TAB` 数量恒为 1 |
 | `MainScreenNavTest.kt` | 顶层导航测试：默认连接管理，点「数据库浏览」切换后第二屏出现 |
+| `EngineClientSelectionTest.kt` | 装配点绑定测试：未设置 / 空白端点属性 → `IdbEngine`；设置端点（含 `unix://`）→ `GrpcEngineClient`；非法端点 → `IllegalArgumentException`（**响亮失败，不静默回落**） |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()`、创建 `Window`、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
-| `MainScreen(engine)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `:shared` 的 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
+| `ENDPOINT_PROPERTY` | public `const val` | 系统属性名 `"sundays.engine.endpoint"` —— 选择 gRPC 引擎端点的唯一开关 |
+| `createEngineClient()` | **internal** | **引擎实现装配点**：读 `System.getProperty(ENDPOINT_PROPERTY)` 并 `trim()`；空白 → `IdbEngine()`（同进程，默认），否则 `GrpcEngineClient.connect(GrpcClientConfig.fromTarget(endpoint))`；端点非法时由 `fromTarget` 抛 `IllegalArgumentException` |
+| `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
+| `MainScreen(engine: EngineClient)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `:shared` 的 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
 
-> **模块边界**：导航条（`TopNavBar` / `NavChip`）、导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 直连 `IdbEngine`（JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
+> **模块边界**：导航条（`TopNavBar` / `NavChip`）、导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 依赖 `EngineClient` 调用层接口（来自 `:engine-protocol`，JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
 
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 
@@ -67,7 +84,7 @@ desktopApp/
 | `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
 | `EmptyHint(title, description, modifier)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位 |
 | `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize`；`key = "$schema::$tableName"` 为去重主键 |
-| `DatabaseBrowserState(engine, scope)` | public class | 状态机：`databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex`；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools`；`generation` 代次用于丢弃跨连接过期响应，`activeDatabases` 记录本屏建过池的 catalog 维度 |
+| `DatabaseBrowserState(engine: EngineClient, scope)` | public class | 状态机：`databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex`；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools`；`generation` 代次用于丢弃跨连接过期响应，`activeDatabases` 记录本屏建过池的 catalog 维度 |
 
 **`DatabaseBrowserState` 引擎调用矩阵**：
 
@@ -178,12 +195,12 @@ tab.loading = false                                  // ← 必须在 fold 之�
 |---|---|
 | 切换到另一个连接（`bindConnection` 检测 id 变化） | `releasePools()`（针对**旧**连接） |
 | 会话状态变为断开 / 失败（`LaunchedEffect` 的 `else` 分支） | `releasePools()` |
-| 窗口关闭 | `IdbEngine.close()` → `PoolManager.closeAll()`（兜底全部） |
+| 窗口关闭 | `EngineClient.close()`（默认实现下即 `IdbEngine.close()` → `PoolManager.closeAll()` 兜底全部） |
 
 `activeDatabases` 记录本屏请求过的 catalog 维度（含 `""` = 默认），`releasePools` 逐个
 `engine.disconnect(engineConnFor(config, database))`。
 
-> **必须由调用方的 scope 执行**：`releasePools` 是异步的（`engine.disconnect` 内部 `withContext(IO)`）。
+> **必须由调用方的 scope 执行**：`releasePools` 是异步的（`engine.disconnect` 为挂起调用；Direct 实现内部 `withContext(IO)`）。
 > 若用组件自己的 `rememberCoroutineScope()`，`onDispose` 时该 scope 已被取消 —— 释放动作会被丢弃。
 > 因此 `DatabaseBrowserState` 在 `MainScreen` 中创建并复用其 `rememberCoroutineScope()`，这同时带来
 > 第二个好处：切到「连接管理」再切回来时标签页仍在。
@@ -223,11 +240,15 @@ H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持�
 
 | UI 动作 | `ConnectionSession` | 引擎调用 | 结果 |
 |---|---|---|---|
-| 测试连接（`TEST_SAVE` 步骤） | `testConnection(config)` | `IdbEngine.testConnection` | 建/复用 HikariCP 池 + `isValid`，状态 → `CONNECTED` / `FAILED` |
-| 连接（连接总览 / 快速连接末步） | `connect(config)` | `IdbEngine.testConnection` | 同上；状态先置 `CONNECTING` 再回填 |
-| 断开（连接总览） | `disconnect(config)` | `IdbEngine.disconnect` | 释放该配置的池，状态 → `DISCONNECTED` |
-| 删除连接 / 编辑后字段变化 | `delete` / `save` | `IdbEngine.disconnect` | 先释放旧配置的池再落盘删除 / 覆盖 |
-| 窗口关闭 | — | `IdbEngine.close` | 释放全部池 / 驱动 / 方言 |
+| 测试连接（`TEST_SAVE` 步骤） | `testConnection(config)` | `EngineClient.testConnection` | 建/复用 HikariCP 池 + `isValid`，状态 → `CONNECTED` / `FAILED` |
+| 连接（连接总览 / 快速连接末步） | `connect(config)` | `EngineClient.testConnection` | 同上；状态先置 `CONNECTING` 再回填 |
+| 断开（连接总览） | `disconnect(config)` | `EngineClient.disconnect` | 释放该配置的池，状态 → `DISCONNECTED` |
+| 删除连接 / 编辑后字段变化 | `delete` / `save` | `EngineClient.disconnect` | 先释放旧配置的池再落盘删除 / 覆盖 |
+| 窗口关闭 | — | `EngineClient.close` | 释放实现自身持有的资源（本地：池 / 驱动 / 方言；gRPC：channel） |
+
+> **两种实现下调用代码完全相同**。默认的 `IdbEngine` 走同进程直调（`testConnection` / `disconnect` 旁路 gRPC 与
+> `RequestDispatcher`）；gRPC 绑定下二者走线协议 `SYSTEM.TEST_CONNECTION` / `SYSTEM.DISCONNECT` ——
+> 后者是 v2.15 新增的路由（连接池活在引擎进程里，远程调用方需要一条线路由来释放它们）；`disconnect` 幂等。
 
 会话状态 `ConnectionStatus(state, message)`（`DISCONNECTED` / `CONNECTING` / `CONNECTED` / `FAILED` + 说明）
 回传给 `ConnectionManagerScreen`：列表项色点、连接总览面板的状态行与「连接」/「断开」按钮的可用性都由它驱动。
@@ -255,7 +276,7 @@ wizard = WizardState(editingConnection = newCfg, step = WizardStep.QUICK_CONNECT
 
 ```kotlin
 // ConnectionSession.kt
-class ConnectionSession(private val engine: IdbEngine, private val scope: CoroutineScope) {
+class ConnectionSession(private val engine: EngineClient, private val scope: CoroutineScope) {
     var connectionList by mutableStateOf(ConnectionStorage.load()); private set
     var selectedConnection by mutableStateOf<ConnectionConfig?>(null); private set
     var wizard by mutableStateOf(WizardState.Idle); private set
@@ -301,9 +322,10 @@ private fun engineConfig(config: ConnectionConfig) = connectionConfig {
 }
 ```
 
-`onTestConnection` / `onConnect` 是**连接初始化**的入口 —— `IdbEngine.testConnection` 旁路 gRPC 与
-`RequestDispatcher`，直接调 `SystemHandler`；首次调用用 `jdbc_url` 建 HikariCP 池（这一步就是“初始化连接”），
-之后按 hash key 复用；`IdbEngine.disconnect` 用同一 key 定位并关闭该配置的所有池。
+`onTestConnection` / `onConnect` 是**连接初始化**的入口 —— `EngineClient.testConnection`（默认的 Direct 实现
+旁路 gRPC 与 `RequestDispatcher`，直接调 `SystemHandler`；gRPC 实现走线路由）；首次调用用 `jdbc_url` 建
+HikariCP 池（这一步就是“初始化连接”），之后按 hash key 复用；`EngineClient.disconnect` 用同一 key 定位并
+关闭该配置的所有池。
 
 ### 持久化路径
 
@@ -314,26 +336,35 @@ private fun engineConfig(config: ConnectionConfig) = connectionConfig {
                                        QUICK_CONNECT 流程「连接」时不调用
 ```
 
-## Direct 模式集成架构
+## 引擎集成架构（`EngineClient` 绑定）
 
 ### 核心契约
 
 ```kotlin
 // desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt
-import com.kxxnzstdsw.engine.IdbEngine
+const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
 
-val engine = IdbEngine()                                          // 构造时自动 bootstrap（幂等）
+internal fun createEngineClient(): EngineClient {
+    val endpoint = System.getProperty(ENDPOINT_PROPERTY).orEmpty().trim()
+    if (endpoint.isEmpty()) return IdbEngine()                               // 默认：同进程
+    return GrpcEngineClient.connect(GrpcClientConfig.fromTarget(endpoint))  // 显式：跨进程 gRPC
+}
+
+val engine: EngineClient = createEngineClient()                             // main() 内的唯一装配点
 Window(
     onCloseRequest = {
-        engine.close()                                            // 释放 PoolManager / DriverLoader / DialectLoader
+        engine.close()                                                        // 释放实现自身资源（幂等）
         exitApplication()
     },
 ) { /* Compose UI */ }
 ```
 
+UI 侧（`ConnectionSession` / `DatabaseBrowserState`）只声明 `EngineClient` 字段，**对绑定哪个实现完全无感**；
+`EngineClientSelectionTest` 锁定 `createEngineClient()` 的绑定行为。
+
 ### 关键设计决策
 
-#### 1. **构造即 bootstrap（幂等）**
+#### 1. **构造即 bootstrap（幂等）**（仅默认的 Direct 绑定）
 
 `IdbEngine()` 构造函数内部触发 `DriverLoader` + `DialectLoader` 的加载。**重复构造是幂等的**（`bootstrap` 用 `AtomicBoolean` 单例保护），所以桌面应用启动时调用一次即可，无需担心后续 ViewModel 多次持有引用导致重复加载。
 
@@ -344,15 +375,19 @@ Window(
 
 启动日志可确认：`Registered 5 dialect plugin(s) from application classpath` → `IdbEngine bootstrap complete`。JDBC 驱动同样以 `runtimeOnly` 上到应用类路径（HikariCP 按 `driverClassName` 直接实例化）。
 
-#### 2. **不启动子进程、不走 gRPC**
+#### 2. **默认不启动子进程、不走 gRPC**
 
-`desktopApp/build.gradle.kts` 显式声明：
+这是**默认绑定**的行为（未设置 `sundays.engine.endpoint` 时）。设了端点属性则改为 `GrpcEngineClient`，
+引擎在独立进程、应用经 gRPC 调用 —— 但 UI 侧代码一行不用改。
+
+`desktopApp/build.gradle.kts` 显式声明（两个实现都在编译期可见，运行期由装配点二选一）：
 
 ```kotlin
-implementation(project(":engine"))    // 直接依赖，无 IPC transport 依赖
+implementation(project(":engine"))             // 默认实现：同进程直调，无 IPC transport 依赖
+implementation(project(":engine-grpc-client")) // 端点实现：跨进程 gRPC
 // :engine 以 implementation 声明 protobuf/grpc，不传递给消费方编译类路径 —— 集成层
 // 需要 typed proto 类型（ConnectionConfig / SystemTestConnectionResponse / Response）才能
-// 调用 facade 的 Direct 模式 API，因此显式补齐：
+// 调用 EngineClient API，因此显式补齐：
 implementation(libs.protobuf.java)
 implementation(libs.protobuf.kotlin.lite)
 ```
@@ -394,14 +429,19 @@ engine.handle(request {
 
 #### 3. **生命周期 = Window 生命周期**
 
-| 操作 | gRPC 模式（独立子进程） | Direct 模式（library 集成） |
+| 操作 | gRPC 绑定（独立子进程） | Direct 绑定（默认，library 集成） |
 |---|---|---|
-| 启动 | 父进程拉起 `java -jar idb-engine.jar` | 父 JVM 构造 `IdbEngine()` |
-| 资源持有 | 子进程独立内存 | 父 JVM 共享类加载器 / 连接池 / 驱动 |
-| 关闭清理 | 子进程 `destroy()` + JVM Shutdown Hook 调 `transport.cleanup()` + `PoolManager.closeAll()` + `Loader.closeAll()` | **仅需** 在 `Window.onCloseRequest` 中调 `engine.close()` —— **不需要** Shutdown Hook（library 不是独立进程，JVM 退出时 GC 自然回收） |
+| 启动 | 先起引擎进程 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051`，应用带 `-Dsundays.engine.endpoint=localhost:50051` 启动 | 父 JVM 构造 `IdbEngine()` |
+| 资源持有 | 子进程独立内存（连接池 / 驱动 / 方言都在引擎进程内） | 父 JVM 共享类加载器 / 连接池 / 驱动 |
+| 关闭清理 | 客户端侧 `engine.close()` 关闭 gRPC channel；引擎进程内的池 / 驱动 / 方言由**引擎进程**退出时释放 | **仅需** 在 `Window.onCloseRequest` 中调 `engine.close()` —— **不需要** Shutdown Hook（library 不是独立进程，JVM 退出时 GC 自然回收） |
 | 调试 | 跨进程 attach | 直接 IDE debug |
 
-> **关键洞察**：Direct 模式下，**`engine.close()` 不再依赖 JVM Shutdown Hook 兜底** —— 因为 `engine` 不是独立进程的入口，而是 JVM 内的一个 library 对象。其生命周期完全由 Compose UI 的 `Window.onCloseRequest` 控制；JVM 退出后 GC 自然回收所有未显式关闭的资源（连接池、驱动、方言 SPI 实例）。
+> **关键洞察**：Direct 绑定下 `engine.close()` **不依赖 JVM Shutdown Hook 兜底** —— `engine` 不是独立进程的入口，
+> 而是 JVM 内的一个 library 对象；其生命周期完全由 Compose UI 的 `Window.onCloseRequest` 控制。
+>
+> `EngineClient.close()` **对两种实现都幂等**，且只释放「实现自身持有的资源」：本地实现释放连接池 / 驱动 /
+> 方言，gRPC 实现关闭 channel（channel 关闭后再发请求会失败）。gRPC 绑定下**引擎进程**另有自己的 Shutdown Hook
+> 负责进程内资源 —— 那是引擎侧的事，不在 desktopApp 的清理路径上。
 
 ---
 
@@ -421,11 +461,11 @@ Window(
 
 **两步清理顺序**：
 
-1. **`engine.close()`** — `IdbEngine` facade 内部调用 `PoolManager.closeAll()`（关闭该应用建立的所有 HikariCP 连接池）+ `DriverLoader.closeAll()`（卸载所有 JDBC 驱动）+ `DialectLoader.closeAll()`（关闭所有方言 SPI 实例）
+1. **`engine.close()`** — `EngineClient.close()`，幂等。默认 Direct 绑定下即 `IdbEngine` facade 内部调用 `PoolManager.closeAll()`（关闭该应用建立的所有 HikariCP 连接池）+ `DriverLoader.closeAll()`（卸载所有 JDBC 驱动）+ `DialectLoader.closeAll()`（关闭所有方言 SPI 实例）；gRPC 绑定下关闭 gRPC channel，引擎进程内的资源由引擎进程自己负责
 2. **`exitApplication()`** — Compose Desktop `application{}` 的退出点，触发所有 `Window` 的销毁
 
 > 协程侧无需额外清理：`ConnectionSession` 的 `connect` / `disconnect` 跑在 `rememberCoroutineScope()` 上，
-> 随组合销毁自动取消；引擎调用本身旁路 RPC，不持有长驻后台任务。
+> 随组合销毁自动取消；引擎调用本身不持有长驻后台任务（Direct 走同进程直调，gRPC 走单次 RPC）。
 
 ### 为什么不需要 Shutdown Hook
 
@@ -443,15 +483,17 @@ Window(
 
 | 文档 | 内容 |
 |---|---|
-| [`desktopApp/README.md`](./README.md) | desktopApp 用户级 README（运行命令 / 演示功能 / Direct 模式概述） |
+| [`desktopApp/README.md`](./README.md) | desktopApp 用户级 README（运行命令 / 演示功能 / 端点属性与两种绑定） |
 | [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎内部架构（`IdbEngine` facade 详解 / `RequestDispatcher` / `PoolManager` / `Loader`） |
 | [`engine/README.md`](../engine/README.md) | 引擎用户级 README（CLI / 构建运行 / API 参考 / Direct 模式示例） |
+| [`engine-protocol/README.md`](../engine-protocol/README.md) | 调用层契约（`EngineClient` 接口 / 两个实现的对照 / 生命周期与线程安全约定） |
+| [`engine-grpc-client/README.md`](../engine-grpc-client/README.md) | gRPC 引擎客户端（`GrpcEngineClient` / `GrpcClientConfig.fromTarget` 端点写法 / 启动与连接方式） |
 | [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) | 共享 UI 组件架构（`CodeEditor` / `DataTable` / `ConnectionManagerScreen` 含 JDBC URL 折算与连接总览 / 右键菜单） |
 
 ---
 
-## 后续迭代方向（v2.13+）
+## 后续迭代方向（v2.15+）
 
 - **真正的数据库管理 UI**：Schema 导航（基于连接池后的 `SCHEMA.LIST`）/ SQL 编辑器面板（嵌入 `CodeEditor`）/ 查询结果表（嵌入 `DataTable`）；连接表单可进一步改为按 `SYSTEM.LIST_DRIVERS` 的 `DialectInfo` 动态渲染
 - **连接重连与会话信息**：总览面板展示 `SYSTEM.SERVER_INFO`（版本 / 模式）；断线自动重连

@@ -67,6 +67,7 @@ import com.kxxnzstdsw.handlers.ForeignKeyHandler
 import com.kxxnzstdsw.handlers.FunctionHandler
 import com.kxxnzstdsw.handlers.GenerateHandler
 import com.kxxnzstdsw.handlers.IndexHandler
+import com.kxxnzstdsw.handlers.ImportHandler
 import com.kxxnzstdsw.handlers.SchemaHandler
 import com.kxxnzstdsw.handlers.SqlEngineHandler
 import com.kxxnzstdsw.handlers.SystemHandler
@@ -187,20 +188,21 @@ object RequestDispatcher {
         ))
 
         // ─────── DATA (non-stream) ───────
+        // v2.16: sessionId 透传 —— 非空时写操作落在事务会话的固定连接上（不自动提交）
         put(Category.DATA to Action.LIST, Route(
-            invoke = { c, r -> DataHandler.list(c, r.dataRequest.list, null) },
+            invoke = { c, r -> DataHandler.list(c, r.dataRequest.list, r.sessionId) },
             wrap = { b, m -> b.data = dataResponse { list = m as com.kxxnzstdsw.grpc.DataListPagedResponse } }
         ))
         put(Category.DATA to Action.CREATE, Route(
-            invoke = { c, r -> DataHandler.create(c, r.dataRequest.create) },
+            invoke = { c, r -> DataHandler.create(c, r.dataRequest.create, r.sessionId) },
             wrap = { b, m -> b.data = dataResponse { create = m as com.kxxnzstdsw.grpc.DataCreateResponse } }
         ))
         put(Category.DATA to Action.UPDATE, Route(
-            invoke = { c, r -> DataHandler.update(c, r.dataRequest.update) },
+            invoke = { c, r -> DataHandler.update(c, r.dataRequest.update, r.sessionId) },
             wrap = { b, m -> b.data = dataResponse { update = m as com.kxxnzstdsw.grpc.DataUpdateResponse } }
         ))
         put(Category.DATA to Action.DELETE, Route(
-            invoke = { c, r -> DataHandler.delete(c, r.dataRequest.delete) },
+            invoke = { c, r -> DataHandler.delete(c, r.dataRequest.delete, r.sessionId) },
             wrap = { b, m -> b.data = dataResponse { delete = m as com.kxxnzstdsw.grpc.DataDeleteResponse } }
         ))
 
@@ -226,6 +228,32 @@ object RequestDispatcher {
         put(Category.SYSTEM to Action.LIST_DRIVERS, Route(
             invoke = { _, _ -> SystemHandler.listDrivers() },
             wrap = { b, m -> b.system = systemResponse { listDrivers = m as com.kxxnzstdsw.grpc.SystemListDriversResponse } }
+        ))
+        put(Category.SYSTEM to Action.DISCONNECT, Route(
+            invoke = { c, _ -> SystemHandler.disconnect(c) },
+            wrap = { b, m -> b.system = systemResponse { disconnect = m as com.kxxnzstdsw.grpc.SystemDisconnectResponse } }
+        ))
+        // v2.16: 查询取消 —— 对运行中的 Statement 调 cancel()，让数据库侧真正停下来
+        put(Category.SYSTEM to Action.CANCEL, Route(
+            invoke = { _, r -> SystemHandler.cancel(r.systemRequest.targetRequestId) },
+            wrap = { b, m -> b.system = systemResponse { cancel = m as com.kxxnzstdsw.grpc.SystemCancelResponse } }
+        ))
+        // v2.16: 事务会话 —— BEGIN 固定连接并关 autocommit，COMMIT/ROLLBACK 结束会话
+        put(Category.SYSTEM to Action.BEGIN, Route(
+            invoke = { c, _ -> SystemHandler.begin(c) },
+            wrap = { b, m -> b.system = systemResponse { begin = m as com.kxxnzstdsw.grpc.SystemBeginResponse } }
+        ))
+        put(Category.SYSTEM to Action.COMMIT, Route(
+            invoke = { _, r -> SystemHandler.commit(r.systemRequest.sessionId) },
+            wrap = { b, m -> b.system = systemResponse { commit = m as com.kxxnzstdsw.grpc.SystemCommitResponse } }
+        ))
+        put(Category.SYSTEM to Action.ROLLBACK, Route(
+            invoke = { _, r -> SystemHandler.rollback(r.systemRequest.sessionId) },
+            wrap = { b, m -> b.system = systemResponse { rollback = m as com.kxxnzstdsw.grpc.SystemRollbackResponse } }
+        ))
+        put(Category.SYSTEM to Action.SESSION_INFO, Route(
+            invoke = { _, r -> SystemHandler.sessionInfo(r.systemRequest.sessionId) },
+            wrap = { b, m -> b.system = systemResponse { sessionInfo = m as com.kxxnzstdsw.grpc.SystemSessionInfoResponse } }
         ))
 
         // ─────── FUNCTION ───────
@@ -361,6 +389,11 @@ object RequestDispatcher {
                     ExportHandler.executeInMainProcess(request).collect { emit(it) }
                     return@flow
                 }
+                // v2.16: 数据导入 —— 与 EXPORT 对称的读方向，流式进度 + 可取消 + 可事务回滚
+                request.category == Category.IMPORT && request.action == Action.RUN_IMPORT -> {
+                    ImportHandler.executeInMainProcess(request).collect { emit(it) }
+                    return@flow
+                }
                 request.category == Category.DATA && request.action == Action.LIST
                     && request.dataRequest.hasList()
                     && request.dataRequest.list.hasPageSize()
@@ -427,6 +460,8 @@ object RequestDispatcher {
         Category.USER to Action.CREATE,
         Category.USER to Action.UPDATE,
         Category.USER to Action.DELETE,
+        // SYSTEM — 释放连接池有副作用，dryRun 必须短路（否则「试运行」会真的断掉用户的连接）
+        Category.SYSTEM to Action.DISCONNECT,
         // TABLE
         Category.TABLE to Action.CREATE,
         Category.TABLE to Action.UPDATE,
@@ -454,6 +489,8 @@ object RequestDispatcher {
         Category.FOREIGN_KEY to Action.DELETE,
         // EXPORT
         Category.EXPORT to Action.RUN_EXPORT,
+        // IMPORT — truncate_first 会清空目标表，dryRun 必须短路（否则「试运行」把用户数据删了）
+        Category.IMPORT to Action.RUN_IMPORT,
     )
 
     // ============ 流式响应 ============
@@ -471,14 +508,22 @@ object RequestDispatcher {
             val ch = Channel<Response>(Channel.BUFFERED)
             val job = launch(Dispatchers.IO) {
                 try {
-                    DataHandler.list(request.connection, request.dataRequest.list) { frame ->
-                        ch.send(
-                            Response.newBuilder()
-                                .setId(id).setSuccess(true).setStream(true).setEnd(false)
-                                .setDataRowFrame(frame)
-                                .build()
-                        )
-                    }
+                    // 透传 requestId / sessionId：DataHandler.list 登记 Statement 供 SYSTEM.CANCEL 中断，
+                    // 且在事务会话内复用固定连接
+                    DataHandler.list(
+                        request.connection,
+                        request.dataRequest.list,
+                        sessionId = request.sessionId,
+                        requestId = id,
+                        onRow = { frame ->
+                            ch.send(
+                                Response.newBuilder()
+                                    .setId(id).setSuccess(true).setStream(true).setEnd(false)
+                                    .setDataRowFrame(frame)
+                                    .build()
+                            )
+                        },
+                    )
                     ch.send(
                         Response.newBuilder()
                             .setId(id).setSuccess(true).setStream(true).setEnd(true)
@@ -506,15 +551,22 @@ object RequestDispatcher {
             val job = launch(Dispatchers.IO) {
                 try {
                     var rowCount = 0
-                    val result = SqlEngineHandler.execute(request.connection, request.sqlRequest.execute) { frame ->
-                        rowCount++
-                        ch.send(
-                            Response.newBuilder()
-                                .setId(id).setSuccess(true).setStream(true).setEnd(false)
-                                .setSqlRowFrame(frame)
-                                .build()
-                        )
-                    }
+                    // sessionId/requestId 透传：让 SQL 执行落在事务会话的固定连接上，
+                    // 并把 Statement 登记到 StatementRegistry 以支持 SYSTEM.CANCEL。
+                    val result = SqlEngineHandler.execute(
+                        request.connection, request.sqlRequest.execute,
+                        sessionId = request.sessionId,
+                        requestId = id,
+                        onRow = { frame ->
+                            rowCount++
+                            ch.send(
+                                Response.newBuilder()
+                                    .setId(id).setSuccess(true).setStream(true).setEnd(false)
+                                    .setSqlRowFrame(frame)
+                                    .build()
+                            )
+                        },
+                    )
                     if (rowCount == 0) {
                         ch.send(
                             Response.newBuilder()
@@ -550,7 +602,11 @@ object RequestDispatcher {
             val ch = Channel<Response>(Channel.BUFFERED)
             val job = launch(Dispatchers.IO) {
                 try {
-                    GenerateHandler.execute(request.connection, request.dataRequest.generate) { frame ->
+                    GenerateHandler.execute(
+                        request.connection,
+                        request.dataRequest.generate,
+                        requestId = id,
+                    ) { frame ->
                         ch.send(
                             Response.newBuilder()
                                 .setId(id).setSuccess(true).setStream(true).setEnd(false)

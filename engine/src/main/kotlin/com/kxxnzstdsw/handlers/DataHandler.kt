@@ -1,6 +1,7 @@
 package com.kxxnzstdsw.handlers
 
 import com.google.protobuf.Value
+import com.kxxnzstdsw.engine.StatementRegistry
 import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.grpc.DataCreateRequest
 import com.kxxnzstdsw.grpc.DataCreateResponse
@@ -58,7 +59,9 @@ object DataHandler {
     suspend fun list(
         config: ConnectionConfig,
         req: DataListRequest,
-        onRow: (suspend (DataRowFrame) -> Unit)? = null
+        sessionId: String = "",
+        requestId: String = "",
+        onRow: (suspend (DataRowFrame) -> Unit)? = null,
     ): DataListPagedResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val page = if (req.page == 0) 1 else req.page
@@ -68,7 +71,7 @@ object DataHandler {
         val orderByRaw = req.orderBy.ifBlank { null }
         val schema = req.schema
 
-        val connection = PoolManager.getConnection(config, schema)
+        val connection = PoolManager.getConnection(config, schema, sessionId)
         val dialect = DialectLoader.getDialect(config.driver)
 
         // 按方言规则校验 SQL 片段安全性
@@ -81,7 +84,8 @@ object DataHandler {
         val whereSql  = if (!whereRaw.isNullOrBlank())  " WHERE $whereRaw"   else ""
         val orderBySql = if (!orderByRaw.isNullOrBlank()) " ORDER BY $orderByRaw" else ""
 
-        return@withContext connection.use { conn ->
+        val conn = connection
+        return@withContext try {
             // 查询总行数（带 WHERE）
             val countSql = "SELECT COUNT(*) AS cnt FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql"
             val total = conn.prepareStatement(countSql).use { countStmt ->
@@ -100,18 +104,24 @@ object DataHandler {
                         ResultSet.TYPE_FORWARD_ONLY,
                         ResultSet.CONCUR_READ_ONLY
                     ).use { stmt ->
-                        stmt.fetchSize = STREAM_FETCH_SIZE
-                        stmt.executeQuery().use { rs ->
-                            while (rs.next()) {
-                                onRow(
-                                    dataRowFrame {
-                                        this.total = total
-                                        this.page = 0
-                                        this.pageSize = 1
-                                        row = buildRow(rs)
-                                    }
-                                )
+                        // 登记到 StatementRegistry —— 大表全量读取时 SYSTEM.CANCEL 才能真正打断 rs.next()
+                        StatementRegistry.register(requestId, stmt)
+                        try {
+                            stmt.fetchSize = STREAM_FETCH_SIZE
+                            stmt.executeQuery().use { rs ->
+                                while (rs.next()) {
+                                    onRow(
+                                        dataRowFrame {
+                                            this.total = total
+                                            this.page = 0
+                                            this.pageSize = 1
+                                            row = buildRow(rs)
+                                        }
+                                    )
+                                }
                             }
+                        } finally {
+                            StatementRegistry.unregister(requestId)
                         }
                     }
                 } finally {
@@ -142,6 +152,9 @@ object DataHandler {
                     }
                 }
             }
+        } finally {
+            // 会话连接由 TransactionManager 持有，COMMIT/ROLLBACK 之前不能归还池
+            if (sessionId.isBlank()) conn.close()
         }
     }
 
@@ -167,14 +180,16 @@ object DataHandler {
         }
     }
 
-    suspend fun create(config: ConnectionConfig, req: DataCreateRequest): DataCreateResponse = withContext(Dispatchers.IO) {
+    suspend fun create(
+        config: ConnectionConfig,
+        req: DataCreateRequest,
+        sessionId: String = "",
+    ): DataCreateResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val schema = req.schema
-
-        val connection = PoolManager.getConnection(config, schema)
         val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
+        withBoundConnection(config, schema, sessionId) { conn ->
             val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
             val columns = req.valuesMap.keys.joinToString(", ") { dialect.quoteIdentifier(it) }
@@ -191,14 +206,16 @@ object DataHandler {
         }
     }
 
-    suspend fun update(config: ConnectionConfig, req: DataUpdateRequest): DataUpdateResponse = withContext(Dispatchers.IO) {
+    suspend fun update(
+        config: ConnectionConfig,
+        req: DataUpdateRequest,
+        sessionId: String = "",
+    ): DataUpdateResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val schema = req.schema
-
-        val connection = PoolManager.getConnection(config, schema)
         val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
+        withBoundConnection(config, schema, sessionId) { conn ->
             val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
             val setClause = req.changesMap.keys.joinToString(", ") { "${dialect.quoteIdentifier(it)} = ?" }
@@ -219,14 +236,16 @@ object DataHandler {
         }
     }
 
-    suspend fun delete(config: ConnectionConfig, req: DataDeleteRequest): DataDeleteResponse = withContext(Dispatchers.IO) {
+    suspend fun delete(
+        config: ConnectionConfig,
+        req: DataDeleteRequest,
+        sessionId: String = "",
+    ): DataDeleteResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val schema = req.schema
-
-        val connection = PoolManager.getConnection(config, schema)
         val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
+        withBoundConnection(config, schema, sessionId) { conn ->
             val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
             val whereClause = req.whereMap.keys.joinToString(" AND ") { "${dialect.quoteIdentifier(it)} = ?" }
@@ -239,6 +258,26 @@ object DataHandler {
                 val affectedRows = stmt.executeUpdate()
                 dataDeleteResponse { this.affectedRows = affectedRows }
             }
+        }
+    }
+
+    /**
+     * 借连接执行，并在**无事务会话时**归还连接池。
+     *
+     * 会话连接的生死由 `SYSTEM.COMMIT` / `ROLLBACK` 决定 —— 在这里 `close()` 会把连接还回
+     * HikariCP，后续语句将落到另一条物理连接上，事务语义直接失效。
+     */
+    private fun <T> withBoundConnection(
+        config: ConnectionConfig,
+        schema: String,
+        sessionId: String,
+        block: (java.sql.Connection) -> T,
+    ): T {
+        val conn = PoolManager.getConnection(config, schema, sessionId)
+        return try {
+            block(conn)
+        } finally {
+            if (sessionId.isBlank()) conn.close()
         }
     }
 

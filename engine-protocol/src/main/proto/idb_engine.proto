@@ -23,6 +23,7 @@ enum Category {
   INDEX        = 10;
   FOREIGN_KEY  = 11;
   TRIGGER      = 12;
+  IMPORT       = 14;  // v2.16: 数据导入（CSV / JSON_LINES → 目标表）
 }
 
 enum Action {
@@ -45,6 +46,13 @@ enum Action {
   TEST_CONNECTION = 16;
   SERVER_INFO     = 17;
   LIST_DRIVERS    = 18;  // v2.8: 列出引擎已加载的所有方言插件 + 连接元数据
+  DISCONNECT      = 19;  // v2.15: 关闭某配置的 HikariCP 连接池（与 TEST_CONNECTION 对称的连接生命周期端点）
+  CANCEL       = 20;  // v2.16: 取消正在执行的请求（Statement.cancel）
+  RUN_IMPORT   = 21;  // v2.16: 启动一次数据导入任务
+  BEGIN        = 22;  // v2.16: 开启事务会话（固定连接 + autocommit=false）
+  COMMIT       = 23;  // v2.16: 提交事务会话
+  ROLLBACK     = 24;  // v2.16: 回滚事务会话
+  SESSION_INFO = 25;  // v2.16: 查询事务会话状态
 }
 
 // ============================================================================
@@ -88,7 +96,13 @@ message GenerateTable { string script = 1; }
 // ============================================================================
 
 // ---------- SYSTEM ----------
-message SystemRequest {}  // no payload fields; INFO / TEST_CONNECTION / SERVER_INFO are no-arg
+// SYSTEM.CANCEL 用 target_request_id 指定被取消的请求；
+// SYSTEM.SESSION_INFO 用 session_id 指定会话（留空则列出全部活跃会话）。
+// INFO / TEST_CONNECTION / SERVER_INFO / LIST_DRIVERS / DISCONNECT / BEGIN / COMMIT / ROLLBACK 为 no-arg。
+message SystemRequest {
+  string target_request_id = 1;
+  string session_id        = 2;
+}
 
 // ---------- SCHEMA ----------
 message SchemaListRequest {
@@ -232,7 +246,23 @@ message DataRequest {
 }
 
 // ---------- SQL ----------
-message SqlExecuteRequest { string sql = 1; string schema = 2; }
+message SqlExecuteRequest {
+  string sql    = 1;
+  string schema = 2;
+  // v2.16: 分号分隔的多语句脚本。false（默认）= 整段当一条语句执行（v2.15 及之前行为）。
+  // true = 按语句边界顺序拆分逐条执行，结果逐条回填到 SqlExecuteResponse.statements。
+  // 拆分器会跳过字符串字面量 / 注释 / PostgreSQL dollar-quoting 内部的分号。
+  bool multi_statement = 3;
+}
+
+// v2.16: 多语句脚本的逐条执行结果（index 从 0 开始）。
+message SqlStatementResult {
+  int32  index         = 1;
+  string sql           = 2;   // 回显该条语句（已 trim）
+  int32  affected_rows = 3;
+  bool   success       = 4;
+  string error         = 5;   // 该条失败时的说明（success=false）
+}
 message SqlExplainRequest { string sql = 1; string schema = 2; }
 message SqlRequest {
   oneof body {
@@ -362,6 +392,33 @@ message ExportRequest {
   ExportRunRequest run_export = 1;
 }
 
+// ---------- IMPORT (v2.16) ----------
+// 数据导入：把本地文件读成行，批量插入目标表 —— 与 EXPORT 对称的读方向。
+message ImportRequest {
+  ImportRunRequest run_import = 1;
+}
+
+message ImportRunRequest {
+  string file_path  = 1;    // 待导入的本地文件绝对路径
+  string format     = 2;    // CSV | JSON_LINES
+  string table_name = 3;    // 目标表（必填）
+  string schema     = 4;
+  int32  batch_size = 5;    // 每批 insert 的行数，default 500
+
+  // ---- CSV 专用 ----
+  string delimiter  = 6;    // default ","
+  // default true。用 `optional` 保留 presence 语义：proto3 的裸 bool 无法区分
+  // 「调用方没传」和「显式传 false」，而这两者的意图完全相反（有表头 vs 无表头），
+  // 猜错就会把首行数据当成表头吃掉。与 DataListRequest.page_size 同一套处理。
+  optional bool has_header = 7;
+  string encoding   = 8;    // default UTF-8
+
+  // ---- 通用 ----
+  bool truncate_first = 9;  // 导入前 TRUNCATE 目标表
+  bool ignore_errors  = 10; // true = 跳过坏行继续并计入 rows_failed；false = 遇错即停
+  string stop_import_id = 11; // 设置为运行中的导入 id 即取消该任务（与 stop_export_id 同构）
+}
+
 // ============================================================================
 // Request envelope
 // ============================================================================
@@ -374,6 +431,10 @@ message Request {
 
   // Cross-cutting options (v2.6): applied uniformly to all (Category, Action) routes.
   RequestOptions options = 5;
+  // v2.16: 事务会话 id —— 由 SYSTEM.BEGIN 分配。留空 = 无事务（每条语句独立提交，即原有行为）。
+  // 非空时，所有 DATA 写操作与 SQL.DML 都在该会话**固定的那条连接**上执行，
+  // 直到 SYSTEM.COMMIT / SYSTEM.ROLLBACK 结束会话。
+  string session_id = 6;
 
   oneof body {
     SystemRequest    system_request    = 10;
@@ -388,6 +449,7 @@ message Request {
     ForeignKeyRequest foreign_key_request = 19;
     TriggerRequest   trigger_request   = 20;
     ExportRequest    export_request    = 21;
+    ImportRequest    import_request    = 22;  // v2.16
   }
 }
 
@@ -534,7 +596,9 @@ message SqlSelectRowFrame {
   Row row = 4;
 }
 message SqlExecuteResponse {
-  int32 affected_rows = 1;
+  int32 affected_rows = 1;   // 单条语句 = 该语句行数；多语句 = 全部成功语句行数合计
+  // v2.16: 仅 multi_statement=true 时逐条填充（顺序即执行顺序）
+  repeated SqlStatementResult statements = 2;
 }
 message SqlExplainResponse {
   repeated Row rows = 1;
@@ -572,6 +636,13 @@ message SystemTestConnectionResponse {
   int32  port     = 4;
   string database = 5;
   string error    = 6;   // populated when ok=false
+}
+
+// SYSTEM.DISCONNECT (v2.15) — 释放某连接配置下的全部 HikariCP 连接池（含各 schema 维度）。
+// 与 TEST_CONNECTION 对称：前者建池（= 初始化连接），本者释放池。
+// 远端调用方（gRPC 客户端）据此获得与本地进程内调用一致的连接生命周期语义。
+message SystemDisconnectResponse {
+  bool closed = 1;   // true = 确实关闭了至少一个连接池；false = 该配置当前没有活跃池
 }
 message SystemServerInfoResponse {
   string version = 1;
@@ -612,7 +683,54 @@ message SystemResponse {
     SystemTestConnectionResponse test_connection = 2;
     SystemServerInfoResponse     server_info     = 3;
     SystemListDriversResponse    list_drivers    = 4;   // v2.8
+    SystemDisconnectResponse     disconnect      = 5;   // v2.15
+    SystemCancelResponse         cancel          = 6;   // v2.16
+    SystemBeginResponse          begin           = 7;   // v2.16
+    SystemCommitResponse         commit          = 8;   // v2.16
+    SystemRollbackResponse       rollback        = 9;   // v2.16
+    SystemSessionInfoResponse    session_info    = 10;  // v2.16
   }
+}
+
+// ---------- SYSTEM.CANCEL (v2.16) ----------
+// 取消正在执行的请求。引擎侧对运行中的 JDBC Statement 调用 Statement.cancel()，
+// 被取消的请求以原本的请求 id 返回一条 success=false、error="cancelled" 的终止帧。
+message SystemCancelResponse {
+  bool   cancelled  = 1;   // true = 找到目标且已发出取消
+  string request_id = 2;   // 被取消的请求 id（回显，便于调用方对齐）
+  string error      = 3;   // 未找到 / 取消失败时的说明
+}
+
+// ---------- SYSTEM 事务会话 (v2.16) ----------
+// BEGIN 之后引擎为该会话固定一条 JDBC 连接并置 autocommit=false；
+// 同一 session_id 的后续请求全部落在这条连接上，直到 COMMIT / ROLLBACK。
+message SystemBeginResponse {
+  string session_id = 1;
+  int64  started_at = 2;   // epoch millis
+  string driver     = 3;
+  string database   = 4;
+}
+message SystemCommitResponse {
+  string session_id = 1;
+  bool   committed  = 2;
+  string error      = 3;    // 会话不存在 / commit 失败时的说明
+}
+message SystemRollbackResponse {
+  string session_id  = 1;
+  bool   rolled_back = 2;
+  string error       = 3;
+}
+message TransactionSession {
+  string session_id  = 1;
+  int64  started_at  = 2;
+  string driver      = 3;
+  string database    = 4;
+  string schema      = 5;
+  bool   auto_commit = 6;   // 会话内恒为 false
+}
+message SystemSessionInfoResponse {
+  int32 active_sessions = 1;
+  repeated TransactionSession sessions = 2;
 }
 
 // ---------- FUNCTION ----------
@@ -764,6 +882,28 @@ message ExportResponse {
   }
 }
 
+// ---------- IMPORT 响应 (v2.16) ----------
+// 进度帧：每读入 N 行推一帧；终止帧携带最终统计。
+message ImportProgressFrame {
+  int64  rows_read     = 1;
+  int64  rows_inserted = 2;
+  int64  rows_failed   = 3;
+  string message       = 4;   // 人类可读进度（如 "inserted 500"）
+}
+message ImportResultResponse {
+  int64  rows_read     = 1;
+  int64  rows_inserted = 2;
+  int64  rows_failed   = 3;
+  bool   success       = 4;
+  string error         = 5;
+}
+message ImportResponse {
+  oneof body {
+    ImportProgressFrame progress = 1;
+    ImportResultResponse result  = 2;
+  }
+}
+
 // Streaming frame for DATA.GENERATE — one frame per INSERT.
 message GenerateProgressFrame {
   string table             = 1;
@@ -805,11 +945,13 @@ message Response {
     TriggerResponse    trigger    = 20;
     ExportResponse     export     = 21;
     GenerateTerminalResponse generate_terminal = 22;
+    ImportResponse     import     = 23;  // v2.16
 
     // Streaming frames (one per row / progress event)
     DataRowFrame          data_row_frame  = 30;
     SqlSelectRowFrame     sql_row_frame   = 31;
     GenerateProgressFrame gen_progress_frame = 32;
+    ImportProgressFrame import_progress = 33;  // v2.16
   }
 }
 

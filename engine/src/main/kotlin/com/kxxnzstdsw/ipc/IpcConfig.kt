@@ -75,6 +75,12 @@ data class IpcConfig(
                         print(USAGE)
                         kotlin.system.exitProcess(0)
                     }
+                    // `--mode <grpc|direct>` 由 IdbEngineServer.parseMode 独立解析（要先于本函数决定入口），
+                    // 但它同样出现在 argv 里 —— 必须跳过，否则 `--mode grpc` 会被当成未知参数直接报错退出。
+                    "--mode" -> {
+                        args.getOrNull(i + 1) ?: error("--mode requires a value (grpc|direct)")
+                        i += 2
+                    }
                     "--ipc" -> {
                         val v = args.getOrNull(i + 1)
                             ?: error("--ipc requires a value (tcp|unix|pipe)")

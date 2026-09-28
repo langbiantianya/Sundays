@@ -54,7 +54,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.protobuf.Value as ProtoValue
-import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.Action
 import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.connectionConfig
@@ -102,8 +102,8 @@ import kotlinx.coroutines.launch
  *
  * ## 引擎耦合
  *
- * 通过 [IdbEngine.invoke] 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST` 路径
- * (与 `ConnectionManagerScreen` 的直连方式一致 —— 详见 desktopApp/ARCHITECTURE.md §Direct 模式集成).
+ * 通过 [EngineClient.invoke] 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST` 路径
+ * (与 `ConnectionManagerScreen` 的调用方式一致 —— 详见 desktopApp/ARCHITECTURE.md §引擎接入).
  *
  * 状态由调用方持有（[DatabaseBrowserState]，在 `MainScreen` 中 `remember`），本组件只负责
  * 渲染 + 事件转发 + 连接变化时的副作用 —— 因此同一份状态机可脱离 UI 直接驱动
@@ -114,8 +114,8 @@ import kotlinx.coroutines.launch
  * @param selectedConnection 当前选中连接
  * @param status 当前连接的引擎会话状态（决定树面板是「未连接」还是加载）
  * @param onSelectConnection 切换连接
- * @param onConnect 建立连接（调用方直连 `IdbEngine.testConnection`）
- * @param onDisconnect 断开连接（调用方直连 `IdbEngine.disconnect`）
+ * @param onConnect 建立连接（调用方经 `EngineClient.testConnection`）
+ * @param onDisconnect 断开连接（调用方经 `EngineClient.disconnect`）
  */
 @Composable
 fun DatabaseBrowserScreen(
@@ -671,7 +671,7 @@ class TablePreviewTab(
  * 以及当前引擎会话状态(连接 ID 仅由 [DatabaseBrowserScreen] 在外层持有).
  */
 class DatabaseBrowserState(
-    private val engine: IdbEngine,
+    private val engine: EngineClient,
     private val scope: CoroutineScope,
 ) {
     /** 数据库名称列表(来自 SCHEMA.LIST level=database) */

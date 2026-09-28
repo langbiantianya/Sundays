@@ -1,9 +1,7 @@
-import com.google.protobuf.gradle.id
 
 plugins {
     kotlin("jvm")
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.protobuf)
 }
 
 group = "com.kxxnzstdsw"
@@ -11,6 +9,10 @@ version = "1.0-SNAPSHOT"
 
 dependencies {
     implementation(project(":api"))
+    // 调用层契约（EngineClient 接口）+ proto 消息 / gRPC stub 由 :engine-protocol 提供。
+    // api 而非 implementation：IdbEngine 实现 EngineClient，且 handler 全部以 typed proto 消息为入参出参，
+    // 因此这些类型是 engine 对外的公开签名的一部分，必须传递给消费方编译类路径。
+    api(project(":engine-protocol"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.hikari)
@@ -107,12 +109,8 @@ dependencies {
         exclude(group = "io.airlift", module = "aircompressor")
     }
 
-    implementation(libs.grpc.stub)
-    implementation(libs.grpc.protobuf)
-    implementation(libs.protobuf.java)
+    // IPC Transport SPI 需要的 Netty shaded（UDS / Windows 命名管道 transport 依赖其内部 channel）
     implementation(libs.grpc.netty.shaded)
-    implementation(libs.grpc.kotlin.stub)
-    implementation(libs.protobuf.kotlin.lite)
 
     // JDBC Drivers — 不编译依赖，构建时复制到 drivers/
     val jdbcDrivers = configurations.create("jdbcDrivers") {
@@ -135,34 +133,6 @@ dependencies {
     testImplementation(project(":dialect-postgresql"))
     testImplementation(project(":dialect-duckdb"))
     testImplementation(project(":dialect-sqlite"))
-}
-
-protobuf {
-    protoc {
-        artifact = "com.google.protobuf:protoc:4.35.1"
-    }
-    plugins {
-        id("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:1.83.1"
-        }
-        id("grpckt") {
-            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.5.0:jdk8@jar"
-        }
-    }
-    generateProtoTasks {
-        all().forEach { task ->
-            task.plugins {
-                id("grpc")
-                id("grpckt")
-            }
-            // 生成 Kotlin DSL（com.kxxnzstdsw.grpc.ColumnDefKt 等），业务层通过 columnDef { ... } 构造
-            task.builtins {
-                id("kotlin") {
-                    option("lite")
-                }
-            }
-        }
-    }
 }
 
 tasks.test {

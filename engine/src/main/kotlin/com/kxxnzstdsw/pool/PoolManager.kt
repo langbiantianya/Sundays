@@ -99,6 +99,9 @@ object PoolManager {
      * @return 是否至少关闭了一个池（false = 该配置当前没有活跃池）
      */
     fun close(config: ConnectionConfig): Boolean {
+        // 先回滚并释放该配置下钉住的事务会话 —— 否则池被关掉时会话仍持有已失效的连接，
+        // 后续 COMMIT 会在一条死连接上静默失败。
+        TransactionManager.closeSessionsFor(config)
         val base = configKey(config)
         val victims = pools.keys.filter { it == base || it.startsWith("$base#") }
         var closed = false
@@ -114,6 +117,26 @@ object PoolManager {
         }
         return closed
     }
+
+    /**
+     * 连接配置指纹 —— 不含 schema 的那一段 key。
+     * 供 [TransactionManager] 把会话归到所属配置（断开连接时批量回滚）。
+     */
+    internal fun configKeyOf(config: ConnectionConfig): String = configKey(config)
+
+    /**
+     * 取连接 —— 事务优先。
+     *
+     * `sessionId` 非空时复用该会话钉住的连接（autocommit=false），否则与 v2.15 一致地从池里借。
+     * 留空 sessionId 的调用方完全不受事务功能影响。
+     */
+    fun getConnection(
+        config: ConnectionConfig,
+        schema: String,
+        sessionId: String,
+    ): Connection =
+        if (sessionId.isBlank()) getConnection(config, schema)
+        else TransactionManager.connectionFor(sessionId, config, schema)
 
     private fun createDataSource(config: ConnectionConfig, schema: String): HikariDataSource {
         val dialect = resolveDialect(config)
@@ -155,6 +178,8 @@ object PoolManager {
     }
 
     fun closeAll() {
+        // 先回滚所有事务会话再关池，顺序与 close(config) 相同
+        TransactionManager.closeAll()
         logger.info("Closing all connection pools")
         pools.values.forEach { it.close() }
         pools.clear()

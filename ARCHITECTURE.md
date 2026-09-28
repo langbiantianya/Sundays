@@ -1,6 +1,6 @@
-# sundays — Kotlin 数据库管理端架构导航（V2.14）
+# sundays — Kotlin 数据库管理端架构导航（V2.16）
 
-> **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `ARCHITECTURE.md`（见下方"模块导航"）。
+> **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、调用层抽象等深度内容已分散到各子模块的 `ARCHITECTURE.md`（见下方"模块导航"）。
 
 ---
 
@@ -8,40 +8,62 @@
 
 `sundays` 是一个**全 Kotlin** 实现的桌面数据库管理工具：
 
-- **后端引擎**：以 **gRPC 服务端** 方式运行（默认 `:50051`）的无头数据库算力引擎；v2.9 起新增 **Direct 直接模式** facade
+- **后端引擎**：可作 **gRPC 服务端**（默认 `:50051`）运行的无头数据库算力引擎，同时提供 **进程内 facade**
+- **调用层**：统一的 `EngineClient` 接口 —— 同一份调用代码可跑在同进程或跨进程 gRPC 上
 - **前端客户端**：**Kotlin Multiplatform + Compose Multiplatform Desktop** 桌面应用（macOS / Linux / Windows 三端共享 Compose Desktop Skia 渲染）
-- **整条工具链 Kotlin 一统**：共享 `protobuf-kotlin-lite` DSL 生成器 + `kotlinx-coroutines`，无语言边界、无桥接开销
+- **整条工具链 Kotlin 一统**：共享 protobuf 生成器 + `kotlinx-coroutines`，无语言边界、无桥接开销
 
-**当前版本：v2.14** — KMP Desktop 前端 + Direct 模式 + 双模式架构 + 仅凭 JDBC URL 初始化连接 + 连接生命周期 + 顶层导航与数据库浏览
+**当前版本：v2.16** — 引擎能力补齐（查询取消 `SYSTEM.CANCEL` / 数据导入 `IMPORT.RUN_IMPORT` / 事务会话 `SYSTEM.BEGIN` 系列 / 多语句脚本）
 
 ---
 
-## 2. 双模式架构（v2.9 核心）
+## 2. 调用层架构（v2.15 核心）
 
-| 模式 | 引擎入口 | 客户端 | 适用场景 |
-|---|---|---|---|
-| **Direct 直接模式（v2.9 推荐）** | `IdbEngine().handle(request): Flow<Response>` | Compose UI（同 JVM） | KMP Desktop 应用，零序列化、零子进程、零 IPC |
-| **gRPC 模式（向后兼容）** | `IdbEngineServer`（gRPC server over IPC transport） | 任意 gRPC client | 跨进程、跨语言、子进程隔离、远程调试 |
+调用方只面向 **`EngineClient` 接口**（`com.kxxnzstdsw.client.EngineClient`）编程，**不感知引擎在同进程还是跨进程**：
 
-两条路径共享同一个 `RequestDispatcher`，envelope options（`traceId` / `dryRun` / `timeoutMs`）、流式 frame assembly、`if_exists` 语义等横切关注点完全一致。
+| 模式 | 实现 | 模块 | 通道 | 适用场景 |
+|---|---|---|---|---|
+| **Direct 直接模式（默认）** | `IdbEngine` | `engine/` | 同 JVM 直接方法调用 | Compose UI 同进程，零序列化、零子进程、零 IPC |
+| **gRPC 模式** | `GrpcEngineClient` | `engine-grpc-client/` | gRPC over TCP / UDS / 命名管道 | 跨进程、跨语言、子进程隔离、远程调试 |
 
-**v2.11 — 连接生命周期直连方法**：`IdbEngine` 新增 `testConnection(config)` / `testConnection(jdbcUrl, user, password)`，**直接调用** `SystemHandler`，旁路 `RequestDispatcher`（无 envelope 包装）。首次调用用 `config.jdbcUrl` 创建（或复用）HikariCP 连接池 —— 即**连接初始化**；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`，前缀由 `DatabaseDialect.jdbcUrlPrefix` 声明）。详见 [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) §3.1 / §4.1。
+两条实现共用 `:engine-protocol` 中的同一份 `Request` / `Response` 消息与同一个 `RequestDispatcher` 路由集，
+因此 envelope options（`traceId` / `dryRun` / `timeoutMs`）、流式 frame assembly、`if_exists` 语义、错误包装（`success=false, error=…`）**逐帧一致**。
+`GrpcEngineClientTest` 用「同一 Request 走两条路径、断言 Response 列表相等」把这条平价钉住。
 
-**v2.12 — 连接管理流程与引擎打通**：`IdbEngine` 新增 `disconnect(config)`（释放该配置的连接池，含各 schema 维度），`PoolManager` 的 pool key 改为两段式（`sha256(配置)#sha256(schema)`）以支持按配置定位；`DialectLoader` 支持**应用类路径 SPI**（Direct 模式下方言插件随 `desktopApp` 的 `runtimeOnly` 依赖加载，无需外部 `dialects/` 目录）。前端侧 `shared/connection` 的 JDBC URL 折算覆盖全部 5 个方言，新增连接总览（连接 / 断开）与状态回显，`desktopApp` 以 `ConnectionSession` 承载状态机并新增端到端 UI 测试。详见 [`README.md` §架构升级历史](./README.md#架构升级历史)。
+**模块依赖**（无环）：
+
+```
+engine-protocol  ──api──▶  engine（同进程实现 + gRPC 服务端）
+      │
+      └─────────api──▶  engine-grpc-client（跨进程实现）
+```
 
 **典型调用栈**：
 
 ```
-Direct 模式（KMP Desktop 推荐）:
-[KMP Desktop Compose UI] ── IdbEngine.handle(req) ─→ [RequestDispatcher] ─→ [Handlers] ─→ [Dialects] ─→ [DB]
-   (同 JVM, typed proto, 直接方法调用)
+Direct 模式（默认，KMP Desktop）:
+[Compose UI] ── EngineClient.handle(req) ─→ [RequestDispatcher] ─→ [Handlers] ─→ [Dialects] ─→ [DB]
+              （同一接口，同一实现类：IdbEngine）
 
 gRPC 模式（跨进程 / 跨语言）:
-[任意 gRPC client] ── gRPC stub ─→ [IdbEngineImpl] ──[IdbEngine.handle]──→ [RequestDispatcher] ─→ [Handlers] ─→ [Dialects] ─→ [DB]
+[任意 gRPC client] ── gRPC stub ─→ [IdbEngineImpl] ─→ [EngineClient.handle] ─→ [RequestDispatcher] ─→ [Handlers] ─→ [DB]
+[KMP Desktop]     ── EngineClient.handle(req) ─→ [GrpcEngineClient] ── gRPC over IPC ─→ [IdbEngineImpl] ─→ …
                               (IPC: TCP / UDS / Named Pipe)
 ```
 
+**v2.15 — 远程连接生命周期**：连接池活在引擎进程内，远程调用方要「测试 / 断开」必须走线。
+因此 `SYSTEM.TEST_CONNECTION`（v2.11 已有）与 **`SYSTEM.DISCONNECT`（v2.15 新增）** 成为 `EngineClient` 契约的一部分；
+`disconnect` 幂等，且已纳入 `writeActions`（`dryRun` 不得真的掐断用户连接）。
+
+**v2.16 — 写路径能力补齐**：同一份 `RequestDispatcher` 路由集新增 `Category.IMPORT` 与一组 SYSTEM 事务 action —— `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`）、`SYSTEM.CANCEL`（`Action.CANCEL = 20`）、`SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action.BEGIN = 22` / `COMMIT = 23` / `ROLLBACK = 24` / `SESSION_INFO = 25`）。
+写路径的公共约束浓缩为一条：**连接的归属者决定它何时被释放** —— 不带会话时 handler 借用后归还，带会话（`Request.session_id`，字段 6）时这条钉住的连接归 `TransactionManager` 所有，直到 `COMMIT` / `ROLLBACK`；搞错这点会让事务静默退化成「只有最后一条语句」。
+`dryRun` 短路集合（`writeActions`）新增 **`IMPORT.RUN_IMPORT`**（`truncate_first` 会清空目标表）与 v2.15 已有的 **`SYSTEM.DISCONNECT`**。此外 `SQL.EXECUTE` 不再是「单语句」——`SqlExecuteRequest.multi_statement` 启用后由 `SqlScriptSplitter` 只切**顶层** `;`，逐条执行并在 `StatementRegistry` 单独登记以便取消。
+
+**前端选择实现**：`main.kt` 是唯一装配点 —— 设置 `-Dsundays.engine.endpoint=host:port`（或 `unix://path` / `pipe:name`）走 gRPC，
+否则用同进程 `IdbEngine`。端点格式错误在装配时直接抛出，不会静默退回本地。
+
 详细对比、最佳实践、流式响应契约、envelope options 见各子模块文档。
+
 
 ---
 
@@ -50,21 +72,27 @@ gRPC 模式（跨进程 / 跨语言）:
 ```
 sundays/
 ├── api/                      公共 SPI 接口（DatabaseDialect + ConnectionType + DialectCapability，v2.8）
+├── engine-protocol/          调用层契约（proto 协议 + 强类型消息 + EngineClient 接口，v2.15 新增）
 ├── dialect-mysql/            MySQL 方言插件 JAR
 ├── dialect-postgresql/       PostgreSQL 方言插件 JAR
 ├── dialect-h2/               H2 方言插件 JAR（嵌入式 + 测试载体）
 ├── dialect-duckdb/           DuckDB 方言插件 JAR（v2.7 新增，嵌入式 OLAP）
 ├── dialect-sqlite/           SQLite 方言插件 JAR（v2.8 新增，嵌入式关系型）
-├── engine/                   主引擎模块（gRPC server + Direct facade + 13 个 handler + 5 方言 loader）
+├── engine/                   引擎实现（14 个 handler + 5 方言 loader + IdbEngine 本地实现 + gRPC 服务端）
+│                              v2.16：`engine/StatementRegistry`（查询取消）+ `engine/SqlScriptSplitter`（多语句）
+│                              `pool/TransactionManager`（事务会话）+ `importer/`（CSV / JSON Lines 导入阅读器）
+├── engine-grpc-client/       gRPC 调用模块（GrpcEngineClient 跨进程实现，v2.15 新增）
 ├── shared/                   KMP 共享 UI 组件（CodeEditor / DataTable / 右键菜单 / 顶层导航 / 应用主题）
-└── desktopApp/               KMP Compose Desktop 应用（v2.9 新前端，Direct 模式集成；v2.13 顶层导航 + 数据库浏览第二屏）
+└── desktopApp/               KMP Compose Desktop 应用（KMP 工程结构 / 顶层导航 + 数据库浏览第二屏）
 ```
 
 ### 模块导航
 
 | 模块 | 入口 README | 内部架构 CLAUDE | 内容主题 |
 |---|---|---|---|
-| **engine/** | [`engine/README.md`](./engine/README.md) | [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) | gRPC 协议 / 13 个 handler 路由 / 强类型 envelope / 表驱动 Dispatcher / 流式响应 / 连接池 / IPC Transport SPI / Direct 模式 facade / 导出子进程隔离 |
+| **engine-protocol/** | [`engine-protocol/README.md`](./engine-protocol/README.md) | — | 调用层契约：`EngineClient` 接口 / proto 协议 / `SYSTEM.DISCONNECT` 路由 |
+| **engine/** | [`engine/README.md`](./engine/README.md) | [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) | gRPC 协议 / 14 个 handler 路由 / 强类型 envelope / 表驱动 Dispatcher / 流式响应 / 连接池 / IPC Transport SPI / `IdbEngine` 实现 / 导出子进程隔离 / v2.16 查询取消 + 事务会话 + 数据导入 |
+| **engine-grpc-client/** | [`engine-grpc-client/README.md`](./engine-grpc-client/README.md) | — | `GrpcEngineClient` 跨进程实现 / 端点配置（TCP / UDS / pipe）/ 端到端测试 |
 | **api/** | [`api/README.md`](./api/README.md) | — | DatabaseDialect SPI 接口定义 / ConnectionType / DialectCapability / 扩展自定义方言流程 |
 | **dialect-mysql/** | [`dialect-mysql/README.md`](./dialect-mysql/README.md) | — | MySQL 方言特性 / SQL 危险关键词 / 已知约束 |
 | **dialect-postgresql/** | [`dialect-postgresql/README.md`](./dialect-postgresql/README.md) | — | PostgreSQL 方言特性 / search_path / DDL 事务 / 已知约束 |
@@ -109,9 +137,12 @@ sundays/
 # Hot reload 开发模式
 ./gradlew :desktopApp:hotRun --auto
 
-# 启动引擎 gRPC server standalone
-./gradlew engine:jar
-cd engine/build/libs && java -jar idb-engine.jar
+# 启动引擎 gRPC server standalone（独立进程）
+./gradlew :engine:jar
+cd engine/build/libs && java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051
+
+# 前端改走 gRPC（连上面那个独立引擎进程）
+./gradlew :desktopApp:run -Dsundays.engine.endpoint=localhost:50051
 
 # 启动引擎 Direct 模式 standalone（不开 server）
 java -jar idb-engine.jar --mode direct
@@ -151,10 +182,12 @@ java -jar idb-engine.jar --mode direct
 | v2.6 | 表驱动 Dispatcher + 跨切面 Envelope Options（`traceId` / `dryRun` / `timeoutMs`）+ `SQL.EXPLAIN` 路由 | — |
 | v2.7 | DuckDB 方言插件（本地嵌入式 OLAP） | 详细：[`dialect-duckdb/README.md`](./dialect-duckdb/README.md) |
 | v2.8 | SQLite 方言插件 + SPI 连接元数据扩展 + `SYSTEM.LIST_DRIVERS` | 详细：[`dialect-sqlite/README.md`](./dialect-sqlite/README.md) + [`api/README.md`](./api/README.md) |
-| **v2.9** | **KMP Desktop 前端 + 双模式架构（gRPC + Direct）** | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) + [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) |
-| **v2.12** | **连接管理流程与引擎打通**（连接 / 断开生命周期 + 方言装配修复 + JDBC URL 折算覆盖全方言） | 详细：[`README.md` 架构升级历史](./README.md#架构升级历史) + [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §4 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
-| **v2.13** | **顶层导航 + 数据库浏览第二屏**（库/表树 + 双击开表预览标签页 + 标签页去重 + 会话代次丢弃过期响应） | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) §数据库浏览 + [`desktopApp/README.md`](./desktopApp/README.md) |
-| **v2.14** | **共享代码上移 `shared` + 模块整理**（`AppDestination` / `TopNavBar` / `SundaysTheme` 从 `desktopApp` 迁入 `commonMain`；删除 KMP 样板与死代码；`DatabaseBrowserState` 三个异步入口改为「先写数据、后清 loading」修掉竞态） | 详细：[`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §1.3 + §5 + §11 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
+| v2.9 | KMP Desktop 前端 + 双模式架构（gRPC + Direct） | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
+| v2.12 | 连接管理流程与引擎打通 | 详细：[`README.md` 架构升级历史](./README.md#架构升级历史) |
+| v2.13 | 顶层导航 + 数据库浏览第二屏 | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
+| v2.14 | 共享代码上移 `shared` + 模块整理 | 详细：[`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) |
+| **v2.15** | **调用层抽象** —— proto 迁出为 `:engine-protocol` + `EngineClient` 接口；新增 `:engine-grpc-client` 跨进程实现；`SYSTEM.DISCONNECT` 路由；`IpcConfig` 修复 `--mode` 误判 | 详细：[`engine-protocol/README.md`](./engine-protocol/README.md) + [`engine-grpc-client/README.md`](./engine-grpc-client/README.md) |
+| **v2.16** | **引擎能力补齐（关闭与 DBeaver / Navicat / DataGrip 的功能差距）** —— 查询取消 `SYSTEM.CANCEL`（`Action.CANCEL = 20`）+ `StatementRegistry`；数据导入 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`）+ `importer` 包（`CsvReader` / `JsonLinesReader` / `ImportSourceFactory`）；事务会话 `SYSTEM.BEGIN/COMMIT/ROLLBACK/SESSION_INFO` + `Request.session_id` + `TransactionManager`；多语句脚本 `SqlExecuteRequest.multi_statement` + `SqlScriptSplitter`。`:engine:test` 188 → **277**，项目总计 **619** | 详细：[`README.md` 引擎新能力（v2.16）](./README.md#引擎新能力v216) |
 
 > **v2.9 关键设计补充**：CodeEditor / DataTable 统一高度策略 —— `CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器。详细见 [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md)。
 

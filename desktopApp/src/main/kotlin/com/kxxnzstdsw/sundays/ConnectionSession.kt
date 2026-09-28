@@ -3,7 +3,7 @@ package com.kxxnzstdsw.sundays
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.connectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
@@ -37,19 +37,21 @@ data class WizardState(
  * 而不必复制调用方逻辑。
  *
  * ## 与引擎的分工
- *
  * | 操作 | 引擎调用 | 语义 |
  * |---|---|---|
- * | 测试连接 / 连接 | [IdbEngine.testConnection] | 按需建 HikariCP 池 + `isValid` 校验（= 初始化连接） |
- * | 断开 | [IdbEngine.disconnect] | 释放该配置的连接池 |
+ * | 测试连接 / 连接 | [EngineClient.testConnection] | 按需建 HikariCP 池 + `isValid` 校验（= 初始化连接） |
+ * | 断开 | [EngineClient.disconnect] | 释放该配置的连接池 |
  * | 保存 / 删除 | [ConnectionStorage] upsert / delete | JSON 持久化（`~/.config/sundays/connection.json`） |
- * | 窗口关闭 | [IdbEngine.close] | 释放全部池 / 驱动 / 方言 |
+ * | 窗口关闭 | [EngineClient.close] | 释放实现持有的资源（本地实现=池/驱动/方言，gRPC 实现=channel） |
+ *
+ * 本状态机只面向 [EngineClient] 接口编程 —— 引擎在同进程（`IdbEngine`）还是跨进程
+ * （`GrpcEngineClient`）由 `main.kt` 的装配决定，这里不感知。
  *
  * 编辑已保存连接时若字段发生变化（URL / 凭据 / 库名），旧配置的连接池会先释放 —— 池按字段 hash 缓存，
  * 不释放就会留下永远取不到的僵尸池。
  */
 class ConnectionSession(
-    private val engine: IdbEngine,
+    private val engine: EngineClient,
     private val scope: CoroutineScope,
 ) {
     /** 已保存的连接列表（`ConnectionStorage` 的镜像） */

@@ -1,13 +1,11 @@
 package com.kxxnzstdsw.engine
 
+import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.dispatcher.RequestDispatcher
 import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.grpc.Request
-import com.kxxnzstdsw.grpc.RequestKt
 import com.kxxnzstdsw.grpc.Response
 import com.kxxnzstdsw.grpc.SystemTestConnectionResponse
-import com.kxxnzstdsw.grpc.connectionConfig
-import com.kxxnzstdsw.grpc.request
 import com.kxxnzstdsw.handlers.SystemHandler
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.loader.DriverLoader
@@ -17,23 +15,26 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.io.File
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * In-process IDB Engine facade (v2.9+).
+ * 进程内 IDB Engine —— [EngineClient] 的**同进程实现**。
  *
- * **Dual-mode architecture** — same business core, two invocation paths:
+ * **调用层抽象**：调用方只面向 [EngineClient] 接口编程，本类与
+ * `:engine-grpc-client` 的 `GrpcEngineClient` 是它的两个实现，调用代码零差异：
  *
- * | Mode | Entry point | Wire | Use case |
+ * | 实现 | 模块 | 通道 | 场景 |
  * |---|---|---|---|
- * | **gRPC** (default) | `IdbEngineServer.main(args)` → gRPC server on `:50051` (or UDS/pipe) | gRPC HTTP/2 + protobuf over IPC transport | Cross-process, cross-language, remote debugging |
- * | **Direct in-process** | `IdbEngine().handle(req)` (this class) | In-JVM typed proto messages | KMP Desktop frontend (jvmMain) — zero subprocess, zero serialization |
+ * | `IdbEngine`（本类） | `:engine` | 同 JVM 直接方法调用 | Compose Desktop 同进程、shell 工具、嵌入式 |
+ * | `GrpcEngineClient` | `:engine-grpc-client` | gRPC over TCP / UDS / 命名管道 | 跨进程、跨语言、远程引擎 |
  *
- * Both modes funnel into the same [RequestDispatcher] routes, so envelope options (`traceId`,
- * `dryRun`, `timeoutMs`), stream semantics, and dialect/SPI dispatch all behave identically.
+ * 本类把请求交给 [RequestDispatcher]，因此 envelope options（`traceId` / `dryRun` / `timeoutMs`）、
+ * 流式分帧、方言 SPI 分派与 gRPC 路径**逐帧一致**。
  *
- * **Direct mode lifecycle**:
+ * **服务端入口**：`IdbEngineServer`（`--mode grpc`）以本类为后端挂载 gRPC service；
+ * `--mode direct` 则只 bootstrap 后阻塞主线程。
+ *
+ * **生命周期**：
  * ```kotlin
  * IdbEngine.bootstrap()              // load JDBC drivers + dialect plugins once per JVM
  * val engine = IdbEngine()           // lightweight — just bootstraps if not done
@@ -55,7 +56,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class IdbEngine(
     driversDir: File = File("drivers"),
     dialectsDir: File = File("dialects"),
-) : AutoCloseable {
+) : EngineClient {
 
     init {
         // 构造即 bootstrap — 保证 IdbEngine() 拿到时 drivers/dialects 已加载
@@ -71,66 +72,9 @@ class IdbEngine(
      * - 流式 (DATA.LIST pageSize=0 / SQL.EXECUTE SELECT / DATA.GENERATE / EXPORT.RUN_EXPORT)：
      *   返回 N 条 Response，最后一条 `end=true`
      *
-     * KMP / desktopApp 通过此方法直接调用，无需启动子进程、无需 gRPC channel：
-     * ```kotlin
-     * val resp = engine.handle(request {
-     *     id = UUID.randomUUID().toString()
-     *     category = Category.SCHEMA
-     *     action = Action.LIST
-     *     connection = connectionConfig { driver = "H2"; database = "test" }
-     *     body = RequestBody.SchemaRequest(schemaRequest = schemaRequest { list = schemaListRequest {} })
-     * }).first()
-     * ```
+     * [EngineClient.invoke] / `testConnection` / `disconnect` 的默认实现或本地直连实现见下方。
      */
-    fun handle(request: Request): Flow<Response> = RequestDispatcher.dispatch(request)
-
-    /**
-     * 单次 (非流式) 调用的便捷包装 — 构造 Request 并 collect 终止帧。
-     * 流式调用请使用 [handle] + `collect`。
-     */
-    suspend fun invoke(connection: ConnectionConfig, configure: RequestKt.Dsl.() -> Unit): Response {
-        val req = request {
-            id = UUID.randomUUID().toString()
-            this.connection = connection
-            configure()
-        }
-        // 非流式响应：collect 直到 end=true (单条响应此值立即为 true)
-        var result: Response? = null
-        handle(req).collect { resp ->
-            if (resp.end || !resp.stream) {
-                result = resp
-            }
-        }
-        return result ?: error("No terminal response received")
-    }
-
-    /**
-     * 测试 / 初始化连接 —— **直连**：不经 gRPC server、不经 IPC transport，也不经
-     * [RequestDispatcher] 的 envelope（无 traceId / dryRun / timeoutMs 包装），
-     * 直接调用 [SystemHandler.testConnection]。
-     *
-     * 首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— 这一步即“初始化连接”；
-     * 随后借出一条连接做 JDBC `isValid(5)` 校验。池按 [PoolManager] 的 hash key 缓存，
-     * 重复调用不会重复建池。
-     *
-     * `config.jdbcUrl` 非空时**只依赖 URL**：方言由 URL scheme 反查，
-     * `driver` / `host` / `port` / `database` 均被忽略。
-     */
-    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse =
-        SystemHandler.testConnection(config)
-
-    /** [testConnection] 的便捷重载 —— 仅凭 JDBC URL + 凭据（driver 由 URL scheme 反查）。 */
-    suspend fun testConnection(
-        jdbcUrl: String,
-        user: String = "",
-        password: String = "",
-    ): SystemTestConnectionResponse = testConnection(
-        connectionConfig {
-            this.jdbcUrl = jdbcUrl
-            this.user = user
-            this.password = password
-        }
-    )
+    override fun handle(request: Request): Flow<Response> = RequestDispatcher.dispatch(request)
 
     /**
      * 断开连接 —— 关闭 [config] 对应的 HikariCP 连接池（含该配置下各 schema 维度的池），
@@ -142,8 +86,23 @@ class IdbEngine(
      *
      * @return 是否真的关闭了连接池（false = 该配置当前没有活跃池）
      */
-    suspend fun disconnect(config: ConnectionConfig): Boolean =
+    override suspend fun disconnect(config: ConnectionConfig): Boolean =
         withContext(Dispatchers.IO) { PoolManager.close(config) }
+
+    /**
+     * 测试 / 初始化连接 —— **本地直连**：不经 gRPC server、不经 IPC transport，也不经
+     * [RequestDispatcher] 的 envelope（无 traceId / dryRun / timeoutMs 包装），
+     * 直接调用 [SystemHandler.testConnection]。
+     *
+     * 首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— 这一步即“初始化连接”；
+     * 随后借出一条连接做 JDBC `isValid(5)` 校验。池按 [PoolManager] 的 hash key 缓存，
+     * 重复调用不会重复建池。
+     *
+     * `config.jdbcUrl` 非空时**只依赖 URL**：方言由 URL scheme 反查，
+     * `driver` / `host` / `port` / `database` 均被忽略。
+     */
+    override suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse =
+        SystemHandler.testConnection(config)
 
     /**
      * 关闭资源 — 调用 PoolManager.closeAll() / DriverLoader.closeAll() / DialectLoader.closeAll()。

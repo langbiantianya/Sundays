@@ -99,7 +99,7 @@ class SQLiteHandlerIntegrationTest : SQLiteFixture() {
             tableName = "users"
             page = 1
             pageSize = 10
-        }, null)
+        })
         assertEquals(2, res.total)
         assertEquals(2, res.rowsCount)
     }

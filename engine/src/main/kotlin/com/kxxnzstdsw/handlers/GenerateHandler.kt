@@ -1,6 +1,7 @@
 package com.kxxnzstdsw.handlers
 
 import com.kxxnzstdsw.dialect.DatabaseDialect
+import com.kxxnzstdsw.engine.StatementRegistry
 import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.grpc.DataGenerateRequest
 import com.kxxnzstdsw.grpc.GenerateProgressFrame
@@ -28,6 +29,8 @@ import party.iroiro.luajava.luajit.LuaJit
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.Statement
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -62,6 +65,14 @@ object GenerateHandler {
         val scriptIndex: Int,
         val totalScripts: Int,
         val progressChannel: Channel<GenerateProgressFrame>,
+        /**
+         * v2.16 取消标志 —— 由 `SYSTEM.CANCEL` 置位。Lua 脚本本身无法被协程取消打断
+         * （它是 JNI 里的阻塞执行），因此在 insert 回调入口检查此标志并抛异常，
+         * 让异常穿过 `L.run()` 把脚本解开。
+         */
+        val cancelled: AtomicBoolean = AtomicBoolean(false),
+        /** 当前正在跑的语句 —— 取消时除了置标志，还要打断正在进行的 executeBatch() */
+        val activeStmt: AtomicReference<PreparedStatement?> = AtomicReference(null),
         var currentTable: String = "",
         var currentStmt: PreparedStatement? = null,
         var currentColumns: List<String>? = null,
@@ -94,52 +105,65 @@ object GenerateHandler {
     suspend fun execute(
         config: ConnectionConfig,
         req: DataGenerateRequest,
-        onProgress: (suspend (GenerateProgressFrame) -> Unit)? = null
+        requestId: String = "",
+        onProgress: (suspend (GenerateProgressFrame) -> Unit)? = null,
     ): Unit = withContext(Dispatchers.IO) {
         if (req.tablesList.isEmpty()) {
             throw IllegalArgumentException("'tables' must not be empty")
         }
 
-        val connection = PoolManager.getConnection(config, req.schema)
-        val dialect = DialectLoader.getDialect(config.driver)
+        val cancelled = AtomicBoolean(false)
+        val activeStmt = AtomicReference<PreparedStatement?>(null)
+        StatementRegistry.registerCanceler(requestId) {
+            cancelled.set(true)
+            activeStmt.get()?.let { runCatching { it.cancel() } }
+        }
 
-        connection.use { conn ->
-            for ((index, tableConfig) in req.tablesList.withIndex()) {
-                val channel = Channel<GenerateProgressFrame>(
-                    capacity = PROGRESS_CHANNEL_CAPACITY,
-                    onBufferOverflow = BufferOverflow.DROP_OLDEST
-                )
-                val state = GenerateState(
-                    conn = conn, dialect = dialect,
-                    scriptIndex = index, totalScripts = req.tablesList.size,
-                    progressChannel = channel
-                )
+        try {
+            val connection = PoolManager.getConnection(config, req.schema)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-                // Collector: 从 channel 读帧,调用 caller 提供的 onProgress 回调
-                val collectorJob = launch(Dispatchers.IO) {
-                    for (frame in channel) {
-                        try {
-                            onProgress?.invoke(frame)
-                        } catch (e: Exception) {
-                            logger.warn("Progress callback failed: ${e.message}")
+            connection.use { conn ->
+                for ((index, tableConfig) in req.tablesList.withIndex()) {
+                    val channel = Channel<GenerateProgressFrame>(
+                        capacity = PROGRESS_CHANNEL_CAPACITY,
+                        onBufferOverflow = BufferOverflow.DROP_OLDEST
+                    )
+                    val state = GenerateState(
+                        conn = conn, dialect = dialect,
+                        scriptIndex = index, totalScripts = req.tablesList.size,
+                        progressChannel = channel,
+                        cancelled = cancelled, activeStmt = activeStmt,
+                    )
+
+                    // Collector: 从 channel 读帧,调用 caller 提供的 onProgress 回调
+                    val collectorJob = launch(Dispatchers.IO) {
+                        for (frame in channel) {
+                            try {
+                                onProgress?.invoke(frame)
+                            } catch (e: Exception) {
+                                logger.warn("Progress callback failed: ${e.message}")
+                            }
                         }
                     }
-                }
 
-                try {
-                    createLuaEngine(req.luaVersion.ifBlank { "luajit" }).use { L ->
-                        L.openLibraries()
-                        applySandbox(L)
-                        registerHelpers(L, state)
-                        L.run(tableConfig.script)
+                    try {
+                        createLuaEngine(req.luaVersion.ifBlank { "luajit" }).use { L ->
+                            L.openLibraries()
+                            applySandbox(L)
+                            registerHelpers(L, state)
+                            L.run(tableConfig.script)
+                        }
+                        state.closeStmt()
+                    } finally {
+                        // 关闭通道让 collector 退出
+                        channel.close()
+                        collectorJob.join()
                     }
-                    state.closeStmt()
-                } finally {
-                    // 关闭通道让 collector 退出
-                    channel.close()
-                    collectorJob.join()
                 }
             }
+        } finally {
+            StatementRegistry.unregister(requestId)
         }
     }
 
@@ -208,7 +232,13 @@ object GenerateHandler {
     private fun flushBatch(state: GenerateState, final: Boolean = false) {
         val stmt = state.currentStmt ?: return
         if (state.batchPending == 0) return
-        stmt.executeBatch()
+        // 登记正在执行的语句，让 SYSTEM.CANCEL 能打断这一批（executeBatch 可能跑很久）
+        state.activeStmt.set(stmt)
+        try {
+            stmt.executeBatch()
+        } finally {
+            state.activeStmt.set(null)
+        }
         state.batchPending = 0
         // 取最后一条的 generated key (lastId 仍只关心最后一张表)
         if (final) {
@@ -229,6 +259,11 @@ object GenerateHandler {
         // ── insert(tableName, rowTable) — 逐条绑定 + addBatch + 流式回报 ──
         L.push(JFunction { lua ->
             if (!lua.isTable(2)) return@JFunction 0
+
+            // v2.16 取消：Lua 脚本在 JNI 里阻塞执行，协程取消打不断它 ——
+            // 唯一的出口是在回调入口检查标志并抛异常，让异常穿过 L.run() 解开脚本。
+            // 已执行的批次不回滚（DATA.GENERATE 不在事务语义内），但脚本会立即停止。
+            if (state.cancelled.get()) throw IllegalStateException("cancelled")
 
             val tableName = lua.toString(1) ?: return@JFunction 0
             val row = readLuaTable(lua, 2)
