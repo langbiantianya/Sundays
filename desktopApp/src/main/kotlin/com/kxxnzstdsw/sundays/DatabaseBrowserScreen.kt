@@ -73,7 +73,7 @@ import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
-import com.kxxnzstdsw.sundays.editor.ui.CodeEditor
+import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
@@ -779,8 +779,10 @@ private fun PreviewTabContent(
 /**
  * SQL 工作台 —— 编辑器（顶部 60%） + 结果面板（底部 40%）。
  *
- * 编辑器用 [CodeEditor]，languageId="sql"，由 [com.kxxnzstdsw.editor.registerBuiltinEditors]
- * 注册的 SQL 高亮。执行按钮调 [DatabaseBrowserState.executeSql]，状态由同一状态机持有。
+ * 编辑器用 [CodeEditorWithToolbar]（`:shared` 的 `commonMain/.../editor/ui/CodeEditor.kt`）：
+ * 固定 `languageId = "sql"`（隐藏语言切换器 —— 本工作台只处理 SQL），内置「格式化」按钮
+ * 走注册表里的 SQL formatter，「执行 SQL」经 `actions` 插槽注入。
+ * SQL 语言与 formatter 由 app 启动时的 `registerBuiltinEditors()` 注册（幂等）。
  *
  * 结果面板四种态：
  * - `loading` → 行内 spinner
@@ -797,7 +799,7 @@ private fun SqlWorkbenchPane(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
-        // 顶部工具条：当前 schema + 执行按钮
+        // 顶部信息条：当前执行的 catalog —— 说明 SQL 会落到哪个库
         Surface(
             tonalElevation = 1.dp,
             color = MaterialTheme.colorScheme.surface,
@@ -821,37 +823,32 @@ private fun SqlWorkbenchPane(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(8.dp))
-                if (schema.isNotBlank()) {
-                    Text(
-                        text = "schema: $schema",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        text = "默认 catalog",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Button(
-                    onClick = { state.executeSql(state.sqlEditorText) },
-                    enabled = connected && !state.sqlRunning && state.sqlEditorText.isNotBlank(),
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (state.sqlRunning) "执行中…" else "执行 SQL")
-                }
+                Text(
+                    text = if (schema.isNotBlank()) "schema: $schema" else "默认 catalog",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
         Column(modifier = Modifier.fillMaxSize()) {
-            CodeEditor(
+            CodeEditorWithToolbar(
                 text = state.sqlEditorText,
                 onTextChange = { state.sqlEditorText = it },
                 languageId = "sql",
+                // 本工作台只处理 SQL —— 不暴露语言切换器
+                showLanguageSwitcher = false,
+                actions = {
+                    Button(
+                        onClick = { state.executeSql(state.sqlEditorText) },
+                        enabled = connected && !state.sqlRunning && state.sqlEditorText.isNotBlank(),
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (state.sqlRunning) "执行中…" else "执行 SQL")
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.6f),

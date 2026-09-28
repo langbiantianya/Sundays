@@ -21,6 +21,7 @@ import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 import com.kxxnzstdsw.sundays.navigation.AppDestination
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 
@@ -46,6 +47,9 @@ import com.kxxnzstdsw.sundays.ui.SundaysTheme
  * 已上移到 `:shared` 的 `commonMain` —— 本文件只剩「平台窗口 + 引擎实现装配」。
  */
 fun main() = application {
+    // 注册内置编辑器语言（SQL / Lua）+ formatter —— 幂等，启动时调一次。
+    // 不注册则 CodeLanguageRegistry.get("sql") 返回 null，编辑器退化为无高亮纯文本。
+    registerBuiltinEditors()
     val engine: EngineClient = createEngineClient()
     Window(
         onCloseRequest = {

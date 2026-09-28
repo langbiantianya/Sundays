@@ -82,7 +82,7 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
 | `BrowserToolBar(activePane, connected, onToggleSqlWorkbench)` | private `@Composable` | 激活 sheet 内容区顶部工具栏：「SQL 工作台」↔「返回表预览」切换；未连接时禁用。渲染在 `ActiveSheetContent` 内（`SheetTabRow` 之下），工具与它作用的连接同属一个视觉块 |
 | `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧（`BrowserPane.TABLE`）：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
-| `SqlWorkbenchPane` / `SqlResultArea` | private `@Composable` | 右侧（`BrowserPane.SQL`）：上 `CodeEditor`（`languageId = "sql"`，占 60%）+ 下结果面板（占 40%）；结果四态 = `loading` / `error` / `affectedRows` / `DataTable` |
+| `SqlWorkbenchPane` / `SqlResultArea` | private `@Composable` | 右侧（`BrowserPane.SQL`）：上 `CodeEditorWithToolbar`（`:shared` editor 模块，`languageId = "sql"`，占 60%——内置格式化按钮 + `actions` 插槽注入「执行 SQL」）+ 下结果面板（占 40%）；结果四态 = `loading` / `error` / `affectedRows` / `DataTable` |
 | `BrowserPane` | public enum | 右栏展示模式：`TABLE`（表预览，初始）/ `SQL`（SQL 工作台）；每 sheet 独立 |
 | `EmptyHint(title, description, modifier)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位 |
 | `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize`；`key = "$schema::$tableName"` 为去重主键 |
@@ -126,7 +126,9 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | 内容区顶部工具栏 | `BrowserToolBar` | 「SQL 工作台」↔「返回表预览」切换右栏内容（`BrowserPane`）；未连接时禁用。**位于 `ActiveSheetContent` 内**（sheet 标签条之下），工具与它作用的连接同属一个视觉块 |
 | 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab` |
 | 右侧（表预览） | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
-| 右侧（SQL 工作台） | `SqlWorkbenchPane` + `SqlResultArea` | 上 60% `CodeEditor`（SQL 高亮）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道 |
+| 右侧（SQL 工作台） | `SqlWorkbenchPane` + `SqlResultArea` | 上 60% `CodeEditorWithToolbar`（`:shared` editor 模块；SQL 高亮 + 格式化 + `actions` 插槽的「执行 SQL」）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道 |
+
+> **注意** `:shared` 的编辑器语言与 formatter 由 `registerBuiltinEditors()` 注册到全局注册表，**app 启动时必须调一次**（`main()` 开头，幂等）。不注册则 `CodeLanguageRegistry.get("sql")` 返回 null，编辑器静默退化为无高亮纯文本。
 
 ### 标签页去重契约
 
