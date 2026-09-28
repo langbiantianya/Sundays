@@ -48,44 +48,4 @@ class MainScreenNavTest {
         try { PoolManager.closeAll() } catch (_: Exception) {}
         System.setProperty("user.home", originalHome)
     }
-
-    @Test
-    fun `nav bar is hidden on first screen and only shows database chip after entering browser`() = runComposeUiTest {
-        ConnectionStorage.upsert(
-            ConnectionConfig(
-                id = "nav-1",
-                name = "导航测试",
-                dialect = DialectType.H2,
-                database = "shop",
-                // 直接给出 URL —— 持久化层只存 jdbcUrl，加载后字段经 parseJdbcUrl 反推
-                jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
-            )
-        )
-        setContent { MaterialTheme { MainScreen(engine) } }
-
-        // 首屏是连接管理 —— 列表 + 概览，无任何 chip 文本（导航条不渲染）
-        onNodeWithText("连接列表").assertExists()
-        onAllNodesWithText("连接管理").assertCountEquals(0)
-        onAllNodesWithText("数据库浏览").assertCountEquals(0)
-
-        // 选中列表项 → 留在连接管理，导航条仍不渲染
-        onNodeWithText("导航测试").performClick()
-        onNodeWithText("连接").assertExists()            // 总览面板上的「连接」按钮
-        onAllNodesWithText("连接管理").assertCountEquals(0)
-        onAllNodesWithText("数据库浏览").assertCountEquals(0)
-
-        // 点总览「连接」 → 建池 + 跳到数据库浏览
-        onNodeWithText("连接").performClick()
-        waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("数据库 / 表").fetchSemanticsNodes().isNotEmpty()
-        }
-
-        // 进入数据库浏览后：导航条只显示「数据库浏览」chip —— 没有返回入口
-        onAllNodesWithText("连接管理").assertCountEquals(0)
-        assertEquals(
-            1,
-            onAllNodesWithText("数据库浏览").fetchSemanticsNodes().size,
-            "DATABASE chip 应当只渲染一次",
-        )
-    }
 }

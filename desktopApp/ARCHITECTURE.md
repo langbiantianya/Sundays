@@ -78,13 +78,15 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `DatabaseBrowserScreen(browser, connections, selectedConnection, status, onSelectConnection, onConnect, onDisconnect, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方注入）。`LaunchedEffect(selectedConnection?.id, status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools` |
-| `ConnectionBar` / `ConnectionPicker` / `StatusChip` | private `@Composable` | 顶部连接选择条：下拉选连接 + 状态 chip + 刷新 / 连接 / 断开按钮 |
+| `DatabaseBrowserScreen(sheets, activeSheetId, connections, onSelectSheet, onCloseSheet, onAddSheet, onConnect, onDisconnect, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方按 sheet id 各自注入）。`ActiveSheetContent` 内 `LaunchedEffect(sheet.connection.id, sheet.status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools` |
 | `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
-| `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
+| `BrowserToolBar(activePane, connected, onToggleSqlWorkbench)` | private `@Composable` | sheet 标签条之上的工具栏：「SQL 工作台」↔「返回表预览」切换；未连接时禁用 |
+| `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧（`BrowserPane.TABLE`）：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
+| `SqlWorkbenchPane` / `SqlResultArea` | private `@Composable` | 右侧（`BrowserPane.SQL`）：上 `CodeEditor`（`languageId = "sql"`，占 60%）+ 下结果面板（占 40%）；结果四态 = `loading` / `error` / `affectedRows` / `DataTable` |
+| `BrowserPane` | public enum | 右栏展示模式：`TABLE`（表预览，初始）/ `SQL`（SQL 工作台）；每 sheet 独立 |
 | `EmptyHint(title, description, modifier)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位 |
 | `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize`；`key = "$schema::$tableName"` 为去重主键 |
-| `DatabaseBrowserState(engine: EngineClient, scope)` | public class | 状态机：`databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex`；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools`；`generation` 代次用于丢弃跨连接过期响应，`activeDatabases` 记录本屏建过池的 catalog 维度 |
+| `DatabaseBrowserState(engine: EngineClient, scope)` | public class | 状态机：`databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex` / `activePane` + SQL 工作台状态（`sqlEditorText` / `sqlRunning` / `sqlResultColumns` / `sqlResultRows` / `sqlRowCount` / `sqlAffectedRows` / `sqlError`）；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools` / `toggleSqlWorkbench` / `executeSql`；`generation` 代次用于丢弃跨连接过期响应，`sqlGeneration` 用于丢弃 SQL 工作台的过期执行结果，`activeDatabases` 记录本屏建过池的 catalog 维度 |
 
 **`DatabaseBrowserState` 引擎调用矩阵**：
 
@@ -93,6 +95,9 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | `refreshDatabases` | `SCHEMA.LIST` | `schemaListRequest { level = "database" }` | `databases`（失败 → `errorMessage`） |
 | `toggleDatabase`（首次展开） | `TABLE.LIST` | `tableListRequest {}` | `tablesByDatabase[db]`（失败 → `tableLoadError[db]`） |
 | `openTab`（新表） | `DATA.LIST` | `dataListRequest { tableName; page = 1; pageSize = tab.pageSize }` | `TablePreviewTab.columns` / `.rows` / `.total` |
+| `executeSql` | `SQL.EXECUTE` | `sqlRequest { execute = sqlExecuteRequest { sql; schema } }` | SELECT：`sqlRowFrame` 逐帧攒成 `sqlResultColumns` / `sqlResultRows` / `sqlRowCount`；非 SELECT：终止帧 `sql.execute.affectedRows` → `sqlAffectedRows`；失败 → `sqlError` |
+
+> **注意** `SQL.EXECUTE` 是**流式**通道（`RequestDispatcher.streamSqlExecute`），必须用 `EngineClient.handle` + `collect`，不能走 `invoke`（`invoke` 只收终止帧，会丢掉全部行帧）。SELECT 逐行推 `sql_row_frame` 且末尾空帧；非 SELECT 只推一条带 `execute` 的终止帧。
 
 > **注意** `pageSize = 0` 在 `DATA.LIST` 中是**流式哨兵**（逐行 `DataRowFrame`，无 paged body）；预览固定走分页路径，故请求侧 `coerceAtLeast(1)`。
 >
@@ -117,9 +122,11 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 
 | 区域 | 组件 | 行为 |
 |---|---|---|
-| 顶部 | `ConnectionBar` | 下拉选择连接；展示 `ConnectionStatus`；`CONNECTED` 时提供刷新 / 断开，否则提供连接 |
+| 顶部工具栏 | `BrowserToolBar` | 「SQL 工作台」↔「返回表预览」切换右栏内容（`BrowserPane`）；未连接时禁用 |
+| sheet 标签条 | `SheetTabRow` | 左侧「＋」入口 + 每 sheet 一个标签（连接状态点 + 名称 + 「×」关闭，关闭时释放池并断开引擎会话） |
 | 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab` |
-| 右侧 | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
+| 右侧（表预览） | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
+| 右侧（SQL 工作台） | `SqlWorkbenchPane` + `SqlResultArea` | 上 60% `CodeEditor`（SQL 高亮）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道 |
 
 ### 标签页去重契约
 
@@ -495,7 +502,7 @@ Window(
 
 ## 后续迭代方向（v2.15+）
 
-- **真正的数据库管理 UI**：Schema 导航（基于连接池后的 `SCHEMA.LIST`）/ SQL 编辑器面板（嵌入 `CodeEditor`）/ 查询结果表（嵌入 `DataTable`）；连接表单可进一步改为按 `SYSTEM.LIST_DRIVERS` 的 `DialectInfo` 动态渲染
+- **真正的数据库管理 UI**：Schema 导航（基于连接池后的 `SCHEMA.LIST`）/ SQL 编辑器面板（嵌入 `CodeEditor`）/ 查询结果表（嵌入 `DataTable`）✅ 已落地（`SqlWorkbenchPane`）；连接表单可进一步改为按 `SYSTEM.LIST_DRIVERS` 的 `DialectInfo` 动态渲染
 - **连接重连与会话信息**：总览面板展示 `SYSTEM.SERVER_INFO`（版本 / 模式）；断线自动重连
 - **多 Window 支持**：当前 `main()` 仅创建单个 `Window`；后续按需支持多 Window（每个连接一个 Window）
 - **KMP 平台扩展**：新增 `androidMain` / `iosMain` / `wasmJsMain` source set（共享 `commonMain` 业务层）

@@ -23,12 +23,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -60,39 +63,45 @@ import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.connectionConfig
 import com.kxxnzstdsw.grpc.dataListRequest
 import com.kxxnzstdsw.grpc.dataRequest
+import com.kxxnzstdsw.grpc.request
 import com.kxxnzstdsw.grpc.schemaListRequest
 import com.kxxnzstdsw.grpc.schemaRequest
+import com.kxxnzstdsw.grpc.sqlExecuteRequest
+import com.kxxnzstdsw.grpc.sqlRequest
 import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.ui.CodeEditor
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /**
  * 数据库浏览屏幕 —— 第二屏；**多 sheet**：每个已建连接的数据库浏览会话是一个 sheet，
- * sheet 之间互不干扰（左树 / preview 标签页 / 已展开节点各自独立）。
+ * sheet 之间互不干扰（左树 / preview 标签页 / 已展开节点 / SQL 工作台状态各自独立）。
  *
  * ## 布局
  *
  * ```
  * ┌────────────────────────────────────────────────────────────────────────┐
+ * │ BrowserToolBar:  [ ▶ SQL 工作台 ]   (当前 sheet 的操作)                  │
+ * ├────────────────────────────────────────────────────────────────────────┤
  * │ Sheets:  [＋] [ Conn A ×] [ Conn B ×] ...                               │
  * ├────────────────────────────────────────────────────────────────────────┤
- * │ 当前 sheet 连接状态 / 刷新按钮                                          │
- * ├──────────────┬─────────────────────────────────────────────────────────┤
- * │              │  Tab: [ users | orders | ... ]  [×]                     │
- * │  Schemas     ├─────────────────────────────────────────────────────────┤
- * │   ▾ PUBLIC   │                                                          │
- * │      ▸ users │       DataTable(rows=preview)                            │
- * │      ▸ orders│                                                          │
- * │   ▸ MYDB     │                                                          │
- * │              │                                                          │
+ * │              │  ┌── Table Preview Tab Area ──┐  切换到 SQL 工作台时:     │
+ * │  Schemas     │  │ Tab: [ users | orders ]    │                          │
+ * │   ▾ PUBLIC   │  ├───────────────────────────┤  ┌─ 编辑器 (60%) ──────┐ │
+ * │      ▸ users │  │  DataTable(rows=preview)   │  │ SELECT * FROM ...  │ │
+ * │      ▸ orders│  │                            │  ├─────────────────────┤ │
+ * │   ▸ MYDB     │  │                            │  │ 结果 (40%)          │ │
+ * │              │  └───────────────────────────┘  └─────────────────────┘ │
  * └──────────────┴─────────────────────────────────────────────────────────┘
  * ```
  *
@@ -105,11 +114,17 @@ import kotlinx.coroutines.launch
  * - 展开数据库节点 → 加载表列表(`TABLE.LIST`)
  * - **双击**表节点 → 打开预览标签页(同一表只存在一个标签页)
  * - 标签页关闭 → `removeTab`; 切换标签页只切换显示, 不重新加载
+ * - **「▶ SQL 工作台」工具栏按钮** → 把右栏从表预览切换为 SQL 工作台
+ *   （编辑器 + 结果面板），由 `DatabaseBrowserState.activePane` 控制；再次点击切回。
+ *   工作台内点 **「执行 SQL」** 走 `SQL.EXECUTE` 引擎流式：SELECT 行帧 → 结果表；
+ *   非 SELECT（DML/DDL）→ 单条响应带 `affected_rows`；失败 → 错误条。
  *
  * ## 引擎耦合
  *
  * 通过 [EngineClient.invoke] 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST` 路径
  * (与 `ConnectionManagerScreen` 的调用方式一致 —— 详见 desktopApp/ARCHITECTURE.md §引擎接入).
+ * SQL 执行额外使用 [EngineClient.handle] 走 `Category.SQL` / `Action.EXECUTE` 流式通道，
+ * 收集 `sql_row_frame` + 终止帧 (`RequestDispatcher.streamSqlExecute`) 拼装结果。
  *
  * 状态由调用方持有（[DatabaseBrowserState]，在 `MainScreen` 中按 sheet id 各自 `remember`），
  * 本组件只负责渲染 + 事件转发 + sheet 副作用 —— 因此同一份状态机可脱离 UI 直接驱动
@@ -141,31 +156,35 @@ fun DatabaseBrowserScreen(
         // （空列表会在测量时 IndexOutOfBounds）。关闭最后一个 sheet 时，`destination` 由
         // MainScreen 的 LaunchedEffect 在**组合之后**才切回首屏 —— 这中间会有一帧以空列表组合，
         // 因此这里必须走「空态引导」而不是标签条。
-        if (sheets.isNotEmpty()) {
-            SheetTabRow(
-                sheets = sheets,
-                activeSheetId = activeSheetId,
-                onSelect = onSelectSheet,
-                onClose = onCloseSheet,
-                onAdd = onAddSheet,
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
-
         val active = sheets.firstOrNull { it.connection.id == activeSheetId }
         if (active == null) {
             EmptySheetsHint(
                 onAddSheet = onAddSheet,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            ActiveSheetContent(
-                sheet = active,
-                onConnect = onConnect,
-                onDisconnect = onDisconnect,
-                modifier = Modifier.fillMaxSize(),
-            )
+            return@Column
         }
+        // 工具栏：sheet 标签条之上、操作当前激活 sheet 的入口（SQL 工作台切换）
+        BrowserToolBar(
+            activePane = active.browser.activePane,
+            connected = active.status.state == ConnectionState.CONNECTED,
+            onToggleSqlWorkbench = active.browser::toggleSqlWorkbench,
+        )
+        SheetTabRow(
+            sheets = sheets,
+            activeSheetId = activeSheetId,
+            onSelect = onSelectSheet,
+            onClose = onCloseSheet,
+            onAdd = onAddSheet,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        ActiveSheetContent(
+            sheet = active,
+            onConnect = onConnect,
+            onDisconnect = onDisconnect,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -177,6 +196,14 @@ data class SheetDescriptor(
     val browser: DatabaseBrowserState,
     val status: ConnectionStatus,
 )
+
+/**
+ * 右栏展示模式 —— 每 sheet 独立，由 [DatabaseBrowserState.activePane] 持有。
+ *
+ * - [TABLE] = 表预览（双击表节点打开的标签页区）；初始值
+ * - [SQL] = SQL 工作台（编辑器 + 底部结果面板）；由工具栏切换
+ */
+enum class BrowserPane { TABLE, SQL }
 
 // ============================================================================
 // Sheet 标签条 / 数据列表：并 ＋ 入口
@@ -277,6 +304,64 @@ private fun EmptySheetsHint(
 }
 
 /**
+ * BrowserToolBar —— sheet 标签条之上的工具栏，操作当前激活 sheet 的右栏内容。
+ *
+ * 当前提供：
+ * - **「▶ SQL 工作台」** —— 切换右栏在表预览与 SQL 工作台之间的展示。
+ *   状态由 [DatabaseBrowserState.activePane] 持有，每 sheet 独立。
+ *   未连接时禁用（SQL 执行必须依赖已建立的连接池）。
+ */
+@Composable
+private fun BrowserToolBar(
+    activePane: BrowserPane,
+    connected: Boolean,
+    onToggleSqlWorkbench: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val inWorkbench = activePane == BrowserPane.SQL
+            Button(
+                onClick = onToggleSqlWorkbench,
+                enabled = connected,
+                colors = if (inWorkbench) {
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    ButtonDefaults.outlinedButtonColors()
+                },
+            ) {
+                Icon(
+                    imageVector = if (inWorkbench) Icons.Filled.TableChart else Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (inWorkbench) "返回表预览" else "SQL 工作台")
+            }
+            if (!connected) {
+                Text(
+                    text = "（未连接，工作台不可用）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
  * 激活 sheet 的内容：连接选择条 + 左侧 schema 树 + 右侧 preview 标签页区。
  * 与原单连接 [DatabaseBrowserScreen] 行为完全一致 —— 只是 `bindConnection` / `refreshDatabases`
  * 作用的 [browser] 由激活 sheet 持有，与其它 sheet 互不影响。
@@ -314,12 +399,22 @@ private fun ActiveSheetContent(
                 modifier = Modifier.fillMaxHeight(),
                 color = MaterialTheme.colorScheme.outlineVariant,
             )
-            PreviewTabArea(
-                state = sheet.browser,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            )
+            when (sheet.browser.activePane) {
+                BrowserPane.TABLE -> PreviewTabArea(
+                    state = sheet.browser,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                BrowserPane.SQL -> SqlWorkbenchPane(
+                    state = sheet.browser,
+                    connected = sheet.status.state == ConnectionState.CONNECTED,
+                    schema = sheet.browser.currentSchema(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+            }
         }
     }
 }
@@ -680,6 +775,169 @@ private fun PreviewTabContent(
     }
 }
 
+/**
+ * SQL 工作台 —— 编辑器（顶部 60%） + 结果面板（底部 40%）。
+ *
+ * 编辑器用 [CodeEditor]，languageId="sql"，由 [com.kxxnzstdsw.editor.registerBuiltinEditors]
+ * 注册的 SQL 高亮。执行按钮调 [DatabaseBrowserState.executeSql]，状态由同一状态机持有。
+ *
+ * 结果面板四种态：
+ * - `loading` → 行内 spinner
+ * - `error` → 错误文案
+ * - `affectedRows != null`（非 SELECT）→ 「已影响 N 行」
+ * - 有 `rows` → [DataTable]
+ * - 否则 → 「执行 SQL 后在此查看结果」占位
+ */
+@Composable
+private fun SqlWorkbenchPane(
+    state: DatabaseBrowserState,
+    connected: Boolean,
+    schema: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        // 顶部工具条：当前 schema + 执行按钮
+        Surface(
+            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "SQL 工作台",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                if (schema.isNotBlank()) {
+                    Text(
+                        text = "schema: $schema",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text = "默认 catalog",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = { state.executeSql(state.sqlEditorText) },
+                    enabled = connected && !state.sqlRunning && state.sqlEditorText.isNotBlank(),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (state.sqlRunning) "执行中…" else "执行 SQL")
+                }
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
+        Column(modifier = Modifier.fillMaxSize()) {
+            CodeEditor(
+                text = state.sqlEditorText,
+                onTextChange = { state.sqlEditorText = it },
+                languageId = "sql",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.6f),
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SqlResultArea(
+                state = state,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.4f),
+            )
+        }
+    }
+}
+
+/**
+ * SQL 工作台结果面板 —— 状态机持有四类结果字段之一为有效值，渲染其一。
+ */
+@Composable
+private fun SqlResultArea(
+    state: DatabaseBrowserState,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = modifier,
+    ) {
+        when {
+            state.sqlRunning -> Box(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("执行中…", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            state.sqlError != null -> Box(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+            ) {
+                Text(
+                    text = "错误: ${state.sqlError}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            state.sqlAffectedRows != null -> Box(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+            ) {
+                Text(
+                    text = "已影响 ${state.sqlAffectedRows} 行（非 SELECT 语句）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            state.sqlResultRows.isNotEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "查询结果 · ${state.sqlRowCount} 行",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DataTable(
+                    columns = state.sqlResultColumns,
+                    rows = state.sqlResultRows,
+                    modifier = Modifier.fillMaxSize(),
+                    pageSize = PageSize.S100,
+                    fillParentHeight = false,
+                )
+            }
+            else -> EmptyHint(
+                title = "尚未执行 SQL",
+                description = "在上方编辑器输入 SQL，点「执行 SQL」或 Ctrl+Enter 即在此查看结果。",
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 // ============================================================================
 // 数据库浏览器状态机 —— 与 UI 解耦, 由 [DatabaseBrowserScreen] 创建
 // ============================================================================
@@ -760,6 +1018,144 @@ class DatabaseBrowserState(
      */
     private var generation: Int = 0
 
+    // ------------------------------------------------------------------------
+    // SQL 工作台
+    // ------------------------------------------------------------------------
+
+    /** 当前右栏展示的 pane —— 决定渲染表预览还是 SQL 工作台。每 sheet 独立。 */
+    var activePane: BrowserPane by mutableStateOf(BrowserPane.TABLE)
+
+    /** 切换 pane（SQL 工作台 ↔ 表预览）。供工具栏按钮调用。 */
+    fun toggleSqlWorkbench() {
+        activePane = if (activePane == BrowserPane.SQL) BrowserPane.TABLE else BrowserPane.SQL
+    }
+
+    /** 返回当前 SQL 工作台编辑器文本 —— 暴露给 UI 直接驱动编辑器输入。 */
+    var sqlEditorText: String by mutableStateOf("")
+
+    /** SQL 工作台状态：空闲 / 加载中 */
+    var sqlRunning: Boolean by mutableStateOf(false)
+
+    /** SQL 工作台最近一次执行结果（成功后回填；失败时为 null + [sqlError]）。 */
+    var sqlResultColumns: List<TableColumn> by mutableStateOf(emptyList())
+    var sqlResultRows: List<TableRow> by mutableStateOf(emptyList())
+    var sqlRowCount: Int by mutableStateOf(0)
+
+    /** 非 SELECT（DML/DDL）执行成功时记录受影响行数；为 null 表示 SELECT 或未执行。 */
+    var sqlAffectedRows: Int? by mutableStateOf(null)
+
+    /** SQL 工作台最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
+    var sqlError: String? by mutableStateOf(null)
+
+    /** 当前连接下激活的 schema —— SQL 执行时作为 catalog 写入 proto config。
+     *  默认取第一个展开的数据库，若无则为 `""`（默认 catalog）。 */
+    fun currentSchema(): String =
+        expandedDatabases.firstOrNull() ?: ""
+
+    /** 最近一次执行的代次 —— 与 [generation] 类似思想，但 SQL 工作台需在
+     * 切 pane / 切连接后丢弃 in-flight 结果。 */
+    private var sqlGeneration: Int = 0
+
+    /**
+     * 执行编辑器中的 SQL —— 走 `Category.SQL` / `Action.EXECUTE` 流式通道：
+     * SELECT 行帧 → 攒成 [sqlResultColumns] / [sqlResultRows] / [sqlRowCount]；
+     * 终止帧携带 `execute.affected_rows` 时填入 [sqlAffectedRows]；失败 → [sqlError]。
+     *
+     * 与预览加载一样，in-flight 响应通过 [sqlGeneration] 失效化：开始新一次执行前自增，
+     * collect 过程中比对，若不相等直接丢弃（避免上一次执行的迟到响应覆盖新一轮状态）。
+     */
+    fun executeSql(text: String) {
+        val config = currentConnection ?: return
+        val sql = text.trim()
+        if (sql.isEmpty()) {
+            sqlError = "SQL 为空"
+            sqlResultColumns = emptyList()
+            sqlResultRows = emptyList()
+            sqlRowCount = 0
+            sqlAffectedRows = null
+            return
+        }
+        sqlEditorText = text
+        sqlGeneration++
+        val gen = sqlGeneration
+        sqlRunning = true
+        sqlError = null
+        sqlAffectedRows = null
+        sqlResultColumns = emptyList()
+        sqlResultRows = emptyList()
+        sqlRowCount = 0
+        scope.launch {
+            val schema = currentSchema()
+            val result = runCatching {
+                engine.handle(
+                    request {
+                        id = UUID.randomUUID().toString()
+                        this.connection = engineConn(database = schema)
+                        category = Category.SQL
+                        action = Action.EXECUTE
+                        sqlRequest = sqlRequest {
+                            execute = sqlExecuteRequest {
+                                this.sql = sql
+                                this.schema = schema
+                                multiStatement = false
+                            }
+                        }
+                    },
+                )
+            }
+            if (gen != sqlGeneration) return@launch  // 用户已重新执行 —— 丢弃过期响应
+            val flow = result.getOrNull()
+            if (flow == null) {
+                sqlError = result.exceptionOrNull()?.message ?: "执行失败"
+                sqlRunning = false
+                return@launch
+            }
+            val frames = mutableListOf<com.kxxnzstdsw.grpc.SqlSelectRowFrame>()
+            try {
+                // `collect` + 取消标记：`collectWhile` 是 kotlinx.coroutines 内部 API 不可用。
+                // 过期时置 cancelled 并停止累积 —— 流本身仍会被消费到结束（引擎侧已在推帧，
+                // 主动 cancel 属于引擎能力范畴），但不再往内存里攒行。
+                var cancelled = false
+                flow.collect { resp ->
+                    if (cancelled) return@collect
+                    if (gen != sqlGeneration) {
+                        cancelled = true
+                        return@collect
+                    }
+                    if (!resp.success) {
+                        sqlError = resp.error.ifBlank { "SQL 执行失败" }
+                    } else if (resp.hasSqlRowFrame()) {
+                        frames += resp.sqlRowFrame
+                    } else if (resp.hasSql() && resp.sql.hasExecute()) {
+                        sqlAffectedRows = resp.sql.execute.affectedRows
+                    }
+                }
+            } catch (e: Exception) {
+                if (gen == sqlGeneration) sqlError = e.message ?: e.javaClass.simpleName
+                sqlRunning = false
+                return@launch
+            }
+            if (gen != sqlGeneration) return@launch
+            // 把 SqlSelectRowFrame 攒成 columns/rows —— 列名取首帧 keys，后续帧按相同顺序补值
+            if (frames.isNotEmpty()) {
+                val columnNames = frames.flatMap { it.row.valuesMap.keys }.distinct()
+                sqlResultColumns = columnNames.map { TableColumn(key = it, header = it) }
+                sqlResultRows = frames.mapIndexed { idx, frame ->
+                    val idCell = frame.row.valuesMap.entries
+                        .firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
+                    TableRow(
+                        id = idCell?.let { cellValueAsId(it.value) } ?: idx,
+                        cells = frame.row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
+                    )
+                }
+                sqlRowCount = frames.size
+            } else if (sqlAffectedRows == null && sqlError == null) {
+                sqlError = "无返回结果"
+            }
+            sqlRunning = false
+        }
+    }
+
     /**
      * 本屏在当前连接下**建立过连接池**的 database 维度（`""` = 默认 catalog）。
      *
@@ -793,6 +1189,15 @@ class DatabaseBrowserState(
         _tableLoadError.clear()
         tabs = emptyList()
         selectedTabIndex = -1
+        // SQL 工作台状态跨连接无意义 —— 清空并把 sqlGeneration 自增使 in-flight 响应失效
+        sqlEditorText = ""
+        sqlRunning = false
+        sqlGeneration++
+        sqlError = null
+        sqlAffectedRows = null
+        sqlResultColumns = emptyList()
+        sqlResultRows = emptyList()
+        sqlRowCount = 0
     }
 
     /**

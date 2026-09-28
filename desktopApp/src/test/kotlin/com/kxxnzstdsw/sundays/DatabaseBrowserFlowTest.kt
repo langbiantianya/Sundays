@@ -6,6 +6,7 @@ import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -15,6 +16,7 @@ import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -262,6 +264,91 @@ class DatabaseBrowserFlowTest {
         state.closeTab(0)
         assertEquals(0, state.tabs.size)
         assertEquals(-1, state.selectedTabIndex)
+    }
+
+    // ------------------------------------------------------------------------
+    // SQL 工作台（状态层契约）
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun `toggleSqlWorkbench flips pane between TABLE and SQL`() {
+        val state = newBrowser()
+        assertEquals(BrowserPane.TABLE, state.activePane, "初始应展示表预览")
+        state.toggleSqlWorkbench()
+        assertEquals(BrowserPane.SQL, state.activePane)
+        state.toggleSqlWorkbench()
+        assertEquals(BrowserPane.TABLE, state.activePane, "再次切换应回到表预览")
+    }
+
+    @Test
+    fun `executeSql SELECT populates result rows from streaming frames`() = runBlocking {
+        val state = newBrowser()
+        state.toggleSqlWorkbench()
+        state.sqlEditorText = "SELECT id, name FROM users ORDER BY id"
+        state.executeSql(state.sqlEditorText)
+
+        // 异步流式收集 —— 等到 sqlRunning 复位
+        withTimeout(5_000) {
+            while (state.sqlRunning) delay(20)
+        }
+        assertNull(state.sqlError, "应无错误: ${state.sqlError}")
+        assertEquals(2, state.sqlRowCount, "users 表有 2 行")
+        assertEquals(2, state.sqlResultRows.size)
+        assertTrue(
+            state.sqlResultColumns.any { it.key.equals("id", ignoreCase = true) },
+            "列名应包含 id",
+        )
+        assertTrue(
+            state.sqlResultColumns.any { it.key.equals("name", ignoreCase = true) },
+            "列名应包含 name",
+        )
+        assertNull(state.sqlAffectedRows, "SELECT 不应填 affected_rows")
+    }
+
+    @Test
+    fun `executeSql empty text sets error without calling engine`() = runBlocking {
+        val state = newBrowser()
+        state.executeSql("   \n   ")
+        assertEquals("SQL 为空", state.sqlError)
+        assertFalse(state.sqlRunning)
+    }
+
+    @Test
+    fun `executeSql DDL surfaces affected_rows instead of rows`() = runBlocking {
+        val state = newBrowser()
+        state.toggleSqlWorkbench()
+        state.sqlEditorText = "CREATE TABLE sqlbench_tmp (id INT)"
+        state.executeSql(state.sqlEditorText)
+
+        withTimeout(5_000) {
+            while (state.sqlRunning) delay(20)
+        }
+        assertNull(state.sqlError, "应无错误: ${state.sqlError}")
+        assertNotNull(state.sqlAffectedRows, "DDL 应填 affected_rows")
+        assertEquals(0, state.sqlResultRows.size, "DDL 不应产生 SELECT 行帧")
+    }
+
+    @Test
+    fun `bindConnection clears SQL workbench state when switching connections`() = runBlocking {
+        val state = newBrowser()
+        state.toggleSqlWorkbench()
+        state.sqlEditorText = "SELECT 1"
+        state.executeSql(state.sqlEditorText)
+        withTimeout(5_000) { while (state.sqlRunning) delay(20) }
+        assertTrue(state.sqlResultRows.isNotEmpty() || state.sqlAffectedRows != null)
+
+        // 切到新连接（不同 db 名）
+        val newJdbc = "jdbc:h2:mem:bdbtest2_${System.nanoTime()};DB_CLOSE_DELAY=-1"
+        DriverManager.getConnection(newJdbc, "sa", "").use { conn ->
+            conn.createStatement().use { it.executeUpdate("CREATE TABLE t (id INT)") }
+        }
+        state.bindConnection(TestConnectionFactory.build(newJdbc))
+
+        assertEquals("", state.sqlEditorText, "切换连接应清空编辑器文本")
+        assertEquals(0, state.sqlResultRows.size)
+        assertNull(state.sqlAffectedRows)
+        assertNull(state.sqlError)
+        assertFalse(state.sqlRunning)
     }
 }
 

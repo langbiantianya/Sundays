@@ -10,6 +10,8 @@ import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -150,4 +152,62 @@ class DatabaseBrowserUiTest {
         onAllNodes(
             hasText("USERS") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)
         ).fetchSemanticsNodes().size
+
+    /**
+     * SQL 工作台的 UI 端到端冒烟 —— 工具栏按钮 → 编辑器 → 执行 → 结果表。
+     *
+     * 覆盖消费者可见路径：工具栏「SQL 工作台」按钮把右栏从表预览切到工作台，
+     * 顶部编辑器输入 SQL 后点「执行 SQL」，底部结果面板渲染出 `SQL.EXECUTE` 的行帧内容。
+     * 断言锚点是**引擎真实返回的数据**（Alice / Bob），不是「组件已渲染」这类 wiring 断言。
+     */
+    @Test
+    fun `sql workbench executes a SELECT and shows result rows`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        // 初始是表预览态 —— 工具栏按钮显示「SQL 工作台」（未进入工作台）
+        onNodeWithText("SQL 工作台").assertIsDisplayed()
+
+        // 点工具栏按钮 → 切到 SQL 工作台（按钮变为「返回表预览」，工具条出现 schema 提示）
+        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText("返回表预览").assertIsDisplayed()
+        onNodeWithText("SQL 工作台", substring = true).assertExists()
+        assertEquals(BrowserPane.SQL, browser.activePane, "工具栏点击后应切到 SQL pane")
+
+        // 输入 SQL —— 直接写状态机字段（CodeEditor 的输入通道需要 focus + IME，
+        // 在 skiko 无头环境下不稳定；执行链路才是本测试的验证目标）
+        browser.sqlEditorText = "SELECT id, name FROM users ORDER BY id"
+        waitForIdle()
+
+        // 「执行 SQL」按钮此时可用（connected + 文本非空 + 未在执行）
+        onNodeWithText("执行 SQL").assertIsDisplayed()
+        onNodeWithText("执行 SQL").performClick()
+
+        // 结果表渲染出引擎真实返回的行 —— 证明 SQL.EXECUTE 流式链路打通
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("Alice", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
+        // 结果区标题标明行数
+        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+    }
 }
