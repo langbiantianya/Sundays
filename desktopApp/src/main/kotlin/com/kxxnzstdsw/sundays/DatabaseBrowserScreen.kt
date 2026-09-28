@@ -91,10 +91,10 @@ import java.util.UUID
  *
  * ```
  * ┌────────────────────────────────────────────────────────────────────────┐
- * │ BrowserToolBar:  [ ▶ SQL 工作台 ]   (当前 sheet 的操作)                  │
- * ├────────────────────────────────────────────────────────────────────────┤
  * │ Sheets:  [＋] [ Conn A ×] [ Conn B ×] ...                               │
  * ├────────────────────────────────────────────────────────────────────────┤
+ * │ ToolBar:  [ ▶ SQL 工作台 ]  ← 归属下方这块 sheet 内容                    │
+ * ├──────────────┬─────────────────────────────────────────────────────────┤
  * │              │  ┌── Table Preview Tab Area ──┐  切换到 SQL 工作台时:     │
  * │  Schemas     │  │ Tab: [ users | orders ]    │                          │
  * │   ▾ PUBLIC   │  ├───────────────────────────┤  ┌─ 编辑器 (60%) ──────┐ │
@@ -164,12 +164,6 @@ fun DatabaseBrowserScreen(
             )
             return@Column
         }
-        // 工具栏：sheet 标签条之上、操作当前激活 sheet 的入口（SQL 工作台切换）
-        BrowserToolBar(
-            activePane = active.browser.activePane,
-            connected = active.status.state == ConnectionState.CONNECTED,
-            onToggleSqlWorkbench = active.browser::toggleSqlWorkbench,
-        )
         SheetTabRow(
             sheets = sheets,
             activeSheetId = activeSheetId,
@@ -384,6 +378,13 @@ private fun ActiveSheetContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // 工具栏归属当前激活 sheet —— 放在内容区内（而非 sheet 标签条之上），
+        // 这样工具与它作用的连接在同一视觉块内，切换 sheet 时工具栏也随之更换。
+        BrowserToolBar(
+            activePane = sheet.browser.activePane,
+            connected = sheet.status.state == ConnectionState.CONNECTED,
+            onToggleSqlWorkbench = sheet.browser::toggleSqlWorkbench,
+        )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Row(modifier = Modifier.fillMaxSize()) {

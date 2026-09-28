@@ -80,7 +80,7 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 |---|---|---|
 | `DatabaseBrowserScreen(sheets, activeSheetId, connections, onSelectSheet, onCloseSheet, onAddSheet, onConnect, onDisconnect, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方按 sheet id 各自注入）。`ActiveSheetContent` 内 `LaunchedEffect(sheet.connection.id, sheet.status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools` |
 | `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
-| `BrowserToolBar(activePane, connected, onToggleSqlWorkbench)` | private `@Composable` | sheet 标签条之上的工具栏：「SQL 工作台」↔「返回表预览」切换；未连接时禁用 |
+| `BrowserToolBar(activePane, connected, onToggleSqlWorkbench)` | private `@Composable` | 激活 sheet 内容区顶部工具栏：「SQL 工作台」↔「返回表预览」切换；未连接时禁用。渲染在 `ActiveSheetContent` 内（`SheetTabRow` 之下），工具与它作用的连接同属一个视觉块 |
 | `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧（`BrowserPane.TABLE`）：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
 | `SqlWorkbenchPane` / `SqlResultArea` | private `@Composable` | 右侧（`BrowserPane.SQL`）：上 `CodeEditor`（`languageId = "sql"`，占 60%）+ 下结果面板（占 40%）；结果四态 = `loading` / `error` / `affectedRows` / `DataTable` |
 | `BrowserPane` | public enum | 右栏展示模式：`TABLE`（表预览，初始）/ `SQL`（SQL 工作台）；每 sheet 独立 |
@@ -122,8 +122,8 @@ desktopApp 现有 **18 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 
 | 区域 | 组件 | 行为 |
 |---|---|---|
-| 顶部工具栏 | `BrowserToolBar` | 「SQL 工作台」↔「返回表预览」切换右栏内容（`BrowserPane`）；未连接时禁用 |
 | sheet 标签条 | `SheetTabRow` | 左侧「＋」入口 + 每 sheet 一个标签（连接状态点 + 名称 + 「×」关闭，关闭时释放池并断开引擎会话） |
+| 内容区顶部工具栏 | `BrowserToolBar` | 「SQL 工作台」↔「返回表预览」切换右栏内容（`BrowserPane`）；未连接时禁用。**位于 `ActiveSheetContent` 内**（sheet 标签条之下），工具与它作用的连接同属一个视觉块 |
 | 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab` |
 | 右侧（表预览） | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
 | 右侧（SQL 工作台） | `SqlWorkbenchPane` + `SqlResultArea` | 上 60% `CodeEditor`（SQL 高亮）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道 |
