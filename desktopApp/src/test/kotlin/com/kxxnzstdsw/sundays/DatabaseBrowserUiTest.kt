@@ -7,12 +7,14 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.dialect.H2Dialect
@@ -209,5 +211,71 @@ class DatabaseBrowserUiTest {
         onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
         // 结果区标题标明行数
         onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+    }
+
+    /**
+     * 编辑器**输入通道**回归 —— 用户报「编辑器无法输入」。
+     *
+     * 此前 UI 测试直接写 `browser.sqlEditorText` 绕过输入，等于没验证这条路径。
+     * 本测试走真实输入：渲染 SQL 工作台 → 对编辑器 `performTextInput` →
+     * 断言状态机 `sqlEditorText` 确实被写入（onTextChange 链路通）。
+     */
+    @Test
+    fun `sql workbench editor accepts typed input`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        // 编辑器内的 BasicTextField 是唯一可编辑节点
+        val editor = onNode(hasSetTextAction())
+        editor.assertExists()
+
+        // 点击应让编辑器获得焦点（真实键盘输入的前提）
+        editor.performClick()
+        waitForIdle()
+        assertTrue(
+            editor.fetchSemanticsNode().config.contains(SemanticsProperties.Focused),
+            "点击编辑器后应获得焦点 —— 否则真实键盘输入无法进入",
+        )
+
+        // 回归：输入区必须撑满编辑框，而不是只有一行高。
+        //
+        // 曾经的缺陷 —— `verticalScroll` 用无界高度测量内容，子项上的 fillMaxHeight() 失效，
+        // BasicTextField 退化成一行（实测 19dp）；编辑框下方大片区域点不到 → 「无法输入」。
+        // 单行文本高度约 19dp，任何一行都远小于 100dp，故该阈值能可靠捕获回归。
+        val bounds = editor.fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            bounds.height > 100f,
+            "输入区高度应撑满编辑框（实测 ${bounds.height}dp）—— 过小说明又退化成一行高，点击无法聚焦",
+        )
+
+        editor.performTextInput("SELECT 1")
+        waitForIdle()
+
+        assertEquals(
+            "SELECT 1",
+            browser.sqlEditorText,
+            "输入应经 onTextChange 写回状态机 —— 否则说明输入通道断开",
+        )
     }
 }

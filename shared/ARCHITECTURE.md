@@ -90,8 +90,8 @@ fun CodeEditor(
 
 | `maxLines` | 行为 |
 |---|---|
-| `null`（**默认**） | 不施加高度上限 —— 编辑器**填充父容器剩余高度**（`Modifier.fillMaxHeight()`），但不会超过父容器；超出可滚动 |
-| 传入整数（如 `15`） | 显式上下限（`Modifier.heightIn(min = minHeight, max = maxHeight)`）；高度夹在 `minLines` × `fontSize` 与 `maxLines` × `fontSize` 之间 |
+| `null`（**默认**） | 不施加高度上限 —— 编辑框**填充父容器剩余高度**（`Modifier.fillMaxHeight()`），但不会超过父容器；超出可滚动 |
+| 传入整数（如 `15`） | 显式上下限（`Modifier.heightIn(min = minHeight, max = maxHeightDp)`）；高度夹在 `minLines` × `fontSize` 与 `maxLines` × `fontSize` 之间 |
 
 ```kotlin
 // 默认行为 —— 填充父容器剩余高度（不超父容器）
@@ -103,6 +103,37 @@ CodeEditor(text = sql, onTextChange = { sql = it }, languageId = "sql",
 ```
 
 **设计动机**：v2.9 前调用方必须显式设置 `maxLines`，否则编辑器只占用最小行数（视觉突兀）。统一为 `maxLines = null → fillMaxHeight()` 后，**默认行为即自适应父容器**，调用方无需关心高度；只有需要硬上限时才显式传入。
+
+> **[!] 陷阱 —— `verticalScroll` 的子项无法 `fillMaxHeight`**
+>
+> `Modifier.verticalScroll` 会用**无界**高度测量其内容，因此**滚动容器内部**的子项调用
+> `fillMaxHeight()` 拿到的是 `Infinity`，会退化为 wrap content。若把 `fillMaxHeight()` 直接挂在
+> `BasicTextField` 上，输入区就只有**一行高**（实测 19dp）—— 编辑框下方大片区域点不到，
+> 表现为「点编辑器没反应、无法输入」。
+>
+> 正确做法（当前实现）：外层 `BoxWithConstraints` 持尺寸（`fillMaxHeight()` / `heightIn`），
+> **在滚动之前**读取 `constraints.maxHeight`，再以 `heightIn(min = 框高)` 把 `BasicTextField`
+> 撑满整框 —— 点击任意位置都能聚焦，内容溢出时仍由 `verticalScroll` 滚动。
+>
+> ```kotlin
+> BoxWithConstraints(modifier = …then(sizeModifier)) {
+>     val boxHeightDp =
+>         if (constraints.hasBoundedHeight) with(LocalDensity.current) { constraints.maxHeight.toDp() }
+>         else null                       // 父容器高度无界 → 退回 wrap content（旧行为）
+>     Row(Modifier.fillMaxSize().verticalScroll(sharedScrollState)) {
+>         LineNumberGutter(...)
+>         BasicTextField(
+>             modifier = Modifier.weight(1f)
+>                 .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier),
+>             …
+>         )
+>     }
+> }
+> ```
+>
+> 注意**变量遮蔽**：`BoxWithConstraintsScope` 有 `maxHeight: Dp`，若函数内存在同名局部变量
+> （如 `val maxHeight = maxLines?.let { … }`），lambda 内会优先解析到局部变量。因此该局部
+> 已改名为 `maxHeightDp`，取框高时显式用 `constraints.maxHeight`。
 
 ### 2.3 工具栏扩展模式
 
@@ -162,17 +193,22 @@ CodeEditor(
 ```kotlin
 val sharedScrollState = rememberScrollState()
 
-Row(
-    modifier = modifier
-        .fillMaxWidth()
-        // ...
-        .verticalScroll(sharedScrollState)  // ← 父容器共享滚动状态
-        .onRightClick { offset -> contextMenuState.show(offset, ...) },
-) {
-    if (showLineNumbers) {
-        LineNumberGutter(lineCount = lineCount, theme = theme)  // ← 子组件在同一个 verticalScroll 容器内
+BoxWithConstraints(modifier = modifier.then(sizeModifier)) {   // ← 尺寸由外层持（见 §2.2 陷阱）
+    val boxHeightDp = if (constraints.hasBoundedHeight) { … } else null
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(sharedScrollState)  // ← 滚动状态由 gutter 与输入区共享
+            .onRightClick { offset -> contextMenuState.show(offset, ...) },
+    ) {
+        if (showLineNumbers) {
+            LineNumberGutter(lineCount = lineCount, theme = theme)  // ← 同一 verticalScroll 容器内
+        }
+        BasicTextField(                                             // ← 编辑器
+            modifier = Modifier.weight(1f).then(… heightIn(min = boxHeightDp) …),
+            …
+        )
     }
-    BasicTextField(...)                                          // ← 编辑器
 }
 ```
 

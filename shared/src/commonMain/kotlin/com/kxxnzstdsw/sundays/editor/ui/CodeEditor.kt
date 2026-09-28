@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -131,7 +133,9 @@ fun CodeEditor(
     }
 
     val minHeight = (theme.textStyle.fontSize.value * minLines + 16).dp
-    val maxHeight = maxLines?.let { (theme.textStyle.fontSize.value * it + 16).dp }
+    // 变量名带 Dp 后缀：避免遮蔽 `BoxWithConstraintsScope.maxHeight`（同名局部变量会优先于
+    // 隐式接收者成员解析，曾导致取其值得到本变量的 null 而非编辑框高度）。
+    val maxHeightDp = maxLines?.let { (theme.textStyle.fontSize.value * it + 16).dp }
 
     // 共享 ScrollState — gutter 与 BasicTextField 共同放在 verticalScroll 容器内，
     // 二者的滚动位置由同一个 ScrollState 统一管理，保证行号与代码完全同步
@@ -147,43 +151,65 @@ fun CodeEditor(
     // - [maxLines] 未设置（默认 `null`）→ 不施加高度上限，填充父容器剩余高度
     //   （`fillMaxHeight()` 使编辑器在父容器剩余空间内自动展开；
     //    配合 [verticalScroll]，内容超过可用高度时仍可滚动而不溢出父容器）
-    val sizeModifier = if (maxHeight != null) {
-        Modifier.heightIn(min = minHeight, max = maxHeight)
+    val sizeModifier = if (maxHeightDp != null) {
+        Modifier.heightIn(min = minHeight, max = maxHeightDp)
     } else {
         Modifier.fillMaxHeight().heightIn(min = minHeight)
     }
 
-    Row(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .background(theme.backgroundColor, RoundedCornerShape(6.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
-            .then(sizeModifier)
-            .verticalScroll(sharedScrollState)
-            // 右键菜单 —— 监听容器内的右键点击
-            .onRightClick { offset ->
-                contextMenuState.show(offset, EditorContextMenuPayload(text = text, languageId = languageId))
-            },
+            .then(sizeModifier),
     ) {
-        if (showLineNumbers) {
-            LineNumberGutter(
-                lineCount = lineCount,
-                theme = theme,
+        // 编辑框可视高度 —— 用于把 BasicTextField 撑满整框。
+        //
+        // 为什么必须在滚动容器**之外**量这个高度：`verticalScroll` 会用**无界**高度测量其内容，
+        // 因此子项上的 `fillMaxHeight()` 不生效（拿到 Infinity 后退化为 wrap content）。
+        // 结果是 BasicTextField 只有一行高（实测 19dp），编辑框下方大片区域点不到 —— 表现为
+        // 「点编辑器没反应、无法输入」。这里在滚动之前取到框高，再以 `heightIn(min = …)`
+        // 把输入区撑满，点击任意位置都能聚焦；内容超出时仍由 verticalScroll 滚动。
+        //
+        // 用 `constraints.maxHeight`（Int, px）而非 scope 的 `maxHeight`（Dp）：后者会被本函数
+        // 同名的局部变量遮蔽（已改名 [maxHeightDp] 规避），这里保持显式以免重蹈覆辙。
+        val boxHeightDp = if (constraints.hasBoundedHeight) {
+            with(LocalDensity.current) { constraints.maxHeight.toDp() }
+        } else {
+            null
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(sharedScrollState)
+                // 右键菜单 —— 监听容器内的右键点击
+                .onRightClick { offset ->
+                    contextMenuState.show(offset, EditorContextMenuPayload(text = text, languageId = languageId))
+                },
+        ) {
+            if (showLineNumbers) {
+                LineNumberGutter(
+                    lineCount = lineCount,
+                    theme = theme,
+                )
+            }
+            BasicTextField(
+                value = fieldValue,
+                onValueChange = { newValue ->
+                    fieldValue = newValue
+                    if (newValue.text != text) onTextChange(newValue.text)
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                textStyle = theme.textStyle,
+                visualTransformation = transformation,
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.textStyle.color),
             )
         }
-        BasicTextField(
-            value = fieldValue,
-            onValueChange = { newValue ->
-                fieldValue = newValue
-                if (newValue.text != text) onTextChange(newValue.text)
-            },
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            textStyle = theme.textStyle,
-            visualTransformation = transformation,
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.textStyle.color),
-        )
     }
 
     // 右键菜单 —— 浮在编辑器之上，不绑定具体位置（位置由 EditorContextMenuState 记录）
