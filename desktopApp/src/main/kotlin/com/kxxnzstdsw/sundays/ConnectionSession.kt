@@ -143,7 +143,12 @@ class ConnectionSession(
         wizard = wizard.copy(step = prev)
     }
 
-    /** 普通流程「保存」—— 持久化并选中；字段变化时先释放旧配置的连接池 */
+    /** 普通流程「保存」—— 持久化并选中；字段变化时先释放旧配置的连接池。
+     *
+     * 保存后**不**自动打开浏览器 sheet —— 用户保留在连接管理首屏，通过 [selectedConnection]
+     * 在右栏看到刚保存的「连接详情」（[ConnectionOverviewPanel]）。需要打开浏览区时由
+     * 总览面板的「连接」按钮显式触发（调用 [connect] + [openSheet]）。
+     * [quickConnectDirect] 仍然自动 openSheet —— 那是「立即建池浏览」语义，与本方法不同。 */
     fun save(config: ConnectionConfig) {
         connectionList.connections
             .find { it.id == config.id }
@@ -152,10 +157,6 @@ class ConnectionSession(
         connectionList = ConnectionStorage.upsert(config)
         selectedConnection = config
         wizard = WizardState.Idle
-        // 保存即落盘 = 添加成功 —— 自动在数据库浏览区打开一个 sheet tab 并设为激活。
-        // 把这条规则下沉到状态机，避免每个调用方（首屏 / AddConnectionDialog / 未来入口）
-        // 都重复接线 openSheet；与 `delete()` 同步关 sheet 对称。
-        openSheet(config)
     }
 
     /** 快速连接「连接」—— 不持久化，直接让引擎建池连接 */

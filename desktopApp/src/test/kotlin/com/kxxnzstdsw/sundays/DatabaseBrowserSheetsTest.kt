@@ -23,6 +23,7 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -219,11 +220,14 @@ class DatabaseBrowserSheetsTest {
     }
 
     /**
-     * 状态层回归：直接驱动 [ConnectionSession] 验证「save / quickConnectDirect 后必须追加 sheet」契约。
-     * 隔离 UI 不变量 —— 状态机本身就是可观察契约：新增 sheet 必须出现在 [ConnectionSession.openSheets]。
+     * 状态层回归：直接驱动 [ConnectionSession] 验证「save 不再自动打开浏览器 sheet」契约。
+     *
+     * 保存后用户保留在连接管理首屏，右栏 `ConnectionOverviewPanel` 展示刚保存的连接详情；
+     * 打开浏览区由总览面板的「连接」按钮显式触发（`quickConnectDirect` / 总览 `onConnect`）。
+     * 这条规则与 quickConnectDirect 仍然追加 sheet 形成对照 —— 两者语义不同。
      */
     @Test
-    fun `save appends a sheet to openSheets`() {
+    fun `save persists and selects the config without opening a sheet`() {
         val session = com.kxxnzstdsw.sundays.ConnectionSession(
             engine,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default),
@@ -238,9 +242,9 @@ class DatabaseBrowserSheetsTest {
 
         assertEquals(emptyList<ConnectionConfig>(), session.openSheets, "初始应无 sheet")
         session.save(cfg)
-        assertEquals(1, session.openSheets.size, "save 后 sheet 应已加入 openSheets")
-        assertEquals("stateless-1", session.openSheets.single().id, "openSheets 含刚 save 的 cfg")
-        assertEquals("stateless-1", session.activeSheetId, "新 sheet 应当设为 active")
+        assertEquals(emptyList<ConnectionConfig>(), session.openSheets, "save 不应打开浏览器 sheet")
+        assertNull(session.activeSheetId, "save 不应激活任何 sheet")
+        assertEquals(cfg, session.selectedConnection, "save 后选中作为详情")
     }
 
     @Test
