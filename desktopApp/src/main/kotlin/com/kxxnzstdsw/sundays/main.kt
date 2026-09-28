@@ -201,7 +201,17 @@ internal fun MainScreen(engine: EngineClient) {
                         wizardStep = wizard.step,
                         wizardFlow = wizard.flow,
                         connectionStatuses = session.statuses,
-                        onSelectConnection = session::select,
+                        // 弹窗上下文 = 已在第二屏：点击左侧连接项 = 把该 cfg 作为新 sheet 打开
+                        // 并激活（覆盖默认的「仅切详情」语义）—— 既添加标签也跳转过去。
+                        onSelectConnection = { cfg ->
+                            if (cfg != null) {
+                                session.select(cfg)
+                                session.openSheet(cfg)
+                            } else {
+                                session.select(null)
+                            }
+                            addDialogVisible = false
+                        },
                         onNewConnection = session::newConnection,
                         onQuickConnect = session::quickConnect,
                         onEditConnection = session::edit,
