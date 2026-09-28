@@ -22,7 +22,6 @@ import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.navigation.AppDestination
-import com.kxxnzstdsw.sundays.navigation.TopNavBar
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 
 /**
@@ -126,12 +125,6 @@ internal fun MainScreen(engine: EngineClient) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (destination == AppDestination.DATABASE) {
-            TopNavBar(
-                current = destination,
-                onSelect = { destination = it },
-                // 进入数据库浏览后没有返回入口 —— CONNECTIONS chip 不在导航条
-                destinations = listOf(AppDestination.DATABASE),
-            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
 

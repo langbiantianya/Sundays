@@ -1,6 +1,5 @@
 package com.kxxnzstdsw.sundays
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,8 +30,6 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,11 +82,9 @@ import kotlinx.coroutines.launch
  *
  * ```
  * ┌────────────────────────────────────────────────────────────────────────┐
- * │ TopNavBar: [ 数据库浏览 ]                                                │
- * ├────────────────────────────────────────────────────────────────────────┤
  * │ Sheets:  [＋] [ Conn A ×] [ Conn B ×] ...                               │
  * ├────────────────────────────────────────────────────────────────────────┤
- * │ 连接选择器 / 当前 sheet 连接状态 / 刷新按钮                              │
+ * │ 当前 sheet 连接状态 / 刷新按钮                                          │
  * ├──────────────┬─────────────────────────────────────────────────────────┤
  * │              │  Tab: [ users | orders | ... ]  [×]                     │
  * │  Schemas     ├─────────────────────────────────────────────────────────┤
@@ -122,7 +117,7 @@ import kotlinx.coroutines.launch
  *
  * @param sheets 已打开 sheet 的描述列表（连接 + 独立 `DatabaseBrowserState` + 当前引擎状态）
  * @param activeSheetId 当前激活的 sheet id（必须在 [sheets] 中）
- * @param connections 全部已保存连接（顶部下拉）
+ * @param connections 全部已保存连接（备用，UI 当前未直接渲染 —— 切换 sheet 在 [onSelectSheet]）
  * @param onSelectSheet 切换激活 sheet
  * @param onCloseSheet 关闭 sheet（调 [DatabaseBrowserState.releasePools] 释放其池）
  * @param onAddSheet 「＋」点击回调 —— 调用方弹出 [AddConnectionDialog]
@@ -166,7 +161,6 @@ fun DatabaseBrowserScreen(
         } else {
             ActiveSheetContent(
                 sheet = active,
-                connections = connections,
                 onConnect = onConnect,
                 onDisconnect = onDisconnect,
                 modifier = Modifier.fillMaxSize(),
@@ -290,7 +284,6 @@ private fun EmptySheetsHint(
 @Composable
 private fun ActiveSheetContent(
     sheet: SheetDescriptor,
-    connections: List<ConnectionConfig>,
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
     modifier: Modifier = Modifier,
@@ -306,17 +299,6 @@ private fun ActiveSheetContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        ConnectionBar(
-            connections = connections,
-            selected = sheet.connection,
-            status = sheet.status,
-            onSelect = { /* 在 sheet 模式下不允许切换 sheet 内的连接 —— 切 sheet 走标签条 */ },
-            onConnect = onConnect,
-            onDisconnect = onDisconnect,
-            onRefresh = {
-                if (sheet.status.state == ConnectionState.CONNECTED) sheet.browser.refreshDatabases()
-            },
-        )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Row(modifier = Modifier.fillMaxSize()) {
@@ -338,122 +320,6 @@ private fun ActiveSheetContent(
                     .weight(1f)
                     .fillMaxHeight(),
             )
-        }
-    }
-}
-
-// ============================================================================
-// 顶部连接选择条
-// ============================================================================
-
-@Composable
-private fun ConnectionBar(
-    connections: List<ConnectionConfig>,
-    selected: ConnectionConfig?,
-    status: ConnectionStatus,
-    onSelect: (ConnectionConfig) -> Unit,
-    onConnect: (ConnectionConfig) -> Unit,
-    onDisconnect: (ConnectionConfig) -> Unit,
-    onRefresh: () -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Storage,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = "当前连接",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.width(4.dp))
-
-            ConnectionPicker(
-                connections = connections,
-                selected = selected,
-                onSelect = onSelect,
-                modifier = Modifier.weight(1f),
-            )
-
-            if (selected != null) {
-                StatusChip(status = status)
-                Spacer(Modifier.width(4.dp))
-                when (status.state) {
-                    ConnectionState.CONNECTED -> {
-                        IconButton(onClick = onRefresh) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "刷新数据库列表")
-                        }
-                        Button(onClick = { onDisconnect(selected) }) { Text("断开") }
-                    }
-                    ConnectionState.CONNECTING -> Button(onClick = {}, enabled = false) { Text("连接中…") }
-                    else -> Button(onClick = { onConnect(selected) }) { Text("连接") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionPicker(
-    connections: List<ConnectionConfig>,
-    selected: ConnectionConfig?,
-    onSelect: (ConnectionConfig) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true },
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = selected?.let { "${it.name} (${it.dialect.name})" } ?: "未选择连接",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Icon(Icons.Filled.ExpandMore, contentDescription = null)
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            if (connections.isEmpty()) {
-                DropdownMenuItem(
-                    text = { Text("尚未配置任何连接") },
-                    onClick = { expanded = false },
-                    enabled = false,
-                )
-            } else {
-                connections.forEach { cfg ->
-                    DropdownMenuItem(
-                        text = { Text("${cfg.name}  ·  ${cfg.dialect.name}") },
-                        onClick = {
-                            expanded = false
-                            onSelect(cfg)
-                        },
-                    )
-                }
-            }
         }
     }
 }
