@@ -201,17 +201,9 @@ internal fun MainScreen(engine: EngineClient) {
                         wizardStep = wizard.step,
                         wizardFlow = wizard.flow,
                         connectionStatuses = session.statuses,
-                        // 弹窗上下文 = 已在第二屏：点击左侧连接项 = 把该 cfg 作为新 sheet 打开
-                        // 并激活（覆盖默认的「仅切详情」语义）—— 既添加标签也跳转过去。
-                        onSelectConnection = { cfg ->
-                            if (cfg != null) {
-                                session.select(cfg)
-                                session.openSheet(cfg)
-                            } else {
-                                session.select(null)
-                            }
-                            addDialogVisible = false
-                        },
+                        // 弹窗上下文 = 在第二屏：点击左侧连接项 = 仅切到详情（停在弹窗里），
+                        // 由用户显式点右栏「连接」按钮（onConnect 包装）才跳过去并添加 sheet。
+                        onSelectConnection = session::select,
                         onNewConnection = session::newConnection,
                         onQuickConnect = session::quickConnect,
                         onEditConnection = session::edit,
@@ -228,7 +220,13 @@ internal fun MainScreen(engine: EngineClient) {
                         onWizardNext = session::goToStep,
                         onWizardBack = session::back,
                         onUpdateEditingConnection = session::updateEditing,
-                        onConnect = session::connect,
+                        // 弹窗右栏「连接」按钮：在建池的同时把 cfg 推入 openSheets（添加新标签）
+                        // 并关弹窗 —— 即「点击连接按钮后才跳转过去」。
+                        onConnect = { cfg ->
+                            session.connect(cfg)
+                            session.openSheet(cfg)
+                            addDialogVisible = false
+                        },
                         onDisconnect = session::disconnect,
                         onTestConnection = session::testConnection,
                         onDismiss = {
