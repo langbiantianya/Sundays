@@ -15,6 +15,7 @@ import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
+import com.kxxnzstdsw.sundays.connection.ConnectionStorage
 import com.kxxnzstdsw.sundays.connection.DialectType
 import org.junit.After
 import org.junit.Before
@@ -267,5 +268,34 @@ class DatabaseBrowserSheetsTest {
         session.quickConnectDirect(newCfg)
         assertEquals(listOf("pre-1", "qc-1"), session.openSheets.map { it.id }, "quickConnectDirect 后 sheet 应已加入")
         assertEquals("qc-1", session.activeSheetId, "新 sheet 应当设为 active")
+    }
+
+    /**
+     * 「关闭最后一个 sheet」不得崩：MainScreen 的 `destination` 由 LaunchedEffect 在组合之后切换，
+     * 这中间会以空 sheet 列表组合一帧 —— 空列表下渲染标签条会在 M3 ScrollableTabRow 里
+     * IndexOutOfBounds（回归：关闭唯一 sheet 直接崩窗口），因此空列表必须走空态引导。
+     */
+    @Test
+    fun `closing the last sheet returns to the first screen`() = runComposeUiTest {
+        ConnectionStorage.upsert(
+            ConnectionConfig(
+                id = "close-1", name = "关闭测试 H2", dialect = DialectType.H2,
+                database = "shop",
+                jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
+            )
+        )
+        setContent { MaterialTheme { MainScreen(engine) } }
+
+        onNodeWithText("关闭测试 H2").performClick()
+        onNodeWithText("连接").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithContentDescription("关闭 sheet").fetchSemanticsNodes().isNotEmpty()
+        }
+        // 关闭唯一的 sheet
+        onNodeWithContentDescription("关闭 sheet").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isEmpty()
+        }
+        println("closed last sheet without crash")
     }
 }

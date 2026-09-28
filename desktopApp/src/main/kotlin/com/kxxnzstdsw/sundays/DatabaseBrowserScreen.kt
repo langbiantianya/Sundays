@@ -142,14 +142,20 @@ fun DatabaseBrowserScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SheetTabRow(
-            sheets = sheets,
-            activeSheetId = activeSheetId,
-            onSelect = onSelectSheet,
-            onClose = onCloseSheet,
-            onAdd = onAddSheet,
-        )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
+        // （空列表会在测量时 IndexOutOfBounds）。关闭最后一个 sheet 时，`destination` 由
+        // MainScreen 的 LaunchedEffect 在**组合之后**才切回首屏 —— 这中间会有一帧以空列表组合，
+        // 因此这里必须走「空态引导」而不是标签条。
+        if (sheets.isNotEmpty()) {
+            SheetTabRow(
+                sheets = sheets,
+                activeSheetId = activeSheetId,
+                onSelect = onSelectSheet,
+                onClose = onCloseSheet,
+                onAdd = onAddSheet,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
 
         val active = sheets.firstOrNull { it.connection.id == activeSheetId }
         if (active == null) {
@@ -259,13 +265,13 @@ private fun EmptySheetsHint(
         Text(
             text = "尚未打开任何连接",
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.outline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
         Text(
             text = "点击「添加连接」配置一个新连接，或在首屏选中已有连接后点「连接」。",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.outline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onAddSheet) {
@@ -458,7 +464,7 @@ private fun StatusChip(status: ConnectionStatus) {
         ConnectionState.CONNECTED -> "已连接 · ${status.message}" to MaterialTheme.colorScheme.primary
         ConnectionState.CONNECTING -> "连接中…" to MaterialTheme.colorScheme.tertiary
         ConnectionState.FAILED -> "失败 · ${status.message}" to MaterialTheme.colorScheme.error
-        ConnectionState.DISCONNECTED -> "未连接" to MaterialTheme.colorScheme.outline
+        ConnectionState.DISCONNECTED -> "未连接" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
         color = color.copy(alpha = 0.12f),
@@ -602,13 +608,13 @@ private fun DatabaseNode(
                 tables == null -> Text(
                     text = "  加载中…",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
                 )
                 tables.isEmpty() -> Text(
                     text = "  (空)",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
                 )
                 else -> tables.forEach { tbl ->
@@ -663,14 +669,14 @@ private fun EmptyHint(title: String, description: String?, modifier: Modifier = 
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.outline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (!description.isNullOrBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -784,7 +790,7 @@ private fun PreviewTabContent(
                     else -> Text(
                         text = "共 ${tab.total} 行 · 第 ${tab.page} 页 · 每页 ${tab.pageSize}",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.outline,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
