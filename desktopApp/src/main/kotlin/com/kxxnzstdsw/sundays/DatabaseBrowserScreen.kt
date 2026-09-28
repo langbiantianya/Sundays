@@ -1,6 +1,8 @@
 package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
@@ -75,13 +78,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * 数据库浏览屏幕 —— 第二屏。
+ * 数据库浏览屏幕 —— 第二屏；**多 sheet**：每个已建连接的数据库浏览会话是一个 sheet，
+ * sheet 之间互不干扰（左树 / preview 标签页 / 已展开节点各自独立）。
  *
  * ## 布局
  *
  * ```
  * ┌────────────────────────────────────────────────────────────────────────┐
- * │ 连接选择器 / 当前连接状态 / 刷新按钮                                     │
+ * │ TopNavBar: [ 数据库浏览 ]                                                │
+ * ├────────────────────────────────────────────────────────────────────────┤
+ * │ Sheets:  [＋] [ Conn A ×] [ Conn B ×] ...                               │
+ * ├────────────────────────────────────────────────────────────────────────┤
+ * │ 连接选择器 / 当前 sheet 连接状态 / 刷新按钮                              │
  * ├──────────────┬─────────────────────────────────────────────────────────┤
  * │              │  Tab: [ users | orders | ... ]  [×]                     │
  * │  Schemas     ├─────────────────────────────────────────────────────────┤
@@ -95,7 +103,10 @@ import kotlinx.coroutines.launch
  *
  * ## 交互
  *
- * - 选中连接后, 左侧自动加载数据库列表(`SCHEMA.LIST level=database`)
+ * - **「＋」sheet 标签**：调 [onAddSheet]，由调用方弹出 [AddConnectionDialog]。
+ * - **切换 sheet**：调 [onSelectSheet]，目标 sheet 获得焦点；其它 sheet 的状态保留。
+ * - **关闭 sheet**：「×」调 [onCloseSheet]；同时释放该 sheet 的连接池。
+ * - 选中 sheet 的连接后，左侧自动加载数据库列表(`SCHEMA.LIST level=database`)
  * - 展开数据库节点 → 加载表列表(`TABLE.LIST`)
  * - **双击**表节点 → 打开预览标签页(同一表只存在一个标签页)
  * - 标签页关闭 → `removeTab`; 切换标签页只切换显示, 不重新加载
@@ -105,64 +116,208 @@ import kotlinx.coroutines.launch
  * 通过 [EngineClient.invoke] 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST` 路径
  * (与 `ConnectionManagerScreen` 的调用方式一致 —— 详见 desktopApp/ARCHITECTURE.md §引擎接入).
  *
- * 状态由调用方持有（[DatabaseBrowserState]，在 `MainScreen` 中 `remember`），本组件只负责
- * 渲染 + 事件转发 + 连接变化时的副作用 —— 因此同一份状态机可脱离 UI 直接驱动
+ * 状态由调用方持有（[DatabaseBrowserState]，在 `MainScreen` 中按 sheet id 各自 `remember`），
+ * 本组件只负责渲染 + 事件转发 + sheet 副作用 —— 因此同一份状态机可脱离 UI 直接驱动
  * （见 `DatabaseBrowserFlowTest`）。
  *
- * @param browser 浏览状态机（数据库 / 表列表、标签页）；由调用方持有以获得跨导航的生命周期
+ * @param sheets 已打开 sheet 的描述列表（连接 + 独立 `DatabaseBrowserState` + 当前引擎状态）
+ * @param activeSheetId 当前激活的 sheet id（必须在 [sheets] 中）
  * @param connections 全部已保存连接（顶部下拉）
- * @param selectedConnection 当前选中连接
- * @param status 当前连接的引擎会话状态（决定树面板是「未连接」还是加载）
- * @param onSelectConnection 切换连接
+ * @param onSelectSheet 切换激活 sheet
+ * @param onCloseSheet 关闭 sheet（调 [DatabaseBrowserState.releasePools] 释放其池）
+ * @param onAddSheet 「＋」点击回调 —— 调用方弹出 [AddConnectionDialog]
  * @param onConnect 建立连接（调用方经 `EngineClient.testConnection`）
  * @param onDisconnect 断开连接（调用方经 `EngineClient.disconnect`）
  */
 @Composable
 fun DatabaseBrowserScreen(
-    browser: DatabaseBrowserState,
+    sheets: List<SheetDescriptor>,
+    activeSheetId: String?,
     connections: List<ConnectionConfig>,
-    selectedConnection: ConnectionConfig?,
-    status: ConnectionStatus,
-    onSelectConnection: (ConnectionConfig) -> Unit,
+    onSelectSheet: (String) -> Unit,
+    onCloseSheet: (String) -> Unit,
+    onAddSheet: () -> Unit,
+    onConnect: (ConnectionConfig) -> Unit,
+    onDisconnect: (ConnectionConfig) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxSize()) {
+        SheetTabRow(
+            sheets = sheets,
+            activeSheetId = activeSheetId,
+            onSelect = onSelectSheet,
+            onClose = onCloseSheet,
+            onAdd = onAddSheet,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        val active = sheets.firstOrNull { it.connection.id == activeSheetId }
+        if (active == null) {
+            EmptySheetsHint(
+                onAddSheet = onAddSheet,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            ActiveSheetContent(
+                sheet = active,
+                connections = connections,
+                onConnect = onConnect,
+                onDisconnect = onDisconnect,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
+ * 一个数据库浏览 sheet 的完整描述 —— 持有独立的 [DatabaseBrowserState] 与该 sheet 的连接配置 + 引擎会话状态。
+ */
+data class SheetDescriptor(
+    val connection: ConnectionConfig,
+    val browser: DatabaseBrowserState,
+    val status: ConnectionStatus,
+)
+
+// ============================================================================
+// Sheet 标签条 / 数据列表：并 ＋ 入口
+// ============================================================================
+
+@Composable
+private fun SheetTabRow(
+    sheets: List<SheetDescriptor>,
+    activeSheetId: String?,
+    onSelect: (String) -> Unit,
+    onClose: (String) -> Unit,
+    onAdd: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 「＋添加连接」按钮：固定在最左，独立于 sheet 标签条；
+        // 点击后由调用方弹出 AddConnectionDialog。
+        IconButton(
+            onClick = onAdd,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "添加连接",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        VerticalDivider(
+            modifier = Modifier.height(28.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        SecondaryScrollableTabRow(
+            selectedTabIndex = sheets.indexOfFirst { it.connection.id == activeSheetId }.coerceAtLeast(0),
+            edgePadding = 0.dp,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            divider = {},
+            modifier = Modifier.weight(1f),
+        ) {
+            sheets.forEach { sheet ->
+                val active = sheet.connection.id == activeSheetId
+                Tab(
+                    selected = active,
+                    onClick = { onSelect(sheet.connection.id) },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ConnectionStatusDot(sheet.status.state, 10.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(text = sheet.connection.name, maxLines = 1)
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "关闭 sheet",
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { onClose(sheet.connection.id) },
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySheetsHint(
+    onAddSheet: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "尚未打开任何连接",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "点击「添加连接」配置一个新连接，或在首屏选中已有连接后点「连接」。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onAddSheet) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("添加连接")
+        }
+    }
+}
+
+/**
+ * 激活 sheet 的内容：连接选择条 + 左侧 schema 树 + 右侧 preview 标签页区。
+ * 与原单连接 [DatabaseBrowserScreen] 行为完全一致 —— 只是 `bindConnection` / `refreshDatabases`
+ * 作用的 [browser] 由激活 sheet 持有，与其它 sheet 互不影响。
+ */
+@Composable
+private fun ActiveSheetContent(
+    sheet: SheetDescriptor,
+    connections: List<ConnectionConfig>,
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 注入当前连接（连接变化时清空派生状态），随后在已连接时自动加载数据库列表。
-    // 合并成单个 effect 保证 bind 先于 refresh 执行。
-    //
-    // 状态由调用方持有（见 `MainScreen`）：本组件被导航切换销毁时 [DatabaseBrowserState]
-    // 仍存活 —— 打开的标签页不会因为切到「连接管理」再切回来而丢失；同时 [DatabaseBrowserState.releasePools]
-    // 借助调用方的长生命周期 scope 才能真正把异步 disconnect 跑完（组件自身的 scope 在 dispose 时已取消）。
-    LaunchedEffect(selectedConnection?.id, status.state) {
-        browser.bindConnection(selectedConnection)
+    LaunchedEffect(sheet.connection.id, sheet.status.state) {
+        sheet.browser.bindConnection(sheet.connection)
         when {
-            selectedConnection == null -> Unit
-            status.state == ConnectionState.CONNECTED -> browser.refreshDatabases()
-            // 用户断开 / 连接失败 —— 该连接上建立的池已不可用，逐个释放
-            else -> browser.releasePools()
+            sheet.status.state == ConnectionState.CONNECTED -> sheet.browser.refreshDatabases()
+            sheet.status.state == ConnectionState.DISCONNECTED -> sheet.browser.releasePools()
+            else -> Unit
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         ConnectionBar(
             connections = connections,
-            selected = selectedConnection,
-            status = status,
-            onSelect = onSelectConnection,
+            selected = sheet.connection,
+            status = sheet.status,
+            onSelect = { /* 在 sheet 模式下不允许切换 sheet 内的连接 —— 切 sheet 走标签条 */ },
             onConnect = onConnect,
             onDisconnect = onDisconnect,
             onRefresh = {
-                if (status.state == ConnectionState.CONNECTED) browser.refreshDatabases()
+                if (sheet.status.state == ConnectionState.CONNECTED) sheet.browser.refreshDatabases()
             },
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Row(modifier = Modifier.fillMaxSize()) {
             SchemaTreePanel(
-                state = browser,
-                connected = status.state == ConnectionState.CONNECTED,
-                onOpenTable = { schema, table -> browser.openTab(schema, table) },
+                state = sheet.browser,
+                connected = sheet.status.state == ConnectionState.CONNECTED,
+                onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
                 modifier = Modifier
                     .width(320.dp)
                     .fillMaxHeight(),
@@ -172,7 +327,7 @@ fun DatabaseBrowserScreen(
                 color = MaterialTheme.colorScheme.outlineVariant,
             )
             PreviewTabArea(
-                state = browser,
+                state = sheet.browser,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -315,6 +470,22 @@ private fun StatusChip(status: ConnectionStatus) {
             style = MaterialTheme.typography.labelMedium,
             color = color,
         )
+    }
+}
+
+/**
+ * 连接状态点 —— sheet 标签上展示引擎会话状态的小色点。
+ */
+@Composable
+internal fun ConnectionStatusDot(state: ConnectionState, dotSize: androidx.compose.ui.unit.Dp) {
+    val color = when (state) {
+        ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+        ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+        ConnectionState.FAILED -> MaterialTheme.colorScheme.error
+        ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
+    }
+    Canvas(modifier = Modifier.size(dotSize)) {
+        drawCircle(color = color)
     }
 }
 

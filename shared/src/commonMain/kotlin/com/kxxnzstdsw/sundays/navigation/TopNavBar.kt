@@ -27,13 +27,18 @@ import androidx.compose.ui.unit.dp
  * - 横向 `Row`, 左对齐, 每个目标是一个 chip; 当前目标高亮.
  * - 纯展示: 选中态由 [current] 传入, 点击经 [onSelect] 回抛 —— 导航状态由调用方的顶层屏幕持有,
  *   目标屏幕的 `remember` 状态因此可跨导航切换保留。
+ * - [destinations] 控制哪些目标渲染 chip —— 调用方可隐藏已不可达的入口
+ *   （如连接管理是首屏，进了数据库浏览后不再返回连接管理，则不显示对应 chip）。
+ *   空列表时整个条不渲染。
  */
 @Composable
 fun TopNavBar(
     current: AppDestination,
     onSelect: (AppDestination) -> Unit,
+    destinations: List<AppDestination> = AppDestination.entries,
     modifier: Modifier = Modifier,
 ) {
+    if (destinations.isEmpty()) return
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
@@ -46,7 +51,7 @@ fun TopNavBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            AppDestination.entries.forEach { dest ->
+            destinations.forEach { dest ->
                 NavChip(
                     destination = dest,
                     selected = current == dest,

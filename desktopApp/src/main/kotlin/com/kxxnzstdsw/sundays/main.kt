@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +18,7 @@ import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.client.grpc.GrpcClientConfig
 import com.kxxnzstdsw.client.grpc.GrpcEngineClient
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.navigation.AppDestination
@@ -81,6 +83,19 @@ const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
 /**
  * 顶层屏幕 —— 导航条 + 当前目标屏幕。
  *
+ * **导航模型：连接管理 ↔ 数据库浏览（多 sheet）**。
+ *
+ * - **首屏** = 连接管理（左侧列表 + 右侧总览 / 向导）；无 TopNavBar 渲染。
+ * - **第二屏** = 数据库浏览，多 sheet：
+ *   - 每个 sheet 一个标签，对应一条已建立的连接（独立的 `DatabaseBrowserState` + 左树 + 预览标签页）
+ *   - 标签条最左边是 `+` 入口 → 弹出 [AddConnectionDialog]，与 `ConnectionManagerScreen`
+ *     内的快速连接 / 添加连接配置同源（共享 `ConnectionWizardContent`）。
+ * - 顶层 `TopNavBar` 仅在第二屏渲染（只渲染 `数据库浏览` chip —— 不显示「连接管理」入口，
+ *   沿用「不要在标签中显示连接管理」约定）。
+ * - 首屏「连接」按钮 / 弹窗保存 / 弹窗快速连接 任一行为 → 都同步调用 [ConnectionSession.openSheet]
+ *   + 切到第二屏 + `connect()` 触发引擎建池（异步，`DatabaseBrowserScreen` 观察
+ *   `CONNECTING → CONNECTED` 状态）。
+ *
  * `internal` 而非 `private`：`MainScreenNavTest` 需要渲染它来验证顶层导航切换
  * （导航状态由本函数持有，无法从外部注入）。
  */
@@ -88,18 +103,37 @@ const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
 internal fun MainScreen(engine: EngineClient) {
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
-    // 浏览状态在此持有（而非 DatabaseBrowserScreen 内部）：切到「连接管理」再切回来时
-    // 已打开的标签页不丢失；且 releasePools 的异步 disconnect 能跑在这个长生命周期 scope 上
-    val browser = remember(engine) { DatabaseBrowserState(engine, scope) }
+    // 浏览状态按 sheet id 各自持有（而非 DatabaseBrowserScreen 内部 remember）：
+    // sheet 关闭时该 state 也随同 GC；且 releasePools 的异步 disconnect 能跑在长生命周期 scope 上
+    val browsers = remember { mutableMapOf<String, DatabaseBrowserState>() }
     var destination by remember { mutableStateOf(AppDestination.CONNECTIONS) }
+    // 「+ 添加连接」弹窗开关 —— 仅在第二屏渲染（与 destination 联动）
+    var addDialogVisible by remember { mutableStateOf(false) }
+
+    // 首屏 sheet 变更：openSheets 非空 → 切到第二屏；空 → 切回首屏
+    // 这样 ConnectManager 「连接」按钮和 AddConnectionDialog 完成后都能触发自动切换。
+    LaunchedEffect(session.openSheets.isEmpty()) {
+        destination = if (session.openSheets.isEmpty()) {
+            AppDestination.CONNECTIONS
+        } else {
+            AppDestination.DATABASE
+        }
+    }
+
     val wizard = session.wizard
+    val openSheetIds = session.openSheets
+    val activeSheetId = session.activeSheetId
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopNavBar(
-            current = destination,
-            onSelect = { destination = it },
-        )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (destination == AppDestination.DATABASE) {
+            TopNavBar(
+                current = destination,
+                onSelect = { destination = it },
+                // 进入数据库浏览后没有返回入口 —— CONNECTIONS chip 不在导航条
+                destinations = listOf(AppDestination.DATABASE),
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
 
         when (destination) {
             AppDestination.CONNECTIONS -> ConnectionManagerScreen(
@@ -121,21 +155,82 @@ internal fun MainScreen(engine: EngineClient) {
                 onWizardBack = session::back,
                 onUpdateEditingConnection = session::updateEditing,
                 onTestConnection = session::testConnection,
-                onConnect = session::connect,
+                // 总览面板「连接」 → 建池 + 打开 sheet + 切到第二屏
+                onConnect = { cfg ->
+                    session.connect(cfg)
+                    session.openSheet(cfg)
+                },
                 onDisconnect = session::disconnect,
                 modifier = Modifier.fillMaxSize(),
             )
-            AppDestination.DATABASE -> DatabaseBrowserScreen(
-                browser = browser,
-                connections = session.connectionList.connections,
-                selectedConnection = session.selectedConnection,
-                status = session.selectedConnection?.let { session.statuses[it.id] }
-                    ?: ConnectionStatus(),
-                onSelectConnection = session::select,
-                onConnect = session::connect,
-                onDisconnect = session::disconnect,
-                modifier = Modifier.fillMaxSize(),
-            )
+            AppDestination.DATABASE -> {
+                // 按 sheet id 懒创建浏览器 state —— sheet 关闭时 entry 留作 stale（不会泄漏：
+                // DatabaseBrowserState 持有 engine/scope 引用，无生命周期短句的资源）
+                val sheetConfigs = openSheetIds  // List<ConnectionConfig>，transient + 持久化 sheet 都直接可用
+                sheetConfigs.forEach { cfg ->
+                    if (browsers[cfg.id] == null) {
+                        browsers[cfg.id] = DatabaseBrowserState(engine, scope)
+                    }
+                }
+                val sheets = sheetConfigs.map { cfg ->
+                    val browser = browsers.getValue(cfg.id)
+                    SheetDescriptor(
+                        connection = cfg,
+                        browser = browser,
+                        status = session.statuses[cfg.id] ?: ConnectionStatus(),
+                    )
+                }
+                DatabaseBrowserScreen(
+                    sheets = sheets,
+                    activeSheetId = activeSheetId,
+                    connections = session.connectionList.connections,
+                    onSelectSheet = session::selectSheet,
+                    onCloseSheet = { id ->
+                        browsers[id]?.releasePools()
+                        session.closeSheet(id)
+                    },
+                    onAddSheet = { addDialogVisible = true },
+                    onConnect = session::connect,
+                    onDisconnect = session::disconnect,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (addDialogVisible) {
+                    AddConnectionDialog(
+                        // 弹窗复用 ConnectionManagerScreen —— 数据 / 状态全部来自 session，与首屏同源
+                        connections = session.connectionList.connections,
+                        selectedConnection = session.selectedConnection,
+                        editingConnection = wizard.editingConnection,
+                        wizardStep = wizard.step,
+                        wizardFlow = wizard.flow,
+                        connectionStatuses = session.statuses,
+                        onSelectConnection = session::select,
+                        onNewConnection = session::newConnection,
+                        onQuickConnect = session::quickConnect,
+                        onEditConnection = session::edit,
+                        onSaveConnection = { cfg ->
+                            session.save(cfg)
+                            addDialogVisible = false
+                        },
+                        onQuickConnectDirect = { cfg ->
+                            session.quickConnectDirect(cfg)
+                            addDialogVisible = false
+                        },
+                        onDeleteConnection = session::delete,
+                        onCancelEdit = session::cancelEdit,
+                        onWizardNext = session::goToStep,
+                        onWizardBack = session::back,
+                        onUpdateEditingConnection = session::updateEditing,
+                        onConnect = session::connect,
+                        onDisconnect = session::disconnect,
+                        onTestConnection = session::testConnection,
+                        onDismiss = {
+                            // 关闭弹窗 = 丢弃向导进度，回到 IDLE
+                            session.cancelEdit()
+                            addDialogVisible = false
+                        },
+                    )
+                }
+            }
         }
     }
 }

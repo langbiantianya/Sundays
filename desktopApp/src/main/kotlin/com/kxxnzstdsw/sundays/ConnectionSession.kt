@@ -70,6 +70,26 @@ class ConnectionSession(
     var statuses by mutableStateOf<Map<String, ConnectionStatus>>(emptyMap())
         private set
 
+    /**
+     * 已在数据库浏览区打开的 sheet（按打开顺序）—— 每条 sheet 持有完整的 `ConnectionConfig`，
+     * 支持两种生命周期：
+     *
+     * - **持久化 sheet** = 通过 [save]（落盘到 `ConnectionStorage`）。`ConnectionConfig` 反映
+     *   的是磁盘上的最新版本（`connectionList.connections` 中对应项）。
+     * - **transient sheet** = 通过 [quickConnectDirect]（不落盘）。配置来自快速连接向导的 draft，
+     *   在浏览器区生命周期内有效；sheet 关闭（[closeSheet]）时丢弃。
+     *
+     * 与 [selectedConnection] 区别：[selectedConnection] 是「连接管理」首屏列表的高亮项，
+     * 用于总览面板；[openSheets] 是「数据库浏览」区每个 sheet 的配置集合，**两者独立**——
+     * 高亮的不一定开了 sheet，开了 sheet 的也不一定在首屏被选中。
+     */
+    var openSheets by mutableStateOf<List<ConnectionConfig>>(emptyList())
+        private set
+
+    /** 当前激活的 sheet id（[openSheets] 中的某一项的 id） */
+    var activeSheetId by mutableStateOf<String?>(null)
+        private set
+
     fun select(config: ConnectionConfig?) {
         selectedConnection = config
         // 选中已保存连接 → 退出向导，右面板切到 ConnectionOverviewPanel
@@ -132,6 +152,10 @@ class ConnectionSession(
         connectionList = ConnectionStorage.upsert(config)
         selectedConnection = config
         wizard = WizardState.Idle
+        // 保存即落盘 = 添加成功 —— 自动在数据库浏览区打开一个 sheet tab 并设为激活。
+        // 把这条规则下沉到状态机，避免每个调用方（首屏 / AddConnectionDialog / 未来入口）
+        // 都重复接线 openSheet；与 `delete()` 同步关 sheet 对称。
+        openSheet(config)
     }
 
     /** 快速连接「连接」—— 不持久化，直接让引擎建池连接 */
@@ -139,6 +163,9 @@ class ConnectionSession(
         selectedConnection = config
         wizard = WizardState.Idle
         connect(config)
+        // 同 [save]：成功添加连接 = 浏览器区出现新 sheet；不持久化但 transient sheet
+        // 仍可在浏览期内被操作（关 sheet 时 closeSheet 会清理）。
+        openSheet(config)
     }
 
     /** 删除连接 —— 先释放其连接池（若存在），再落盘删除 */
@@ -149,7 +176,42 @@ class ConnectionSession(
         if (selectedConnection?.id == id) {
             selectedConnection = null
         }
+        // 删除时同步关掉其 sheet —— 否则浏览器区会指向已不存在的配置
+        if (openSheets.any { it.id == id }) closeSheet(id)
     }
+
+    /**
+     * 打开一条 sheet（数据库浏览区一个 tab），并把它设为激活。
+     *
+     * 幂等 —— 重复打开同 id 不重复入栈，只切换激活态。
+     *
+     * [save] 与 [quickConnectDirect] 都会在内部调用本方法 —— 这是「添加连接成功后要添加新标签页」
+     * 契约的下沉点，调用方无需自行接线。
+     */
+    fun openSheet(config: ConnectionConfig) {
+        openSheets = if (openSheets.any { it.id == config.id }) openSheets else openSheets + config
+        activeSheetId = config.id
+    }
+
+    /** 关闭一条 sheet —— 释放它在浏览器侧的状态（实际释放由 `DatabaseBrowserState.releasePools`） */
+    fun closeSheet(id: String) {
+        if (openSheets.none { it.id == id }) return
+        val newList = openSheets.filterNot { it.id == id }
+        openSheets = newList
+        activeSheetId = when {
+            activeSheetId != id -> activeSheetId
+            newList.isEmpty() -> null
+            else -> newList.last().id
+        }
+    }
+
+    /** 切换激活 sheet —— 调用方在用户点击 sheet 标签时调用。id 必须在 [openSheets] 中；否则忽略 */
+    fun selectSheet(id: String) {
+        if (openSheets.any { it.id == id }) activeSheetId = id
+    }
+
+    /** 是否已打开某条 sheet */
+    fun isSheetOpen(id: String): Boolean = openSheets.any { it.id == id }
 
     /** 建立连接 —— `IdbEngine.testConnection` 建池 + 校验，状态回填列表 / 总览 */
     fun connect(config: ConnectionConfig) {

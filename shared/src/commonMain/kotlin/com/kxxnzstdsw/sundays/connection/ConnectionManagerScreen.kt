@@ -113,7 +113,7 @@ fun ConnectionManagerScreen(
     onDisconnect: (ConnectionConfig) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier.fillMaxSize()) {
+    Row(modifier = modifier.fillMaxHeight()) {
         // 左侧: 连接列表
         ConnectionListPanel(
             connections = connections,
@@ -125,7 +125,7 @@ fun ConnectionManagerScreen(
             onEditConnection = onEditConnection,
             onDeleteConnection = onDeleteConnection,
             modifier = Modifier
-                .width(280.dp)
+                .width(250.dp)
                 .fillMaxHeight(),
         )
 
@@ -134,7 +134,9 @@ fun ConnectionManagerScreen(
             color = MaterialTheme.colorScheme.outlineVariant,
         )
 
-        // 右侧: 连接总览 / 连接信息引导页面
+        // 右侧: 连接总览 / 连接信息引导页面 —— 最小宽度 280 dp（与左侧已保存列表对齐），
+// 实际宽度随父容器扩展（wizard 内字段过多时由自身 verticalScroll 处理），
+// 布局视觉左右对称但右侧可呼吸。
         ConnectionWizardPanel(
             editingConnection = editingConnection,
             selectedConnection = selectedConnection,
@@ -155,7 +157,7 @@ fun ConnectionManagerScreen(
             onEditConnection = onEditConnection,
             onDeleteConnection = onDeleteConnection,
             modifier = Modifier
-                .weight(1f)
+                .widthIn(min = 350.dp)
                 .fillMaxHeight(),
         )
     }
@@ -430,18 +432,21 @@ private fun ConnectionWizardPanel(
     onDisconnect: (ConnectionConfig) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    val totalSteps = totalStepsFor(wizardFlow)
-
-    Column(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(24.dp)
-            .verticalScroll(scrollState),
-    ) {
-        // 使用 safe render 避免 editingConnection 为 null 时崩溃
-        when (wizardStep) {
-            WizardStep.IDLE -> if (selectedConnection != null) {
+    ConnectionWizardContent(
+        editingConnection = editingConnection,
+        wizardStep = wizardStep,
+        wizardFlow = wizardFlow,
+        onSaveConnection = onSaveConnection,
+        onQuickConnectDirect = onQuickConnectDirect,
+        onCancelEdit = onCancelEdit,
+        onWizardNext = onWizardNext,
+        onWizardBack = onWizardBack,
+        onUpdateEditingConnection = onUpdateEditingConnection,
+        onTestConnection = onTestConnection,
+        modifier = modifier,
+        idleContent = {
+            // 全屏场景：IDLE 时若已选中连接显示总览，否则显示入口按钮
+            if (selectedConnection != null) {
                 ConnectionOverviewPanel(
                     connection = selectedConnection,
                     status = connectionStatus,
@@ -456,6 +461,48 @@ private fun ConnectionWizardPanel(
                     onQuickConnect = onQuickConnect,
                 )
             }
+        },
+    )
+}
+
+/**
+ * 连接配置向导内容 —— 仅渲染向导步骤本身（QUICK_CONNECT / BASIC_INFO / CONNECTION_TYPE /
+ * CREDENTIALS / TEST_SAVE），IDLE 步骤的内容由 [idleContent] 槽位提供。
+ *
+ * 抽出本组件的目的：
+ * - [ConnectionManagerScreen] 在 IDLE 槽位提供「总览面板 / 入口按钮」
+ * - [AddConnectionDialog] 在 IDLE 槽位仅提供「入口按钮」，**不**渲染总览面板
+ *   （弹窗里展示选中连接的引擎状态总览会误导 —— 那是连接管理全屏的职责）。
+ *
+ * 步骤组件（QuickConnectStep / BasicInfoStep / ...）全部沿用 v2 内的同名实现 —— 仅本函数对外可见。
+ */
+@Composable
+fun ConnectionWizardContent(
+    editingConnection: ConnectionConfig?,
+    wizardStep: WizardStep,
+    wizardFlow: WizardFlow,
+    onSaveConnection: (ConnectionConfig) -> Unit,
+    onQuickConnectDirect: (ConnectionConfig) -> Unit,
+    onCancelEdit: () -> Unit,
+    onWizardNext: (WizardStep) -> Unit,
+    onWizardBack: () -> Unit,
+    onUpdateEditingConnection: (ConnectionConfig) -> Unit,
+    modifier: Modifier = Modifier,
+    onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
+    idleContent: @Composable () -> Unit = {},
+) {
+    val scrollState = rememberScrollState()
+    val totalSteps = totalStepsFor(wizardFlow)
+
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(24.dp)
+            .verticalScroll(scrollState),
+    ) {
+        // 使用 safe render 避免 editingConnection 为 null 时崩溃
+        when (wizardStep) {
+            WizardStep.IDLE -> idleContent()
             WizardStep.QUICK_CONNECT -> editingConnection?.let { config ->
                 QuickConnectStep(
                     stepIndex = 1,
@@ -656,9 +703,9 @@ private fun ConnectionOverviewPanel(
     }
 }
 
-/** 空闲状态面板 */
+/** 空闲状态面板 —— IDLE 时显示入口按钮（新建 / 快速连接）。可在 ConnectionManagerScreen 全屏使用，也可在 [AddConnectionDialog] 内复用（弹窗场景不渲染左侧连接列表与总览）。 */
 @Composable
-private fun IdlePanel(
+internal fun IdlePanel(
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
 ) {

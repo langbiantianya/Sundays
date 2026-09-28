@@ -91,14 +91,20 @@ class DatabaseBrowserUiTest {
     @Test
     fun `double clicking a table opens exactly one preview tab`() = runComposeUiTest {
         val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
         setContent {
             MaterialTheme {
                 DatabaseBrowserScreen(
-                    browser = browser,
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
                     connections = listOf(connection),
-                    selectedConnection = connection,
-                    status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
-                    onSelectConnection = {},
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
                     onConnect = {},
                     onDisconnect = {},
                     modifier = Modifier.fillMaxSize(),
