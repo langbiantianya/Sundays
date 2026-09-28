@@ -1,4 +1,4 @@
-# desktopApp — KMP Compose Desktop 客户端内部架构（v2.13）
+# desktopApp — KMP Compose Desktop 客户端内部架构（v2.14）
 
 ## 概述
 
@@ -23,8 +23,8 @@ desktopApp/
 ├── build.gradle.kts    # composeMultiplatform + compose.material3 + :engine / :shared + 方言/驱动 runtimeOnly 依赖
 └── src/
     ├── main/kotlin/com/kxxnzstdsw/sundays/
-    │   ├── main.kt                    # 入口：main() + MainScreen()（导航条 + 目标分派）+ isSystemInDarkTheme()
-    │   ├── Navigation.kt              # AppDestination 枚举（CONNECTIONS / DATABASE）
+    │   ├── main.kt                    # 入口：main()（Window + SundaysTheme）+ MainScreen()（目标分派）
+    │   │                              # 导航条（TopNavBar）与 AppDestination 已上移 :shared/commonMain
     │   ├── ConnectionSession.kt       # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
     │   └── DatabaseBrowserScreen.kt   # 第二屏 UI + DatabaseBrowserState / TablePreviewTab 状态机
     └── test/kotlin/com/kxxnzstdsw/sundays/
@@ -39,8 +39,8 @@ desktopApp/
 | 文件 | 职责 |
 |---|---|
 | `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:engine` / `:shared` 依赖 + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 应用入口（`application { Window { MainScreen(engine) } }`）；`MainScreen` 持有 `AppDestination`、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `TopNavBar` + 当前目标屏幕 |
-| `Navigation.kt` | `AppDestination(label)` 枚举 —— 顶层导航目标（`CONNECTIONS` / `DATABASE`） |
+| `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `:shared` 的 `TopNavBar` + 当前目标屏幕 |
+| （已上移 `:shared`） | `AppDestination` / `TopNavBar` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt)。三者不引用 `:engine`，故可跨平台复用 |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
 | `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`） |
 | `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine` + 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
@@ -52,11 +52,10 @@ desktopApp/
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()`、创建 `Window`、安装 `MaterialTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
-| `MainScreen(engine)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
-| `TopNavBar(current, onSelect)` | private `@Composable` | 导航条：遍历 `AppDestination.entries` 渲染 `NavChip`，当前目标高亮 |
-| `NavChip(destination, selected, onClick)` | private `@Composable` | 单个导航 chip（图标 + 文案；选中态用 `primary` / `onPrimary`） |
-| `isSystemInDarkTheme()` | private `@Composable` | 包装 `androidx.compose.foundation.isSystemInDarkTheme()`（避免导入冲突） |
+| `main()` | public | `application { ... }` 入口；构造 `IdbEngine()`、创建 `Window`、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
+| `MainScreen(engine)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `:shared` 的 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
+
+> **模块边界**：导航条（`TopNavBar` / `NavChip`）、导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 直连 `IdbEngine`（JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
 
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 
@@ -131,7 +130,7 @@ fun bindConnection(config: ConnectionConfig?) {
     if (currentConnection?.id == config?.id) return   // 同连接是空操作
     currentConnection = config
     generation++                                      // 使所有 in-flight 响应作废
-    databases = emptyList(); expandedDatabases.clear()
+    databases = emptyList(); loadingDatabases = false; expandedDatabases.clear()
     _tablesByDatabase.clear(); loadingTables.clear(); _tableLoadError.clear()
     tabs = emptyList(); selectedTabIndex = -1
 }
@@ -142,13 +141,33 @@ private fun loadTables(database: String) {
     scope.launch {
         val result = runCatching { engine.invoke(…) }
         if (requestGeneration != generation) return@launch   // 连接已切换 → 丢弃
-        …
+        result.fold(…)              // 先写数据
+        loadingTables.remove(database)   // 最后清 loading —— 顺序不可交换
     }
 }
 ```
 
 三个异步入口（`refreshDatabases` / `loadTables` / `loadTabPreview`）都套用同一模式：
 **发起时捕获 `generation`，挂起点之后比对，不一致则直接返回**，避免旧连接的结果污染新连接的已清空状态。
+
+### loading 标志的写入顺序（不可交换）
+
+三个异步入口都**先写数据、最后清 loading**：
+
+```kotlin
+if (requestGeneration != generation) return@launch   // 过期 → 什么都不碰
+result.fold(onSuccess = { … tab.rows = … }, onFailure = { … })
+tab.loading = false                                  // ← 必须在 fold 之后
+```
+
+顺序反了会有可观察的错误：`loading` 与数据是**各自独立的快照状态**，写在同一协程里也是两次提交。
+任何「轮询 `loading` 直到为 false，再读数据」的调用方（`DatabaseBrowserFlowTest` 就是这样），
+都可能正好落在两次提交之间 —— 看到 `loading == false` 却读到上一次的空数据，
+表现为 `users row count expected:<2> but was:<0>` 的间歇性失败。
+
+同理，`bindConnection` 必须复位 `loadingDatabases`：切换连接时若有 in-flight 刷新，
+它的响应会被代次检查丢弃、协程直接 `return`，若不复位则 `loading` 永远为 `true`，
+顶部刷新指示器会一直转。
 
 ### 连接池生命周期（浏览场景）
 

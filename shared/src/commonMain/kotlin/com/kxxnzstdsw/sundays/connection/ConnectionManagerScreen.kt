@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -33,17 +34,18 @@ import kotlinx.coroutines.launch
  * | 快速连接 | QUICK_CONNECT → CREDENTIALS → TEST_SAVE | 3 |
  * | 编辑已有 | BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE | 4 |
  *
- * 调用方维护 [WizardState] (editingConnection + wizardStep + flow)，进入不同入口时**同步**设置 flow：
+ * 调用方维护向导状态（三字段原子更新的容器：`editingConnection` + `step` + `flow`），
+ * 进入不同入口时**同步**设置 flow：
  *
  * ```kotlin
  * var wizardState by remember {
- *     mutableStateOf(WizardState(editingConnection = null, wizardStep = WizardStep.IDLE, flow = WizardFlow.NORMAL))
+ *     mutableStateOf(WizardState(editingConnection = null, step = WizardStep.IDLE, flow = WizardFlow.NORMAL))
  * }
  *
  * ConnectionManagerScreen(
  *     connections = connectionList.connections,
  *     editingConnection = wizardState.editingConnection,
- *     wizardStep = wizardState.wizardStep,
+ *     wizardStep = wizardState.step,
  *     wizardFlow = wizardState.flow,
  *     onSelectConnection = { ... },
  *     onNewConnection = { wizardState = WizardState(newCfg, WizardStep.BASIC_INFO, WizardFlow.NORMAL) },
@@ -60,8 +62,9 @@ import kotlinx.coroutines.launch
  * | 连接 / 断开 | [onConnect] / [onDisconnect] —— 调用方直连 `IdbEngine.testConnection` / `IdbEngine.disconnect` |
  * | 连接状态 | [connectionStatuses] —— 调用方从引擎侧维护后回传（列表项状态点 + 总览面板） |
  *
- * URL 真相源：[JdbcUrl] 负责字段 ↔ JDBC URL 双向折算，覆盖全部方言与连接类型；组件内的所有编辑
- * 都通过 [onUpdateEditingConnection] 回写调用方，调用方持有唯一真相（不回写则向导内的输入丢失）。
+ * URL 真相源：[buildJdbcUrl] / [parseJdbcUrl] 负责字段 ↔ JDBC URL 双向折算，覆盖全部方言与连接类型；
+ * 组件内的所有编辑都通过 [onUpdateEditingConnection] 回写调用方，调用方持有唯一真相
+ * （不回写则向导内的输入丢失）。
  *
  * @param connections 所有保存的连接配置
  * @param selectedConnection 当前选中的连接 (用于左侧列表高亮 + 总览面板)
@@ -73,13 +76,18 @@ import kotlinx.coroutines.launch
  * @param onNewConnection 新建连接回调 (普通流程)
  * @param onQuickConnect 快速连接回调
  * @param onEditConnection 编辑已有连接回调
- * @param onSaveConnection 保存连接 (普通流程/快速连接均不直接调用)
+ * @param onSaveConnection 保存连接 —— 普通流程末步「保存」直接调用；快速连接末步走 [onQuickConnectDirect]
  * @param onQuickConnectDirect 快速连接（不保存到 ConnectionStorage，由调用方直接连库）
  * @param onTestConnection 测试连接回调 —— 由调用方直连引擎实现（如 `IdbEngine.testConnection`）；
  *   null 时“测试连接”按钮禁用
  * @param onConnect 建立连接回调（总览面板「连接」按钮）
  * @param onDisconnect 断开连接回调（总览面板「断开」按钮）
  * @param onDeleteConnection 删除连接
+ * @param onCancelEdit 取消编辑/向导（回到空闲态）
+ * @param onWizardNext 前进到指定步骤
+ * @param onWizardBack 回退一步（按当前 flow 计算）
+ * @param onUpdateEditingConnection 编辑回写 —— 向导内所有字段变更都经此回调写回调用方状态
+ * @param modifier Compose modifier
  */
 @Composable
 fun ConnectionManagerScreen(
@@ -373,7 +381,7 @@ private fun ConnectionListItem(
 
 /** 连接状态色点 —— 列表项 / 总览面板共用 */
 @Composable
-internal fun ConnectionStatusDot(state: ConnectionState, size: androidx.compose.ui.unit.Dp = 8.dp) {
+private fun ConnectionStatusDot(state: ConnectionState, size: Dp = 8.dp) {
     Box(
         modifier = Modifier
             .size(size)
@@ -450,7 +458,6 @@ private fun ConnectionWizardPanel(
             }
             WizardStep.QUICK_CONNECT -> editingConnection?.let { config ->
                 QuickConnectStep(
-                    editingConnection = config,
                     stepIndex = 1,
                     totalSteps = totalSteps,
                     onSelectDialect = { dialect ->
@@ -695,7 +702,6 @@ private fun IdlePanel(
 /** 快速连接步骤 — 预置方言快捷入口 */
 @Composable
 private fun QuickConnectStep(
-    editingConnection: ConnectionConfig,
     stepIndex: Int,
     totalSteps: Int,
     onSelectDialect: (DialectType) -> Unit,
@@ -887,10 +893,16 @@ private fun BasicInfoStep(
     }
 }
 
-/** 数据库方言选项 */
+/**
+ * 可选中选项行 —— 单选按钮 + 标题 + 说明。
+ *
+ * [DialectOption] 与 [ConnectionTypeOption] 的外观完全一致，差异只在「标题 / 说明」两段文案
+ * （各自的 `when` 映射），因此布局收敛到这里，两个选项只负责产出文案。
+ */
 @Composable
-private fun DialectOption(
-    dialect: DialectType,
+private fun SelectableOptionRow(
+    title: String,
+    description: String,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -914,22 +926,37 @@ private fun DialectOption(
             RadioButton(selected = isSelected, onClick = onClick)
             Spacer(modifier = Modifier.width(8.dp))
             Column {
-                Text(dialect.name, style = MaterialTheme.typography.bodyMedium)
+                Text(title, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    text = when (dialect) {
-                        DialectType.MYSQL -> "MySQL 客户端-服务器模式"
-                        DialectType.POSTGRESQL -> "PostgreSQL 客户端-服务器模式"
-                        DialectType.H2 -> "H2 内存/嵌入式数据库"
-                        DialectType.DUCKDB -> "DuckDB 嵌入式 OLAP"
-                        DialectType.SQLITE -> "SQLite 文件数据库"
-                        DialectType.UNKNOWN -> ""
-                    },
+                    text = description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+}
+
+/** 数据库方言选项 */
+@Composable
+private fun DialectOption(
+    dialect: DialectType,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    SelectableOptionRow(
+        title = dialect.name,
+        description = when (dialect) {
+            DialectType.MYSQL -> "MySQL 客户端-服务器模式"
+            DialectType.POSTGRESQL -> "PostgreSQL 客户端-服务器模式"
+            DialectType.H2 -> "H2 内存/嵌入式数据库"
+            DialectType.DUCKDB -> "DuckDB 嵌入式 OLAP"
+            DialectType.SQLITE -> "SQLite 文件数据库"
+            DialectType.UNKNOWN -> ""
+        },
+        isSelected = isSelected,
+        onClick = onClick,
+    )
 }
 
 /** 普通流程步骤 2: 连接类型 —— 选项来自 [DialectType.supportedConnectionTypes]，选择直接回写调用方 */
@@ -987,50 +1014,24 @@ private fun ConnectionTypeOption(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            1.dp,
-            if (isSelected) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.outlineVariant,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = isSelected, onClick = onClick)
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = when (connectionType) {
-                        ConnectionType.CLIENT_SERVER -> "客户端-服务器"
-                        ConnectionType.EMBEDDED -> "嵌入式"
-                        ConnectionType.IN_MEMORY -> "内存数据库"
-                        ConnectionType.FILE_BASED -> "文件数据库"
-                        ConnectionType.UNKNOWN -> "未知"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = when (connectionType) {
-                        ConnectionType.CLIENT_SERVER -> "需要主机地址和端口"
-                        ConnectionType.EMBEDDED -> "数据库文件嵌入在应用中"
-                        ConnectionType.IN_MEMORY -> "数据存储在内存中，重启后消失"
-                        ConnectionType.FILE_BASED -> "数据存储在单个文件中"
-                        ConnectionType.UNKNOWN -> ""
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
+    SelectableOptionRow(
+        title = when (connectionType) {
+            ConnectionType.CLIENT_SERVER -> "客户端-服务器"
+            ConnectionType.EMBEDDED -> "嵌入式"
+            ConnectionType.IN_MEMORY -> "内存数据库"
+            ConnectionType.FILE_BASED -> "文件数据库"
+            ConnectionType.UNKNOWN -> "未知"
+        },
+        description = when (connectionType) {
+            ConnectionType.CLIENT_SERVER -> "需要主机地址和端口"
+            ConnectionType.EMBEDDED -> "数据库文件嵌入在应用中"
+            ConnectionType.IN_MEMORY -> "数据存储在内存中，重启后消失"
+            ConnectionType.FILE_BASED -> "数据存储在单个文件中"
+            ConnectionType.UNKNOWN -> ""
+        },
+        isSelected = isSelected,
+        onClick = onClick,
+    )
 }
 
 /**

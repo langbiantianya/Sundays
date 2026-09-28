@@ -4,7 +4,7 @@
 
 它通过 **v2.9 Direct 直接模式** 与 `engine/` 模块集成 —— `IdbEngine()` facade 直接方法调用引擎，**不启动子进程、不建立 gRPC channel、不走 IPC transport**，typed proto 消息在同一 JVM 内直传，零序列化、零桥接开销。
 
-> **当前版本：v2.13** — KMP Desktop 前端 + Direct 模式 + 连接管理 + **顶层导航与数据库浏览第二屏**
+> **当前版本：v2.14** — KMP Desktop 前端 + Direct 模式 + 连接管理 + **顶层导航与数据库浏览第二屏**
 > 详细架构设计见本目录的 [`./ARCHITECTURE.md`](./ARCHITECTURE.md)；整体项目架构见 [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
 
 ---
@@ -45,14 +45,14 @@
 
 ## 顶层导航（v2.13）
 
-`main.kt` 的 `MainScreen` 渲染**顶层导航条** + 当前目标屏幕，两个目标：
+`main.kt` 的 `MainScreen` 渲染**顶层导航条**（`:shared` 的 `TopNavBar`）+ 当前目标屏幕，两个目标：
 
 | 目标 | 屏幕 | 职责 |
 |---|---|---|
 | `CONNECTIONS`（默认） | `ConnectionManagerScreen` | 连接列表 / 向导 / 连接生命周期 |
 | `DATABASE` | `DatabaseBrowserScreen` | 数据库 / 表浏览 + 表数据预览标签页 |
 
-导航状态由 `MainScreen` 持有的 `AppDestination` 决定；连接列表 / 会话状态由 `ConnectionSession`
+导航状态由 `MainScreen` 持有的 `AppDestination` 决定（枚举与导航条均在 `:shared`）；连接列表 / 会话状态由 `ConnectionSession`
 持有（位于导航之上），因此**切换目标不会丢失连接**。
 
 ## 功能：连接管理（v2.12）
@@ -161,8 +161,8 @@ fun main() = application {
         },
         title = "sundays",
     ) {
-        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-            MainScreen(engine)                                     // 绑定 ConnectionSession → ConnectionManagerScreen
+        SundaysTheme {                                             // :shared 的主题（跟随系统明暗）
+            MainScreen(engine)                                     // 绑定 ConnectionSession → ConnectionManagerScreen / DatabaseBrowserScreen
         }
     }
 }

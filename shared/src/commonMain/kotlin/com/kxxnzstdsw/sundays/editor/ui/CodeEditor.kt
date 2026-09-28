@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -60,9 +61,10 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  *
  * - **解耦语言与 UI**：通过 [CodeLanguageRegistry] 查找语言，新增语言只需 `registry.register(...)`
  * - **tokenize 缓存**：使用 [rememberCodeHighlighter] 复用 [SyntaxHighlighter]，避免每次 recompose 创建
- * - **deferred 格式化**：[text] 与 [languageId] 变化时**异步** tokenize + 高亮，不阻塞 UI 帧
- * - **共享 ScrollState**：行号 gutter 与代码编辑区共用同一个 [ScrollState]，
- *   保证两者的垂直滚动完全同步（用户滚编辑器时行号同步移动，反之亦然）
+ * - **tokenize 时机**：[text] 与 [languageId] 变化时重新 tokenize + 高亮，在 UI 线程同步执行 ——
+   SQL / Lua 典型体量（< 10K 行）足够快；大文本如需异步化见 §8.2 未来扩展
+ * - **共享 ScrollState**：行号 gutter 与代码编辑区是同一个 `verticalScroll` 容器的两个子节点，
+ *   因此垂直滚动天然同步（用户滚编辑器时行号同步移动，反之亦然）
  *
  * ## 用法
  *
@@ -80,9 +82,9 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  *
  * ## 扩展性保证
  *
- * - 新增 [TokenType] → 只需在 [SyntaxHighlighter.DefaultLightColors] / [DarkColors] 追加键值对
+ * - 新增 token 类型 → 只需在 [SyntaxHighlighter.DefaultLightColors] / [SyntaxHighlighter.DefaultDarkColors] 追加键值对
  * - 新增语言 → 实现 [CodeLanguage] + 注册；编辑器零修改即可显示
- * - 新增 formatter → 实现 [CodeFormatter] + 注册；工具栏"格式化"按钮自动启用
+ * - 新增 formatter → 实现 `CodeFormatter` 接口 + 注册到 [CodeFormatterRegistry]；工具栏"格式化"按钮自动启用
  * - 替换主题 → 提供自定义 [CodeEditorTheme]
  *
  * @param text 编辑器文本内容
@@ -91,7 +93,7 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  * @param modifier Compose modifier
  * @param theme 编辑器主题（默认 [CodeEditorTheme.default]）
  * @param showLineNumbers 是否显示行号（默认 true — IDE 习惯）
- * @param minLines 最小显示行数（不足时空行也填充）
+ * @param minLines 最小显示行数（仅约束高度下限，不填充空行）
  * @param maxLines 最大显示行数（超过则内部滚动）；**默认 `null`（不限制）** —— 编辑器会填充
  *   父容器剩余高度，不会超过父容器；调用方显式传入整数才启用高度上限
  * @param contextMenuState 右键菜单状态；通常用 [rememberEditorContextMenuState] 创建
@@ -125,7 +127,7 @@ fun CodeEditor(
     }
 
     val transformation = remember(language, highlighter, fieldValue.text) {
-        CodeVisualTransformation(fieldValue.text, language, highlighter)
+        CodeVisualTransformation(language, highlighter)
     }
 
     val minHeight = (theme.textStyle.fontSize.value * minLines + 16).dp
@@ -184,21 +186,19 @@ fun CodeEditor(
         )
     }
 
-    // 右键菜单 Popup —— 全局显示，根据 [contextMenuState] 渲染
+    // 右键菜单 —— 浮在编辑器之上，不绑定具体位置（位置由 EditorContextMenuState 记录）
     if (contextMenuState.visible) {
         val density = LocalDensity.current
         val menuOffset = androidx.compose.ui.unit.DpOffset(
             x = with(density) { contextMenuState.position.x.toDp() },
             y = with(density) { contextMenuState.position.y.toDp() },
         )
-        Box {
-            DropdownMenu(
-                expanded = true,
-                onDismissRequest = { contextMenuState.dismiss() },
-                offset = menuOffset,
-            ) {
-                contextMenuItems(contextMenuState.payload)
-            }
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { contextMenuState.dismiss() },
+            offset = menuOffset,
+        ) {
+            contextMenuItems(contextMenuState.payload)
         }
     }
 }
@@ -210,13 +210,12 @@ fun CodeEditor(
  *
  * - **行数计算**：按 `\n` 分割 + 1；空文本显示 1 行
  * - **宽度自适应**：根据总行数的位数自动扩展（至少 2 位宽 → 容纳 "1, 2, ..., 99"）
- * - **滚动同步**：与编辑器共享 [ScrollState] — 用户滚动编辑器时行号同步移动
+ * - **滚动同步**：gutter 与编辑器同处一个 `verticalScroll` 容器（见 [CodeEditor]），随其一起移动
  * - **配色**：背景用 [CodeEditorTheme.gutterColor]；文字用主题文字色 + alpha 降低，使其"低调"但不消失
  * - **行高**：使用与编辑器相同的 [TextStyle]，自动匹配编辑器行高（含自定义 lineHeight）
  *
  * @param lineCount 总行数
  * @param theme 编辑器主题
- * @param scrollState 与编辑器共享的滚动状态
  */
 @Composable
 private fun LineNumberGutter(
@@ -458,12 +457,11 @@ fun rememberCodeHighlighter(theme: CodeEditorTheme): SyntaxHighlighter =
  * - 使用 [OffsetMapping.Identity] 因为我们只改样式、不改字符位置 — 选择位置保持稳定
  */
 private class CodeVisualTransformation(
-    private val source: String,
     private val language: CodeLanguage?,
     private val highlighter: SyntaxHighlighter,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val toHighlight = if (text.text == source) source else text.text
+        val toHighlight = text.text
         val annotated = if (language != null) {
             val tokens = try {
                 language.tokenize(toHighlight)
@@ -602,24 +600,42 @@ end
 return main
 """
 
+
+// ============================================================================
+// 预览脚手架
+// ============================================================================
+
+/**
+ * 预览外壳 —— 注册内置语言/formatter + 套 [MaterialTheme] + 统一内边距。
+ *
+ * 每个 `@Preview` 只描述自己**特有**的差异（样本文本 / 语言 / 主题 / 高度约束），
+ * 共同的外壳收敛到这里。
+ */
+@Composable
+private fun EditorPreview(
+    colorScheme: ColorScheme,
+    content: @Composable () -> Unit,
+) {
+    registerBuiltinEditors()
+    MaterialTheme(colorScheme = colorScheme) {
+        Box(modifier = Modifier.padding(16.dp)) { content() }
+    }
+}
 /**
  * [CodeEditor] 浅色主题预览 — SQL 样本 + 行号。
  */
 @Composable
 @Preview(name = "CodeEditor / SQL / Light", widthDp = 600, heightDp = 280)
 private fun CodeEditorSqlPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                theme = CodeEditorTheme.Light,
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            theme = CodeEditorTheme.Light,
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -629,18 +645,15 @@ private fun CodeEditorSqlPreview() {
 @Composable
 @Preview(name = "CodeEditor / Lua / Light", widthDp = 600, heightDp = 280)
 private fun CodeEditorLuaPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_LUA_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                theme = CodeEditorTheme.Light,
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_LUA_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            theme = CodeEditorTheme.Light,
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -650,18 +663,15 @@ private fun CodeEditorLuaPreview() {
 @Composable
 @Preview(name = "CodeEditor / SQL / Dark", widthDp = 600, heightDp = 280, backgroundColor = 0xFF2B2B2B)
 private fun CodeEditorSqlDarkPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                theme = CodeEditorTheme.Dark,
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(darkColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            theme = CodeEditorTheme.Dark,
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -671,18 +681,15 @@ private fun CodeEditorSqlDarkPreview() {
 @Composable
 @Preview(name = "CodeEditor / Lua / Dark", widthDp = 600, heightDp = 280, backgroundColor = 0xFF2B2B2B)
 private fun CodeEditorLuaDarkPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_LUA_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                theme = CodeEditorTheme.Dark,
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(darkColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_LUA_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            theme = CodeEditorTheme.Dark,
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -692,17 +699,14 @@ private fun CodeEditorLuaDarkPreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / SQL", widthDp = 600, heightDp = 320)
 private fun CodeEditorWithToolbarSqlPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                onLanguageChange = {},
-                theme = CodeEditorTheme.Light,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            onLanguageChange = {},
+            theme = CodeEditorTheme.Light,
+        )
     }
 }
 
@@ -712,17 +716,14 @@ private fun CodeEditorWithToolbarSqlPreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / Lua / Dark", widthDp = 600, heightDp = 320, backgroundColor = 0xFF2B2B2B)
 private fun CodeEditorWithToolbarLuaDarkPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_LUA_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                onLanguageChange = {},
-                theme = CodeEditorTheme.Dark,
-            )
-        }
+    EditorPreview(darkColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_LUA_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            onLanguageChange = {},
+            theme = CodeEditorTheme.Dark,
+        )
     }
 }
 
@@ -735,18 +736,15 @@ private fun CodeEditorWithToolbarLuaDarkPreview() {
 @PreviewLightDark
 @Preview(name = "CodeEditor / SQL / LightDark", widthDp = 600, heightDp = 280)
 private fun CodeEditorSqlLightDarkPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                theme = CodeEditorTheme.default(),
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(if (androidx.compose.foundation.isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            theme = CodeEditorTheme.default(),
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -758,19 +756,16 @@ private fun CodeEditorSqlLightDarkPreview() {
 @Composable
 @Preview(name = "CodeEditor / Plain Text", widthDp = 600, heightDp = 200)
 private fun CodeEditorPlainTextPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = "// 此处 languageId=null，无语法高亮\n" +
-                    "SELECT id, name FROM users -- 普通文本模式",
-                onTextChange = {},
-                languageId = null,
-                theme = CodeEditorTheme.Light,
-                minLines = 5,
-                maxLines = 10,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = "// 此处 languageId=null，无语法高亮\n" +
+                "SELECT id, name FROM users -- 普通文本模式",
+            onTextChange = {},
+            languageId = null,
+            theme = CodeEditorTheme.Light,
+            minLines = 5,
+            maxLines = 10,
+        )
     }
 }
 
@@ -782,18 +777,15 @@ private fun CodeEditorPlainTextPreview() {
 @Composable
 @Preview(name = "CodeEditor / Multi-line / Scroll Sync", widthDp = 600, heightDp = 300)
 private fun CodeEditorMultilineScrollSyncPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_MULTILINE_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                theme = CodeEditorTheme.Light,
-                minLines = 10,
-                maxLines = 15,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_MULTILINE_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            theme = CodeEditorTheme.Light,
+            minLines = 10,
+            maxLines = 15,
+        )
     }
 }
 
@@ -803,19 +795,16 @@ private fun CodeEditorMultilineScrollSyncPreview() {
 @Composable
 @Preview(name = "CodeEditor / No Line Numbers", widthDp = 600, heightDp = 240)
 private fun CodeEditorNoLineNumbersPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                theme = CodeEditorTheme.Light,
-                showLineNumbers = false,
-                minLines = 8,
-                maxLines = 12,
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            theme = CodeEditorTheme.Light,
+            showLineNumbers = false,
+            minLines = 8,
+            maxLines = 12,
+        )
     }
 }
 
@@ -828,29 +817,26 @@ private fun CodeEditorNoLineNumbersPreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / Custom Actions", widthDp = 700, heightDp = 320)
 private fun CodeEditorWithToolbarCustomActionsPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                onLanguageChange = {},
-                theme = CodeEditorTheme.Light,
-                // 演示：调用方注入「执行」「清空」「复制」三个自定义按钮
-                actions = {
-                    Button(onClick = {}) {
-                        Text("执行 ▶")
-                    }
-                    Button(onClick = {}) {
-                        Text("清空")
-                    }
-                    Button(onClick = {}) {
-                        Text("复制")
-                    }
-                },
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            onLanguageChange = {},
+            theme = CodeEditorTheme.Light,
+            // 演示：调用方注入「执行」「清空」「复制」三个自定义按钮
+            actions = {
+                Button(onClick = {}) {
+                    Text("执行 ▶")
+                }
+                Button(onClick = {}) {
+                    Text("清空")
+                }
+                Button(onClick = {}) {
+                    Text("复制")
+                }
+            },
+        )
     }
 }
 
@@ -864,18 +850,15 @@ private fun CodeEditorWithToolbarCustomActionsPreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / Fixed Language", widthDp = 600, heightDp = 280)
 private fun CodeEditorWithToolbarFixedLanguagePreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",  // 在实例化时直接指定，固定为 SQL
-                // onLanguageChange 省略 —— 切换器已隐藏，不会被调用
-                theme = CodeEditorTheme.Light,
-                showLanguageSwitcher = false,  // 隐藏切换下拉框
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",  // 在实例化时直接指定，固定为 SQL
+            // onLanguageChange 省略 —— 切换器已隐藏，不会被调用
+            theme = CodeEditorTheme.Light,
+            showLanguageSwitcher = false,  // 隐藏切换下拉框
+        )
     }
 }
 
@@ -887,21 +870,18 @@ private fun CodeEditorWithToolbarFixedLanguagePreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / Fixed Lang + Actions", widthDp = 700, heightDp = 280)
 private fun CodeEditorWithToolbarFixedLangActionsPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_LUA_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                theme = CodeEditorTheme.Light,
-                showLanguageSwitcher = false,
-                actions = {
-                    Button(onClick = {}) { Text("保存") }
-                    Button(onClick = {}) { Text("执行 ▶") }
-                },
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_LUA_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            theme = CodeEditorTheme.Light,
+            showLanguageSwitcher = false,
+            actions = {
+                Button(onClick = {}) { Text("保存") }
+                Button(onClick = {}) { Text("执行 ▶") }
+            },
+        )
     }
 }
 
@@ -914,31 +894,28 @@ private fun CodeEditorWithToolbarFixedLangActionsPreview() {
 @Composable
 @Preview(name = "CodeEditor / Context Menu", widthDp = 700, heightDp = 320)
 private fun CodeEditorContextMenuPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditor(
-                text = PREVIEW_SQL_SAMPLE,
-                onTextChange = {},
-                languageId = "sql",
-                theme = CodeEditorTheme.Light,
-                contextMenuItems = { payload ->
-                    DropdownMenuItem(
-                        text = { Text("复制全部 (${payload?.text?.length ?: 0} 字符)") },
-                        onClick = { },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("在编辑器中查找") },
-                        onClick = { },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("语言：${payload?.languageId ?: "纯文本"}") },
-                        onClick = { },
-                        enabled = false,
-                    )
-                }
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditor(
+            text = PREVIEW_SQL_SAMPLE,
+            onTextChange = {},
+            languageId = "sql",
+            theme = CodeEditorTheme.Light,
+            contextMenuItems = { payload ->
+                DropdownMenuItem(
+                    text = { Text("复制全部 (${payload?.text?.length ?: 0} 字符)") },
+                    onClick = { },
+                )
+                DropdownMenuItem(
+                    text = { Text("在编辑器中查找") },
+                    onClick = { },
+                )
+                DropdownMenuItem(
+                    text = { Text("语言：${payload?.languageId ?: "纯文本"}") },
+                    onClick = { },
+                    enabled = false,
+                )
+            }
+        )
     }
 }
 
@@ -948,26 +925,23 @@ private fun CodeEditorContextMenuPreview() {
 @Composable
 @Preview(name = "CodeEditorWithToolbar / Context Menu", widthDp = 700, heightDp = 320)
 private fun CodeEditorWithToolbarContextMenuPreview() {
-    registerBuiltinEditors()
-    MaterialTheme(colorScheme = lightColorScheme()) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CodeEditorWithToolbar(
-                text = PREVIEW_LUA_SAMPLE,
-                onTextChange = {},
-                languageId = "lua",
-                onLanguageChange = {},
-                theme = CodeEditorTheme.Light,
-                contextMenuItems = { payload ->
-                    DropdownMenuItem(
-                        text = { Text("运行 Lua 脚本 (${payload?.languageId ?: "?"})") },
-                        onClick = { },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("保存到剪贴板") },
-                        onClick = { },
-                    )
-                }
-            )
-        }
+    EditorPreview(lightColorScheme()) {
+        CodeEditorWithToolbar(
+            text = PREVIEW_LUA_SAMPLE,
+            onTextChange = {},
+            languageId = "lua",
+            onLanguageChange = {},
+            theme = CodeEditorTheme.Light,
+            contextMenuItems = { payload ->
+                DropdownMenuItem(
+                    text = { Text("运行 Lua 脚本 (${payload?.languageId ?: "?"})") },
+                    onClick = { },
+                )
+                DropdownMenuItem(
+                    text = { Text("保存到剪贴板") },
+                    onClick = { },
+                )
+            }
+        )
     }
 }

@@ -300,7 +300,7 @@ fun main() = application {
     Window(onCloseRequest = {
         engine.close()
         exitApplication()
-    }) { App() }
+    }) { SundaysTheme { MainScreen(engine) } }   // 主题 + 顶层导航来自 :shared
 }
 
 // 在 ViewModel 里调用（与 gRPC stub 同形）

@@ -117,8 +117,6 @@ enum class PageSize(val value: Int, val label: String) {
         val DEFAULT: PageSize = S20
         /** 所有可选分页值（按枚举顺序 = 升序 + 全部在末尾）。 */
         val ALL_VALUES: List<PageSize> = entries.toList()
-
-        fun fromInt(value: Int): PageSize = entries.firstOrNull { it.value == value } ?: DEFAULT
     }
 }
 
@@ -130,7 +128,7 @@ enum class PageSize(val value: Int, val label: String) {
 // 提供带类型的别名，便于调用方书写：
 //
 // ```kotlin
-// val state = rememberTableContextMenuState()  // 类型已推断为 ContextMenuState<TableRow>
+// val state = rememberContextMenuState()  // 类型已推断为 ContextMenuState<TableRow>
 // ```
 
 /** 表格专用 `ContextMenuState<TableRow>` 类型别名。 */
@@ -140,20 +138,6 @@ typealias ContextMenuState = com.kxxnzstdsw.sundays.ui.ContextMenuState<TableRow
 @Composable
 fun rememberContextMenuState(): ContextMenuState =
     androidx.compose.runtime.remember { com.kxxnzstdsw.sundays.ui.ContextMenuState<TableRow>() }
-
-// ============================================================================
-// 旧版兼容 — 早期 API 中 [ContextMenuState] 暴露 [targetRow] 字段，
-// 新版使用泛型 [payload]，这里提供兼容属性 / 旧字段。
-// ============================================================================
-
-/**
- * 旧版 [targetRow] 字段的兼容别名 —— 实际为 `payload as? TableRow`。
- *
- * 已迁移到 [payload]，保留旧字段以便现有调用方（如 [DataTable] 的 [contextMenuItems]
- * 槽位仍通过 `state.targetRow` 读取）无需修改。
- */
-val ContextMenuState.targetRow: TableRow?
-    get() = payload
 
 // ============================================================================
 // 表格主题 (DataTableTheme)

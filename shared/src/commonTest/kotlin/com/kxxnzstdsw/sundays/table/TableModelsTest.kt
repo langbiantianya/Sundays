@@ -96,19 +96,6 @@ class TableModelsTest {
     }
 
     @Test
-    fun page_size_from_int_resolves_known_values() {
-        assertSame(PageSize.S10, PageSize.fromInt(10))
-        assertSame(PageSize.S500, PageSize.fromInt(500))
-        assertSame(PageSize.ALL, PageSize.fromInt(0))
-    }
-
-    @Test
-    fun page_size_from_int_falls_back_to_default_for_unknown() {
-        assertSame(PageSize.DEFAULT, PageSize.fromInt(42))
-        assertSame(PageSize.DEFAULT, PageSize.fromInt(-1))
-    }
-
-    @Test
     fun page_size_default_is_s20() {
         assertSame(PageSize.S20, PageSize.DEFAULT)
     }
@@ -129,7 +116,7 @@ class TableModelsTest {
     fun context_menu_state_initial_state_is_hidden() {
         val state = ContextMenuState()
         assertEquals(false, state.visible)
-        assertNull(state.targetRow)
+        assertNull(state.payload)
     }
 
     @Test
@@ -139,7 +126,7 @@ class TableModelsTest {
         val pos = androidx.compose.ui.geometry.Offset(100f, 200f)
         state.show(pos, row)
         assertEquals(true, state.visible)
-        assertSame(row, state.targetRow)
+        assertSame(row, state.payload)
         assertEquals(pos, state.position)
     }
 
@@ -148,7 +135,7 @@ class TableModelsTest {
         val state = ContextMenuState()
         state.show(androidx.compose.ui.geometry.Offset(50f, 50f), null)
         assertEquals(true, state.visible)
-        assertNull(state.targetRow)
+        assertNull(state.payload)
     }
 
     @Test
@@ -157,7 +144,7 @@ class TableModelsTest {
         state.show(androidx.compose.ui.geometry.Offset(10f, 10f), TableRow(id = 1L, "id" to 1L))
         state.dismiss()
         assertEquals(false, state.visible)
-        assertNull(state.targetRow)
+        assertNull(state.payload)
     }
 
     @Test

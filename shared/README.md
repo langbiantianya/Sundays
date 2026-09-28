@@ -2,7 +2,7 @@
 
 面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库，与 `:engine` 解耦 —— 可在不带引擎依赖的情况下独立使用与测试。
 
-> **当前版本**：v2.12
+> **当前版本**：v2.14
 >
 > 内部架构与设计决策见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md)
 
@@ -30,15 +30,21 @@ shared/
 │   │   ├── ConnectionConfig.kt          ConnectionConfig / DialectType / ConnectionType + 持久化精简模型 + withDialect/withConnectionType
 │   │   ├── JdbcUrl.kt                   字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，URL 为真相源）
 │   │   └── ConnectionStorage.kt         ~/.config/sundays/connection.json（按 version 分派 v1/v2，自动迁移）
+│   ├── navigation/      顶层导航（平台无关的导航条 + 目标枚举）
+│   │   ├── AppDestination.kt          AppDestination 枚举（CONNECTIONS / DATABASE）
+│   │   └── TopNavBar.kt               顶层导航条（TopNavBar + 私有 NavChip）
 │   └── ui/              通用 UI 工具
+│       ├── Theme.kt                   SundaysTheme（跟随系统明暗的应用主题）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
 ├── commonTest/          平台无关测试（tokenizer / 模型 / 集成）
-├── jvmMain/             JVM 特定实现（最小化：仅 Platform.jvm.kt）
+├── jvmMain/             当前为空 —— 无平台特定实现
 └── jvmTest/             JVM 特定测试
 ```
 
 **当前仅启用 `jvm` 单一目标**（macOS / Linux / Windows Desktop）。KMP 工程结构天然支持后续扩展 `androidMain` / `iosMain` / `wasmJsMain` —— `commonMain` 中的组件零修改复用，只需新增 source set 提供平台特定的 `pointerInput` / `Okio` 适配。
+
+> KMP 脚手架样板（`App` / `Greeting` / `getPlatform` 与其 `composeResources` logo）已在 v2.14 删除 —— 入口由 `desktopApp` 持有，样板无任何调用方。
 
 ---
 
@@ -55,6 +61,9 @@ shared/
 | `ConnectionStorage` | `commonMain/.../connection/ConnectionStorage.kt` | 连接配置 JSON 持久化（`~/.config/sundays/connection.json`） |
 | `buildJdbcUrl` / `parseJdbcUrl` | `commonMain/.../connection/JdbcUrl.kt` | 连接字段 ↔ JDBC URL 折算（URL 是引擎侧真相源） |
 | `DialectType.engineDriverName` | `commonMain/.../connection/ConnectionConfig.kt` | 方言枚举 → 引擎 `DatabaseDialect.driverName`（`MYSQL` → `Mysql`；proto `ConnectionConfig.driver` 必须填这个，**不能用 `Enum.name`**） |
+| `TopNavBar` | `commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（chip 列表 + 选中高亮）；纯展示，`current` / `onSelect` 由调用方的顶层屏幕持有 |
+| `AppDestination` | `commonMain/.../navigation/AppDestination.kt` | 顶层导航目标枚举（`label` 供导航条渲染） |
+| `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `darkColorScheme` / `lightColorScheme`）；各平台入口只需创建平台容器 |
 
 ---
 
@@ -169,7 +178,7 @@ ConnectionManagerScreen(
 >
 > 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开」全链路。
 
-端到端 demo：连接管理见 [`main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt)（desktopApp 当前顶层仅渲染 `ConnectionManagerScreen`）。
+端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) —— `MainScreen` 用本模块的 `TopNavBar` + `ConnectionManagerScreen` 组成顶层导航。
 
 ---
 
@@ -192,7 +201,7 @@ ConnectionManagerScreen(
 # 构建（KMP：当前编译 jvm 目标）
 ./gradlew :shared:build
 
-# 跑测试（101 项）
+# 跑测试（97 项）
 ./gradlew :shared:jvmTest
 
 # 跑测试（等价）
@@ -203,10 +212,9 @@ ConnectionManagerScreen(
 - `LuaTokenizerTest` — 30 项（Lua 关键字 / 字符串 / 注释 / 数字 tokenize）
 - `SqlTokenizerTest` — 23 项（SQL tokenize）
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
-- `TableModelsTest` — 18 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
+- `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `ConnectionStorageTest` — 4 项（jvmTest：持久化往返重建派生字段、upsert/delete、v1 → v2 迁移回写）
-- `SharedCommonTest` / `SharedLogicDesktopTest` — 各 1 项（KMP 冒烟测试）
 
 ---
 
@@ -220,7 +228,7 @@ ConnectionManagerScreen(
 | **替换 token 颜色** | 在 `SyntaxHighlighter.DefaultLightColors` / `DarkColors` 追加键值对 |
 | **替换上下文菜单项** | 通过 `contextMenuItems: @Composable (...) -> Unit` 插槽注入任意 `DropdownMenuItem` |
 
-详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §5 设计原则。
+详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §7 设计原则。
 
 ---
 
@@ -231,4 +239,4 @@ ConnectionManagerScreen(
 | [根 `README.md`](../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) | **内部架构设计**：高度策略、可扩展性、databind 模式、与引擎解耦边界 |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式下通过 `desktopApp/` 集成） |
-| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：编辑器 + 表格 + 右键菜单删除 |
+| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：`TopNavBar` 顶层导航 + `ConnectionManagerScreen` 连接管理 |

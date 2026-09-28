@@ -9,9 +9,9 @@
 
 引擎支持 **5 个** 可插拔方言：**MySQL** / **PostgreSQL** / **H2** / **DuckDB**（本地嵌入式 OLAP，v2.7） / **SQLite**（本地嵌入式关系型，v2.8）。
 
-> **当前版本：v2.9** — KMP Desktop 前端 + Direct 模式 + 双模式架构
+> **当前版本：v2.14** — KMP Desktop 前端 + Direct 模式 + 双模式架构 + 连接生命周期 + 顶层导航与数据库浏览
 >
-> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)（V2.9），引擎 README 见 [`engine/README.md`](./engine/README.md)。
+> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)（V2.14），引擎 README 见 [`engine/README.md`](./engine/README.md)。
 
 ---
 
@@ -43,13 +43,14 @@ sundays/
 │   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单）
 │   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
 │   │   ├── connection/   ConnectionManagerScreen：连接管理（左侧连接列表 + 右侧 4 步向导，JSON 持久化到 ~/.config/sundays/connection.json）
-│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier）
+│   │   ├── navigation/   TopNavBar / AppDestination：顶层导航条（平台无关，v2.14 自 desktopApp 上移）
+│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier、SundaysTheme 应用主题）
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  dependencies 含 implementation(project(":engine")) — Direct 模式依赖
     └── src/main/kotlin/com/kxxnzstdsw/sundays/
-        ├── main.kt                  KMP Desktop 入口：IdbEngine() 直接持有、顶层导航 + 目标分派
-        ├── Navigation.kt            AppDestination（连接管理 / 数据库浏览）
+        ├── main.kt                  KMP Desktop 入口：Window + SundaysTheme、IdbEngine() 直接持有、顶层导航目标分派
+        │                            （TopNavBar / AppDestination / SundaysTheme 已在 :shared/commonMain）
         ├── ConnectionSession.kt     连接列表 / 向导 / 引擎会话状态机
         └── DatabaseBrowserScreen.kt 数据库浏览第二屏（库表树 + 表数据预览标签页）
 ```
@@ -73,7 +74,7 @@ fun main() = application {
             engine.close()    // PoolManager.closeAll() + DriverLoader.closeAll() + DialectLoader.closeAll()
             exitApplication()
         }
-    ) { App() }
+    ) { SundaysTheme { MainScreen(engine) } }   // 主题 + 顶层导航来自 :shared
 }
 
 // 在 ViewModel 里调用 — 与 gRPC stub `IdbEngineCoroutineStub.handle()` 同形
@@ -241,7 +242,7 @@ CodeEditor(
 - **databind**：行数据由调用方管理 state 传入，变化自动重绘
 - **单行详情面板**：点击行 → 右侧详情面板（可隐藏；可自定义 `detailPanel` 插槽；`detailPanelRatio` 控制宽度比）
 - **单元格可选中**：每行包裹 `SelectionContainer`，可在单元格内拖拽选中
-- **右键菜单**：`@Composable (TableRow?) -> Unit` 插槽；通过 `ContextMenuState.targetRow` 拿目标行
+- **右键菜单**：`@Composable (TableRow?) -> Unit` 插槽；通过 `ContextMenuState.payload` 拿目标行
 - **数据库主键**：`TableRow.id` 承载主键，详情面板 / 选中状态识别
 
 #### 高度策略（v2.9+）
@@ -426,6 +427,7 @@ java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
 
 | v2.12 | **连接管理流程与引擎打通：连接生命周期（连接 / 断开）+ 方言装配修复**<br>`IdbEngine` facade 新增 `disconnect(config)`（→ `PoolManager.close(config)`：释放该配置下**所有** schema 维度的连接池），与 `testConnection` 构成对称生命周期；pool key 改为两段式 `sha256(配置)#sha256(schema)` 以便按配置定位池，并新增 `activePoolCount()`（诊断 / 测试）<br>`DialectLoader` 新增**应用类路径 SPI**加载通道（`ServiceLoader`，`desktopApp` 用 `runtimeOnly` 引入 5 个方言插件 + 5 个 JDBC 驱动）—— 修复 Direct 模式下 `dialects/` 目录缺失导致 `No dialect plugin matches JDBC URL`、测试连接永远失败的问题<br>`shared/connection`：`JdbcUrl.kt` 独立出字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，MySQL 默认参数、H2 `mem:`/`file:`、DuckDB、SQLite），`ConnectionConfig` 删除死字段 `filePath` / `useJdbcUrl`（`database` 统一承载嵌入式 URL 主体），向导各步骤改为**直写调用方状态**（修复连接名称、连接类型选完即丢的问题），URL 折算不出时禁用放行按钮，新增**连接总览面板**（状态 + 连接/断开/编辑/删除）与列表状态色点；`ConnectionStorage` 按文件 `version` 分派 v1/v2 并真正迁移<br>`desktopApp`：连接列表 / 向导 / 引擎会话状态收敛到新的 `ConnectionSession` 状态机（`MainScreen` 只做绑定），新增 `ConnectionManagerFlowTest`（Compose UI 真点击 + 真引擎：选方言 → 填字段 → 测试连接 → 连接 → 断开，断言连接池建立与释放、`connection.json` 落盘） |
 | v2.13 | **顶层导航 + 数据库浏览第二屏**<br>`desktopApp`：新增 `Navigation.kt`（`AppDestination` 枚举）与 `MainScreen` 顶层导航条（`TopNavBar` / `NavChip`），在「连接管理」与「数据库浏览」之间切换；连接列表仍由 `ConnectionSession` 持有（位于导航之上），切换不丢连接<br>新增 `DatabaseBrowserScreen.kt`：**左侧**库/表树（`SCHEMA.LIST level=database` 拉库 → 展开时懒加载 `TABLE.LIST`）+ **右侧** `SecondaryScrollableTabRow` 标签页与 `DataTable` 预览。**双击**表名打开预览标签页（`DATA.LIST`，`page=1` / `pageSize=100`），同一张表以 `schema::table` 为唯一键**去重** —— 重复双击只激活已有标签页、不重复加载；标签可逐页关闭且选中索引自动回退<br>`DatabaseBrowserState`：连接切换时清空全部派生状态（库 / 展开节点 / 表缓存 / 标签页）并自增**会话代次** `generation`，三个异步入口在挂起点后比对代次、**丢弃跨连接的过期响应**<br>注意点：proto `ConnectionConfig.driver` 是各 handler 取方言的必填字段；库名**不写入** `schema` 字段（否则 H2 `SET SCHEMA <dbname>` 失败）；`DATA.LIST` 的 `pageSize = 0` 是流式哨兵，预览请求侧 `coerceAtLeast(1)`<br>测试：`DatabaseBrowserFlowTest`（状态机全链路）、`DatabaseBrowserUiTest`（真点击 + `Role=TAB` 标签数恒为 1）、`MainScreenNavTest`（导航切换）<br>详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) §数据库浏览 |
+| v2.14 | **共享代码上移 `shared`（模块边界整理）**<br>`desktopApp` 中不依赖 `:engine` 的纯 UI 迁入 `:shared` 的 `commonMain`：新增 `navigation/AppDestination.kt`（顶层导航目标枚举）、`navigation/TopNavBar.kt`（`TopNavBar` + 私有 `NavChip`）、`ui/Theme.kt`（`SundaysTheme`，跟随系统明暗）。`desktopApp/Navigation.kt` 删除，`main.kt` 瘦身为「平台窗口 + 引擎状态机接线」（203 → 114 行），同时消除原先为规避导入冲突而写的 `private fun isSystemInDarkTheme()` 包装<br>边界判据：`:engine` 是纯 JVM 模块（`kotlin("jvm")` + HikariCP/JDBC/gRPC/Hadoop），而 `shared` 业务代码全在 KMP `commonMain` —— 任何引用 `IdbEngine` / proto 的代码都无法上移。故 `ConnectionSession`（`IdbEngine.testConnection` / `disconnect`）与 `DatabaseBrowserState` / `DatabaseBrowserScreen`（`IdbEngine.invoke` + proto 构造器）**保留在 desktopApp**，`engine ↮ shared` 的依赖方向不变<br>`TopNavBar` 新增 `modifier` 参数，与 shared 其余组件的 Reasonable Defaults 约定一致 |
 
 ---
 

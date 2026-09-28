@@ -1,39 +1,24 @@
 package com.kxxnzstdsw.sundays
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.navigation.AppDestination
+import com.kxxnzstdsw.sundays.navigation.TopNavBar
+import com.kxxnzstdsw.sundays.ui.SundaysTheme
 
 /**
  * KMP Desktop 应用入口 (v2.12 双模式架构).
@@ -48,6 +33,8 @@ import com.kxxnzstdsw.sundays.connection.ConnectionStatus
  * 连接列表 / 向导 / 引擎会话状态全部由 [ConnectionSession] 持有, [MainScreen] 只做绑定与顶层导航.
  *
  * **顶层导航**: 连接管理 ↔ 数据库浏览. 切换目标会重建屏幕; 各自的内部状态由屏幕自身 `remember` 持有.
+ * 导航条本体 (`TopNavBar` / `AppDestination`) 与应用主题 (`SundaysTheme`) 是平台无关的纯 UI,
+ * 已上移到 `:shared` 的 `commonMain` —— 本文件只剩「平台窗口 + 引擎状态机接线」。
  */
 fun main() = application {
     val engine = IdbEngine()
@@ -58,9 +45,7 @@ fun main() = application {
         },
         title = "sundays",
     ) {
-        MaterialTheme(
-            colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-        ) {
+        SundaysTheme {
             MainScreen(engine)
         }
     }
@@ -127,77 +112,3 @@ internal fun MainScreen(engine: IdbEngine) {
         }
     }
 }
-
-/**
- * 顶层导航条 —— 切换 [AppDestination].
- *
- * 设计要点:
- * - 横向 `Row`, 左对齐, 每个目标是一个 chip; 当前目标高亮.
- * - 连接列表由 [ConnectionSession] 持有 (在 Nav 之上), 切换 destination 不会丢失连接.
- */
-@Composable
-private fun TopNavBar(
-    current: AppDestination,
-    onSelect: (AppDestination) -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AppDestination.entries.forEach { dest ->
-                NavChip(
-                    destination = dest,
-                    selected = current == dest,
-                    onClick = { onSelect(dest) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun NavChip(
-    destination: AppDestination,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val icon: ImageVector = when (destination) {
-        AppDestination.CONNECTIONS -> Icons.Filled.Storage
-        AppDestination.DATABASE -> Icons.Filled.TableChart
-    }
-    val bg = if (selected) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surface
-    val fg = if (selected) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    Surface(
-        color = bg.copy(alpha = if (selected) 1f else 0.4f),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.clickable(onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = fg)
-            Text(
-                text = destination.label,
-                color = fg,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            )
-        }
-    }
-}
-
-@Composable
-private fun isSystemInDarkTheme(): Boolean =
-    androidx.compose.foundation.isSystemInDarkTheme()

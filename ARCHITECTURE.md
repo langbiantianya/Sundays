@@ -1,4 +1,4 @@
-# sundays — Kotlin 数据库管理端架构导航（V2.13）
+# sundays — Kotlin 数据库管理端架构导航（V2.14）
 
 > **本文件仅作整体介绍与模块导航**。详细架构设计、handler 矩阵、方言特性、协议规范、双模式对比等深度内容已分散到各子模块的 `ARCHITECTURE.md`（见下方"模块导航"）。
 
@@ -12,7 +12,7 @@
 - **前端客户端**：**Kotlin Multiplatform + Compose Multiplatform Desktop** 桌面应用（macOS / Linux / Windows 三端共享 Compose Desktop Skia 渲染）
 - **整条工具链 Kotlin 一统**：共享 `protobuf-kotlin-lite` DSL 生成器 + `kotlinx-coroutines`，无语言边界、无桥接开销
 
-**当前版本：v2.11** — KMP Desktop 前端 + Direct 模式 + 双模式架构 + 仅凭 JDBC URL 初始化连接
+**当前版本：v2.14** — KMP Desktop 前端 + Direct 模式 + 双模式架构 + 仅凭 JDBC URL 初始化连接 + 连接生命周期 + 顶层导航与数据库浏览
 
 ---
 
@@ -56,7 +56,7 @@ sundays/
 ├── dialect-duckdb/           DuckDB 方言插件 JAR（v2.7 新增，嵌入式 OLAP）
 ├── dialect-sqlite/           SQLite 方言插件 JAR（v2.8 新增，嵌入式关系型）
 ├── engine/                   主引擎模块（gRPC server + Direct facade + 13 个 handler + 5 方言 loader）
-├── shared/                   KMP 共享 UI 组件（CodeEditor / DataTable / 右键菜单）
+├── shared/                   KMP 共享 UI 组件（CodeEditor / DataTable / 右键菜单 / 顶层导航 / 应用主题）
 └── desktopApp/               KMP Compose Desktop 应用（v2.9 新前端，Direct 模式集成；v2.13 顶层导航 + 数据库浏览第二屏）
 ```
 
@@ -71,7 +71,7 @@ sundays/
 | **dialect-h2/** | [`dialect-h2/README.md`](./dialect-h2/README.md) | — | H2 嵌入式 / 集成测试 fixture / 已知约束 |
 | **dialect-duckdb/** | [`dialect-duckdb/README.md`](./dialect-duckdb/README.md) | — | DuckDB 嵌入式 OLAP / Excel 预转换 / FK table-rebuild / 已知约束 |
 | **dialect-sqlite/** | [`dialect-sqlite/README.md`](./dialect-sqlite/README.md) | — | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
-| **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
+| **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单 / TopNavBar / SundaysTheme）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
 | **desktopApp/** | [`desktopApp/README.md`](./desktopApp/README.md) | [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | KMP 工程结构 / Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览第二屏 / 生命周期管理 |
 | **历史文档** | [`docs/architecture-history-v2.9.md`](./docs/architecture-history-v2.9.md) | — | v2.9 之前的根级完整架构设计（已归档保留） |
 
@@ -154,6 +154,7 @@ java -jar idb-engine.jar --mode direct
 | **v2.9** | **KMP Desktop 前端 + 双模式架构（gRPC + Direct）** | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) + [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) |
 | **v2.12** | **连接管理流程与引擎打通**（连接 / 断开生命周期 + 方言装配修复 + JDBC URL 折算覆盖全方言） | 详细：[`README.md` 架构升级历史](./README.md#架构升级历史) + [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §4 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
 | **v2.13** | **顶层导航 + 数据库浏览第二屏**（库/表树 + 双击开表预览标签页 + 标签页去重 + 会话代次丢弃过期响应） | 详细：[`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) §数据库浏览 + [`desktopApp/README.md`](./desktopApp/README.md) |
+| **v2.14** | **共享代码上移 `shared` + 模块整理**（`AppDestination` / `TopNavBar` / `SundaysTheme` 从 `desktopApp` 迁入 `commonMain`；删除 KMP 样板与死代码；`DatabaseBrowserState` 三个异步入口改为「先写数据、后清 loading」修掉竞态） | 详细：[`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) §1.3 + §5 + §11 + [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) |
 
 > **v2.9 关键设计补充**：CodeEditor / DataTable 统一高度策略 —— `CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器。详细见 [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md)。
 

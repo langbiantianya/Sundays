@@ -188,6 +188,50 @@ class DatabaseBrowserFlowTest {
         assertEquals(setOf("USERS", "ORDERS"), titles)
     }
 
+    /**
+     * 回归：`loading` 落定的瞬间数据必须已经就位。
+     *
+     * `loadTabPreview` 曾把 `tab.loading = false` 写在写 `tab.rows` **之前**。二者是各自独立的
+     * 快照状态，即使同一个协程里连着写也是两次提交 —— 于是「轮询 loading 等它落定」的调用方
+     * 可能在两次提交之间醒来，读到 `loading == false` + 空 rows（症状：间歇性
+     * `users row count expected:<2> but was:<0>`）。
+     *
+     * 这里在测试线程上**无挂起地紧轮询** `tab.loading`（写协程跑在 `Dispatchers.Default`，是另一个线程），
+     * 把「loading 落定」与「那一瞬间 rows 的规模」一起捕获。用 `delay` 轮询（哪怕 1ms）会错过这个
+     * 微秒级窗口 —— 那正是原缺陷只在低概率下暴露的原因。修复后 `loading` 最后落定，观测必为满数据。
+     */
+    @Test
+    fun `preview data is populated by the time loading flag clears`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        withTimeout(5_000) {
+            while (state.loadingDatabases) kotlinx.coroutines.delay(1)
+        }
+        val db = state.databases.first()
+        state.toggleDatabase(db)
+        withTimeout(5_000) {
+            while (db in state.loadingTables) kotlinx.coroutines.delay(1)
+        }
+        val table = state.tablesByDatabase[db]!!.first { it.uppercase() == "USERS" }
+
+        state.openTab(db, table)
+        val tab = state.tabs.single { it.tableName.uppercase() == "USERS" }
+        // 紧轮询到 loading 落定，并在**同一瞬间**记录 rows 规模
+        var rowsAtClear = -1
+        withTimeout(5_000) {
+            while (true) {
+                if (!tab.loading) {
+                    rowsAtClear = tab.rows.size
+                    break
+                }
+            }
+        }
+
+        // loading 一旦为 false，行数据必须已经在位（不允许出现中间态）
+        assertEquals(2, rowsAtClear, "rows must be populated once loading clears")
+        assertTrue(tab.columns.isNotEmpty(), "columns must be populated once loading clears")
+    }
+
     @Test
     fun `closeTab adjusts selectedTabIndex`() = runBlocking {
         val state = newBrowser()

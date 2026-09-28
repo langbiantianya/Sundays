@@ -742,6 +742,7 @@ class DatabaseBrowserState(
         currentConnection = config
         generation++
         databases = emptyList()
+        loadingDatabases = false   // 切连接时若有 in-flight 刷新，其响应会被代次丢弃 —— 必须在此复位，否则转圈停不下来
         errorMessage = null
         expandedDatabases.clear()
         _tablesByDatabase.clear()
@@ -784,7 +785,8 @@ class DatabaseBrowserState(
                 }
             }
             if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
-            loadingDatabases = false
+            // 先写数据、最后清 loading —— 顺序反了会让「轮询 loading」的调用方
+            // （DatabaseBrowserFlowTest / 未来任何等待逻辑）读到 loading=false 却拿到旧数据。
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
@@ -797,6 +799,7 @@ class DatabaseBrowserState(
                 },
                 onFailure = { errorMessage = it.message ?: "Unknown error" },
             )
+            loadingDatabases = false
         }
     }
 
@@ -827,7 +830,7 @@ class DatabaseBrowserState(
                 }
             }
             if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
-            loadingTables.remove(database)
+            // 同 refreshDatabases：先写数据再清 loading
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
@@ -841,6 +844,7 @@ class DatabaseBrowserState(
                     _tableLoadError[database] = it.message ?: "Unknown error"
                 },
             )
+            loadingTables.remove(database)
         }
     }
 
@@ -899,7 +903,7 @@ class DatabaseBrowserState(
                 }
             }
             if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
-            tab.loading = false
+            // 同 refreshDatabases / loadTables：先写数据、最后清 loading
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
@@ -929,6 +933,7 @@ class DatabaseBrowserState(
                 },
                 onFailure = { tab.error = it.message ?: "Unknown error" },
             )
+            tab.loading = false
         }
     }
 

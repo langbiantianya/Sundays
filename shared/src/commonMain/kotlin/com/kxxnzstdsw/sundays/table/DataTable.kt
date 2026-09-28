@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -107,7 +108,6 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  * @param theme 表格主题
  * @param fillParentHeight 是否填充父容器剩余高度；默认 `true`（与 `CodeEditor.maxLines = null` 一致 —— 不施加高度上限，
  *   但仍受父容器约束、不会溢出）。设为 `false` 时表格按内容自适应高度（外部父容器需自己处理滚动 / 尺寸）
- * @param primaryKey 主键列的 [TableColumn.key]（默认 `"id"`，用于 detail panel 标题等）
  * @param pageSize 当前分页大小
  * @param onPageSizeChange 分页大小变化回调
  * @param currentPage 当前页码（1-based）
@@ -118,7 +118,7 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  * @param showDetailPanel 是否显示右侧详情面板（默认 `true`）
  * @param detailPanel 详情面板 Composable 插槽；不传则使用默认 [DefaultDetailPanel]
  * @param detailPanelRatio 详情面板与主表格的宽度比（默认 `0.35f` = 主 65% / 详情 35%）
- * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；目标行通过 [ContextMenuState.targetRow] 访问
+ * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；目标行通过 [ContextMenuState.payload] 访问
  * @param contextMenuState 右键菜单状态；通常用 [rememberContextMenuState] 创建
  */
 @Composable
@@ -128,7 +128,6 @@ fun DataTable(
     modifier: Modifier = Modifier,
     theme: DataTableTheme = DataTableTheme.default(),
     fillParentHeight: Boolean = true,
-    primaryKey: String = "id",
     pageSize: PageSize = PageSize.DEFAULT,
     onPageSizeChange: (PageSize) -> Unit = {},
     currentPage: Int = 1,
@@ -231,21 +230,19 @@ fun DataTable(
         }
     }
 
-    // 右键菜单 —— 全局 Popup，不依赖具体行（位置由 ContextMenuState 记录）
+    // 右键菜单 —— 浮在表格之上，不绑定具体行（位置由 ContextMenuState 记录）
     if (contextMenuState.visible) {
         val density = LocalDensity.current
         val menuOffset = androidx.compose.ui.unit.DpOffset(
             x = with(density) { contextMenuState.position.x.toDp() },
             y = with(density) { contextMenuState.position.y.toDp() },
         )
-        androidx.compose.foundation.layout.Box {
-            DropdownMenu(
-                expanded = true,
-                onDismissRequest = { contextMenuState.dismiss() },
-                offset = menuOffset,
-            ) {
-                contextMenuItems(contextMenuState.targetRow)
-            }
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { contextMenuState.dismiss() },
+            offset = menuOffset,
+        ) {
+            contextMenuItems(contextMenuState.payload)
         }
     }
 }
@@ -268,19 +265,13 @@ private fun TableHeader(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        columns.forEach { column ->
+        TableRowCells(columns = columns, theme = theme) { column, modifier ->
             TableCell(
                 text = column.header,
                 column = column,
                 theme = theme,
                 isHeader = true,
-                modifier = Modifier.let { mod ->
-                    if (column.width != null) mod.width(column.width) else mod.weight(column.weight)
-                },
-            )
-            if (column != columns.last()) VerticalDivider(
-                color = theme.borderColor,
-                modifier = Modifier.height(20.dp),
+                modifier = modifier,
             )
         }
     }
@@ -316,14 +307,14 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
             .fillMaxWidth()
             .weight(1f),
     ) {
-        items(items = rows, key = { it.id }) { row ->
+        itemsIndexed(items = rows, key = { _, row -> row.id }) { index, row ->
             val isSelected = row.id == selectedRowId
             TableRowView(
                 row = row,
                 columns = columns,
                 theme = theme,
                 isSelected = isSelected,
-                isAlternate = rows.indexOf(row) % 2 == 1,
+                isAlternate = index % 2 == 1,
                 onClick = { onRowClick(row) },
                 contextMenuState = contextMenuState,
             )
@@ -365,22 +356,47 @@ private fun TableRowView(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            columns.forEach { column ->
+            TableRowCells(columns = columns, theme = theme) { column, modifier ->
                 TableCell(
                     text = row.formatted(column),
                     column = column,
                     theme = theme,
                     cellStyle = cellStyle,
-                    modifier = Modifier.let { mod ->
-                        if (column.width != null) mod.width(column.width) else mod.weight(column.weight)
-                    },
-                )
-                if (column != columns.last()) VerticalDivider(
-                    color = theme.borderColor,
-                    modifier = Modifier.height(20.dp),
+                    modifier = modifier,
                 )
             }
         }
+    }
+}
+
+// ============================================================================
+// 单元格序列 —— 表头与数据行共用的列宽 / 分隔线布局
+// ============================================================================
+
+/**
+ * 遍历 [columns] 渲染单元格，并在列之间插入竖直分隔线（最后一列不加）。
+ *
+ * 表头（[TableHeader]）与数据行（[TableRowView]）的差异只有「单元格内容」与「文本样式」，
+ * 列宽策略（[TableColumn.width] 优先，否则按 [TableColumn.weight] 分配）与分隔线完全一致 —— 抽到这里
+ * 避免两处各写一份、改一处漏一处。
+ *
+ * [cell] 收到的 `Modifier` 已按上述列宽策略算好，调用方直接透传给单元格根节点即可。
+ */
+@Composable
+private fun RowScope.TableRowCells(
+    columns: List<TableColumn>,
+    theme: DataTableTheme,
+    cell: @Composable (column: TableColumn, modifier: Modifier) -> Unit,
+) {
+    columns.forEach { column ->
+        cell(
+            column,
+            if (column.width != null) Modifier.width(column.width) else Modifier.weight(column.weight),
+        )
+        if (column != columns.last()) VerticalDivider(
+            color = theme.borderColor,
+            modifier = Modifier.height(20.dp),
+        )
     }
 }
 
@@ -509,7 +525,7 @@ private fun TablePagination(
 // ============================================================================
 
 /**
- * 默认详情面板 —— 当调用方不提供 [DataTable.detailPanel] 时使用。
+ * 默认详情面板 —— 当调用方不提供 [DataTable] 的 `detailPanel` 插槽时使用。
  *
  * 渲染选中行的所有列（key → formatted value）+ 主键标识。
  */
@@ -614,7 +630,7 @@ private val PREVIEW_COLUMNS = listOf(
 @Composable
 @Preview(name = "DataTable / Light", widthDp = 1000, heightDp = 600)
 private fun DataTableLightPreview() {
-    var rows by remember { mutableStateOf(previewUsers()) }
+    val rows = remember { previewUsers() }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,
@@ -629,7 +645,7 @@ private fun DataTableLightPreview() {
 @Composable
 @Preview(name = "DataTable / Dark", widthDp = 1000, heightDp = 600, backgroundColor = 0xFF2B2B2B)
 private fun DataTableDarkPreview() {
-    var rows by remember { mutableStateOf(previewUsers()) }
+    val rows = remember { previewUsers() }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,
@@ -645,7 +661,7 @@ private fun DataTableDarkPreview() {
 @PreviewLightDark
 @Preview(name = "DataTable / LightDark", widthDp = 1000, heightDp = 600)
 private fun DataTableLightDarkPreview() {
-    var rows by remember { mutableStateOf(previewUsers(100)) }
+    val rows = remember { previewUsers(100) }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,
@@ -660,7 +676,7 @@ private fun DataTableLightDarkPreview() {
 @Composable
 @Preview(name = "DataTable / Context Menu", widthDp = 1000, heightDp = 600)
 private fun DataTableContextMenuPreview() {
-    var rows by remember { mutableStateOf(previewUsers()) }
+    val rows = remember { previewUsers() }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,
@@ -685,7 +701,7 @@ private fun DataTableContextMenuPreview() {
 @Composable
 @Preview(name = "DataTable / Small", widthDp = 800, heightDp = 400)
 private fun DataTableSmallPreview() {
-    var rows by remember { mutableStateOf(previewUsers(5)) }
+    val rows = remember { previewUsers(5) }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,
@@ -701,7 +717,7 @@ private fun DataTableSmallPreview() {
 @Composable
 @Preview(name = "DataTable / No Detail Panel", widthDp = 800, heightDp = 400)
 private fun DataTableNoDetailPanelPreview() {
-    var rows by remember { mutableStateOf(previewUsers()) }
+    val rows = remember { previewUsers() }
     DataTable(
         columns = PREVIEW_COLUMNS,
         rows = rows,

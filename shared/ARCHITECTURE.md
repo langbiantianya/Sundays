@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构设计文档
 
-> **版本**：v2.12（与根 `../ARCHITECTURE.md` 同版本）
+> **版本**：v2.14（与根 `../ARCHITECTURE.md` 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 
@@ -15,15 +15,17 @@
 - **CodeEditor** — 语法高亮 + 行号 + 工具栏 + 格式化 + 右键菜单
 - **DataTable** — 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 + 右键菜单
 - **ConnectionManagerScreen** — 连接管理（左侧连接列表 + 右侧 4 步引导页面），支持 MySQL/PostgreSQL/H2/DuckDB/SQLite
+- **TopNavBar / AppDestination** — 顶层导航条（v2.14 自 `desktopApp` 上移）
+- **SundaysTheme** — 跟随系统明暗的应用主题（v2.14 自 `desktopApp` 上移）
 - **通用 UI 工具** — `ContextMenuState<T>` + `Modifier.onRightClick`
 
 ### 1.2 KMP Source Set 布局
 
 ```
 shared/
-├── commonMain/        所有业务 UI 组件（平台无关）
+├── commonMain/        所有业务 UI 组件（平台无关）：editor/ table/ connection/ navigation/ ui/
 ├── commonTest/        平台无关测试（tokenizer / 模型 / 集成）
-├── jvmMain/           JVM 特定实现（当前最小化：仅 Platform.jvm.kt）
+├── jvmMain/           当前为空 —— 无平台特定实现（`commonMain` 全量可用）
 └── jvmTest/           JVM 特定测试
 ```
 
@@ -39,6 +41,18 @@ shared/
 | **可独立复用** | `CodeEditor` / `DataTable` 是通用 UI —— 任何 Compose Desktop 应用都能用，无需带 `:engine` 这颗大依赖 |
 | **避免循环依赖** | `:engine` 不需要任何 UI；`:desktopApp` 同时依赖 `:engine` 与 `:shared`，但 `:shared` 不应反过来知道 `:engine` 存在 |
 | **强制依赖方向** | 单向：`desktopApp → {engine, shared}`；`engine ↮ shared` |
+
+**这条边界的物理约束**：`:engine` 是纯 JVM 模块（`engine/build.gradle.kts` 用 `kotlin("jvm")`，依赖
+HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码全部落在 KMP `commonMain`。
+因此**任何引用 `IdbEngine` 或 proto 类型的代码都无法进入 `commonMain`** —— 状态机与引擎接线必须留在
+`desktopApp`。这条判据决定了「什么算可上移的共享代码」：
+
+| 代码 | 是否引用 `:engine` | 归属 |
+|---|---|---|
+| `TopNavBar` / `AppDestination` / `SundaysTheme` | 否（纯 Compose） | ✅ `shared/commonMain`（v2.14 上移） |
+| `ConnectionManagerScreen`（回调注入） | 否（引擎调用由 `onTestConnection` 等回调注入） | ✅ `shared/commonMain` |
+| `ConnectionSession` | 是（`IdbEngine.testConnection` / `disconnect`） | ❌ 留在 `desktopApp` |
+| `DatabaseBrowserState` / `DatabaseBrowserScreen` | 是（`IdbEngine.invoke` + proto 构造器） | ❌ 留在 `desktopApp` |
 
 ---
 
@@ -167,11 +181,11 @@ Row(
 - 当 `BasicTextField` 因内容溢出产生滚动时，整个 `Row`（含 gutter）一起移动
 - gutter 宽度按行数位数自适应（`maxOf(2, lineCount.toString().length)`），保证行号始终右对齐不裁切
 
-### 2.6 异步 Tokenize + 高亮
+### 2.6 Tokenize + 高亮（UI 线程同步）
 
 ```kotlin
 val transformation = remember(language, highlighter, fieldValue.text) {
-    CodeVisualTransformation(fieldValue.text, language, highlighter)
+    CodeVisualTransformation(language, highlighter)
 }
 
 BasicTextField(
@@ -213,7 +227,6 @@ fun DataTable(
     modifier: Modifier = Modifier,
     theme: DataTableTheme = DataTableTheme.default(),
     fillParentHeight: Boolean = true,           // ★ 默认 true —— 填父容器
-    primaryKey: String = "id",
     pageSize: PageSize = PageSize.DEFAULT,
     // ...
 )
@@ -267,7 +280,7 @@ DataTable(
 )
 ```
 
-**目标行访问**：通过 `contextMenuItems` lambda 的 `row: TableRow?` 参数；也可通过 `menuState.payload`（旧字段 `menuState.targetRow` 仍兼容）。
+**目标行访问**：通过 `contextMenuItems` lambda 的 `row: TableRow?` 参数；也可读 `menuState.payload`（唯一来源，无兼容别名）。
 
 ### 3.5 行模型 (`TableRow`)
 
@@ -523,9 +536,62 @@ onEditConnection = { conn -> wizard = WizardState(conn, BASIC_INFO, NORMAL) }
 
 ---
 
-## 5. 通用 UI 工具
+## 5. 顶层导航与应用主题
 
-### 5.1 `ContextMenuState<T : Any>` —— 通用右键菜单状态
+### 5.1 `AppDestination` —— 导航目标
+
+```kotlin
+enum class AppDestination(val label: String) {
+    CONNECTIONS("连接管理"),
+    DATABASE("数据库浏览"),
+}
+```
+
+纯枚举，无平台 / 引擎依赖。`label` 供导航条渲染文案；**新增目标只需加一个枚举项** ——
+`TopNavBar` 自动遍历 `entries` 渲染 chip，无需改导航条代码。
+
+### 5.2 `TopNavBar` —— 顶层导航条
+
+```kotlin
+@Composable
+fun TopNavBar(
+    current: AppDestination,
+    onSelect: (AppDestination) -> Unit,
+    modifier: Modifier = Modifier,
+)
+```
+
+| 设计点 | 说明 |
+|---|---|
+| 纯展示 + 回调 | 选中态由 `current` 传入、点击经 `onSelect` 回抛；导航状态由调用方的顶层屏幕（desktopApp 的 `MainScreen`）持有 |
+| 遍历 `entries` | 新增 `AppDestination` 成员即自动获得 chip，无需改本文件 |
+| 选中态配色 | `primary` / `onPrimary`；未选中 `surface.copy(alpha = 0.4f)` |
+| `NavChip` 私有 | 单个 chip（图标 + 文案 + 选中加粗）不是对外 API，不暴露 |
+
+调用方（`MainScreen`）持有 `AppDestination` 状态并在导航**之上**持有各屏状态机 ——
+切目标只销毁目标屏幕的组合，不销毁其状态，因此浏览标签页跨导航保留。
+
+### 5.3 `SundaysTheme` —— 应用主题
+
+```kotlin
+@Composable
+fun SundaysTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
+        content = content,
+    )
+}
+```
+
+`isSystemInDarkTheme()` 本身即 `commonMain` API（`androidx.compose.foundation`），各平台入口
+（desktop `Window` / 未来的 Android / iOS）只需创建平台容器并套上本主题，
+明暗策略无需在每个平台重复。
+
+---
+
+## 6. 通用 UI 工具
+
+### 6.1 `ContextMenuState<T : Any>` —— 通用右键菜单状态
 
 ```kotlin
 @Stable
@@ -559,7 +625,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 表格包内别名
 @Composable fun rememberContextMenuState(): ContextMenuState = ...
 ```
 
-### 5.2 `Modifier.onRightClick` —— 右键检测
+### 6.2 `Modifier.onRightClick` —— 右键检测
 
 ```kotlin
 fun Modifier.onRightClick(
@@ -591,7 +657,7 @@ fun Modifier.onRightClick(
 **为何不复用 Compose Foundation 的 `internal suspend PointerInputScope.onRightClickDown`**：
 该 API 是 `internal` 修饰符，在跨模块的 `shared/` 中不可见。本函数复制其公开 API 调用模式，达到相同效果。
 
-### 5.3 三步使用模式
+### 6.3 三步使用模式
 
 ```kotlin
 // 1. 创建状态（Composable 中）
@@ -617,9 +683,9 @@ if (menuState.visible) {
 
 ---
 
-## 6. 设计原则
+## 7. 设计原则
 
-### 6.1 Slot-based 可扩展性
+### 7.1 Slot-based 可扩展性
 
 所有扩展点都采用 **Composable lambda 插槽**（而非 `List<UIElement>` 数据驱动）：
 
@@ -635,7 +701,7 @@ if (menuState.visible) {
 - 调用方自由控制视觉 / 状态，无需预先枚举所有可能性
 - 类型安全（lambda 参数类型明确，无需运行时类型转换）
 
-### 6.2 状态由调用方管理（databind 模式）
+### 7.2 状态由调用方管理（databind 模式）
 
 ```kotlin
 // 编辑器
@@ -651,7 +717,7 @@ DataTable(rows = rows, ...)                                 // ★ 调用方持�
 
 **唯一例外**：`DataTable` 内部 `internalSelectedRowId` 在调用方未传入 `selectedRowId` prop 时作为默认内部 state（用 `internalSelectedRowId` 的 if-else 合并）—— 保持调用方零样板代码。
 
-### 6.3 类型别名复用
+### 7.3 类型别名复用
 
 ```kotlin
 // editor 包
@@ -663,7 +729,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 **避免每处都写泛型**：`rememberEditorContextMenuState()` / `rememberContextMenuState()`（表格版）已自动推断 payload 类型，调用方写起来像普通 state。
 
-### 6.4 调用方零样板（Reasonable Defaults）
+### 7.4 调用方零样板（Reasonable Defaults）
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
@@ -678,7 +744,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 调用方不传这些参数时组件行为合理；只在显式传入时才改变默认行为。
 
-### 6.5 与 `:engine` 解耦的具体边界
+### 7.5 与 `:engine` 解耦的具体边界
 
 | shared/ 是否能引用 | 是 / 否 |
 |---|---|
@@ -693,21 +759,19 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 7. 测试覆盖
+## 8. 测试覆盖
 
-`shared/` 共 **101 项测试**，分布如下：
+`shared/` 共 **97 项测试**，分布如下：
 
 | 测试类 | 路径 | 项数 | 说明 |
 |---|---|---|---|
 | `LuaTokenizerTest` | `commonTest/.../editor/LuaTokenizerTest.kt` | 30 | Lua 关键字 / 字符串 / 注释 / 数字 tokenize |
 | `SqlTokenizerTest` | `commonTest/.../editor/SqlTokenizerTest.kt` | 23 | SQL 关键字 / 字符串 / 注释 tokenize |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
-| `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 18 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
+| `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
-| `SharedCommonTest` | `commonTest/.../SharedCommonTest.kt` | 1 | KMP 公共冒烟测试 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
-| `SharedLogicDesktopTest` | `jvmTest/.../SharedLogicDesktopTest.kt` | 1 | JVM 平台特定冒烟测试 |
-| **合计** | | **101** | **0 失败 / 0 错误** |
+| **合计** | | **97** | **0 失败 / 0 错误** |
 
 运行命令：
 
@@ -718,9 +782,9 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 8. 已知约束与未来扩展
+## 9. 已知约束与未来扩展
 
-### 8.1 当前约束
+### 9.1 当前约束
 
 | 约束 | 影响 |
 |---|---|
@@ -731,7 +795,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | 不支持 IME composition 输入 | 中文 / 日文输入法合成中文本期间显示可能异常 |
 | `Modifier.onRightClick` 仅响应鼠标右键 / 双指点击 | 触摸设备长按弹出菜单需另写 |
 
-### 8.2 未来扩展路径
+### 9.2 未来扩展路径
 
 | 方向 | 说明 |
 |---|---|
@@ -743,7 +807,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ---
 
-## 9. 跨链接
+## 10. 跨链接
 
 | 文档 | 内容 |
 |---|---|
@@ -751,11 +815,11 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
-| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `CodeEditor` + `DataTable` + `ConnectionManagerScreen` 三个核心组件的端到端用法 |
+| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `SundaysTheme` + `TopNavBar` + `ConnectionManagerScreen` 的端到端用法 |
 
 ---
 
-## 10. 架构升级历史
+## 11. 架构升级历史
 
 | 版本 | 主要变化 |
 |---|---|
@@ -764,3 +828,4 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | v2.5 | 引入 `protobuf-kotlin-lite`（仅 `engine/` 用）；`shared/` 不受影响 |
 | v2.6 | 引入 `RequestDispatcher` envelope options（`traceId` / `dryRun` / `timeoutMs`）；`shared/` 不受影响 |
 | v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`（填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限；新增 `ConnectionManagerScreen` 连接管理组件 + `ConnectionStorage` JSON 持久化 |
+| v2.14 | **① 顶层导航与应用主题上移**：新增 `navigation/`（`AppDestination` + `TopNavBar`）与 `ui/Theme.kt`（`SundaysTheme`），均自 `desktopApp` 的 `Navigation.kt` / `main.kt` 提取 —— 不引用 `:engine`，可在 `commonMain` 跨平台复用；`desktopApp` 瘦身为「平台窗口 + 引擎状态机接线」。`ConnectionSession` / `DatabaseBrowserState` 因直连 `IdbEngine` 仍留在 `desktopApp`（见 §1.3）<br>**② 模块整理**：删除 KMP 脚手架样板 `App` / `Greeting` / `getPlatform` 及 `composeResources` logo，移除 `compose.components.resources` 依赖（`jvmMain` 随之清空）；删除两个恒真冒烟测试（`assertEquals(3, 1 + 2)`）与无生产调用方的 `PageSize.fromInt` 及其 2 项测试，测试数 101 → 97<br>**死代码清理**：`DataTable.primaryKey`（从未被读取、无调用方、KDoc 描述的行为未实现）、`CodeVisualTransformation.source` 及其恒等三元式、两处无 modifier 单子节点的 `Box` 包裹、预览里从不重新赋值的 `mutableStateOf`、`QuickConnectStep.editingConnection` 未读参数<br>**去兼容层**：删除 `ContextMenuState.targetRow` 别名（唯一真实调用方 `DataTable` 改为直接读 `payload`）<br>**去重**：`DataTable` 表头/数据行的列布局抽为 `RowScope.TableRowCells`；`DialectOption` / `ConnectionTypeOption` 抽为 `SelectableOptionRow`；14 个编辑器预览共用 `EditorPreview` 外壳<br>**性能**：`TableBody` 的 `rows.indexOf(row)`（每可见行 O(n) 扫描）改为 `itemsIndexed` 下标<br>**文档纠偏**：KDoc 中「异步 tokenize」「滚动共享 `ScrollState` 参数」「空行填充」「`[DarkColors]` / `[TokenType]` / `[CodeFormatter]` / `[ScrollState]` / `[WizardState]` / `[JdbcUrl]` / `[DataTable.detailPanel]`」等与实现不符的描述或失效链接，以及 `WizardState` 字段名写错（`wizardStep` → `step`）的示例，全部按实现改正 |
