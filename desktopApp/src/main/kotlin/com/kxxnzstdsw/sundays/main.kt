@@ -179,7 +179,12 @@ internal fun MainScreen(engine: EngineClient) {
                     connections = session.connectionList.connections,
                     onSelectSheet = session::selectSheet,
                     onCloseSheet = { id ->
+                        // 关 sheet 时一并断开连接：浏览器 SCHEMA.LIST 在多 database 下建的池
+                        // 由 releasePools 负责；连接管理层的池（testConnection 初始化的那个）
+                        // 由 disconnect 负责 —— 两者 key 不同，须都释放，否则留孤儿池。
+                        val cfg = sheetConfigs.firstOrNull { it.id == id }
                         browsers[id]?.releasePools()
+                        if (cfg != null) session.disconnect(cfg)
                         session.closeSheet(id)
                     },
                     onAddSheet = { addDialogVisible = true },

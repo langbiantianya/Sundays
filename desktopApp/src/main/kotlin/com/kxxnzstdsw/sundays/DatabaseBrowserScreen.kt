@@ -100,7 +100,7 @@ import kotlinx.coroutines.launch
  *
  * - **「＋」sheet 标签**：调 [onAddSheet]，由调用方弹出 [AddConnectionDialog]。
  * - **切换 sheet**：调 [onSelectSheet]，目标 sheet 获得焦点；其它 sheet 的状态保留。
- * - **关闭 sheet**：「×」调 [onCloseSheet]；同时释放该 sheet 的连接池。
+ * - **关闭 sheet**：「×」调 [onCloseSheet]；同时释放该 sheet 的连接池并断开引擎会话。
  * - 选中 sheet 的连接后，左侧自动加载数据库列表(`SCHEMA.LIST level=database`)
  * - 展开数据库节点 → 加载表列表(`TABLE.LIST`)
  * - **双击**表节点 → 打开预览标签页(同一表只存在一个标签页)
@@ -119,7 +119,7 @@ import kotlinx.coroutines.launch
  * @param activeSheetId 当前激活的 sheet id（必须在 [sheets] 中）
  * @param connections 全部已保存连接（备用，UI 当前未直接渲染 —— 切换 sheet 在 [onSelectSheet]）
  * @param onSelectSheet 切换激活 sheet
- * @param onCloseSheet 关闭 sheet（调 [DatabaseBrowserState.releasePools] 释放其池）
+ * @param onCloseSheet 关闭 sheet（调 [DatabaseBrowserState.releasePools] 释放浏览器侧派生池 + 调用方断开引擎会话）
  * @param onAddSheet 「＋」点击回调 —— 调用方弹出 [AddConnectionDialog]
  * @param onConnect 建立连接（调用方经 `EngineClient.testConnection`）
  * @param onDisconnect 断开连接（调用方经 `EngineClient.disconnect`）

@@ -159,8 +159,8 @@ class DatabaseBrowserSheetsTest {
             onAllNodesWithText("现有 H2").fetchSemanticsNodes().size >= 2
         ) { "弹窗与 sheet tab 均展示已保存连接名" }
 
-        // 弹窗内能看到「当前连接」标题（左侧 ConnectionBar 渲染）—— 证明首屏布局已嵌入
-        onNodeWithText("当前连接").assertIsDisplayed()
+        // 弹窗内能看到「连接列表」标题（首屏左侧列表标题）—— 证明首屏布局已嵌入
+        onNodeWithText("连接列表").assertIsDisplayed()
 
         // 点击弹窗左侧的「快速连接」按钮 → 进入向导 QUICK_CONNECT 步骤
         onNodeWithContentDescription("快速连接").performClick()
