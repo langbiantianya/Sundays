@@ -614,10 +614,16 @@ object RequestDispatcher {
                                 .build()
                         )
                     }
+                    // tables_processed = 本次请求下发的脚本数 —— 全部脚本走完才发终止帧，
+                    // 此前该字段恒为 0（声明了却没人填），调用方拿不到「处理了几个脚本」。
+                    val generateRequest = request.dataRequest.generate
                     ch.send(
                         Response.newBuilder()
                             .setId(id).setSuccess(true).setStream(true).setEnd(true)
-                            .setGenerateTerminal(generateTerminalResponse { success = true })
+                            .setGenerateTerminal(generateTerminalResponse {
+                                success = true
+                                tablesProcessed = generateRequest.tablesCount
+                            })
                             .build()
                     )
                 } catch (e: Exception) {

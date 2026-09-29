@@ -750,6 +750,10 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 
 **Lua 版本**（通过 `payload.luaVersion` 选择，默认 `"luajit"`，支持 `"5.1"` / `"5.2"` / `"5.3"` / `"5.4"` / `"5.5"` 及短名 `"lua51"` 等）。
 
+**调用方须知（两个易错点）**：
+- 进度帧的 `script_index` 是 **1-based**（`GenerateHandler` 发帧时 `state.scriptIndex + 1`）；按请求 `tables` 数组定位脚本要减 1
+- 终止帧 `generate_terminal.tables_processed` = 本次请求下发的脚本数（`streamDataGenerate` 填 `tablesCount`）
+
 **Lua 内置辅助函数**：
 
 | 函数 | 说明 |

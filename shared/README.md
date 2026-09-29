@@ -54,6 +54,7 @@ shared/
 |---|---|---|
 | `CodeEditor` | `commonMain/.../editor/ui/CodeEditor.kt` | 语法高亮代码编辑器；可独立使用 |
 | `CodeEditorWithToolbar` | 同上 | `CodeEditor` + 工具栏（语言切换 + 格式化 + 自定义 actions） |
+| `CodeEditorState` / `rememberCodeEditorState` | 同上 | 编辑器内部状态（文本 + 光标/选区 + 滚动）；由 `editorState` 参数注入，调用方状态机持有时可在组件离开组合后保持文本、光标与滚动（`setText` 保留光标，受控输入可在文本中间编辑） |
 | `DataTable` | `commonMain/.../table/DataTable.kt` | 虚拟滚动数据表格；主键承载（数据库行标识） |
 | `ContextMenuState<T>` | `commonMain/.../ui/ContextMenu.kt` | 通用右键菜单状态（被 editor / table 共用） |
 | `Modifier.onRightClick` | `commonMain/.../ui/RightClick.kt` | 鼠标右键检测 modifier（基于 `awaitPointerEventScope`） |

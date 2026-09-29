@@ -1,6 +1,7 @@
 package com.kxxnzstdsw.sundays.editor.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
@@ -55,6 +57,61 @@ import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
 import com.kxxnzstdsw.sundays.editor.language.SqlLanguage
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
 import com.kxxnzstdsw.sundays.ui.onRightClick
+
+/**
+ * 编辑器内部状态 —— 文本 + 光标/选区 + 滚动位置。
+ *
+ * 默认由 [rememberCodeEditorState] 创建，生命周期与调用它的组合绑定；组件离开组合再回来
+ * （例如「SQL 工作台 ↔ 表预览」切换把编辑器从组合里摘掉）时，光标会回到文首、滚动回到顶部。
+ * 需要跨这种切换保持一致时，**由状态机持有本对象**并作为 [CodeEditor] / [CodeEditorWithToolbar]
+ * 的 `editorState` 传入 —— 文本、选区、滚动位置即随状态机存活。
+ *
+ * 文本真相源仍是 `text` 参数（[CodeEditor] 内部会把外部 `text` 同步进本对象）；
+ * [setText] 用于「整段替换」（用户输入、格式化、重置），**保留光标 / 选区**（越界时夹到新文本范围内）——
+ * 受控输入每个键都会回调它，把光标弹到文末会让用户无法在文本中间编辑。
+ */
+class CodeEditorState(initialText: String = "") {
+
+    /** 输入框的值（文本 + 光标/选区） */
+    var value: TextFieldValue by mutableStateOf(TextFieldValue(initialText, TextRange.Zero))
+        private set
+
+    /** 行号 gutter 与代码区共享的滚动位置 */
+    val scrollState: ScrollState = ScrollState(0)
+
+    /** 当前文本（等价 `value.text`） */
+    val text: String get() = value.text
+
+    /** 用户输入（BasicTextField 回调） */
+    fun onValueChange(newValue: TextFieldValue) {
+        value = newValue
+    }
+
+    /**
+     * 整段替换文本（用户输入 / 格式化 / 外部赋值）—— **保留光标与选区**（夹到新文本长度内），
+     * 滚动位置不动。文本未变时是空操作。
+     */
+    fun setText(newText: String) {
+        if (value.text == newText) return
+        val len = newText.length
+        val selection = value.selection
+        value = value.copy(
+            text = newText,
+            selection = TextRange(
+                selection.min.coerceIn(0, len),
+                selection.max.coerceIn(0, len),
+            ),
+        )
+    }
+}
+
+/**
+ * 记住一个 [CodeEditorState]（默认用法：状态随组合存活）。
+ * 传入 [initialText] 仅在**首次创建**时生效 —— 之后的文本变化由 [CodeEditor] 的 `text` 参数同步。
+ */
+@Composable
+fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
+    remember { CodeEditorState(initialText) }
 
 /**
  * 可扩展的代码编辑器 Composable —— 支持语法高亮、格式化、语言切换、行号显示。
@@ -98,6 +155,8 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  * @param minLines 最小显示行数（仅约束高度下限，不填充空行）
  * @param maxLines 最大显示行数（超过则内部滚动）；**默认 `null`（不限制）** —— 编辑器会填充
  *   父容器剩余高度，不会超过父容器；调用方显式传入整数才启用高度上限
+ * @param editorState 编辑器内部状态（文本 / 光标 / 滚动）；默认 [rememberCodeEditorState]，生命周期与组合同。
+ *   需要在组件离开组合后仍保持一致时（如工作台与表预览互切），由调用方的状态机持有并传入
  * @param contextMenuState 右键菜单状态；通常用 [rememberEditorContextMenuState] 创建
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
  *   payload 通过 [EditorContextMenuPayload]（包含当前 text + languageId）传入
@@ -112,6 +171,7 @@ fun CodeEditor(
     showLineNumbers: Boolean = true,
     minLines: Int = 3,
     maxLines: Int? = null,
+    editorState: CodeEditorState = rememberCodeEditorState(text),
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
 ) {
@@ -119,12 +179,12 @@ fun CodeEditor(
         languageId?.let { CodeLanguageRegistry.get(it) }
     }
     val highlighter = rememberCodeHighlighter(theme)
-    var fieldValue by remember { mutableStateOf(TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange.Zero)) }
+    val fieldValue = editorState.value
 
     // 外部 text 变化（重置、格式化）需要同步到内部 TextFieldValue
     LaunchedEffect(text) {
-        if (fieldValue.text != text) {
-            fieldValue = fieldValue.copy(text = text)
+        if (editorState.value.text != text) {
+            editorState.setText(text)
         }
     }
 
@@ -139,7 +199,7 @@ fun CodeEditor(
 
     // 共享 ScrollState — gutter 与 BasicTextField 共同放在 verticalScroll 容器内，
     // 二者的滚动位置由同一个 ScrollState 统一管理，保证行号与代码完全同步
-    val sharedScrollState = rememberScrollState()
+    val sharedScrollState = editorState.scrollState
 
     // 计算行数（按 \n 分割 + 1，至少为 1）
     val lineCount = remember(text) {
@@ -198,7 +258,7 @@ fun CodeEditor(
             BasicTextField(
                 value = fieldValue,
                 onValueChange = { newValue ->
-                    fieldValue = newValue
+                    editorState.onValueChange(newValue)
                     if (newValue.text != text) onTextChange(newValue.text)
                 },
                 modifier = Modifier
@@ -345,6 +405,8 @@ private fun LineNumberGutter(
  * @param minLines 最小显示行数
  * @param maxLines 最大显示行数（超过则内部滚动）；**默认 `null`（不限制）** —— 编辑器会填充
  *   父容器剩余高度，不会超过父容器；调用方显式传入整数才启用高度上限
+ * @param editorState 编辑器内部状态（文本 / 光标 / 滚动）；默认 [rememberCodeEditorState]，生命周期与组合同。
+ *   需要在组件离开组合后仍保持一致时，由调用方的状态机持有并传入
  * @param actions 自定义操作按钮插槽 — 渲染在内置按钮之后
  * @param contextMenuState 右键菜单状态；通常用 [rememberEditorContextMenuState] 创建
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
@@ -361,6 +423,7 @@ fun CodeEditorWithToolbar(
     showLanguageSwitcher: Boolean = true,
     minLines: Int = 5,
     maxLines: Int? = null,
+    editorState: CodeEditorState = rememberCodeEditorState(text),
     actions: @Composable RowScope.() -> Unit = {},
     onLanguageChange: (String) -> Unit = {},
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
@@ -392,6 +455,7 @@ fun CodeEditorWithToolbar(
             showLineNumbers = showLineNumbers,
             minLines = minLines,
             maxLines = maxLines,
+            editorState = editorState,
             contextMenuState = contextMenuState,
             contextMenuItems = contextMenuItems,
         )

@@ -1,26 +1,26 @@
 package com.kxxnzstdsw.sundays
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.Icons
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,17 +46,19 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.protobuf.Value as ProtoValue
@@ -61,8 +66,10 @@ import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.Action
 import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.connectionConfig
+import com.kxxnzstdsw.grpc.dataGenerateRequest
 import com.kxxnzstdsw.grpc.dataListRequest
 import com.kxxnzstdsw.grpc.dataRequest
+import com.kxxnzstdsw.grpc.generateTable
 import com.kxxnzstdsw.grpc.request
 import com.kxxnzstdsw.grpc.schemaListRequest
 import com.kxxnzstdsw.grpc.schemaRequest
@@ -73,15 +80,16 @@ import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 /**
  * 数据库浏览屏幕 —— 第二屏；**多 sheet**：每个已建连接的数据库浏览会话是一个 sheet，
@@ -196,8 +204,11 @@ data class SheetDescriptor(
  *
  * - [TABLE] = 表预览（双击表节点打开的标签页区）；初始值
  * - [SQL] = SQL 工作台（编辑器 + 底部结果面板）；由工具栏切换
+ * - [GENERATE] = 造数工作台（Lua 脚本编辑 + 造数结果面板）；由工具栏切换
+ *
+ * 三个 pane 是**同一份 sheet 状态**的两种以上渲染 —— 切换只改变渲染目标，不清空任何状态。
  */
-enum class BrowserPane { TABLE, SQL }
+enum class BrowserPane { TABLE, SQL, GENERATE }
 
 // ============================================================================
 // Sheet 标签条 / 数据列表：并 ＋ 入口
@@ -300,16 +311,16 @@ private fun EmptySheetsHint(
 /**
  * BrowserToolBar —— sheet 标签条之上的工具栏，操作当前激活 sheet 的右栏内容。
  *
- * 当前提供：
- * - **「▶ SQL 工作台」** —— 切换右栏在表预览与 SQL 工作台之间的展示。
- *   状态由 [DatabaseBrowserState.activePane] 持有，每 sheet 独立。
- *   未连接时禁用（SQL 执行必须依赖已建立的连接池）。
+ * 两个工作台入口：**「SQL 工作台」** 与 **「造数工作台」**。当前正处在某个工作台时，
+ * 该按钮变为「返回表预览」（点它回到表预览）；从另一个工作台切过来时直接进入目标工作台。
+ * 状态由 [DatabaseBrowserState.activePane] 持有，每 sheet 独立 —— 切换不清空任何工作台状态。
+ * 未连接时禁用（两个工作台的执行都必须依赖已建立的连接池）。
  */
 @Composable
 private fun BrowserToolBar(
     activePane: BrowserPane,
     connected: Boolean,
-    onToggleSqlWorkbench: () -> Unit,
+    onSelectPane: (BrowserPane) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -324,26 +335,22 @@ private fun BrowserToolBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val inWorkbench = activePane == BrowserPane.SQL
-            Button(
-                onClick = onToggleSqlWorkbench,
+            PaneToggleButton(
+                pane = BrowserPane.SQL,
+                activePane = activePane,
+                label = "SQL 工作台",
+                icon = Icons.Filled.PlayArrow,
                 enabled = connected,
-                colors = if (inWorkbench) {
-                    ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    ButtonDefaults.outlinedButtonColors()
-                },
-            ) {
-                Icon(
-                    imageVector = if (inWorkbench) Icons.Filled.TableChart else Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(if (inWorkbench) "返回表预览" else "SQL 工作台")
-            }
+                onSelect = onSelectPane,
+            )
+            PaneToggleButton(
+                pane = BrowserPane.GENERATE,
+                activePane = activePane,
+                label = "造数工作台",
+                icon = Icons.Filled.Bolt,
+                enabled = connected,
+                onSelect = onSelectPane,
+            )
             if (!connected) {
                 Text(
                     text = "（未连接，工作台不可用）",
@@ -352,6 +359,40 @@ private fun BrowserToolBar(
                 )
             }
         }
+    }
+}
+
+/**
+ * 单个工作台切换按钮 —— 处于该 pane 时显示「返回表预览」（实心），否则显示工作台名（描边）。
+ */
+@Composable
+private fun PaneToggleButton(
+    pane: BrowserPane,
+    activePane: BrowserPane,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    onSelect: (BrowserPane) -> Unit,
+) {
+    val isActive = activePane == pane
+    Button(
+        onClick = { onSelect(if (isActive) BrowserPane.TABLE else pane) },
+        enabled = enabled,
+        colors = if (isActive) {
+            ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+        } else {
+            ButtonDefaults.outlinedButtonColors()
+        },
+    ) {
+        Icon(
+            imageVector = if (isActive) Icons.Filled.TableChart else icon,
+            contentDescription = null,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(if (isActive) "返回表预览" else label)
     }
 }
 
@@ -383,7 +424,7 @@ private fun ActiveSheetContent(
         BrowserToolBar(
             activePane = sheet.browser.activePane,
             connected = sheet.status.state == ConnectionState.CONNECTED,
-            onToggleSqlWorkbench = sheet.browser::toggleSqlWorkbench,
+            onSelectPane = sheet.browser::selectPane,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -408,6 +449,14 @@ private fun ActiveSheetContent(
                         .fillMaxHeight(),
                 )
                 BrowserPane.SQL -> SqlWorkbenchPane(
+                    state = sheet.browser,
+                    connected = sheet.status.state == ConnectionState.CONNECTED,
+                    schema = sheet.browser.currentSchema(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                BrowserPane.GENERATE -> GenerateWorkbenchPane(
                     state = sheet.browser,
                     connected = sheet.status.state == ConnectionState.CONNECTED,
                     schema = sheet.browser.currentSchema(),
@@ -835,6 +884,7 @@ private fun SqlWorkbenchPane(
         Column(modifier = Modifier.fillMaxSize()) {
             CodeEditorWithToolbar(
                 text = state.sqlEditorText,
+                editorState = state.sqlEditor,
                 onTextChange = { state.sqlEditorText = it },
                 languageId = "sql",
                 // 本工作台只处理 SQL —— 不暴露语言切换器
@@ -923,7 +973,12 @@ private fun SqlResultArea(
                     columns = state.sqlResultColumns,
                     rows = state.sqlResultRows,
                     modifier = Modifier.fillMaxSize(),
-                    pageSize = PageSize.S100,
+                    pageSize = state.sqlResultPageSize,
+                    onPageSizeChange = { state.sqlResultPageSize = it },
+                    currentPage = state.sqlResultPage,
+                    onPageChange = { state.sqlResultPage = it },
+                    selectedRowId = state.sqlResultSelectedRowId,
+                    onSelectedRowChange = { state.sqlResultSelectedRowId = it?.id },
                     fillParentHeight = false,
                 )
             }
@@ -935,6 +990,293 @@ private fun SqlResultArea(
         }
     }
 }
+
+// ============================================================================
+// 造数工作台 —— Lua 脚本编辑 + 造数结果
+// ============================================================================
+
+/** 造数工作台的 Lua 版本候选 —— 对应引擎 `DataGenerateRequest.lua_version`。 */
+private val LUA_VERSIONS = listOf("luajit", "5.1", "5.2", "5.3", "5.4", "5.5")
+
+/** 新建造数脚本的初始内容 —— 顺带把引擎提供的 random_* 辅助函数列出来当速查表。 */
+internal const val GENERATE_SCRIPT_TEMPLATE = """-- 造数脚本：insert(表名, { 列 = 值, … }) 逐条写库
+-- 辅助：random_int / random_float / random_string / random_name / random_email / random_phone
+--      random_date / random_datetime / random_time / random_uuid / random_enum / lastId()
+for i = 1, 100 do
+  insert("your_table", {
+    name  = random_name(),
+    email = random_email(),
+    age   = random_int(18, 60),
+  })
+end"""
+
+/**
+ * 造数工作台 —— 上半脚本标签条 + Lua 版本 + 编辑器，下半造数结果。
+ *
+ * 与 [SqlWorkbenchPane] 同构：编辑器的 [CodeEditorState] 由状态机持有（[DatabaseBrowserState.generateScripts]），
+ * 因此切到表预览再切回来时，脚本文本 / 光标 / 滚动位置都保持不变。
+ */
+@Composable
+private fun GenerateWorkbenchPane(
+    state: DatabaseBrowserState,
+    connected: Boolean,
+    schema: String,
+    modifier: Modifier = Modifier,
+) {
+    val script = state.currentGenerateScript()
+    Column(modifier = modifier) {
+        Surface(
+            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Bolt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "造数工作台",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (schema.isNotBlank()) "schema: $schema" else "默认 catalog",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        GenerateScriptTabs(state = state)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Lua 版本",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LUA_VERSIONS.forEach { version ->
+                val selected = state.generateLuaVersion == version
+                AssistChip(
+                    onClick = { state.generateLuaVersion = version },
+                    enabled = connected,
+                    label = { Text(version) },
+                    colors = if (selected) {
+                        AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    } else {
+                        AssistChipDefaults.assistChipColors()
+                    },
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (script == null) {
+                EmptyHint(
+                    title = "没有可编辑的脚本",
+                    description = "点上方「＋」新建一个 Lua 造数脚本。",
+                    // 用 weight 而非 fillMaxSize —— 与下方两个 weighted 子项共存时不会互相挤掉
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+            } else {
+                CodeEditorWithToolbar(
+                    text = script.editor.text,
+                    onTextChange = { script.editor.setText(it) },
+                    editorState = script.editor,
+                    languageId = "lua",
+                    // 本工作台只处理 Lua —— 不暴露语言切换器
+                    showLanguageSwitcher = false,
+                    actions = {
+                        Button(
+                            onClick = { state.executeGenerate() },
+                            enabled = connected && !state.generateRunning,
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (state.generateRunning) "造数中…" else "执行造数")
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(0.6f),
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            GenerateResultArea(
+                state = state,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.4f),
+            )
+        }
+    }
+}
+
+/** 造数脚本标签条 —— 顺序即引擎 `tables` 的执行顺序（外键依赖靠 `lastId()` 串起来）。 */
+@Composable
+private fun GenerateScriptTabs(state: DatabaseBrowserState) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "脚本",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        SecondaryScrollableTabRow(
+            selectedTabIndex = state.selectedGenerateIndex.coerceIn(0, (state.generateScripts.size - 1).coerceAtLeast(0)),
+            edgePadding = 0.dp,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            divider = {},
+            modifier = Modifier.weight(1f),
+        ) {
+            state.generateScripts.forEachIndexed { index, script ->
+                val active = index == state.selectedGenerateIndex
+                Tab(
+                    selected = active,
+                    onClick = { state.selectGenerateScript(index) },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${index + 1}. ${script.title}",
+                                maxLines = 1,
+                            )
+                            if (state.generateScripts.size > 1) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "关闭脚本",
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable { state.removeGenerateScript(index) },
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        IconButton(onClick = { state.addGenerateScript() }) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "新建造数脚本",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/**
+ * 造数结果面板 —— 三态：进行中（实时进度）/ 错误 / 结果表（每个脚本一行）。
+ *
+ * 进度数据来自引擎 `DATA.GENERATE` 的 `gen_progress_frame` 流（每条 INSERT 一帧），
+ * 终止帧的 `generate_terminal.tables_processed` 是已处理脚本数。
+ */
+@Composable
+private fun GenerateResultArea(
+    state: DatabaseBrowserState,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = modifier,
+    ) {
+        when {
+            state.generateRunning -> Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                Text(
+                    text = "造数中… 已插入 ${state.generateTotalInserted} 行",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            state.generateError != null -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+            ) {
+                Text(
+                    text = "错误: ${state.generateError}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            state.hasGenerateResult -> Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "造数完成 · 共 ${state.generateTotalInserted} 行 · 处理 ${state.generateTablesProcessed} 个脚本",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DataTable(
+                    columns = GENERATE_RESULT_COLUMNS,
+                    rows = state.generateResultRows(),
+                    modifier = Modifier.fillMaxSize(),
+                    pageSize = state.generateResultPageSize,
+                    onPageSizeChange = { state.generateResultPageSize = it },
+                    currentPage = state.generateResultPage,
+                    onPageChange = { state.generateResultPage = it },
+                    selectedRowId = state.generateResultSelectedRowId,
+                    onSelectedRowChange = { state.generateResultSelectedRowId = it?.id },
+                    fillParentHeight = false,
+                )
+            }
+            else -> EmptyHint(
+                title = "尚未执行造数",
+                description = "在上方编写 Lua 脚本（insert(表名, {列 = 值}) 逐条写库），点「执行造数」即在此查看逐脚本统计。",
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/** 造数结果表列定义（脚本 / 目标表 / 插入行数）。 */
+private val GENERATE_RESULT_COLUMNS = listOf(
+    TableColumn(key = "script", header = "脚本"),
+    TableColumn(key = "table", header = "目标表"),
+    TableColumn(key = "inserted", header = "插入行数"),
+)
 
 // ============================================================================
 // 数据库浏览器状态机 —— 与 UI 解耦, 由 [DatabaseBrowserScreen] 创建
@@ -1020,16 +1362,29 @@ class DatabaseBrowserState(
     // SQL 工作台
     // ------------------------------------------------------------------------
 
-    /** 当前右栏展示的 pane —— 决定渲染表预览还是 SQL 工作台。每 sheet 独立。 */
+    /** 当前右栏展示的 pane —— 决定渲染表预览 / SQL 工作台 / 造数工作台。每 sheet 独立。 */
     var activePane: BrowserPane by mutableStateOf(BrowserPane.TABLE)
 
-    /** 切换 pane（SQL 工作台 ↔ 表预览）。供工具栏按钮调用。 */
-    fun toggleSqlWorkbench() {
-        activePane = if (activePane == BrowserPane.SQL) BrowserPane.TABLE else BrowserPane.SQL
+    /** 切换 pane。工具栏按钮调用 —— 只改渲染目标，不动任何工作台状态。 */
+    fun selectPane(pane: BrowserPane) {
+        activePane = pane
     }
 
-    /** 返回当前 SQL 工作台编辑器文本 —— 暴露给 UI 直接驱动编辑器输入。 */
-    var sqlEditorText: String by mutableStateOf("")
+
+    /**
+     * SQL 工作台的编辑器状态（文本 + 光标 / 选区 + 滚动位置）。
+     *
+     * 由状态机持有而非交给 `CodeEditor` 内部 `remember` —— 右栏在表预览与工作台之间切换时
+     * 工作台会离开组合，光标 / 滚动随组合一起丢失（文本因为在 [sqlEditorText] 上而幸存）。
+     */
+    val sqlEditor: CodeEditorState = CodeEditorState()
+
+    /** SQL 工作台编辑器文本 —— [sqlEditor] 的文本视图（赋值即整段替换，光标移到文末）。 */
+    var sqlEditorText: String
+        get() = sqlEditor.text
+        set(value) {
+            sqlEditor.setText(value)
+        }
 
     /** SQL 工作台状态：空闲 / 加载中 */
     var sqlRunning: Boolean by mutableStateOf(false)
@@ -1044,6 +1399,11 @@ class DatabaseBrowserState(
 
     /** SQL 工作台最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
     var sqlError: String? by mutableStateOf(null)
+
+    /** 结果区视图状态（分页 / 选中行）—— 同样归状态机，切 pane 后保持一致；每次重新执行归位。 */
+    var sqlResultPage: Int by mutableStateOf(1)
+    var sqlResultPageSize: PageSize by mutableStateOf(PageSize.S100)
+    var sqlResultSelectedRowId: Any? by mutableStateOf(null)
 
     /** 当前连接下激活的 schema —— SQL 执行时作为 catalog 写入 proto config。
      *  默认取第一个展开的数据库，若无则为 `""`（默认 catalog）。 */
@@ -1082,6 +1442,9 @@ class DatabaseBrowserState(
         sqlResultColumns = emptyList()
         sqlResultRows = emptyList()
         sqlRowCount = 0
+        // 新一轮结果 → 视图归位（页码 / 选中行都是上一批数据的，指过去没有意义）
+        sqlResultPage = 1
+        sqlResultSelectedRowId = null
         scope.launch {
             val schema = currentSchema()
             val result = runCatching {
@@ -1154,6 +1517,176 @@ class DatabaseBrowserState(
         }
     }
 
+    // ------------------------------------------------------------------------
+    // 造数工作台
+    // ------------------------------------------------------------------------
+
+    /**
+     * 造数脚本 —— 一份 Lua 脚本 + 该脚本的造数统计。
+     *
+ * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切到表预览再切回来保持不变
+     * - [inserted] / [lastTable] 由引擎 `gen_progress_frame` 流实时回填
+     */
+    class GenerateScript(val title: String) {
+        val editor: CodeEditorState = CodeEditorState(GENERATE_SCRIPT_TEMPLATE)
+        var inserted: Long by mutableStateOf(0)
+        var lastTable: String by mutableStateOf("")
+    }
+
+    /** 造数脚本列表（顺序 = 引擎 `tables` 执行顺序 = 多表外键依赖顺序）。 */
+    val generateScripts: SnapshotStateList<GenerateScript> =
+        mutableStateListOf(GenerateScript("脚本 1"))
+
+    var selectedGenerateIndex: Int by mutableStateOf(0)
+
+    /** 引擎 Lua 运行时（`luajit` / `5.1` ~ `5.5`），随请求 `lua_version` 下发。 */
+    var generateLuaVersion: String by mutableStateOf("luajit")
+
+    var generateRunning: Boolean by mutableStateOf(false)
+
+    /** 终止帧回填：已处理的脚本数。 */
+    var generateTablesProcessed: Int by mutableStateOf(0)
+
+    var generateError: String? by mutableStateOf(null)
+
+    /** 结果区视图状态（与 SQL 工作台同构：分页 / 选中行归状态机，切 pane 保持）。 */
+    var generateResultPage: Int by mutableStateOf(1)
+    var generateResultPageSize: PageSize by mutableStateOf(PageSize.DEFAULT)
+    var generateResultSelectedRowId: Any? by mutableStateOf(null)
+
+    /** 造数代次 —— 同 [sqlGeneration]：切连接 / 重新执行后使 in-flight 进度帧失效。 */
+    private var generateGeneration: Int = 0
+
+    /** 当前选中的脚本（越界时为 null —— 例如用户删掉了最后一个脚本）。 */
+    fun currentGenerateScript(): GenerateScript? = generateScripts.getOrNull(selectedGenerateIndex)
+
+    /** 新增一个脚本并选中它 —— 初始内容为 [GENERATE_SCRIPT_TEMPLATE] 模板。 */
+    fun addGenerateScript() {
+        generateScripts.add(GenerateScript("脚本 ${generateScripts.size + 1}"))
+        selectedGenerateIndex = generateScripts.lastIndex
+    }
+
+    /** 删除脚本；删掉后选中项跟随回退（与预览标签页 `closeTab` 同策略）。 */
+    fun removeGenerateScript(index: Int) {
+        if (index !in generateScripts.indices) return
+        generateScripts.removeAt(index)
+        selectedGenerateIndex = when {
+            generateScripts.isEmpty() -> -1
+            index >= generateScripts.size -> generateScripts.lastIndex
+            else -> index
+        }
+    }
+
+    fun selectGenerateScript(index: Int) {
+        if (index in generateScripts.indices) selectedGenerateIndex = index
+    }
+
+    /** 最近一次造数插入的总行数（各脚本累计）。 */
+    val generateTotalInserted: Long get() = generateScripts.sumOf { it.inserted }
+
+    /** 是否已有可展示的造数结果（至少一个脚本插过行）。 */
+    val hasGenerateResult: Boolean get() = generateScripts.any { it.inserted > 0 }
+
+    /** 造数结果表数据 —— 每个脚本一行。 */
+    fun generateResultRows(): List<TableRow> = generateScripts.mapIndexed { index, script ->
+        TableRow(
+            id = index.toLong(),
+            cells = mapOf(
+                "script" to "${index + 1}. ${script.title}",
+                "table" to script.lastTable.ifBlank { "—" },
+                "inserted" to script.inserted.toString(),
+            ),
+        )
+    }
+
+    /**
+     * 执行造数 —— 走 `Category.DATA` / `Action.GENERATE` 流式通道：
+     * 每条 INSERT 回一帧 `gen_progress_frame`（含 `script_index` / `inserted` / `table`），
+     * 终止帧 `generate_terminal.tables_processed` 是已处理脚本数；失败 → [generateError]。
+     *
+     * 与 [executeSql] 一样用 [generateGeneration] 失效化 in-flight 响应：
+     * 重新执行或切换连接后，迟到的进度帧直接丢弃。
+     */
+    fun executeGenerate() {
+        currentConnection ?: return
+        val scripts = generateScripts.filter { it.editor.text.isNotBlank() }
+        if (scripts.isEmpty()) {
+            generateError = "造数脚本为空"
+            return
+        }
+        generateGeneration++
+        val gen = generateGeneration
+        generateRunning = true
+        generateError = null
+        generateTablesProcessed = 0
+        generateResultPage = 1
+        generateResultSelectedRowId = null
+        generateScripts.forEach {
+            it.inserted = 0
+            it.lastTable = ""
+        }
+        val schema = currentSchema()
+        val luaVersion = generateLuaVersion
+        scope.launch {
+            val result = runCatching {
+                engine.handle(
+                    request {
+                        id = UUID.randomUUID().toString()
+                        this.connection = engineConn(database = schema)
+                        category = Category.DATA
+                        action = Action.GENERATE
+                        dataRequest = dataRequest {
+                            generate = dataGenerateRequest {
+                                this.schema = schema
+                                this.luaVersion = luaVersion
+                                // 进度帧的 script_index 是**本次请求内**的下标，
+                                // 因此回填时也按这个过滤后的列表定位。
+                                scripts.forEach { tables += generateTable { script = it.editor.text } }
+                            }
+                        }
+                    },
+                )
+            }
+            if (gen != generateGeneration) return@launch  // 已重新执行 —— 丢弃过期响应
+            val flow = result.getOrNull()
+            if (flow == null) {
+                generateError = result.exceptionOrNull()?.message ?: "造数失败"
+                generateRunning = false
+                return@launch
+            }
+            try {
+                var cancelled = false
+                flow.collect { resp ->
+                    if (cancelled) return@collect
+                    if (gen != generateGeneration) {
+                        cancelled = true
+                        return@collect
+                    }
+                    if (!resp.success) {
+                        generateError = resp.error.ifBlank { "造数失败" }
+                    } else if (resp.hasGenProgressFrame()) {
+                        val frame = resp.genProgressFrame
+                        // 引擎的 `script_index` 是 **1-based**（GenerateHandler 发帧时 +1），
+                        // 这里转成 0-based 再定位到本次请求的脚本列表。
+                        scripts.getOrNull(frame.scriptIndex - 1)?.let { script ->
+                            script.inserted = frame.inserted
+                            if (frame.table.isNotBlank()) script.lastTable = frame.table
+                        }
+                    } else if (resp.hasGenerateTerminal()) {
+                        generateTablesProcessed = resp.generateTerminal.tablesProcessed
+                    }
+                }
+            } catch (e: Exception) {
+                if (gen == generateGeneration) generateError = e.message ?: e.javaClass.simpleName
+                generateRunning = false
+                return@launch
+            }
+            if (gen != generateGeneration) return@launch
+            if (generateError == null && !hasGenerateResult) generateError = "没有插入任何数据"
+            generateRunning = false
+        }
+    }
+
     /**
      * 本屏在当前连接下**建立过连接池**的 database 维度（`""` = 默认 catalog）。
      *
@@ -1196,6 +1729,18 @@ class DatabaseBrowserState(
         sqlResultColumns = emptyList()
         sqlResultRows = emptyList()
         sqlRowCount = 0
+        sqlResultPage = 1
+        sqlResultSelectedRowId = null
+        // 造数工作台同理 —— 脚本与统计都绑定在上一连接上，整体复位（自增代次使 in-flight 进度帧失效）
+        generateScripts.clear()
+        generateScripts.add(GenerateScript("脚本 1"))
+        selectedGenerateIndex = 0
+        generateRunning = false
+        generateGeneration++
+        generateTablesProcessed = 0
+        generateError = null
+        generateResultPage = 1
+        generateResultSelectedRowId = null
     }
 
     /**

@@ -69,6 +69,7 @@ HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码
 | **右键菜单** | `Modifier.onRightClick` + `EditorContextMenuState` + `contextMenuItems` 插槽 |
 | **语言切换下拉框** | `AssistChip` 触发；可隐藏（`showLanguageSwitcher = false`） |
 | **滚动同步** | 行号 gutter 与 `BasicTextField` 共享同一个 `ScrollState` |
+| **内部状态** | `CodeEditorState`（文本 + 光标/选区 + `ScrollState`）；默认 `rememberCodeEditorState` 随组合同生命周期，调用方也可持有并在重新进入组合时传回（见 2.5） |
 
 ### 2.2 高度策略（v2.9 统一）
 
@@ -83,6 +84,7 @@ fun CodeEditor(
     showLineNumbers: Boolean = true,
     minLines: Int = 3,
     maxLines: Int? = null,           // ★ 默认 null —— 不施加高度上限
+    editorState: CodeEditorState = rememberCodeEditorState(text),  // ★ 内部状态可由调用方持有
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
 )
@@ -188,7 +190,39 @@ CodeEditor(
 
 **Payload 设计**：payload 暴露当前编辑器快照（text + languageId），菜单项 lambda 可基于语言决定是否禁用某项（如"格式化"菜单项仅在 `languageId` 不为 null 时显示）。
 
-### 2.5 行号 Gutter 同步滚动
+### 2.5 内部状态归属（`CodeEditorState`）
+
+`CodeEditor` 内部有三样状态：**文本值 + 光标/选区**（`TextFieldValue`）、**滚动位置**（行号与代码共享的 `ScrollState`）。
+它们打包在 `CodeEditorState` 里，默认由 `rememberCodeEditorState(text)` 创建 —— **生命周期与组合绑定**：
+组件一旦离开组合（典型场景：右栏在「表预览 ↔ 工作台」之间切换，编辑器被摘出组合），
+再回来时文本虽然会从 `text` 参数恢复，但**光标回到文首、滚动回到顶部**。
+
+需要跨这类切换保持一致时，**由调用方的状态机持有 `CodeEditorState` 并作为 `editorState` 传入**：
+
+```kotlin
+// 状态机（存活于组合之外，例如 desktopApp 的 DatabaseBrowserState）
+val sqlEditor = CodeEditorState()
+val sql: String get() = sqlEditor.text          // 文本视图
+fun setSql(v: String) = sqlEditor.setText(v)    // 整段替换（光标/选区保持，越界夹紧）
+
+// UI
+CodeEditorWithToolbar(text = sql, onTextChange = { setSql(it) }, languageId = "sql", editorState = sqlEditor)
+```
+
+| 成员 | 用途 |
+|---|---|
+| `value: TextFieldValue` | 文本 + 光标 / 选区（用户输入经 `onValueChange` 写入） |
+| `scrollState: ScrollState` | 行号 gutter 与代码区共享的滚动位置 |
+| `text` / `setText(v)` | 文本视图 / 整段替换（文本未变时空操作；**保留光标与选区**，越界夹到新长度内） |
+
+> **文本真相源仍是 `text` 参数** —— `CodeEditor` 内的 `LaunchedEffect(text)` 会把外部文本同步进
+> `CodeEditorState`（格式化、状态机赋值都走这条路），因此 `editorState` 不构成第二真相源。
+>
+> **为什么 `setText` 保留光标**：受控输入下用户每敲一个键都会回调 `onTextChange` → `setText`。
+> 若这里把光标弹到文末，用户就无法在文本中间编辑（每次输入都被顶到末尾）。文本未变时直接空操作，
+> 也不动滚动位置 —— 滚动只应由用户手势或显式调用改变。
+
+### 2.6 行号 Gutter 同步滚动
 
 ```kotlin
 val sharedScrollState = rememberScrollState()
@@ -217,7 +251,7 @@ BoxWithConstraints(modifier = modifier.then(sizeModifier)) {   // ← 尺寸由�
 - 当 `BasicTextField` 因内容溢出产生滚动时，整个 `Row`（含 gutter）一起移动
 - gutter 宽度按行数位数自适应（`maxOf(2, lineCount.toString().length)`），保证行号始终右对齐不裁切
 
-### 2.6 Tokenize + 高亮（UI 线程同步）
+### 2.7 Tokenize + 高亮（UI 线程同步）
 
 ```kotlin
 val transformation = remember(language, highlighter, fieldValue.text) {

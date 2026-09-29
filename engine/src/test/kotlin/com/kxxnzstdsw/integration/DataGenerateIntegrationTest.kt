@@ -55,6 +55,7 @@ class DataGenerateIntegrationTest : H2Fixture() {
         assertTrue(resp.last().end, "last frame must be terminal (end=true)")
         assertTrue(resp.last().success)
         assertTrue(resp.last().hasGenerateTerminal())
+        assertEquals(1, resp.last().generateTerminal.tablesProcessed, "终止帧应回填已处理脚本数")
         assertTrue(resp.last().generateTerminal.success)
 
         // 验证行确实写入

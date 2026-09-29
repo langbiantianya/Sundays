@@ -271,19 +271,21 @@ class DatabaseBrowserFlowTest {
     // ------------------------------------------------------------------------
 
     @Test
-    fun `toggleSqlWorkbench flips pane between TABLE and SQL`() {
+    fun `selectPane switches between table, SQL and generate workbenches`() {
         val state = newBrowser()
         assertEquals(BrowserPane.TABLE, state.activePane, "初始应展示表预览")
-        state.toggleSqlWorkbench()
+        state.selectPane(BrowserPane.SQL)
         assertEquals(BrowserPane.SQL, state.activePane)
-        state.toggleSqlWorkbench()
-        assertEquals(BrowserPane.TABLE, state.activePane, "再次切换应回到表预览")
+        state.selectPane(BrowserPane.GENERATE)
+        assertEquals(BrowserPane.GENERATE, state.activePane)
+        state.selectPane(BrowserPane.TABLE)
+        assertEquals(BrowserPane.TABLE, state.activePane, "应能切回表预览")
     }
 
     @Test
     fun `executeSql SELECT populates result rows from streaming frames`() = runBlocking {
         val state = newBrowser()
-        state.toggleSqlWorkbench()
+        state.selectPane(BrowserPane.SQL)
         state.sqlEditorText = "SELECT id, name FROM users ORDER BY id"
         state.executeSql(state.sqlEditorText)
 
@@ -316,7 +318,7 @@ class DatabaseBrowserFlowTest {
     @Test
     fun `executeSql DDL surfaces affected_rows instead of rows`() = runBlocking {
         val state = newBrowser()
-        state.toggleSqlWorkbench()
+        state.selectPane(BrowserPane.SQL)
         state.sqlEditorText = "CREATE TABLE sqlbench_tmp (id INT)"
         state.executeSql(state.sqlEditorText)
 
@@ -331,7 +333,7 @@ class DatabaseBrowserFlowTest {
     @Test
     fun `bindConnection clears SQL workbench state when switching connections`() = runBlocking {
         val state = newBrowser()
-        state.toggleSqlWorkbench()
+        state.selectPane(BrowserPane.SQL)
         state.sqlEditorText = "SELECT 1"
         state.executeSql(state.sqlEditorText)
         withTimeout(5_000) { while (state.sqlRunning) delay(20) }
@@ -349,6 +351,92 @@ class DatabaseBrowserFlowTest {
         assertNull(state.sqlAffectedRows)
         assertNull(state.sqlError)
         assertFalse(state.sqlRunning)
+    }
+
+    // ------------------------------------------------------------------------
+    // 造数工作台（状态层契约）
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun `executeGenerate inserts rows via Lua script and reports per-script stats`() = runBlocking {
+        val state = newBrowser()
+        state.selectPane(BrowserPane.GENERATE)
+        val script = state.currentGenerateScript()!!
+        script.editor.setText("for i = 1, 3 do insert('orders', {id = 100 + i, total = i * 10}) end")
+
+        state.executeGenerate()
+        withTimeout(10_000) { while (state.generateRunning) delay(20) }
+
+        assertNull(state.generateError, "应无错误: ${state.generateError}")
+        assertEquals(3L, state.generateTotalInserted, "脚本应插入 3 行")
+        assertEquals(1, state.generateTablesProcessed, "终止帧应回填已处理脚本数")
+        assertEquals("orders", script.lastTable, "进度帧应带回目标表名")
+
+        // 引擎确实把行写进了库（造数不是只报数）
+        val count = DriverManager.getConnection(jdbcUrl, "sa", "").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM orders").use { rs -> rs.next(); rs.getInt(1) }
+            }
+        }
+        assertEquals(6, count, "orders 原有 3 行 + 造数 3 行")
+    }
+
+    @Test
+    fun `generate scripts keep their own editor state across pane switches`() {
+        val state = newBrowser()
+        state.selectPane(BrowserPane.GENERATE)
+        val first = state.currentGenerateScript()!!
+        first.editor.setText("-- 第一个脚本")
+
+        state.addGenerateScript()
+        val second = state.currentGenerateScript()!!
+        assertEquals(2, state.generateScripts.size)
+        assertEquals(1, state.selectedGenerateIndex, "新增脚本后应选中它")
+
+        // 切到表预览再切回来：两个脚本各自的文本都还在，选中项不变
+        state.selectPane(BrowserPane.TABLE)
+        state.selectPane(BrowserPane.GENERATE)
+        assertEquals("-- 第一个脚本", first.editor.text)
+        assertEquals(1, state.selectedGenerateIndex, "切 pane 不应改动选中脚本")
+        assertTrue(second.editor.text.isNotBlank(), "第二个脚本保留模板内容")
+
+        // 删掉选中脚本后选中项回退
+        state.removeGenerateScript(1)
+        assertEquals(1, state.generateScripts.size)
+        assertEquals(0, state.selectedGenerateIndex)
+    }
+
+    @Test
+    fun `executeGenerate with blank scripts reports error without calling engine`() {
+        val state = newBrowser()
+        val script = state.currentGenerateScript()!!
+        script.editor.setText("   ")
+        state.executeGenerate()
+        assertEquals("造数脚本为空", state.generateError)
+        assertFalse(state.generateRunning)
+    }
+
+    @Test
+    fun `bindConnection clears generate workbench state when switching connections`() = runBlocking {
+        val state = newBrowser()
+        state.selectPane(BrowserPane.GENERATE)
+        val script = state.currentGenerateScript()!!
+        script.editor.setText("for i = 1, 2 do insert('orders', {id = 200 + i, total = i}) end")
+        state.executeGenerate()
+        withTimeout(10_000) { while (state.generateRunning) delay(20) }
+        assertTrue(state.generateTotalInserted > 0)
+
+        val newJdbc = "jdbc:h2:mem:bdbtest3_${System.nanoTime()};DB_CLOSE_DELAY=-1"
+        DriverManager.getConnection(newJdbc, "sa", "").use { conn ->
+            conn.createStatement().use { it.executeUpdate("CREATE TABLE t (id INT)") }
+        }
+        state.bindConnection(TestConnectionFactory.build(newJdbc))
+
+        assertEquals(1, state.generateScripts.size, "切换连接应复位为单个默认脚本")
+        assertEquals(0, state.generateTotalInserted)
+        assertEquals(0, state.generateTablesProcessed)
+        assertNull(state.generateError)
+        assertFalse(state.generateRunning)
     }
 }
 

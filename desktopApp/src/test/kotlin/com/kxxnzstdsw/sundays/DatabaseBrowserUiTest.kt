@@ -14,8 +14,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
@@ -72,6 +74,11 @@ class DatabaseBrowserUiTest {
             conn.createStatement().use { stmt ->
                 stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(64))")
                 stmt.executeUpdate("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')")
+                // 250 行 —— 结果区分页（每页 100 → 3 页）的验证载体
+                stmt.executeUpdate("CREATE TABLE big (id INT PRIMARY KEY)")
+                stmt.executeUpdate("INSERT INTO big SELECT X FROM SYSTEM_RANGE(1, 250)")
+                // 造数工作台的目标表（空表，脚本跑完应正好 3 行）
+                stmt.executeUpdate("CREATE TABLE gen_target (id INT PRIMARY KEY, label VARCHAR(64))")
             }
         }
 
@@ -278,4 +285,265 @@ class DatabaseBrowserUiTest {
             "输入应经 onTextChange 写回状态机 —— 否则说明输入通道断开",
         )
     }
-}
+
+    /**
+     * SQL 工作台状态保持 —— 切到表预览再切回，SQL 文本与查询结果必须与切换前一致。
+     *
+     * 契约：编辑器文本与最近一次执行结果（结果行 / 行数标题）都挂在 [DatabaseBrowserState] 上，
+     * 右栏两个 pane 只是同一份状态的两种渲染 —— 切换不得清空任何一项。
+     */
+    @Test
+    fun `sql text and result survive toggling back to table pane`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        val editor = onNode(hasSetTextAction())
+        editor.performClick()
+        waitForIdle()
+        val sql = "SELECT id, name FROM users ORDER BY id"
+        editor.performTextInput(sql)
+        waitForIdle()
+
+        onNodeWithText("执行 SQL").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // 切回表预览：工作台内容应离开语义树
+        onNodeWithText("返回表预览").performClick()
+        waitForIdle()
+        assertEquals(BrowserPane.TABLE, browser.activePane)
+        assertEquals(0, onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().size)
+
+        // 再切回工作台 —— SQL 文本与查询结果都应原样恢复
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+        assertEquals(sql, browser.sqlEditorText, "切回工作台后 SQL 文本应保持不变")
+        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+        onAllNodesWithText("Alice", substring = true).assertCountEquals(1)
+        onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
+        onNode(hasSetTextAction()).assertTextEquals(sql)
+
+        // 继续输入应落在切换前的老光标位置（文末）—— 光标被重置到文首会让用户接着写的内容插到最前面
+        onNode(hasSetTextAction()).performTextInput(" ORDER BY name")
+        waitForIdle()
+        assertEquals(
+            "$sql ORDER BY name",
+            browser.sqlEditorText,
+            "切回工作台后光标应在原位置 —— 被重置到文首会让后续输入插到 SQL 最前面",
+        )
+    }
+
+    /**
+     * 结果区视图状态（页码 / 选中行）在 pane 切换后保持 —— 与 SQL 文本同一契约。
+     *
+     * 页码与选中行此前是 `DataTable` 内部 / 未接线的默认值，切走再回来就回到第 1 页、无选中行。
+     */
+    @Test
+    fun `result page and selected row survive toggling back to table pane`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        browser.sqlEditorText = "SELECT id FROM big"
+        waitForIdle()
+        onNodeWithText("执行 SQL").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // 翻到第 2 页（每页 100 → 3 页），并选中该页首行
+        onNodeWithText("下一页").performClick()
+        waitForIdle()
+        onNodeWithText("2 / 3").assertExists()
+        onAllNodesWithText("101")[0].performClick()
+        waitForIdle()
+        assertEquals(2, browser.sqlResultPage, "点「下一页」应推进结果页码")
+        // 选中行会在单元格与详情面板中各出现一次（具体节点数由布局决定，先记下来做切走前后的对比）
+        val selectedRowNodesBefore = onAllNodesWithText("101", substring = true).fetchSemanticsNodes().size
+        assertTrue(selectedRowNodesBefore > 1, "选中行应在单元格与详情面板中同时可见")
+
+        // 切走再切回
+        onNodeWithText("返回表预览").performClick()
+        waitForIdle()
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        onNodeWithText("2 / 3").assertExists()
+        assertEquals(2, browser.sqlResultPage, "切回工作台后应仍停在第 2 页")
+        assertEquals(
+            selectedRowNodesBefore,
+            onAllNodesWithText("101", substring = true).fetchSemanticsNodes().size,
+            "切回工作台后结果区渲染应与切走前一致（同一页 + 同一选中行）",
+        )
+        assertEquals("101", browser.sqlResultSelectedRowId, "切回工作台后选中行应保留")
+    }
+
+    /**
+     * 编辑器滚动位置在 pane 切换后保持 —— 长 SQL 滚到中间切走再回来，不应被弹回顶部。
+     */
+    @Test
+    fun `editor scroll position survives toggling back to table pane`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        browser.sqlEditorText = (1..200).joinToString("\n") { "SELECT $it" }
+        waitForIdle()
+
+        val editor = onNode(hasSetTextAction())
+        editor.performTouchInput { swipeUp() }
+        waitForIdle()
+        val scrolled = browser.sqlEditor.scrollState.value
+        assertTrue(scrolled > 0, "200 行 SQL 超出可视区应能滚动（实测 offset=$scrolled）")
+
+        onNodeWithText("返回表预览").performClick()
+        waitForIdle()
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        assertEquals(scrolled, browser.sqlEditor.scrollState.value, "切回工作台后滚动位置应保持不变")
+    }
+
+    /**
+     * 造数工作台端到端 —— 工具栏进入 → 编辑器输入 Lua → 执行 → 结果统计，
+     * 且**切到表预览再切回来后脚本与结果原样回显**（与 SQL 工作台同一契约）。
+     *
+     * 断言锚点是引擎真实效果：目标表 `gen_target` 里确实多出 3 行。
+     */
+    @Test
+    fun `generate workbench inserts rows and restores state after pane toggle`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        // 工具栏进入造数工作台（此时 SQL 与造数两个入口都可见）
+        onNodeWithText("造数工作台").performClick()
+        onNodeWithText("返回表预览").assertIsDisplayed()
+        assertEquals(BrowserPane.GENERATE, browser.activePane, "工具栏点击后应切到造数 pane")
+
+        val script = browser.currentGenerateScript()!!
+        script.editor.setText("")
+        waitForIdle()
+        val editor = onNode(hasSetTextAction())
+        editor.performClick()
+        waitForIdle()
+        editor.performTextInput("for i = 1, 3 do insert('gen_target', {id = i, label = 'row_'..i}) end")
+        waitForIdle()
+
+        onNodeWithText("执行造数").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").fetchSemanticsNodes().isNotEmpty()
+        }
+        // 结果表出现目标表列 —— 编辑器文本里也含同名串，故要求整串相等，只命中单元格
+        onNodeWithText("gen_target", substring = false).assertIsDisplayed()
+
+        // 引擎真的把行写进了库
+        val rows = DriverManager.getConnection(jdbcUrl, "sa", "").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM gen_target").use { rs -> rs.next(); rs.getInt(1) }
+            }
+        }
+        assertEquals(3, rows, "gen_target 应有脚本插入的 3 行")
+
+        // 切到表预览再切回：脚本文本、光标位置、造数统计都应原样恢复
+        onNodeWithText("返回表预览").performClick()
+        waitForIdle()
+        assertEquals(BrowserPane.TABLE, browser.activePane)
+        assertEquals(
+            0,
+            onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").fetchSemanticsNodes().size,
+            "工作台离开组合后结果面板不应留在表预览上",
+        )
+
+        onNodeWithText("造数工作台").performClick()
+        waitForIdle()
+        onNode(hasSetTextAction()).assertTextEquals(script.editor.text)
+        assertEquals(3L, browser.generateTotalInserted, "切回后插入行数应保留")
+        onNodeWithText("造数完成 · 共 3 行 · 处理 1 个脚本").assertIsDisplayed()
+
+        // 光标仍在文末 —— 继续输入应追加到脚本末尾，而不是插到开头
+        onNode(hasSetTextAction()).performTextInput("\n-- done")
+        waitForIdle()
+        assertTrue(
+            script.editor.text.endsWith("-- done"),
+            "切回后光标应在原位置，实际文本: ${script.editor.text.takeLast(40)}",
+        )
+    }
+ }

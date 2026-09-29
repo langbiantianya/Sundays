@@ -959,6 +959,9 @@ val closed = engine.disconnect(connection)   // true = 确实关掉了池
 {"id":"r27","success":true,"stream":true,"end":true,"data":null}
 ```
 
+> **进度帧两个易错点**：`scriptIndex` 是 **1-based**（第 1 个脚本 = 1，定位请求里的 `tables` 要减 1）；
+> 终止帧 `generateTerminal.tablesProcessed` = 本次请求下发的脚本数（全部脚本跑完才发）。
+
 **Lua 内置函数**：
 
 | 函数 | 签名 | 行为 |
