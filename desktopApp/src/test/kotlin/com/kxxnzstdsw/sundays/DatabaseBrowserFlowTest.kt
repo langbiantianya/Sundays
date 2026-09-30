@@ -286,58 +286,137 @@ class DatabaseBrowserFlowTest {
     fun `executeSql SELECT populates result rows from streaming frames`() = runBlocking {
         val state = newBrowser()
         state.selectPane(BrowserPane.SQL)
-        state.sqlEditorText = "SELECT id, name FROM users ORDER BY id"
-        state.executeSql(state.sqlEditorText)
+        val sheet = state.currentSqlSheet()!!
+        sheet.editor.setText("SELECT id, name FROM users ORDER BY id")
+        state.executeSql()
 
-        // 异步流式收集 —— 等到 sqlRunning 复位
+        // 异步流式收集 —— 等到该 sheet 的 running 复位
         withTimeout(5_000) {
-            while (state.sqlRunning) delay(20)
+            while (sheet.running) delay(20)
         }
-        assertNull(state.sqlError, "应无错误: ${state.sqlError}")
-        assertEquals(2, state.sqlRowCount, "users 表有 2 行")
-        assertEquals(2, state.sqlResultRows.size)
+        assertNull(sheet.error, "应无错误: ${sheet.error}")
+        assertEquals(2, sheet.rowCount, "users 表有 2 行")
+        assertEquals(2, sheet.rows.size)
         assertTrue(
-            state.sqlResultColumns.any { it.key.equals("id", ignoreCase = true) },
+            sheet.columns.any { it.key.equals("id", ignoreCase = true) },
             "列名应包含 id",
         )
         assertTrue(
-            state.sqlResultColumns.any { it.key.equals("name", ignoreCase = true) },
+            sheet.columns.any { it.key.equals("name", ignoreCase = true) },
             "列名应包含 name",
         )
-        assertNull(state.sqlAffectedRows, "SELECT 不应填 affected_rows")
+        assertNull(sheet.affectedRows, "SELECT 不应填 affected_rows")
     }
 
     @Test
     fun `executeSql empty text sets error without calling engine`() = runBlocking {
         val state = newBrowser()
-        state.executeSql("   \n   ")
-        assertEquals("SQL 为空", state.sqlError)
-        assertFalse(state.sqlRunning)
+        val sheet = state.currentSqlSheet()!!
+        sheet.editor.setText("   \n   ")
+        state.executeSql()
+        assertEquals("SQL 为空", sheet.error)
+        assertFalse(sheet.running)
     }
 
     @Test
     fun `executeSql DDL surfaces affected_rows instead of rows`() = runBlocking {
         val state = newBrowser()
         state.selectPane(BrowserPane.SQL)
-        state.sqlEditorText = "CREATE TABLE sqlbench_tmp (id INT)"
-        state.executeSql(state.sqlEditorText)
+        val sheet = state.currentSqlSheet()!!
+        sheet.editor.setText("CREATE TABLE sqlbench_tmp (id INT)")
+        state.executeSql()
 
         withTimeout(5_000) {
-            while (state.sqlRunning) delay(20)
+            while (sheet.running) delay(20)
         }
-        assertNull(state.sqlError, "应无错误: ${state.sqlError}")
-        assertNotNull(state.sqlAffectedRows, "DDL 应填 affected_rows")
-        assertEquals(0, state.sqlResultRows.size, "DDL 不应产生 SELECT 行帧")
+        assertNull(sheet.error, "应无错误: ${sheet.error}")
+        assertNotNull(sheet.affectedRows, "DDL 应填 affected_rows")
+        assertEquals(0, sheet.rows.size, "DDL 不应产生 SELECT 行帧")
+    }
+
+    /**
+     * 多 SQL sheet —— 每个 sheet 一份独立文本 + 独立结果，切换只改渲染目标，不串显另一个 sheet 的结果。
+     */
+    @Test
+    fun `sql sheets keep their own editor text and results`() = runBlocking {
+        val state = newBrowser()
+        state.selectPane(BrowserPane.SQL)
+        val first = state.currentSqlSheet()!!
+        first.editor.setText("SELECT id, name FROM users ORDER BY id")
+        state.executeSql()
+        withTimeout(5_000) { while (first.running) delay(20) }
+        assertEquals(2, first.rowCount, "users 有 2 行")
+
+        state.addSqlSheet()
+        val second = state.currentSqlSheet()!!
+        assertEquals(2, state.sqlSheets.size)
+        assertEquals(1, state.selectedSqlIndex, "新增 sheet 后应选中它")
+        assertEquals("", second.editor.text, "新 sheet 应为空文本")
+
+        second.editor.setText("SELECT id FROM orders")
+        state.executeSql()
+        withTimeout(5_000) { while (second.running) delay(20) }
+        assertEquals(3, second.rowCount, "orders 有 3 行")
+
+        // 切回第一个 sheet —— 文本与结果都还在，且没有被第二个 sheet 的执行覆盖
+        state.selectSqlSheet(0)
+        assertEquals("SELECT id, name FROM users ORDER BY id", first.editor.text)
+        assertEquals(2, first.rowCount)
+        assertEquals("SELECT id FROM orders", second.editor.text)
+        assertEquals(3, second.rowCount)
+
+        // 删除选中 sheet 后选中项回退，剩余 sheet 内容不受影响
+        state.removeSqlSheet(1)
+        assertEquals(1, state.sqlSheets.size)
+        assertEquals(0, state.selectedSqlIndex)
+        assertEquals(2, state.currentSqlSheet()!!.rowCount)
+    }
+
+    @Test
+    fun `renameSqlSheet trims the name and ignores blank input`() {
+        val state = newBrowser()
+        state.addSqlSheet()
+        assertEquals("SQL 2", state.currentSqlSheet()!!.title, "新建 sheet 的默认名")
+
+        state.renameSqlSheet(1, "  用户查询  ")
+        assertEquals("用户查询", state.currentSqlSheet()!!.title, "应去掉首尾空白")
+
+        state.renameSqlSheet(1, "   ")
+        assertEquals("用户查询", state.currentSqlSheet()!!.title, "空名应保持原名")
+
+        state.renameSqlSheet(9, "越界")
+        assertEquals(2, state.sqlSheets.size)
+        assertEquals("SQL 1", state.sqlSheets.first().title, "越界下标不得改到别的 sheet")
+    }
+
+    @Test
+    fun `renameGenerateScript renames the script and its result row label`() {
+        val state = newBrowser()
+        assertEquals("脚本 1", state.currentGenerateScript()!!.title)
+
+        state.renameGenerateScript(0, " 订单造数 ")
+        assertEquals("订单造数", state.currentGenerateScript()!!.title)
+        assertEquals(
+            "1. 订单造数",
+            state.generateResultRows().single().cells["script"],
+            "造数结果表的脚本列应跟随重命名",
+        )
+
+        state.renameGenerateScript(0, "")
+        assertEquals("订单造数", state.currentGenerateScript()!!.title, "空名应保持原名")
     }
 
     @Test
     fun `bindConnection clears SQL workbench state when switching connections`() = runBlocking {
         val state = newBrowser()
         state.selectPane(BrowserPane.SQL)
-        state.sqlEditorText = "SELECT 1"
-        state.executeSql(state.sqlEditorText)
-        withTimeout(5_000) { while (state.sqlRunning) delay(20) }
-        assertTrue(state.sqlResultRows.isNotEmpty() || state.sqlAffectedRows != null)
+        val sheet = state.currentSqlSheet()!!
+        sheet.editor.setText("SELECT 1")
+        state.executeSql()
+        withTimeout(5_000) { while (sheet.running) delay(20) }
+        assertTrue(sheet.rows.isNotEmpty() || sheet.affectedRows != null)
+        state.addSqlSheet()
+        assertEquals(2, state.sqlSheets.size)
 
         // 切到新连接（不同 db 名）
         val newJdbc = "jdbc:h2:mem:bdbtest2_${System.nanoTime()};DB_CLOSE_DELAY=-1"
@@ -346,11 +425,15 @@ class DatabaseBrowserFlowTest {
         }
         state.bindConnection(TestConnectionFactory.build(newJdbc))
 
-        assertEquals("", state.sqlEditorText, "切换连接应清空编辑器文本")
-        assertEquals(0, state.sqlResultRows.size)
-        assertNull(state.sqlAffectedRows)
-        assertNull(state.sqlError)
-        assertFalse(state.sqlRunning)
+        assertEquals(1, state.sqlSheets.size, "切换连接应复位为单个 sheet")
+        assertEquals(0, state.selectedSqlIndex)
+        val fresh = state.currentSqlSheet()!!
+        assertEquals("SQL 1", fresh.title, "切换连接应复位为默认名的单个 sheet")
+        assertEquals("", fresh.editor.text, "切换连接应清空编辑器文本")
+        assertEquals(0, fresh.rows.size)
+        assertNull(fresh.affectedRows)
+        assertNull(fresh.error)
+        assertFalse(fresh.running)
     }
 
     // ------------------------------------------------------------------------

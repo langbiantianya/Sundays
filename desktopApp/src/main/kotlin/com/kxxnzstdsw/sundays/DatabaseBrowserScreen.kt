@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,10 +42,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -57,10 +61,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.google.protobuf.Value as ProtoValue
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.Action
@@ -124,7 +136,9 @@ import kotlinx.coroutines.launch
  * - 标签页关闭 → `removeTab`; 切换标签页只切换显示, 不重新加载
  * - **「▶ SQL 工作台」工具栏按钮** → 把右栏从表预览切换为 SQL 工作台
  *   （编辑器 + 结果面板），由 `DatabaseBrowserState.activePane` 控制；再次点击切回。
- *   工作台内点 **「执行 SQL」** 走 `SQL.EXECUTE` 引擎流式：SELECT 行帧 → 结果表；
+ *   工作台内是**多个 SQL sheet**（标签条：＋ 新建 / ✎ 重命名 / × 关闭 / 滚轮横向滚动），
+ *   每个 sheet 一份独立 SQL 与独立结果。
+ *   点 **「执行 SQL」** 走 `SQL.EXECUTE` 引擎流式：SELECT 行帧 → 结果表；
  *   非 SELECT（DML/DDL）→ 单条响应带 `affected_rows`；失败 → 错误条。
  *
  * ## 引擎耦合
@@ -826,15 +840,19 @@ private fun PreviewTabContent(
 }
 
 /**
- * SQL 工作台 —— 编辑器（顶部 60%） + 结果面板（底部 40%）。
+ * SQL 工作台 —— 顶部信息条 + SQL sheet 标签条 + 编辑器（60%） + 结果面板（40%）。
+ *
+ * 与 [GenerateWorkbenchPane] 同构：**多 sheet**，每个 sheet 的 [CodeEditorState] 与执行结果都由
+ * 状态机持有（[DatabaseBrowserState.sqlSheets]），因此切到表预览 / 切到别的 sheet 再切回来时，
+ * 文本 / 光标 / 滚动位置 / 结果都保持不变。「执行 SQL」只作用于 [DatabaseBrowserState.currentSqlSheet]。
  *
  * 编辑器用 [CodeEditorWithToolbar]（`:shared` 的 `commonMain/.../editor/ui/CodeEditor.kt`）：
  * 固定 `languageId = "sql"`（隐藏语言切换器 —— 本工作台只处理 SQL），内置「格式化」按钮
  * 走注册表里的 SQL formatter，「执行 SQL」经 `actions` 插槽注入。
  * SQL 语言与 formatter 由 app 启动时的 `registerBuiltinEditors()` 注册（幂等）。
  *
- * 结果面板四种态：
- * - `loading` → 行内 spinner
+ * 结果面板渲染**当前 sheet** 的四种态：
+ * - `running` → 行内 spinner
  * - `error` → 错误文案
  * - `affectedRows != null`（非 SELECT）→ 「已影响 N 行」
  * - 有 `rows` → [DataTable]
@@ -880,32 +898,59 @@ private fun SqlWorkbenchPane(
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        WorkbenchTabStrip(
+            leadingLabel = "SQL",
+            titles = state.sqlSheets.map { it.title },
+            selectedIndex = state.selectedSqlIndex,
+            addDescription = "新建 SQL sheet",
+            renameDescription = "重命名当前标签",
+            removeDescription = "关闭 SQL sheet",
+            onSelect = state::selectSqlSheet,
+            onAdd = state::addSqlSheet,
+            onRemove = state::removeSqlSheet,
+            onRename = state::renameSqlSheet,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        val sheet = state.currentSqlSheet()
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
         Column(modifier = Modifier.fillMaxSize()) {
-            CodeEditorWithToolbar(
-                text = state.sqlEditorText,
-                editorState = state.sqlEditor,
-                onTextChange = { state.sqlEditorText = it },
-                languageId = "sql",
-                // 本工作台只处理 SQL —— 不暴露语言切换器
-                showLanguageSwitcher = false,
-                actions = {
-                    Button(
-                        onClick = { state.executeSql(state.sqlEditorText) },
-                        enabled = connected && !state.sqlRunning && state.sqlEditorText.isNotBlank(),
-                    ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (state.sqlRunning) "执行中…" else "执行 SQL")
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.6f),
-            )
+            if (sheet == null) {
+                EmptyHint(
+                    title = "没有可编辑的 SQL sheet",
+                    description = "点上方「＋」新建一个 SQL sheet。",
+                    // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+            } else {
+                CodeEditorWithToolbar(
+                    text = sheet.editor.text,
+                    editorState = sheet.editor,
+                    onTextChange = { sheet.editor.setText(it) },
+                    languageId = "sql",
+                    // 本工作台只处理 SQL —— 不暴露语言切换器
+                    showLanguageSwitcher = false,
+                    actions = {
+                        Button(
+                            onClick = { state.executeSql() },
+                            enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (sheet.running) "执行中…" else "执行 SQL")
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(0.6f),
+                )
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SqlResultArea(
-                state = state,
+                sheet = sheet,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.4f),
@@ -915,11 +960,238 @@ private fun SqlWorkbenchPane(
 }
 
 /**
- * SQL 工作台结果面板 —— 状态机持有四类结果字段之一为有效值，渲染其一。
+ * 工作台标签条 —— SQL sheet 与造数脚本共用（两者行为完全一致，只有文案不同）。
+ *
+ * 三个能力：
+ * 1. **横向滚动**：`SecondaryScrollableTabRow` 自带拖拽滚动 + 选中项自动滚入可视区；
+ *    另外挂 [verticalWheelScrollsHorizontally] 让普通鼠标的**纵向滚轮**也能滚动标签条
+ *    （Compose 的 `horizontalScroll` 只吃横向滚轮分量，见该函数的 KDoc）。
+ * 2. **重命名**：右侧「✎」为**当前选中标签**弹出 [TabRenameDialog]（确定提交 / 取消放弃）；
+ *    空名保持原名（由 [DatabaseBrowserState.renameSqlSheet] / [renameGenerateScript] 兜底）。
+ * 3. **增删**：右侧「＋」调 [onAdd]；每个标签的「×」调 [onRemove]（只剩一个标签时不渲染「×」，
+ *    与预览标签页/造数脚本的既有策略一致）。
+ *
+ * > **为什么重命名是「按钮 + 弹窗」而不是双击内联编辑**：
+ * > 1. 双击不可行 —— `Tab` 内部把 `modifier.selectable(...)` 挂在同一节点上，`Clickable`
+ * >    会在 Main pass 消费 down（`handleDownEvent` → `down.consume()`），外层再挂
+ * >    `detectTapGestures(onDoubleTap)` 需要**未被消费的 down**，因此永远收不到手势；挂到内容里
+ * >    又会抢走 `selectable` 需要的 down（双击成了就单击失灵）。想保留双击语义只能自绘标签
+ * >    （连带失去 Material 指示条）。
+ * > 2. 内联编辑会**卡死画面** —— `Tab` 的文本槽位于 `SecondaryScrollableTabRow` 的
+ * >    SubcomposeLayout 内，把一个自己抢焦点的 `BasicTextField` 塞进去，Compose 场景会永远
+ * >    有下一帧要渲染（`SkikoComposeUiTest.waitForIdle()` 实测永不返回，真机表现为界面卡死）。
+ * >    弹窗把编辑面与标签条的测量 / 焦点链路彻底解耦。
+ *
+ * @param leadingLabel 标签条前的固定小标题（「SQL」/「脚本」）
+ * @param titles 各标签的显示名（顺序即标签条顺序）
+ * @param selectedIndex 当前选中下标（越界时夹到合法范围）
+ * @param addDescription 「＋」的无障碍描述，同时是 UI 测试的锚点
+ * @param renameDescription 「✎」的无障碍描述
+ * @param removeDescription 「×」的无障碍描述
+ * @param onRename 提交重命名（index, 新名字）—— 仅在名字真正变化时回调
+ */
+@Composable
+private fun WorkbenchTabStrip(
+    leadingLabel: String,
+    titles: List<String>,
+    selectedIndex: Int,
+    addDescription: String,
+    renameDescription: String,
+    removeDescription: String,
+    onSelect: (Int) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (Int) -> Unit,
+    onRename: (Int, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // 正在重命名的标签下标（null = 无）—— 纯视图态，不进状态机
+    var renameTarget by remember { mutableStateOf<Int?>(null) }
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = leadingLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        SecondaryScrollableTabRow(
+            selectedTabIndex = selectedIndex.coerceIn(0, (titles.size - 1).coerceAtLeast(0)),
+            scrollState = scrollState,
+            edgePadding = 0.dp,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            divider = {},
+            modifier = Modifier
+                .weight(1f)
+                .verticalWheelScrollsHorizontally(scrollState),
+        ) {
+            titles.forEachIndexed { index, title ->
+                Tab(
+                    selected = index == selectedIndex,
+                    onClick = { onSelect(index) },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = title,
+                                maxLines = 1,
+                            )
+                            if (titles.size > 1) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = removeDescription,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable { onRemove(index) },
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        IconButton(
+            onClick = { renameTarget = selectedIndex.takeIf { it in titles.indices } },
+            enabled = titles.isNotEmpty() && selectedIndex in titles.indices,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Edit,
+                contentDescription = renameDescription,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        IconButton(onClick = onAdd) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = addDescription,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+
+    // 重命名弹窗 —— 与标签条解耦：不在 Tab（SubcomposeLayout）内部放可编辑控件
+    val target = renameTarget
+    val targetTitle = target?.let { titles.getOrNull(it) }
+    if (target != null && targetTitle != null) {
+        TabRenameDialog(
+            initialTitle = targetTitle,
+            onConfirm = { newTitle ->
+                renameTarget = null
+                if (newTitle != targetTitle) onRename(target, newTitle)
+            },
+            onDismiss = { renameTarget = null },
+        )
+    }
+}
+
+/**
+ * 「重命名标签」弹窗 —— 标签条「✎」的落地 UI。
+ *
+ * 用底层 [Dialog]（与 [com.kxxnzstdsw.sundays.connection.AddConnectionDialog] 同款）：
+ * Material3 `AlertDialog` 会把内容塞进 `maxWidth = 560.dp` 的容器，且不需要它的槽位。
+ * 输入框占位 280.dp + 单行；回车 = 确定（[onPreviewKeyEvent]），Esc = 关闭（[Dialog] 默认行为）。
+ *
+ * **为什么是弹窗而不是标签内联编辑**：`Tab` 的文本槽位于 `SecondaryScrollableTabRow` 的
+ * SubcomposeLayout 内，把可编辑控件（尤其是自己抢焦点的 `BasicTextField`）塞进去会与该布局
+ * 的测量 / 焦点链路互相触发。弹窗把编辑面与标签条彻底解耦。
+ */
+@Composable
+private fun TabRenameDialog(
+    initialTitle: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var value by remember { mutableStateOf(initialTitle) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "重命名标签",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    singleLine = true,
+                    label = { Text("名称") },
+                    modifier = Modifier
+                        .width(280.dp)
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                            ) {
+                                onConfirm(value)
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    TextButton(onClick = { onConfirm(value) }) { Text("确定") }
+                }
+            }
+        }
+    }
+}
+
+/** 滚轮一格（`scrollDelta` 一个单位）对应横向滚动的像素数 —— 约等于一个标签宽（`minTabWidth` 90.dp）。 */
+private const val TAB_WHEEL_SCROLL_STEP_PX = 96f
+
+/**
+ * Modifier 扩展 —— 把鼠标**纵向**滚轮转发成自己的横向滚动。
+ *
+ * Compose 的 `horizontalScroll` 走 `Offset.toSingleAxisDeltaFromAngle()`：纵向滚轮分量在横向
+ * 滚动容器上被判定为「另一个轴」而返回 0、**不消费**（见 foundation `Scrollable.kt` /
+ * `MouseWheelScrollingLogic.kt`）。因此只有横向滚轮（触控板/倾斜滚轮）能滚动标签条，
+ * 普通鼠标滚轮完全滚不动 —— 这里补上这一环。
+ *
+ * 约定：
+ * - 只处理**未被消费**的 Scroll 事件（Main pass），因此触控板的横向分量仍优先交给
+ *   `horizontalScroll` 自己处理，不会双重滚动；
+ * - 处理后 `consume()`，避免同一个滚轮事件再去滚动外层容器；
+ * - 纵向增量为 0（横向滚轮）时不拦截。
+ */
+private fun Modifier.verticalWheelScrollsHorizontally(state: ScrollState): Modifier =
+    this.pointerInput(state) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Main)
+                if (event.type != PointerEventType.Scroll) continue
+                val change = event.changes.firstOrNull() ?: continue
+                if (change.isConsumed) continue
+                val dy = change.scrollDelta.y
+                if (dy == 0f) continue
+                change.consume()
+                state.dispatchRawDelta(dy * TAB_WHEEL_SCROLL_STEP_PX)
+            }
+        }
+    }
+
+/**
+ * SQL 工作台结果面板 —— 渲染**当前 sheet** 的 [DatabaseBrowserState.SqlSheet] 四类结果字段之一为有效值者。
+ * 无 sheet（用户删光了）时展示空态。
  */
 @Composable
 private fun SqlResultArea(
-    state: DatabaseBrowserState,
+    sheet: DatabaseBrowserState.SqlSheet?,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -927,7 +1199,12 @@ private fun SqlResultArea(
         modifier = modifier,
     ) {
         when {
-            state.sqlRunning -> Box(
+            sheet == null -> EmptyHint(
+                title = "尚未执行 SQL",
+                description = "在上方编辑器输入 SQL，点「执行 SQL」即在此查看结果。",
+                modifier = Modifier.fillMaxSize(),
+            )
+            sheet.running -> Box(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -937,25 +1214,25 @@ private fun SqlResultArea(
                     Text("执行中…", style = MaterialTheme.typography.labelMedium)
                 }
             }
-            state.sqlError != null -> Box(
+            sheet.error != null -> Box(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
             ) {
                 Text(
-                    text = "错误: ${state.sqlError}",
+                    text = "错误: ${sheet.error}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            state.sqlAffectedRows != null -> Box(
+            sheet.affectedRows != null -> Box(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
             ) {
                 Text(
-                    text = "已影响 ${state.sqlAffectedRows} 行（非 SELECT 语句）",
+                    text = "已影响 ${sheet.affectedRows} 行（非 SELECT 语句）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            state.sqlResultRows.isNotEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
+            sheet.rows.isNotEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -963,22 +1240,22 @@ private fun SqlResultArea(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "查询结果 · ${state.sqlRowCount} 行",
+                        text = "查询结果 · ${sheet.rowCount} 行",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 DataTable(
-                    columns = state.sqlResultColumns,
-                    rows = state.sqlResultRows,
+                    columns = sheet.columns,
+                    rows = sheet.rows,
                     modifier = Modifier.fillMaxSize(),
-                    pageSize = state.sqlResultPageSize,
-                    onPageSizeChange = { state.sqlResultPageSize = it },
-                    currentPage = state.sqlResultPage,
-                    onPageChange = { state.sqlResultPage = it },
-                    selectedRowId = state.sqlResultSelectedRowId,
-                    onSelectedRowChange = { state.sqlResultSelectedRowId = it?.id },
+                    pageSize = sheet.resultPageSize,
+                    onPageSizeChange = { sheet.resultPageSize = it },
+                    currentPage = sheet.resultPage,
+                    onPageChange = { sheet.resultPage = it },
+                    selectedRowId = sheet.selectedRowId,
+                    onSelectedRowChange = { sheet.selectedRowId = it?.id },
                     fillParentHeight = false,
                 )
             }
@@ -1057,7 +1334,18 @@ private fun GenerateWorkbenchPane(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        GenerateScriptTabs(state = state)
+        WorkbenchTabStrip(
+            leadingLabel = "脚本",
+            titles = state.generateScripts.map { it.title },
+            selectedIndex = state.selectedGenerateIndex,
+            addDescription = "新建造数脚本",
+            renameDescription = "重命名当前标签",
+            removeDescription = "关闭脚本",
+            onSelect = state::selectGenerateScript,
+            onAdd = state::addGenerateScript,
+            onRemove = state::removeGenerateScript,
+            onRename = state::renameGenerateScript,
+        )
 
         Row(
             modifier = Modifier
@@ -1129,67 +1417,6 @@ private fun GenerateWorkbenchPane(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.4f),
-            )
-        }
-    }
-}
-
-/** 造数脚本标签条 —— 顺序即引擎 `tables` 的执行顺序（外键依赖靠 `lastId()` 串起来）。 */
-@Composable
-private fun GenerateScriptTabs(state: DatabaseBrowserState) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "脚本",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        SecondaryScrollableTabRow(
-            selectedTabIndex = state.selectedGenerateIndex.coerceIn(0, (state.generateScripts.size - 1).coerceAtLeast(0)),
-            edgePadding = 0.dp,
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            divider = {},
-            modifier = Modifier.weight(1f),
-        ) {
-            state.generateScripts.forEachIndexed { index, script ->
-                val active = index == state.selectedGenerateIndex
-                Tab(
-                    selected = active,
-                    onClick = { state.selectGenerateScript(index) },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${index + 1}. ${script.title}",
-                                maxLines = 1,
-                            )
-                            if (state.generateScripts.size > 1) {
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = "关闭脚本",
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clickable { state.removeGenerateScript(index) },
-                                )
-                            }
-                        }
-                    },
-                )
-            }
-        }
-        IconButton(onClick = { state.addGenerateScript() }) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "新建造数脚本",
-                tint = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -1372,79 +1599,121 @@ class DatabaseBrowserState(
 
 
     /**
-     * SQL 工作台的编辑器状态（文本 + 光标 / 选区 + 滚动位置）。
+     * 单个 SQL sheet —— 一份 SQL 文本 + 该 sheet 自己的执行结果。
      *
-     * 由状态机持有而非交给 `CodeEditor` 内部 `remember` —— 右栏在表预览与工作台之间切换时
-     * 工作台会离开组合，光标 / 滚动随组合一起丢失（文本因为在 [sqlEditorText] 上而幸存）。
+     * 与 [GenerateScript] 同构：
+     * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切 pane / 切 sheet 后保持不变
+     * - 执行结果（[running] / [columns] / [rows] / [affectedRows] / [error] / 结果区视图）
+     *   **归属单个 sheet** —— 切到另一个 sheet 不会串显上一次的结果
+     * - [generation] 是本 sheet 的 in-flight 失效代次：重新执行 / 删除时自增，
+     *   迟到的行帧据此丢弃（不能让上一轮响应覆盖新一轮状态）
      */
-    val sqlEditor: CodeEditorState = CodeEditorState()
+    class SqlSheet(title: String) {
+        /** 标签条上展示的名字（默认 `SQL N`）—— 用户可重命名，见 [renameSqlSheet]。 */
+        var title: String by mutableStateOf(title)
 
-    /** SQL 工作台编辑器文本 —— [sqlEditor] 的文本视图（赋值即整段替换，光标移到文末）。 */
-    var sqlEditorText: String
-        get() = sqlEditor.text
-        set(value) {
-            sqlEditor.setText(value)
+        val editor: CodeEditorState = CodeEditorState()
+
+        /** 该 sheet 是否正在执行（控制「执行 SQL」按钮与结果区 spinner）。 */
+        var running: Boolean by mutableStateOf(false)
+
+        /** 最近一次执行结果（成功后回填；失败时为 null + [error]）。 */
+        var columns: List<TableColumn> by mutableStateOf(emptyList())
+        var rows: List<TableRow> by mutableStateOf(emptyList())
+        var rowCount: Int by mutableStateOf(0)
+
+        /** 非 SELECT（DML/DDL）执行成功时记录受影响行数；为 null 表示 SELECT 或未执行。 */
+        var affectedRows: Int? by mutableStateOf(null)
+
+        /** 最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
+        var error: String? by mutableStateOf(null)
+
+        /** 结果区视图状态（分页 / 选中行）—— 每次重新执行归位。 */
+        var resultPage: Int by mutableStateOf(1)
+        var resultPageSize: PageSize by mutableStateOf(PageSize.S100)
+        var selectedRowId: Any? by mutableStateOf(null)
+
+        /** in-flight 失效代次（见类 KDoc）。 */
+        internal var generation: Int = 0
+    }
+
+    /** SQL sheet 列表（顺序仅决定标签条顺序 —— 各 sheet 彼此独立执行）。 */
+    val sqlSheets: SnapshotStateList<SqlSheet> = mutableStateListOf(SqlSheet("SQL 1"))
+
+    /** 当前选中的 SQL sheet 下标（越界表示无 sheet）。 */
+    var selectedSqlIndex: Int by mutableStateOf(0)
+
+    /** 当前选中的 SQL sheet（越界时为 null —— 例如用户删掉了最后一个 sheet）。 */
+    fun currentSqlSheet(): SqlSheet? = sqlSheets.getOrNull(selectedSqlIndex)
+
+    /** 新增一个 SQL sheet 并选中它。 */
+    fun addSqlSheet() {
+        sqlSheets.add(SqlSheet("SQL ${sqlSheets.size + 1}"))
+        selectedSqlIndex = sqlSheets.lastIndex
+    }
+
+    /** 删除 SQL sheet；删掉后选中项跟随回退（与 [removeGenerateScript] 同策略）。 */
+    fun removeSqlSheet(index: Int) {
+        if (index !in sqlSheets.indices) return
+        // 该 sheet 可能正在执行 —— 自增代次让其 in-flight 行帧作废
+        sqlSheets[index].generation++
+        sqlSheets.removeAt(index)
+        selectedSqlIndex = when {
+            sqlSheets.isEmpty() -> -1
+            index >= sqlSheets.size -> sqlSheets.lastIndex
+            else -> index
         }
+    }
 
-    /** SQL 工作台状态：空闲 / 加载中 */
-    var sqlRunning: Boolean by mutableStateOf(false)
+    fun selectSqlSheet(index: Int) {
+        if (index in sqlSheets.indices) selectedSqlIndex = index
+    }
 
-    /** SQL 工作台最近一次执行结果（成功后回填；失败时为 null + [sqlError]）。 */
-    var sqlResultColumns: List<TableColumn> by mutableStateOf(emptyList())
-    var sqlResultRows: List<TableRow> by mutableStateOf(emptyList())
-    var sqlRowCount: Int by mutableStateOf(0)
-
-    /** 非 SELECT（DML/DDL）执行成功时记录受影响行数；为 null 表示 SELECT 或未执行。 */
-    var sqlAffectedRows: Int? by mutableStateOf(null)
-
-    /** SQL 工作台最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
-    var sqlError: String? by mutableStateOf(null)
-
-    /** 结果区视图状态（分页 / 选中行）—— 同样归状态机，切 pane 后保持一致；每次重新执行归位。 */
-    var sqlResultPage: Int by mutableStateOf(1)
-    var sqlResultPageSize: PageSize by mutableStateOf(PageSize.S100)
-    var sqlResultSelectedRowId: Any? by mutableStateOf(null)
+    /** 重命名 SQL sheet —— 去首尾空白；空名（或纯空白）视为无效，保持原名。 */
+    fun renameSqlSheet(index: Int, title: String) {
+        val sheet = sqlSheets.getOrNull(index) ?: return
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        sheet.title = trimmed
+    }
 
     /** 当前连接下激活的 schema —— SQL 执行时作为 catalog 写入 proto config。
      *  默认取第一个展开的数据库，若无则为 `""`（默认 catalog）。 */
     fun currentSchema(): String =
         expandedDatabases.firstOrNull() ?: ""
 
-    /** 最近一次执行的代次 —— 与 [generation] 类似思想，但 SQL 工作台需在
-     * 切 pane / 切连接后丢弃 in-flight 结果。 */
-    private var sqlGeneration: Int = 0
-
     /**
-     * 执行编辑器中的 SQL —— 走 `Category.SQL` / `Action.EXECUTE` 流式通道：
-     * SELECT 行帧 → 攒成 [sqlResultColumns] / [sqlResultRows] / [sqlRowCount]；
-     * 终止帧携带 `execute.affected_rows` 时填入 [sqlAffectedRows]；失败 → [sqlError]。
+     * 执行**当前 SQL sheet** 编辑器中的 SQL —— 走 `Category.SQL` / `Action.EXECUTE` 流式通道：
+     * SELECT 行帧 → 攒成该 sheet 的 [SqlSheet.columns] / [SqlSheet.rows] / [SqlSheet.rowCount]；
+     * 终止帧携带 `execute.affected_rows` 时填入 [SqlSheet.affectedRows]；失败 → [SqlSheet.error]。
      *
-     * 与预览加载一样，in-flight 响应通过 [sqlGeneration] 失效化：开始新一次执行前自增，
-     * collect 过程中比对，若不相等直接丢弃（避免上一次执行的迟到响应覆盖新一轮状态）。
+     * 与预览加载一样，in-flight 响应通过该 sheet 自己的 [SqlSheet.generation] 失效化：
+     * 开始新一次执行前自增，collect 过程中比对，若不相等直接丢弃
+     * （避免上一次执行的迟到响应覆盖新一轮状态）。
      */
-    fun executeSql(text: String) {
-        val config = currentConnection ?: return
-        val sql = text.trim()
+    fun executeSql() {
+        val sheet = currentSqlSheet() ?: return
+        currentConnection ?: return
+        val sql = sheet.editor.text.trim()
         if (sql.isEmpty()) {
-            sqlError = "SQL 为空"
-            sqlResultColumns = emptyList()
-            sqlResultRows = emptyList()
-            sqlRowCount = 0
-            sqlAffectedRows = null
+            sheet.error = "SQL 为空"
+            sheet.columns = emptyList()
+            sheet.rows = emptyList()
+            sheet.rowCount = 0
+            sheet.affectedRows = null
             return
         }
-        sqlEditorText = text
-        sqlGeneration++
-        val gen = sqlGeneration
-        sqlRunning = true
-        sqlError = null
-        sqlAffectedRows = null
-        sqlResultColumns = emptyList()
-        sqlResultRows = emptyList()
-        sqlRowCount = 0
+        sheet.generation++
+        val gen = sheet.generation
+        sheet.running = true
+        sheet.error = null
+        sheet.affectedRows = null
+        sheet.columns = emptyList()
+        sheet.rows = emptyList()
+        sheet.rowCount = 0
         // 新一轮结果 → 视图归位（页码 / 选中行都是上一批数据的，指过去没有意义）
-        sqlResultPage = 1
-        sqlResultSelectedRowId = null
+        sheet.resultPage = 1
+        sheet.selectedRowId = null
         scope.launch {
             val schema = currentSchema()
             // 本请求在 catalog = schema 维度上建池（schema 字段本身留空，见下方注释），
@@ -1472,11 +1741,11 @@ class DatabaseBrowserState(
                     },
                 )
             }
-            if (gen != sqlGeneration) return@launch  // 用户已重新执行 —— 丢弃过期响应
+            if (gen != sheet.generation) return@launch  // 用户已重新执行 —— 丢弃过期响应
             val flow = result.getOrNull()
             if (flow == null) {
-                sqlError = result.exceptionOrNull()?.message ?: "执行失败"
-                sqlRunning = false
+                sheet.error = result.exceptionOrNull()?.message ?: "执行失败"
+                sheet.running = false
                 return@launch
             }
             val frames = mutableListOf<com.kxxnzstdsw.grpc.SqlSelectRowFrame>()
@@ -1487,29 +1756,29 @@ class DatabaseBrowserState(
                 var cancelled = false
                 flow.collect { resp ->
                     if (cancelled) return@collect
-                    if (gen != sqlGeneration) {
+                    if (gen != sheet.generation) {
                         cancelled = true
                         return@collect
                     }
                     if (!resp.success) {
-                        sqlError = resp.error.ifBlank { "SQL 执行失败" }
+                        sheet.error = resp.error.ifBlank { "SQL 执行失败" }
                     } else if (resp.hasSqlRowFrame()) {
                         frames += resp.sqlRowFrame
                     } else if (resp.hasSql() && resp.sql.hasExecute()) {
-                        sqlAffectedRows = resp.sql.execute.affectedRows
+                        sheet.affectedRows = resp.sql.execute.affectedRows
                     }
                 }
             } catch (e: Exception) {
-                if (gen == sqlGeneration) sqlError = e.message ?: e.javaClass.simpleName
-                sqlRunning = false
+                if (gen == sheet.generation) sheet.error = e.message ?: e.javaClass.simpleName
+                sheet.running = false
                 return@launch
             }
-            if (gen != sqlGeneration) return@launch
+            if (gen != sheet.generation) return@launch
             // 把 SqlSelectRowFrame 攒成 columns/rows —— 列名取首帧 keys，后续帧按相同顺序补值
             if (frames.isNotEmpty()) {
                 val columnNames = frames.flatMap { it.row.valuesMap.keys }.distinct()
-                sqlResultColumns = columnNames.map { TableColumn(key = it, header = it) }
-                sqlResultRows = frames.mapIndexed { idx, frame ->
+                sheet.columns = columnNames.map { TableColumn(key = it, header = it) }
+                sheet.rows = frames.mapIndexed { idx, frame ->
                     val idCell = frame.row.valuesMap.entries
                         .firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
                     TableRow(
@@ -1517,11 +1786,11 @@ class DatabaseBrowserState(
                         cells = frame.row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
                     )
                 }
-                sqlRowCount = frames.size
-            } else if (sqlAffectedRows == null && sqlError == null) {
-                sqlError = "无返回结果"
+                sheet.rowCount = frames.size
+            } else if (sheet.affectedRows == null && sheet.error == null) {
+                sheet.error = "无返回结果"
             }
-            sqlRunning = false
+            sheet.running = false
         }
     }
 
@@ -1535,7 +1804,10 @@ class DatabaseBrowserState(
  * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切到表预览再切回来保持不变
      * - [inserted] / [lastTable] 由引擎 `gen_progress_frame` 流实时回填
      */
-    class GenerateScript(val title: String) {
+    class GenerateScript(title: String) {
+        /** 标签条上展示的名字（默认 `脚本 N`）—— 用户可重命名，见 [renameGenerateScript]。 */
+        var title: String by mutableStateOf(title)
+
         val editor: CodeEditorState = CodeEditorState(GENERATE_SCRIPT_TEMPLATE)
         var inserted: Long by mutableStateOf(0)
         var lastTable: String by mutableStateOf("")
@@ -1562,7 +1834,7 @@ class DatabaseBrowserState(
     var generateResultPageSize: PageSize by mutableStateOf(PageSize.DEFAULT)
     var generateResultSelectedRowId: Any? by mutableStateOf(null)
 
-    /** 造数代次 —— 同 [sqlGeneration]：切连接 / 重新执行后使 in-flight 进度帧失效。 */
+    /** 造数代次 —— 同 [SqlSheet.generation]：切连接 / 重新执行后使 in-flight 进度帧失效。 */
     private var generateGeneration: Int = 0
 
     /** 当前选中的脚本（越界时为 null —— 例如用户删掉了最后一个脚本）。 */
@@ -1587,6 +1859,14 @@ class DatabaseBrowserState(
 
     fun selectGenerateScript(index: Int) {
         if (index in generateScripts.indices) selectedGenerateIndex = index
+    }
+
+    /** 重命名造数脚本 —— 规则同 [renameSqlSheet]：去首尾空白，空名保持原名。 */
+    fun renameGenerateScript(index: Int, title: String) {
+        val script = generateScripts.getOrNull(index) ?: return
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        script.title = trimmed
     }
 
     /** 最近一次造数插入的总行数（各脚本累计）。 */
@@ -1731,17 +2011,12 @@ class DatabaseBrowserState(
         _tableLoadError.clear()
         tabs = emptyList()
         selectedTabIndex = -1
-        // SQL 工作台状态跨连接无意义 —— 清空并把 sqlGeneration 自增使 in-flight 响应失效
-        sqlEditorText = ""
-        sqlRunning = false
-        sqlGeneration++
-        sqlError = null
-        sqlAffectedRows = null
-        sqlResultColumns = emptyList()
-        sqlResultRows = emptyList()
-        sqlRowCount = 0
-        sqlResultPage = 1
-        sqlResultSelectedRowId = null
+        // SQL 工作台状态跨连接无意义 —— 整体复位为单个空 sheet。旧 sheet 对象被丢弃，
+        // 其 in-flight 响应写进已脱离的实例，不会再出现在 UI 上；仍自增代次让协程尽早停止累积。
+        sqlSheets.forEach { it.generation++ }
+        sqlSheets.clear()
+        sqlSheets.add(SqlSheet("SQL 1"))
+        selectedSqlIndex = 0
         // 造数工作台同理 —— 脚本与统计都绑定在上一连接上，整体复位（自增代次使 in-flight 进度帧失效）
         generateScripts.clear()
         generateScripts.add(GenerateScript("脚本 1"))

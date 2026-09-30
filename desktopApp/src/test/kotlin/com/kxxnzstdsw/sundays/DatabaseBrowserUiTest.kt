@@ -13,8 +13,13 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
@@ -204,7 +209,7 @@ class DatabaseBrowserUiTest {
 
         // 输入 SQL —— 直接写状态机字段（CodeEditor 的输入通道需要 focus + IME，
         // 在 skiko 无头环境下不稳定；执行链路才是本测试的验证目标）
-        browser.sqlEditorText = "SELECT id, name FROM users ORDER BY id"
+        browser.currentSqlSheet()!!.editor.setText("SELECT id, name FROM users ORDER BY id")
         waitForIdle()
 
         // 「执行 SQL」按钮此时可用（connected + 文本非空 + 未在执行）
@@ -218,6 +223,195 @@ class DatabaseBrowserUiTest {
         onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
         // 结果区标题标明行数
         onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+    }
+
+    /**
+     * SQL 工作台多 sheet —— 「＋」新建第二个 sheet，两个 sheet 各自的 SQL 文本与查询结果
+     * 互不串显；「×」关闭后选中项回退。
+     *
+     * 断言锚点是**每个 sheet 自己的引擎结果**（users 2 行 vs big 250 行），不是「组件已渲染」。
+     */
+    @Test
+    fun `sql workbench keeps per-sheet text and results`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        // 第一个 sheet：跑 users 查询
+        val first = browser.currentSqlSheet()!!
+        first.editor.setText("SELECT id, name FROM users ORDER BY id")
+        waitForIdle()
+        onNodeWithText("执行 SQL").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // 「＋」新建第二个 sheet —— 标签条多出「SQL 2」并被选中，编辑器为空
+        onNodeWithContentDescription("新建 SQL sheet").performClick()
+        waitForIdle()
+        assertEquals(2, browser.sqlSheets.size, "点「＋」应新增一个 SQL sheet")
+        assertEquals("SQL 2", browser.currentSqlSheet()!!.title, "新建后应选中新 sheet")
+        onNodeWithText("SQL 2").assertIsDisplayed()
+        onNode(hasSetTextAction()).assertTextEquals("")
+
+        // 第二个 sheet 跑另一条查询 —— 结果区渲染它自己的 250 行
+        val second = browser.currentSqlSheet()!!
+        second.editor.setText("SELECT id FROM big")
+        waitForIdle()
+        onNodeWithText("执行 SQL").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // 切回第一个 sheet —— 编辑器与结果都回到它自己那一份，不串显第二个 sheet 的
+        onNodeWithText("SQL 1").performClick()
+        waitForIdle()
+        assertTrue(browser.selectedSqlIndex == 0, "点标签应切回第一个 sheet")
+        onNode(hasSetTextAction()).assertTextEquals("SELECT id, name FROM users ORDER BY id")
+        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+        assertEquals(0, onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().size)
+
+        // 「×」关闭第二个 sheet —— 只剩一个时不再渲染关闭按钮，选中回退到第一个
+        onAllNodesWithContentDescription("关闭 SQL sheet")[1].performClick()
+        waitForIdle()
+        assertEquals(1, browser.sqlSheets.size, "点「×」应删除该 SQL sheet")
+        assertEquals(0, browser.selectedSqlIndex, "删除后选中项应回退")
+        onNodeWithText("SQL 2").assertDoesNotExist()
+        onNode(hasSetTextAction()).assertTextEquals("SELECT id, name FROM users ORDER BY id")
+    }
+
+    /**
+     * 标签重命名 —— 选中标签后点「✎」弹出重命名弹窗：确定提交、取消放弃（保持原名）。
+     *
+     * 断言锚点是状态机里的真实名字，不只是渲染文本。
+     */
+    @Test
+    fun `sql tab rename commits on confirm and discards on cancel`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        // 点「✎」→ 弹窗出现，输入框预填当前标签名
+        onNodeWithContentDescription("重命名当前标签").performClick()
+        waitForIdle()
+        onNodeWithText("重命名标签").assertIsDisplayed()
+        // 输入框预填当前标签名
+        onNode(hasSetTextAction() and hasText("SQL 1")).assertExists()
+        // 用「名称」label 定位弹窗输入框（值本身会变，label 不变），整段替换后确认
+        onNode(hasSetTextAction() and hasText("名称")).performTextReplacement("用户查询")
+        waitForIdle()
+        onNodeWithText("确定").performClick()
+        waitForIdle()
+
+        assertEquals("用户查询", browser.currentSqlSheet()!!.title, "「确定」应提交重命名")
+        onNodeWithText("用户查询").assertIsDisplayed()
+        onNodeWithText("SQL 1").assertDoesNotExist()
+
+        // 再来一次 → 改名后点「取消」，名字应保持不变
+        onNodeWithContentDescription("重命名当前标签").performClick()
+        waitForIdle()
+        onNode(hasSetTextAction() and hasText("名称")).performTextReplacement("临时名字")
+        waitForIdle()
+        onNodeWithText("取消").performClick()
+        waitForIdle()
+
+        assertEquals("用户查询", browser.currentSqlSheet()!!.title, "「取消」应放弃重命名")
+        onNodeWithText("用户查询").assertIsDisplayed()
+    }
+
+    /**
+     * 标签条滚动 —— 标签总宽超出右栏时：
+     * 1. 新建/选中的标签自动滚入可视区；
+     * 2. 普通鼠标的**纵向滚轮**也能横向滚动标签条（Compose 的 `horizontalScroll` 只吃横向分量）。
+     */
+    @Test
+    fun `sql tab strip scrolls with the mouse wheel and follows the selection`() = runComposeUiTest {
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+
+        // 加到 15 个 sheet —— 总宽远超右栏（每标签至少 90dp），末尾标签初始在可视区外
+        repeat(14) { browser.addSqlSheet() }
+        waitForIdle()
+        assertEquals(15, browser.sqlSheets.size)
+        onNodeWithText("SQL 15").assertIsDisplayed()
+
+        // 选中回到第一个 sheet → 标签条跟着滚回起点，末尾标签移出可视区
+        browser.selectSqlSheet(0)
+        waitForIdle()
+        onNodeWithText("SQL 1").assertIsDisplayed()
+        onNodeWithText("SQL 15").assertIsNotDisplayed()
+
+        // 纵向滚轮 → 横向滚动（自定义转发；Compose 自身会忽略横向容器上的纵向分量）
+        onNodeWithText("SQL 1").performMouseInput {
+            moveTo(center)
+            scroll(300f)
+        }
+        waitForIdle()
+        onNodeWithText("SQL 15").assertIsDisplayed()
     }
 
     /**
@@ -281,7 +475,7 @@ class DatabaseBrowserUiTest {
 
         assertEquals(
             "SELECT 1",
-            browser.sqlEditorText,
+            browser.currentSqlSheet()!!.editor.text,
             "输入应经 onTextChange 写回状态机 —— 否则说明输入通道断开",
         )
     }
@@ -338,7 +532,7 @@ class DatabaseBrowserUiTest {
         // 再切回工作台 —— SQL 文本与查询结果都应原样恢复
         onNodeWithText("SQL 工作台").performClick()
         waitForIdle()
-        assertEquals(sql, browser.sqlEditorText, "切回工作台后 SQL 文本应保持不变")
+        assertEquals(sql, browser.currentSqlSheet()!!.editor.text, "切回工作台后 SQL 文本应保持不变")
         onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
         onAllNodesWithText("Alice", substring = true).assertCountEquals(1)
         onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
@@ -349,7 +543,7 @@ class DatabaseBrowserUiTest {
         waitForIdle()
         assertEquals(
             "$sql ORDER BY name",
-            browser.sqlEditorText,
+            browser.currentSqlSheet()!!.editor.text,
             "切回工作台后光标应在原位置 —— 被重置到文首会让后续输入插到 SQL 最前面",
         )
     }
@@ -384,7 +578,8 @@ class DatabaseBrowserUiTest {
         }
 
         onNodeWithText("SQL 工作台").performClick()
-        browser.sqlEditorText = "SELECT id FROM big"
+        val resultSheet = browser.currentSqlSheet()!!
+        resultSheet.editor.setText("SELECT id FROM big")
         waitForIdle()
         onNodeWithText("执行 SQL").performClick()
         waitUntil(timeoutMillis = 10_000) {
@@ -397,7 +592,7 @@ class DatabaseBrowserUiTest {
         onNodeWithText("2 / 3").assertExists()
         onAllNodesWithText("101")[0].performClick()
         waitForIdle()
-        assertEquals(2, browser.sqlResultPage, "点「下一页」应推进结果页码")
+        assertEquals(2, resultSheet.resultPage, "点「下一页」应推进结果页码")
         // 选中行会在单元格与详情面板中各出现一次（具体节点数由布局决定，先记下来做切走前后的对比）
         val selectedRowNodesBefore = onAllNodesWithText("101", substring = true).fetchSemanticsNodes().size
         assertTrue(selectedRowNodesBefore > 1, "选中行应在单元格与详情面板中同时可见")
@@ -409,13 +604,13 @@ class DatabaseBrowserUiTest {
         waitForIdle()
 
         onNodeWithText("2 / 3").assertExists()
-        assertEquals(2, browser.sqlResultPage, "切回工作台后应仍停在第 2 页")
+        assertEquals(2, resultSheet.resultPage, "切回工作台后应仍停在第 2 页")
         assertEquals(
             selectedRowNodesBefore,
             onAllNodesWithText("101", substring = true).fetchSemanticsNodes().size,
             "切回工作台后结果区渲染应与切走前一致（同一页 + 同一选中行）",
         )
-        assertEquals("101", browser.sqlResultSelectedRowId, "切回工作台后选中行应保留")
+        assertEquals("101", resultSheet.selectedRowId, "切回工作台后选中行应保留")
     }
 
     /**
@@ -446,13 +641,14 @@ class DatabaseBrowserUiTest {
         }
 
         onNodeWithText("SQL 工作台").performClick()
-        browser.sqlEditorText = (1..200).joinToString("\n") { "SELECT $it" }
+        val scrollSheet = browser.currentSqlSheet()!!
+        scrollSheet.editor.setText((1..200).joinToString("\n") { "SELECT $it" })
         waitForIdle()
 
         val editor = onNode(hasSetTextAction())
         editor.performTouchInput { swipeUp() }
         waitForIdle()
-        val scrolled = browser.sqlEditor.scrollState.value
+        val scrolled = scrollSheet.editor.scrollState.value
         assertTrue(scrolled > 0, "200 行 SQL 超出可视区应能滚动（实测 offset=$scrolled）")
 
         onNodeWithText("返回表预览").performClick()
@@ -460,7 +656,7 @@ class DatabaseBrowserUiTest {
         onNodeWithText("SQL 工作台").performClick()
         waitForIdle()
 
-        assertEquals(scrolled, browser.sqlEditor.scrollState.value, "切回工作台后滚动位置应保持不变")
+        assertEquals(scrolled, scrollSheet.editor.scrollState.value, "切回工作台后滚动位置应保持不变")
     }
 
     /**
