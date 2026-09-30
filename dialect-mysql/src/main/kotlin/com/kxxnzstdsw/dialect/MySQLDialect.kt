@@ -1030,16 +1030,6 @@ class MySQLDialect : DatabaseDialect {
     override suspend fun listTriggers(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
         val safeDb = sanitizeIdentifier(schema.ifBlank { conn.catalog ?: "" }, "database name")
         val triggers = mutableListOf<Map<String, String>>()
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery(
-                "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
-                "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? " +
-                "ORDER BY TRIGGER_NAME"
-            ).use { rs ->
-                // prepared statement 占位符
-            }
-        }
-        // prepared 走一遍
         conn.prepareStatement(
             "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
             "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME"

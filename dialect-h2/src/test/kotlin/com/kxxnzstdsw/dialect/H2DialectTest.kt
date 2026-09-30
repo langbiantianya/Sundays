@@ -65,52 +65,68 @@ class H2DialectTest {
     }
 
     @Test
-    fun `quoteIdentifier uppercases identifier for H2`() {
-        // H2 不加引号，统一大写
-        assertEquals("NAME", dialect.quoteIdentifier("name"))
-        assertEquals("A\"B", dialect.quoteIdentifier("a\"b"))
+    fun `quoteIdentifier quotes and uppercases identifier for H2`() {
+        // 引号内统一大写：H2 把未加引号的标识符折叠为大写，executeUpdate("CREATE TABLE t") 建出的就是 T
+        assertEquals("\"NAME\"", dialect.quoteIdentifier("name"))
+        // 内嵌双引号翻倍，防止跳出引用
+        assertEquals("\"A\"\"B\"", dialect.quoteIdentifier("a\"b"))
+    }
+
+    @Test
+    fun `quoteIdentifier makes reserved word usable as table name`() = runBlocking {
+        withConn { conn ->
+            // 不加引号时 ORDER 是保留字，SELECT * FROM ORDER 直接语法报错
+            conn.createStatement().use { it.execute("CREATE TABLE ${dialect.quoteIdentifier("order")} (id INT)") }
+            conn.createStatement().use { it.execute("INSERT INTO ${dialect.quoteIdentifier("order")} VALUES (1)") }
+            val rows = conn.createStatement().use { stmt ->
+                stmt.executeQuery("SELECT COUNT(*) FROM ${dialect.quoteIdentifier("order")}").use { rs ->
+                    if (rs.next()) rs.getInt(1) else -1
+                }
+            }
+            assertEquals(1, rows)
+        }
     }
 
     @Test
     fun `buildColumnDefinition handles VARCHAR with size`() {
         val def = dialect.buildColumnDefinition("name", "VARCHAR", 100, true, false, null, false)
-        assertEquals("NAME VARCHAR(100)", def)
+        assertEquals("\"NAME\" VARCHAR(100)", def)
     }
 
     @Test
     fun `buildColumnDefinition NOT NULL adds clause`() {
         val def = dialect.buildColumnDefinition("id", "INT", null, false, true, null, false)
-        assertEquals("ID INT NOT NULL", def)
+        assertEquals("\"ID\" INT NOT NULL", def)
     }
 
     @Test
     fun `buildColumnDefinition autoIncrement INT becomes INT AUTO_INCREMENT`() {
         val def = dialect.buildColumnDefinition("id", "INT", null, false, true, null, true)
-        assertEquals("ID INT AUTO_INCREMENT", def)
+        assertEquals("\"ID\" INT AUTO_INCREMENT", def)
     }
 
     @Test
     fun `buildColumnDefinition with default value`() {
         val def = dialect.buildColumnDefinition("status", "VARCHAR", 20, true, false, "active", false)
-        assertEquals("STATUS VARCHAR(20) DEFAULT 'active'", def)
+        assertEquals("\"STATUS\" VARCHAR(20) DEFAULT 'active'", def)
     }
 
     @Test
     fun `buildColumnDefinition numeric default not quoted`() {
         val def = dialect.buildColumnDefinition("count", "INT", null, true, false, "0", false)
-        assertEquals("COUNT INT DEFAULT 0", def)
+        assertEquals("\"COUNT\" INT DEFAULT 0", def)
     }
 
     @Test
     fun `buildAddColumnSQL uses ALTER TABLE ADD COLUMN`() {
         val sql = dialect.buildAddColumnSQL("users", "AGE INT")
-        assertEquals("ALTER TABLE USERS ADD COLUMN AGE INT", sql)
+        assertEquals("ALTER TABLE \"USERS\" ADD COLUMN AGE INT", sql)
     }
 
     @Test
     fun `buildDropColumnSQL uses ALTER TABLE DROP COLUMN`() {
         val sql = dialect.buildDropColumnSQL("users", "age")
-        assertEquals("ALTER TABLE USERS DROP COLUMN AGE", sql)
+        assertEquals("ALTER TABLE \"USERS\" DROP COLUMN \"AGE\"", sql)
     }
 
     @Test
@@ -178,6 +194,9 @@ class H2DialectTest {
                 "id type should contain INT, got: ${idCol["type"]}")
             val nameCol = cols.first { (it["name"] as? String)?.equals("NAME", ignoreCase = true) == true }
             assertEquals(false, nameCol["nullable"], "NAME was NOT NULL so should be non-nullable")
+            // CHARACTER_MAXIMUM_LENGTH=50、NUMERIC_PRECISION=NULL — wasNull() 读错列时长度会被吞成 0，
+            // 编辑列路径再拿这个 0 回写就会把 VARCHAR(50) 降级成 VARCHAR
+            assertEquals(50, nameCol["size"], "VARCHAR(50) 的 size 应回填 50，实际: ${nameCol["size"]}")
             val scoreCol = cols.first { (it["name"] as? String)?.equals("SCORE", ignoreCase = true) == true }
             assertEquals(true, scoreCol["nullable"], "score 无 NOT NULL，所以 nullable=true")
             assertEquals("0.0", scoreCol["defaultValue"]?.toString())
@@ -216,11 +235,24 @@ class H2DialectTest {
                 it.execute("CREATE TABLE users (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(50), age INT)")
             }
             val ddl = dialect.getCreateTableDDL(conn, "USERS")
-            assertTrue(ddl.contains("CREATE TABLE USERS"))
-            assertTrue(ddl.contains("ID INT NOT NULL"), "DDL 应包含 ID 列: $ddl")
-            assertTrue(ddl.contains("NAME VARCHAR(50)"), "DDL 应包含 NAME VARCHAR(50): $ddl")
-            assertTrue(ddl.contains("AGE INT"))
-            assertTrue(ddl.contains("PRIMARY KEY (ID)"), "应包含主键: $ddl")
+            assertTrue(ddl.contains("CREATE TABLE \"USERS\""))
+            assertTrue(ddl.contains("\"ID\" INT NOT NULL"), "DDL 应包含 ID 列: $ddl")
+            assertTrue(ddl.contains("\"NAME\" VARCHAR(50)"), "DDL 应包含 NAME VARCHAR(50): $ddl")
+            assertTrue(ddl.contains("\"AGE\" INT"))
+            assertTrue(ddl.contains("PRIMARY KEY (\"ID\")"), "应包含主键: $ddl")
+        }
+    }
+
+    @Test
+    fun `getCreateTableDDL keeps UNIQUE constraint`() = runBlocking {
+        withConn { conn ->
+            conn.createStatement().use {
+                it.execute("CREATE TABLE u (x INT, y INT, UNIQUE(x,y))")
+            }
+            val ddl = dialect.getCreateTableDDL(conn, "U")
+            // H2 的 INDEX_TYPE_NAME 存的是 'UNIQUE INDEX'，等值比较 'UNIQUE' 会让 UNIQUE 子句被静默丢掉
+            // GROUP_CONCAT 默认分隔符是逗号，列名按存储形式为大写
+            assertTrue(ddl.contains("UNIQUE (X,Y)", ignoreCase = true), "应保留 UNIQUE 约束: $ddl")
         }
     }
 
@@ -371,7 +403,7 @@ class H2DialectTest {
             assertTrue(views.any { it["name"]?.equals("V_PRODUCTS", ignoreCase = true) == true })
 
             val ddl = dialect.getViewDDL(conn, "V_PRODUCTS", "PUBLIC")
-            assertTrue(ddl.contains("CREATE VIEW"))
+            assertTrue(ddl.contains("CREATE VIEW \"V_PRODUCTS\""))
             assertTrue(ddl.contains("V_PRODUCTS", ignoreCase = true))
 
             dialect.dropView(conn, "v_products", ifExists = true)

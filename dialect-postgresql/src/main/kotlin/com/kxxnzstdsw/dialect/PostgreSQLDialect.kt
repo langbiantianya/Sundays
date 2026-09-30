@@ -520,14 +520,18 @@ class PostgreSQLDialect : DatabaseDialect {
                     val colName = rs.getString("column_name")
                     val rawType = rs.getString("data_type")
                     val charLen = rs.getInt("character_maximum_length")
+                    // wasNull() 只反映"最近一次 getXXX"的那一列,必须紧跟读取就地取标志;
+                    // 否则下面的判定实际测的是 numeric_scale 的 NULL(字符列恒为 NULL),
+                    // 导致 varchar(50)/char(10) 被降级成无长度的 VARCHAR/CHAR
+                    val hasCharLen = !rs.wasNull()
                     val nullable = rs.getString("is_nullable") == "YES"
                     val defaultVal = rs.getString("column_default")
                     val numPrec = rs.getInt("numeric_precision")
                     val numScale = rs.getInt("numeric_scale")
 
                     val typeSpec = when (rawType.uppercase()) {
-                        "CHARACTER VARYING" -> if (!rs.wasNull() && charLen > 0) "VARCHAR($charLen)" else "VARCHAR"
-                        "CHARACTER" -> if (!rs.wasNull() && charLen > 0) "CHAR($charLen)" else "CHAR"
+                        "CHARACTER VARYING" -> if (hasCharLen && charLen > 0) "VARCHAR($charLen)" else "VARCHAR"
+                        "CHARACTER" -> if (hasCharLen && charLen > 0) "CHAR($charLen)" else "CHAR"
                         "NUMERIC" -> if (numPrec > 0) "NUMERIC($numPrec, $numScale)" else "NUMERIC"
                         else -> rawType
                     }
@@ -721,10 +725,12 @@ class PostgreSQLDialect : DatabaseDialect {
                        WHEN t.tgtype & 1 = 1 THEN 'ROW'
                        ELSE 'STATEMENT'
                    END || ' ' ||(
-                       CASE t.tgtype & 3
-                           WHEN 1 THEN 'BEFORE'
-                           WHEN 2 THEN 'AFTER'
-                           WHEN 3 THEN 'INSTEAD OF'
+                       -- 时效位: TRIGGER_TYPE_TIMING_MASK = BEFORE(0x02) | INSTEAD(0x40);
+                       -- 掩码必须取这两位,否则会把 ROW(0x01) 或 INSERT(0x04) 混进时效判定
+                       CASE t.tgtype & 66
+                           WHEN 0 THEN 'AFTER'
+                           WHEN 2 THEN 'BEFORE'
+                           WHEN 64 THEN 'INSTEAD OF'
                        END
                    ) || ' ' || (
                        SELECT string_agg(CASE WHEN e.event_manipulation = 'INSERT' THEN 'INSERT'
@@ -824,10 +830,12 @@ class PostgreSQLDialect : DatabaseDialect {
                        WHEN t.tgtype & 1 = 1 THEN 'ROW'
                        ELSE 'STATEMENT'
                    END AS level,
-                   CASE t.tgtype & 3
-                       WHEN 1 THEN 'BEFORE'
-                       WHEN 2 THEN 'AFTER'
-                       WHEN 3 THEN 'INSTEAD OF'
+                   -- 时效位: TRIGGER_TYPE_TIMING_MASK = BEFORE(0x02) | INSTEAD(0x40);
+                   -- 掩码必须取这两位,否则会把 ROW(0x01) 或 INSERT(0x04) 混进时效判定
+                   CASE t.tgtype & 66
+                       WHEN 0 THEN 'AFTER'
+                       WHEN 2 THEN 'BEFORE'
+                       WHEN 64 THEN 'INSTEAD OF'
                    END AS action_timing,
                    CASE
                        WHEN t.tgtype & 4 = 4 THEN 'INSERT'
@@ -869,9 +877,12 @@ class PostgreSQLDialect : DatabaseDialect {
                     val funcArgs = if (args.isNotEmpty()) "($args)" else "()"
                     return@withContext buildString {
                         appendLine("CREATE OR REPLACE TRIGGER ${quoteIdentifier(routineName)}")
+                        // level 来自 tgtype 的 ROW 位(STATEMENT 触发器必须还原,否则导出的 DDL
+                        // 描述的不是库里那个触发器);null 时按 PG 默认的 ROW 处理
+                        val forEach = level?.takeIf { it.isNotBlank() } ?: "ROW"
                         appendLine("  $level $actionTiming $events")
                         appendLine("  ON ${quoteIdentifier(tableName)}")
-                        appendLine("  FOR EACH ROW")
+                        appendLine("  FOR EACH $forEach")
                         appendLine("  EXECUTE FUNCTION ${quoteIdentifier(funcSchema)}.${quoteIdentifier(funcName)}$funcArgs;")
                     }.trimEnd()
                 }
@@ -1152,10 +1163,12 @@ class PostgreSQLDialect : DatabaseDialect {
                        WHEN t.tgtype & 1 = 1 THEN 'ROW'
                        ELSE 'STATEMENT'
                    END || ' ' ||(
-                       CASE t.tgtype & 3
-                           WHEN 1 THEN 'BEFORE'
-                           WHEN 2 THEN 'AFTER'
-                           WHEN 3 THEN 'INSTEAD OF'
+                       -- 时效位: TRIGGER_TYPE_TIMING_MASK = BEFORE(0x02) | INSTEAD(0x40);
+                       -- 掩码必须取这两位,否则会把 ROW(0x01) 或 INSERT(0x04) 混进时效判定
+                       CASE t.tgtype & 66
+                           WHEN 0 THEN 'AFTER'
+                           WHEN 2 THEN 'BEFORE'
+                           WHEN 64 THEN 'INSTEAD OF'
                        END
                    ) || ' ' || (
                        SELECT string_agg(
