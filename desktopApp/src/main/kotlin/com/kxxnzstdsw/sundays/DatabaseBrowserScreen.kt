@@ -984,7 +984,7 @@ private fun SqlResultArea(
             }
             else -> EmptyHint(
                 title = "尚未执行 SQL",
-                description = "在上方编辑器输入 SQL，点「执行 SQL」或 Ctrl+Enter 即在此查看结果。",
+                description = "在上方编辑器输入 SQL，点「执行 SQL」即在此查看结果。",
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -1447,6 +1447,10 @@ class DatabaseBrowserState(
         sqlResultSelectedRowId = null
         scope.launch {
             val schema = currentSchema()
+            // 本请求在 catalog = schema 维度上建池（schema 字段本身留空，见下方注释），
+            // 因此登记进 activeDatabases —— 否则 close-sheet 的 releasePools 遍历不到它，
+            // 池会一直挂着到 JVM 退出。
+            activeDatabases.add(schema)
             val result = runCatching {
                 engine.handle(
                     request {
@@ -1457,7 +1461,11 @@ class DatabaseBrowserState(
                         sqlRequest = sqlRequest {
                             execute = sqlExecuteRequest {
                                 this.sql = sql
-                                this.schema = schema
+                                // **不要**把 catalog（数据库）名写进 schema —— 引擎会把
+                                // req.schema 传给 PoolManager.getConnection → setSearchPath，
+                                // 对 H2 是 `SET SCHEMA "<库名>"` → `Schema "X" not found`，
+                                // 对 PG 是把库名当 schema 设进 search_path。见 engineConnFor 的 KDoc。
+                                this.schema = ""
                                 multiStatement = false
                             }
                         }
@@ -1628,6 +1636,8 @@ class DatabaseBrowserState(
         val schema = currentSchema()
         val luaVersion = generateLuaVersion
         scope.launch {
+            // 同 executeSql：登记本请求建池所处的 catalog 维度，供 releasePools 回收。
+            activeDatabases.add(schema)
             val result = runCatching {
                 engine.handle(
                     request {
@@ -1637,7 +1647,8 @@ class DatabaseBrowserState(
                         action = Action.GENERATE
                         dataRequest = dataRequest {
                             generate = dataGenerateRequest {
-                                this.schema = schema
+                                // 同 executeSql：schema 必须留空，不能塞 catalog 名。
+                                this.schema = ""
                                 this.luaVersion = luaVersion
                                 // 进度帧的 script_index 是**本次请求内**的下标，
                                 // 因此回填时也按这个过滤后的列表定位。

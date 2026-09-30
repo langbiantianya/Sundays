@@ -107,7 +107,8 @@ internal fun MainScreen(engine: EngineClient) {
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
     // 浏览状态按 sheet id 各自持有（而非 DatabaseBrowserScreen 内部 remember）：
-    // sheet 关闭时该 state 也随同 GC；且 releasePools 的异步 disconnect 能跑在长生命周期 scope 上
+    // releasePools 的异步 disconnect 能跑在长生命周期 scope 上；sheet 关闭时 entry 被移除，
+    // 否则 map 的强引用会让该 sheet 的编辑内容一直存活。
     val browsers = remember { mutableMapOf<String, DatabaseBrowserState>() }
     var destination by remember { mutableStateOf(AppDestination.CONNECTIONS) }
     // 「+ 添加连接」弹窗开关 —— 仅在第二屏渲染（与 destination 联动）
@@ -161,8 +162,8 @@ internal fun MainScreen(engine: EngineClient) {
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {
-                // 按 sheet id 懒创建浏览器 state —— sheet 关闭时 entry 留作 stale（不会泄漏：
-                // DatabaseBrowserState 持有 engine/scope 引用，无生命周期短句的资源）
+                // 按 sheet id 懒创建浏览器 state；sheet 关闭时 entry 会被移除（见 onCloseSheet），
+                // 否则 map 的强引用会让该连接的 SQL 文本 / 造数脚本 / 预览标签页一直存活。
                 val sheetConfigs = openSheetIds  // List<ConnectionConfig>，transient + 持久化 sheet 都直接可用
                 sheetConfigs.forEach { cfg ->
                     if (browsers[cfg.id] == null) {
@@ -188,6 +189,10 @@ internal fun MainScreen(engine: EngineClient) {
                         // 由 disconnect 负责 —— 两者 key 不同，须都释放，否则留孤儿池。
                         val cfg = sheetConfigs.firstOrNull { it.id == id }
                         browsers[id]?.releasePools()
+                        // 必须移除 entry：`browsers` 是强引用 map，留着会让该 sheet 的
+                        // SQL 文本 / 造数脚本 / 预览标签页在整个 MainScreen 生命周期内不可回收，
+                        // 且重开同一连接会复用这份过期状态（bindConnection 对同 id 是 no-op）。
+                        browsers.remove(id)
                         if (cfg != null) session.disconnect(cfg)
                         session.closeSheet(id)
                     },

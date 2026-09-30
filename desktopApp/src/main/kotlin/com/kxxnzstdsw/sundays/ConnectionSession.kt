@@ -71,6 +71,20 @@ class ConnectionSession(
         private set
 
     /**
+     * 各连接的状态代次 —— [connect] / [disconnect] 都用它做「结果是否仍然有效」的判定。
+     *
+     * 两者的 `engine.*` 调用都是 fire-and-forget（拿不到可取消的 Job 句柄），关 sheet 时
+     * `disconnect` 与 in-flight 的 `connect` 会同时在飞：谁后写 `statuses` 谁赢，于是
+     * 「已关闭的 sheet 又显示成 CONNECTED」或「刚重开的连接被翻成 DISCONNECTED」。
+     * 每次发起操作自增该连接的代次，回填前先比对代次，过期结果直接丢弃。
+     */
+    private val statusGeneration = mutableMapOf<String, Int>()
+
+    /** 自增该连接的状态代次，返回**自增后**的值（供发起方与回填方比对）。 */
+    private fun bumpStatusGeneration(id: String): Int =
+        (statusGeneration[id] ?: 0) + 1.also { statusGeneration[id] = it }
+
+    /**
      * 已在数据库浏览区打开的 sheet（按打开顺序）—— 每条 sheet 持有完整的 `ConnectionConfig`，
      * 支持两种生命周期：
      *
@@ -174,6 +188,7 @@ class ConnectionSession(
         connectionList.connections.find { it.id == id }?.let { disconnect(it) }
         connectionList = ConnectionStorage.delete(id)
         statuses = statuses - id
+        statusGeneration.remove(id)
         if (selectedConnection?.id == id) {
             selectedConnection = null
         }
@@ -216,6 +231,7 @@ class ConnectionSession(
 
     /** 建立连接 —— `IdbEngine.testConnection` 建池 + 校验，状态回填列表 / 总览 */
     fun connect(config: ConnectionConfig) {
+        val gen = bumpStatusGeneration(config.id)
         statuses = statuses + (config.id to ConnectionStatus(ConnectionState.CONNECTING))
         scope.launch {
             val status = runCatching { engine.testConnection(engineConfig(config)) }.fold(
@@ -228,15 +244,17 @@ class ConnectionSession(
                 },
                 onFailure = { ConnectionStatus(ConnectionState.FAILED, it.message ?: "Unknown error") },
             )
+            if (statusGeneration[config.id] != gen) return@launch   // 期间又断开/重连 —— 丢弃过期结果
             statuses = statuses + (config.id to status)
         }
     }
 
     /** 断开连接 —— 释放该配置的连接池（`IdbEngine.disconnect`） */
     fun disconnect(config: ConnectionConfig) {
+        bumpStatusGeneration(config.id)
+        statuses = statuses + (config.id to ConnectionStatus())
         scope.launch {
             runCatching { engine.disconnect(engineConfig(config)) }
-            statuses = statuses + (config.id to ConnectionStatus())
         }
     }
 

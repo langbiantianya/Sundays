@@ -123,14 +123,24 @@ desktopApp 现有 **41 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | `refreshDatabases` | `SCHEMA.LIST` | `schemaListRequest { level = "database" }` | `databases`（失败 → `errorMessage`） |
 | `toggleDatabase`（首次展开） | `TABLE.LIST` | `tableListRequest {}` | `tablesByDatabase[db]`（失败 → `tableLoadError[db]`） |
 | `openTab`（新表） | `DATA.LIST` | `dataListRequest { tableName; page = 1; pageSize = tab.pageSize }` | `TablePreviewTab.columns` / `.rows` / `.total` |
-| `executeSql` | `SQL.EXECUTE` | `sqlRequest { execute = sqlExecuteRequest { sql; schema } }` | SELECT：`sqlRowFrame` 逐帧攒成 `sqlResultColumns` / `sqlResultRows` / `sqlRowCount`；非 SELECT：终止帧 `sql.execute.affectedRows` → `sqlAffectedRows`；失败 → `sqlError` |
-| `executeGenerate` | `DATA.GENERATE` | `dataRequest { generate = dataGenerateRequest { schema; luaVersion; tables += generateTable { script } } }` | `gen_progress_frame` 逐帧回填 `generateScripts[frame.scriptIndex - 1].inserted`（**`script_index` 是 1-based**）/ `.lastTable`；终止帧 `generate_terminal.tables_processed` → `generateTablesProcessed`；失败 → `generateError` |
+| `executeSql` | `SQL.EXECUTE` | `sqlRequest { execute = sqlExecuteRequest { sql; schema = "" } }` | SELECT：`sqlRowFrame` 逐帧攒成 `sqlResultColumns` / `sqlResultRows` / `sqlRowCount`；非 SELECT：终止帧 `sql.execute.affectedRows` → `sqlAffectedRows`；失败 → `sqlError` |
+| `executeGenerate` | `DATA.GENERATE` | `dataRequest { generate = dataGenerateRequest { schema = ""; luaVersion; tables += generateTable { script } } }` | `gen_progress_frame` 逐帧回填 `generateScripts[frame.scriptIndex - 1].inserted`（**`script_index` 是 1-based**）/ `.lastTable`；终止帧 `generate_terminal.tables_processed` → `generateTablesProcessed`；失败 → `generateError` |
 
 > **注意** `SQL.EXECUTE` 是**流式**通道（`RequestDispatcher.streamSqlExecute`），必须用 `EngineClient.handle` + `collect`，不能走 `invoke`（`invoke` 只收终止帧，会丢掉全部行帧）。SELECT 逐行推 `sql_row_frame` 且末尾空帧；非 SELECT 只推一条带 `execute` 的终止帧。
 
 > **注意** `pageSize = 0` 在 `DATA.LIST` 中是**流式哨兵**（逐行 `DataRowFrame`，无 paged body）；预览固定走分页路径，故请求侧 `coerceAtLeast(1)`。
 >
-> **注意** proto `ConnectionConfig.driver` 是各 handler 的必填字段（`SchemaHandler.list` / `ExportEngine` 先按 `driver` 取方言），因此 `engineConn` 必须同时写 `driver = cfg.dialect.name`、`jdbcUrl` 与凭据；**不要把库名写进 `schema` 字段** —— H2 会执行 `SET SCHEMA <dbname>` 并失败（H2 的 schema 是 `PUBLIC`，与 catalog 名无关）。
+> proto `ConnectionConfig.driver` 是各 handler 的必填字段（`SchemaHandler.list` / `ExportEngine` 先按 `driver` 取方言），因此 `engineConn` 必须同时写 `driver = cfg.dialect.name`、`jdbcUrl` 与凭据；**不要把库名写进 `schema` 字段** —— H2 会执行 `SET SCHEMA <dbname>` 并失败（H2 的 schema 是 `PUBLIC`，与 catalog 名无关）。
+>
+> **catalog 与 schema 是两个维度**：库名（catalog）只经 `engineConn(database = …)` 进 `ConnectionConfig.database`，
+> 它参与连接池 key 并决定「浏览另一个库 = 另一个池」；请求里的 `schema` 字段必须**留空**，
+> 引擎会把它交给 `PoolManager.getConnection(config, req.schema)` → `dialect.setSearchPath`。
+> 写成库名会让 SQL / 造数工作台在用户展开任意库后直接失败。
+>
+> **每个建池的 catalog 维度都要登记**：`DatabaseBrowserState.activeDatabases` 是 `releasePools` 的唯一遍历来源，
+> 因此 `refreshDatabases`（`""`）、`loadTables`（`database`）、`loadTabPreview`（`tab.schema`）以及
+> `executeSql` / `executeGenerate`（`currentSchema()`）发起请求后都必须 `activeDatabases.add(...)`，
+> 否则关 sheet 时那个池永远不会被 `disconnect` 回收。
 
 **`ConnectionSession.kt` 内符号分解**：
 

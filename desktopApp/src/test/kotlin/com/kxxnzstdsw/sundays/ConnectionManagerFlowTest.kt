@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -119,6 +120,12 @@ class ConnectionManagerFlowTest {
         onNodeWithText("连接").performClick()
         waitUntil(timeoutMillis = 10_000) { session.selectedConnection != null }
         assertTrue(session.connectionList.connections.isEmpty(), "快速连接不写入持久化列表")
+        // 标签由 connectionStatuses 驱动：connect() 同步置 CONNECTING（标签「连接中」）、
+        // 异步回填 CONNECTED（标签「已连接」）。测试连接那步已让状态是 CONNECTED，
+        // 因此不能只等状态 —— 直接等 UI 标签收敛，避免中间态一闪而过抓不到。
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+        }
         onNodeWithText("已连接").assertExists()
 
         // 「断开」→ 释放引擎连接池
