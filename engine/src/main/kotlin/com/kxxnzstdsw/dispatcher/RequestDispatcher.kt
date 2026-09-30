@@ -1,6 +1,7 @@
 package com.kxxnzstdsw.dispatcher
 
 import com.google.protobuf.Message
+import com.kxxnzstdsw.engine.StatementRegistry
 import com.kxxnzstdsw.grpc.Action
 import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.ColumnDef
@@ -78,6 +79,7 @@ import com.kxxnzstdsw.handlers.ViewHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
@@ -384,31 +386,57 @@ object RequestDispatcher {
             }
 
             // ─────── Stream routes ───────
-            when {
-                request.category == Category.EXPORT && request.action == Action.RUN_EXPORT -> {
-                    ExportHandler.executeInMainProcess(request).collect { emit(it) }
+            // timeoutMs 对流式路由同样生效。修复前流式分支在超时包装之外直接 return@flow，
+            // 导致 SQL.EXECUTE / DATA.LIST(pageSize=0) / DATA.GENERATE / EXPORT / IMPORT
+            // —— 恰恰是最容易跑飞的长任务 —— 完全没有超时保护。
+            if (isStreamRoute(request)) {
+                val streamTimeoutMs = timeoutMs
+                if (streamTimeoutMs == null) {
+                    dispatchStream(request) { emit(it) }
                     return@flow
                 }
-                // v2.16: 数据导入 —— 与 EXPORT 对称的读方向，流式进度 + 可取消 + 可事务回滚
-                request.category == Category.IMPORT && request.action == Action.RUN_IMPORT -> {
-                    ImportHandler.executeInMainProcess(request).collect { emit(it) }
-                    return@flow
+                var timedOut = false
+                var terminalSent = false
+                coroutineScope {
+                    // 看门狗：到点对运行中的目标发取消。
+                    // **协程取消对阻塞 JDBC 调用无效** —— 收集协程挂起后，那条 IO 线程仍在
+                    // 数据库里跑（StatementRegistry 的存在意义即此）。因此必须对运行中的
+                    // Statement 调 cancel()，让数据库侧真正停下来，收集才能结束。
+                    val guard = launch {
+                        delay(streamTimeoutMs)
+                        timedOut = true
+                        StatementRegistry.cancel(request.id)
+                    }
+                    try {
+                        // 协作式兜底：若 cancel() 没能让语句停下（例如目标未登记），
+                        // 宽限期后强制放弃，不让调用方无限等待。
+                        withTimeoutOrNull(streamTimeoutMs + CANCEL_GRACE_MS) {
+                            dispatchStream(request) { frame ->
+                                if (frame.end) terminalSent = true
+                                emit(frame)
+                            }
+                        }
+                    } finally {
+                        guard.cancel()
+                    }
                 }
-                request.category == Category.DATA && request.action == Action.LIST
-                    && request.dataRequest.hasList()
-                    && request.dataRequest.list.hasPageSize()
-                    && request.dataRequest.list.pageSize == 0 -> {
-                    streamDataList(request.id, request).collect { emit(it) }
-                    return@flow
+                if (timedOut && !terminalSent) {
+                    logger.warn(
+                        "Streaming handler ${request.category}/${request.action} exceeded ${streamTimeoutMs}ms"
+                    )
+                    emit(
+                        Response.newBuilder()
+                            .setId(request.id)
+                            .setSuccess(false)
+                            .setStream(true)
+                            .setEnd(true)
+                            .setError(
+                                "Handler ${request.category}/${request.action} exceeded ${streamTimeoutMs}ms"
+                            )
+                            .build()
+                    )
                 }
-                request.category == Category.SQL && request.action == Action.EXECUTE -> {
-                    streamSqlExecute(request.id, request).collect { emit(it) }
-                    return@flow
-                }
-                request.category == Category.DATA && request.action == Action.GENERATE -> {
-                    streamDataGenerate(request.id, request).collect { emit(it) }
-                    return@flow
-                }
+                return@flow
             }
 
             // ─────── Table-driven routes ───────
@@ -492,6 +520,57 @@ object RequestDispatcher {
         // IMPORT — truncate_first 会清空目标表，dryRun 必须短路（否则「试运行」把用户数据删了）
         Category.IMPORT to Action.RUN_IMPORT,
     )
+
+    /** 该请求是否走流式路径（决定是否需要 timeout 包装）。 */
+    private fun isStreamRoute(request: Request): Boolean = when {
+        request.category == Category.EXPORT && request.action == Action.RUN_EXPORT -> true
+        request.category == Category.IMPORT && request.action == Action.RUN_IMPORT -> true
+        request.category == Category.DATA && request.action == Action.LIST
+            && request.dataRequest.hasList()
+            && request.dataRequest.list.hasPageSize()
+            && request.dataRequest.list.pageSize == 0 -> true
+        request.category == Category.SQL && request.action == Action.EXECUTE -> true
+        request.category == Category.DATA && request.action == Action.GENERATE -> true
+        else -> false
+    }
+
+    /**
+     * 派发到对应的流式 handler，每一帧经 [sink] 转发到下游。
+     *
+     * 显式传 sink 而不是在扩展函数里 `emit`：流式路由需要被 `withTimeoutOrNull` 包裹，
+     * 而 emit 必须留在**外层** flow 的收集协程里（`emit` 只能从该协程调用）。
+     */
+    private suspend fun dispatchStream(
+        request: Request,
+        sink: suspend (Response) -> Unit,
+    ) {
+        when {
+            request.category == Category.EXPORT && request.action == Action.RUN_EXPORT ->
+                ExportHandler.executeInMainProcess(request).collect { sink(it) }
+            // v2.16: 数据导入 —— 与 EXPORT 对称的读方向，流式进度 + 可取消 + 可事务回滚
+            request.category == Category.IMPORT && request.action == Action.RUN_IMPORT ->
+                ImportHandler.executeInMainProcess(request).collect { sink(it) }
+            request.category == Category.DATA && request.action == Action.LIST ->
+                streamDataList(request.id, request).collect { sink(it) }
+            request.category == Category.SQL && request.action == Action.EXECUTE ->
+                streamSqlExecute(request.id, request).collect { sink(it) }
+            request.category == Category.DATA && request.action == Action.GENERATE ->
+                streamDataGenerate(request.id, request).collect { sink(it) }
+            else ->
+                throw UnsupportedOperationException(
+                    "dispatchStream called for non-streaming ${request.category}/${request.action}"
+                )
+        }
+    }
+
+    /**
+     * 流式超时后「已发出取消」到「放弃等待」的宽限时长。
+     *
+     * [StatementRegistry.cancel] 对 JDBC 驱动是**协作式**的：驱动抛出 SQLException 到
+     * IO 线程通常很快，但少数驱动需要等当前读返回。给一段固定宽限，让正常情况干净收尾；
+     * 超宽限则强制放弃，不把调用方一起挂住。
+     */
+    private const val CANCEL_GRACE_MS = 5_000L
 
     // ============ 流式响应 ============
     //

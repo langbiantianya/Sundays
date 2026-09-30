@@ -5,7 +5,9 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.PushbackInputStream
 import java.nio.charset.Charset
 import java.nio.charset.IllegalCharsetNameException
 import java.nio.charset.StandardCharsets
@@ -73,11 +75,63 @@ object ImportSourceFactory {
         }
     }
 
+    /**
+     * 打开 Reader 并剥掉 UTF-8 BOM。
+     *
+     * **为什么必须剥**：本项目的 [com.kxxnzstdsw.export.CsvWriter] 导出时会写 UTF-8 BOM
+     * （让 Excel 正确识别中文）。若导入侧不剥，首个列名会变成 `"\uFEFFid"`，
+     * 拼出的 `INSERT INTO t ("\uFEFFid", name)` 会被数据库拒收 —— 即「自己导出的文件
+     * 自己导不回来」。BOM 是**文件级**前缀而非格式语义，因此放在这一层统一处理，
+     * CSV 与 JSON Lines 两种读取器都受益。
+     *
+     * 只认 UTF-8 BOM（EF BB BF）：GBK 等其它编码不以它开头，不受影响。
+     */
     private fun openReader(file: File, charset: Charset, path: String): BufferedReader = try {
-        BufferedReader(InputStreamReader(FileInputStream(file), charset))
+        BufferedReader(InputStreamReader(BomStrippingInputStream(FileInputStream(file)), charset))
     } catch (e: IOException) {
         // canRead() 只能挡住大部分情况，权限在检查之后被改、或路径指向目录仍可能落到这里
         throw IllegalArgumentException("导入文件无法打开: $path — ${e.message}", e)
+    }
+
+    /**
+     * 惰性剥离 UTF-8 BOM 的输入流 —— 只在第一次读取时判断前三个字节，
+     * 探测后立即决定「吞掉」或「回推」，因此不破坏流式导入。
+     */
+    private class BomStrippingInputStream(input: InputStream) : InputStream() {
+        // PushbackInputStream：非 BOM 文件把已读的字节原样推回，不丢任何数据
+        private val delegate = PushbackInputStream(input, UTF8_BOM.size)
+        private var checked = false
+
+        override fun read(): Int {
+            stripBomOnce()
+            return delegate.read()
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            stripBomOnce()
+            return delegate.read(b, off, len)
+        }
+
+        private fun stripBomOnce() {
+            if (checked) return
+            checked = true
+            val head = ByteArray(UTF8_BOM.size)
+            var n = 0
+            while (n < head.size) {
+                val b = delegate.read()
+                if (b < 0) break
+                head[n++] = b.toByte()
+            }
+            if (n == head.size && head.contentEquals(UTF8_BOM)) return   // 命中 BOM：已吞掉
+            if (n > 0) delegate.unread(head, 0, n)                          // 未命中：全部回推
+        }
+
+        override fun available(): Int = delegate.available()
+        override fun close() = delegate.close()
+
+        companion object {
+            private val UTF8_BOM = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+        }
     }
 
     private const val DEFAULT_DELIMITER = ','

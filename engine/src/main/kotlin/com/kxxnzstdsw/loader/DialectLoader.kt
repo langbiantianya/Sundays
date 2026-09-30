@@ -88,11 +88,37 @@ object DialectLoader {
 
         val urls = jars.map { it.toURI().toURL() }.toTypedArray()
         val parent = dialectClassLoader ?: Thread.currentThread().contextClassLoader
+        // 单个 URLClassLoader 覆盖整个目录（与 DriverLoader 同理：方言实例注册后仍会
+        // 惰性加载自身内部类，不能提前关闭；真实 dialects/ 有 5 个 JAR）。
         val classLoader = URLClassLoader(urls, parent)
 
-        val serviceLoader = ServiceLoader.load(DatabaseDialect::class.java, classLoader)
         var count = 0
-        for (dialect in serviceLoader) {
+        var failures = 0
+        var consecutiveFailures = 0
+        val iterator = ServiceLoader.load(DatabaseDialect::class.java, classLoader).iterator()
+        // 同 DriverLoader：守卫迭代器本身，坏 provider 只跳过自己，不让
+        // ServiceConfigurationError 逃出去中断引擎启动。
+        while (true) {
+            val hasNext = try {
+                iterator.hasNext()
+            } catch (e: Throwable) {
+                logger.warn("Aborting dialect scan of ${dir.absolutePath} (hasNext failed): ${e.message}")
+                break
+            }
+            if (!hasNext) break
+
+            val dialect = try {
+                iterator.next()
+            } catch (e: Throwable) {
+                failures++
+                logger.warn("Skipping unloadable dialect entry in ${dir.absolutePath}: ${e.message}")
+                if (++consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                    logger.warn("Too many consecutive dialect failures, aborting scan of ${dir.absolutePath}")
+                    break
+                }
+                continue
+            }
+            consecutiveFailures = 0
             try {
                 dialects[dialect.driverName] = dialect
                 count++
@@ -107,9 +133,15 @@ object DialectLoader {
             logger.info("Loaded $count dialect plugin(s) from ${dir.absolutePath}")
         } else {
             classLoader.close()
-            logger.debug("No valid dialect plugins found in ${dir.absolutePath}")
+            logger.warn(
+                "No valid dialect plugins found in ${dir.absolutePath}" +
+                    if (failures == 0) "" else " (skipped $failures broken plugin entr(ies))"
+            )
         }
     }
+
+    /** 连续失败上限 —— 仅用于防御「迭代器不前进」的病态实现（同 DriverLoader）。 */
+    private const val MAX_CONSECUTIVE_FAILURES = 1000
 
     /**
      * 获取指定驱动名的方言实例

@@ -57,15 +57,25 @@ object StatementRegistry {
     /**
      * 取消指定请求正在执行的语句。
      *
-     * @return true = 找到目标且 `Statement.cancel()` 未抛异常；false = 该请求不在运行或已结束
+     * **子 id 匹配**：一次请求内可能先后登记多条语句 —— 多语句脚本按 `"$requestId#$index"`
+     * 逐条登记（`SqlEngineHandler.executeScript`）。调用方只知道自己发的 `Request.id`，
+     * 拿不到带 `#index` 后缀的内部键，因此这里在精确匹配失败后按**前缀**回退：
+     * `r2` 命中 `r2#0`。这让 `SYSTEM.CANCEL` 的文档语义（携带原请求 id 即可中止）
+     * 在脚本模式下真正成立。
+     *
+     * @return true = 找到目标且 `cancel()` 未抛异常；false = 该请求不在运行或已结束
      */
     fun cancel(requestId: String): Boolean {
-        val statement = running[requestId] ?: run {
-            logger.debug("No running statement for request id={}", requestId)
-            return false
-        }
+        val target = running[requestId]
+            ?: running.entries.firstOrNull { (key, _) ->
+                key.length > requestId.length && key.startsWith("$requestId#")
+            }?.value
+            ?: run {
+                logger.debug("No running statement for request id={}", requestId)
+                return false
+            }
         return try {
-            statement.cancel()
+            target.cancel()
             logger.info("Cancellation issued for request id={}", requestId)
             true
         } catch (e: Exception) {

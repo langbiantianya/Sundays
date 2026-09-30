@@ -122,6 +122,12 @@ class IdbEngine(
          * 全局初始化 (幂等) — 加载 JDBC drivers/ 目录 + dialects/ 目录。
          * 通常由 [IdbEngine] 构造时自动调用，业务代码不需显式调用。
          * 仅在需要预加载 (例如命令行工具启动前) 时单独调用。
+         *
+         * **失败可重试**：标志位只在加载**成功后**置位。此前用 `compareAndSet(false, true)`
+         * 先置位再加载，一旦 `loadFromDir` 抛异常（如某个坏插件 JAR 导致
+         * `ServiceConfigurationError`），标志已为 true —— 后续任何重试都被静默跳过，
+         * 引擎在进程内**永久处于未初始化**状态。改为「成功后置位 + 失败复位」后，
+         * 修掉坏插件再调一次即可恢复。
          */
         @JvmStatic
         @JvmOverloads
@@ -129,11 +135,20 @@ class IdbEngine(
             driversDir: File = File("drivers"),
             dialectsDir: File = File("dialects"),
         ) {
-            if (bootstrapped.compareAndSet(false, true)) {
-                DriverLoader.loadFromDir(driversDir)
-                DialectLoader.loadFromDir(dialectsDir)
-                logger.info("IdbEngine bootstrap complete (drivers={}, dialects={})",
-                    driversDir.absolutePath, dialectsDir.absolutePath)
+            if (bootstrapped.get()) return          // 已成功初始化 —— 幂等短路
+            synchronized(bootstrapped) {
+                if (bootstrapped.get()) return      // 双检：并发调用只加载一次
+                try {
+                    DriverLoader.loadFromDir(driversDir)
+                    DialectLoader.loadFromDir(dialectsDir)
+                    bootstrapped.set(true)
+                    logger.info("IdbEngine bootstrap complete (drivers={}, dialects={})",
+                        driversDir.absolutePath, dialectsDir.absolutePath)
+                } catch (e: Throwable) {
+                    // 失败不复位标志 —— 下次调用会重试，坏插件修好后即可恢复
+                    logger.warn("IdbEngine bootstrap failed, will retry on next call: ${e.message}")
+                    throw e
+                }
             }
         }
 

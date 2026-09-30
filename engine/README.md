@@ -10,8 +10,8 @@
 5 个可插拔方言：MySQL、PostgreSQL、H2、DuckDB、SQLite（v2.8 新增）。
 
 > **当前版本：v2.16**
-> - **查询取消 `SYSTEM.CANCEL`（v2.16，Action = 20）** —— 协程取消**无法**中断阻塞的 JDBC 调用（`rs.next()` 跑在 `Dispatchers.IO` 线程上，取消上游 Flow 只是让协程挂起，数据库里那条语句照跑），因此新增按请求 id 对**正在执行**的 `Statement` 调 `Statement.cancel()` 的能力；被取消的请求由其自身的异常路径收口为 `success=false, error="cancelled"` 的终止帧（携带原请求 id）
-> - **数据导入 `IMPORT.RUN_IMPORT`（v2.16，Category `IMPORT` = 14，Action = 21）** —— 与 EXPORT 对称的读方向，把本地 **CSV / JSON_LINES** 文件批量插入目标表；运行在**主进程**（无 POI / Parquet / Hadoop 负担），正因为如此批次语句才能登记到 `StatementRegistry`，`SYSTEM.CANCEL` 可立即打断正在执行的 `executeBatch()`
+> - **查询取消 `SYSTEM.CANCEL`（v2.16，Action = 20）** —— 协程取消**无法**中断阻塞的 JDBC 调用（`rs.next()` 跑在 `Dispatchers.IO` 线程上，取消上游 Flow 只是让协程挂起，数据库里那条语句照跑），因此新增按请求 id 对**正在执行**的 `Statement` 调 `Statement.cancel()` 的能力；被取消的请求由其自身的异常路径收口为 `success=false, error="cancelled"` 的终止帧（携带原请求 id）。多语句脚本按 `"<requestId>#<index>"` 逐条登记，`cancel` 精确匹配失败后会按 `requestId#` 前缀回退命中，因此调用方**只需传自己发的 `Request.id`**
+> - **数据导入 `IMPORT.RUN_IMPORT`（v2.16，Category `IMPORT` = 14，Action = 21）** —— 与 EXPORT 对称的读方向，把本地 **CSV / JSON_LINES** 文件批量插入目标表；运行在**主进程**（无 POI / Parquet / Hadoop 负担），正因为如此批次语句才能登记到 `StatementRegistry`，`SYSTEM.CANCEL` 可立即打断正在执行的 `executeBatch()`。打开文件时会**剥离 UTF-8 BOM**（`ImportSourceFactory.BomStrippingInputStream`）—— 本项目的 `CsvWriter` 导出时写 BOM，导入侧不剥会让首个列名变成 `"\uFEFFid"`，导致「自己导出的文件自己导不回来」
 > - **事务会话 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（v2.16，Action = 22 / 23 / 24 / 25）** —— `Request.session_id` 留空 = 无事务，**行为与 v2.15 完全一致**（每条语句独立提交），旧调用方零改动；非空时 `BEGIN` 为会话**钉住一条连接**并置 `autocommit=false`，同一 `session_id` 的 `DATA.*` 写操作与 `SQL.EXECUTE` DML 全部落在这条连接上，直到 `COMMIT` / `ROLLBACK`
 > - **多语句脚本（v2.16，`SQL.EXECUTE` 的 `multi_statement = true`）** —— 词法分句器 `SqlScriptSplitter` 只在**顶层** `;` 切分（跳过字符串 / 引号标识符 / 注释 / PostgreSQL dollar-quoting 内部的分号），按序执行、**遇错即停**，逐条结果回填 `SqlExecuteResponse.statements`
 > - **调用层抽象（v2.15）** —— proto 契约与 `EngineClient` 接口下沉到新模块 **`:engine-protocol`**（`engine` 通过 `api(project(":engine-protocol"))` 依赖它）；新增 **`:engine-grpc-client`**，以 gRPC 提供 `EngineClient` 的跨进程实现。调用方只面向 `EngineClient` 编程，**不感知引擎在同进程还是跨进程** → 参见 [`:engine-protocol`](../engine-protocol/README.md) 与 [`:engine-grpc-client`](../engine-grpc-client/README.md)
@@ -29,6 +29,7 @@
 > - **业务层 Kotlin DSL（v2.5）** —— 13 个 handler + `RequestDispatcher` + 11 个集成测试全部使用 protoc-gen-grpc-kotlin + protobuf-kotlin-lite 生成的 DSL builder（`xxxRequest { ... }` / `xxxResponse { ... }` / `xxxItem { ... }` / `request { ... }` / `response { ... }`）；仅 `google.protobuf.Value`（Well-Known Type，无生成 DSL）仍使用 `Value.newBuilder()`
 > - **强类型列表项 envelope** —— `TableListItem` / `ViewListItem` / `IndexListItem` / `ForeignKeyListItem` / `TriggerListItem` / `FunctionListItem` / `FunctionDebugItem` / `UserGrantItem` / typed `Row` 包装动态行；仅真正方言差异显著的 item shape（USER.LIST 重载、FUNCTION.CALL/INFO、SYSTEM.SERVER_INFO extras）保留 `google.protobuf.Value`
 > - **跨切面请求选项（v2.6）** —— `Request.options { traceId, dryRun, timeoutMs }` 统一应用到所有 (Category, Action) 路由；`traceId` 通过 SLF4J MDC 透传；`dryRun=true` 时 write action 直接短路返回 success（不调用 handler、不修改数据库）；`timeoutMs > 0` 时用 `withTimeoutOrNull` 包 handler 调用，超时返回 `success=false, error="timeout"`
+> - **`timeoutMs` 覆盖流式路由** —— 流式分支（`SQL.EXECUTE` / `DATA.LIST(pageSize=0)` / `DATA.GENERATE` / `EXPORT.RUN_EXPORT` / `IMPORT.RUN_IMPORT`）同样受 `timeoutMs` 约束。超时时先经 `StatementRegistry` 对运行中的目标发取消（协程取消对阻塞 JDBC 无效），再在 `CANCEL_GRACE_MS`（5s）宽限后强制收口为 `success=false, stream=true, end=true` 的终止帧
 > - **表驱动 dispatcher（v2.6）** —— `RequestDispatcher` 用单个 typed `routes` map（`Pair<Category, Action>` → `Route{invoke, wrap}`）替代原来的 9 个 `handleX` 函数 + 11 个 `wrapTypedResponse` `when` 分支；新增 (Category, Action) 仅需一个 map 条目；消除静默 `else -> {}` 兜底（不可能走到 —— 表查不到时直接抛 `UnsupportedOperationException`）；`SQL.EXPLAIN` 路由打通（之前 handler 存在但 dispatcher 从未路由）
 > - **DuckDB 方言（v2.7）** —— 第 4 个方言插件，面向**本地嵌入式 OLAP** 场景（内存 / `.duckdb` / `.csv` / `.parquet` / `.json` / `.xlsx` via POI 预转换）；driver 名 `Duckdb`（JDBC `org.duckdb.DuckDBDriver` 1.5.5.1）；`host`/`port` 完全忽略，`database` 字段即路径；自增主键走 `SEQUENCE + DEFAULT nextval + 表级 PRIMARY KEY`（DuckDB 拒绝 `IDENTITY + 表级 PK` 组合，也不支持 `INTEGER PRIMARY KEY` ROWID 自填充）；FK 走 table-rebuild（DuckDB 无 `ALTER TABLE ADD/DROP CONSTRAINT`）；USER / PRIVILEGE / TRIGGER 抛 `UnsupportedOperationException`
 > - **SQLite 方言（v2.8）** —— 第 5 个方言插件，面向**本地嵌入式关系型**场景（`:memory:` / `.db` 文件）；driver 名 `Sqlite`（JDBC `org.sqlite.JDBC` 3.46.1.3）；`host`/`port`/`user`/`password` 全部忽略，`database` 字段即路径；自增主键走 inline `INTEGER PRIMARY KEY AUTOINCREMENT`（`TableHandler.create` 检测到自增 PK 时跳过表级 `PRIMARY KEY` 子句，避免 SQLite "more than one primary key"）；FK 走 table-rebuild（SQLite 无 `ALTER TABLE ADD/DROP CONSTRAINT`）；`MODIFY_COLUMN` 仅支持 RENAME（无 ALTER COLUMN）；`TRUNCATE` 用 `DELETE FROM` + `sqlite_sequence` 重置模拟；多 database 走 `ATTACH/DETACH`；USER / PRIVILEGE / TRIGGER / FUNCTION（routines 概念）抛 `UnsupportedOperationException`
@@ -81,14 +82,23 @@ drivers/                JDBC 驱动（mysql-connector-j / postgresql / h2 / duck
 dialects/               方言插件（idb-dialect-{mysql,postgresql,h2,duckdb,sqlite}.jar，5 个 SPI 动态加载）
 ```
 
+> **坏插件不阻断启动** —— `drivers/` / `dialects/` 按 **JAR 逐个** 发现。某个 JAR 的
+> `META-INF/services` 声明了无法加载的类时，`ServiceLoader` 迭代器抛出的
+> `ServiceConfigurationError` 会被捕获并只跳过该 JAR（告警日志列出文件名），
+> 其余插件照常注册。`IdbEngine.bootstrap` 也只在加载**成功后**才置幂等标志 ——
+> 首次失败后再次调用会重试，不会把引擎永久留在「未初始化」状态。
+
 ### 运行
 
 ```bash
-# TCP loopback（默认 :50051，POSIX 上自动 fallback 到 unix）
+# TCP loopback（默认 127.0.0.1:50051，POSIX 上自动 fallback 到 unix）
 cd engine/build/libs && java -jar idb-engine.jar
 
 # 显式指定 TCP 端口
 java -jar idb-engine.jar --ipc tcp --port 60000
+
+# 对外暴露（无鉴权！请自行限制网络可达性）
+java -jar idb-engine.jar --ipc tcp --host 0.0.0.0 --port 50051
 
 # 显式指定 Unix Domain Socket（路径可换）
 java -jar idb-engine.jar --ipc unix --uds-path /run/idb/engine.sock
@@ -122,17 +132,21 @@ service IdbEngine {
 
 | `--ipc` | 传输 | 平台 | 说明 |
 |---|---|---|---|
-| `tcp`（默认） | TCP loopback `localhost:<port>` | 全平台 | 生产路径；`--port` 控制端口（默认 50051） |
+| `tcp`（默认） | TCP `127.0.0.1:<port>` | 全平台 | 生产路径；`--port` 控制端口（默认 50051），`--host` 控制绑定地址 |
 | `unix` | Unix Domain Socket | Linux / macOS / BSD | Linux 用 epoll native，macOS/BSD 用 NIO；UDS 文件权限 `rw-------`；默认路径 `/tmp/idb-engine.sock` |
 | `pipe` | Windows 命名管道 | Windows | 客户端可用；grpc-java 1.76 无 server-side API，`serverBuilder()` 抛 `UnsupportedOperationException`；管道名默认 `idb-engine` |
 
 **自动检测**：`--ipc` 缺省时，Windows → `pipe`，POSIX → `unix`。
+
+> **⚠️ TCP 端口无鉴权** —— 连上即可执行任意 SQL（含 `SYSTEM.DISCONNECT` 踢掉他人连接）。
+> 因此默认**只绑回环** `127.0.0.1`。确需跨机访问时显式 `--host 0.0.0.0`，并自行在网络层限制可达性。
 
 **所有 CLI 选项**：
 ```
 --mode <grpc|direct>      启动模式（默认 grpc；v2.9 新增 direct — 仅 bootstrap、不开 server）
 --ipc <tcp|unix|pipe>     IPC 传输（默认自动检测；仅 grpc 模式生效）
 --port <int>              TCP 端口（默认 50051，仅 tcp 模式生效）
+--host <addr>             TCP 绑定地址（默认 127.0.0.1；传 0.0.0.0 对外暴露，无鉴权）
 --uds-path <path>         UDS 文件路径（默认 /tmp/idb-engine.sock）
 --pipe-name <name>        命名管道名称（默认 idb-engine；需匹配 ^[A-Za-z0-9_.-]{1,64}$）
 --help / -h               打印 CLI 用法并退出
