@@ -21,7 +21,8 @@ class IpcTransportTest {
     fun `TcpIpcTransport exposes tcp scheme and 50051 default`() {
         val t = TcpIpcTransport(IpcConfig(kind = IpcKind.TCP, tcpPort = 50051))
         assertEquals("tcp", t.scheme())
-        assertEquals("50051", t.displayTarget())
+        // displayTarget 含绑定地址 —— 绑定到哪是安全相关的事实（日志里要能看出来）
+        assertEquals("127.0.0.1:50051", t.displayTarget())
         t.prepare()
         assertNotNull(t.serverBuilder())
         assertNotNull(t.channelBuilder())

@@ -27,6 +27,54 @@ private const val MYSQL_DEFAULT_PARAMS =
     "useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
 
 /**
+ * userinfo 的 percent-encoding —— 与 [decodeUserInfo] 成对。
+ *
+ * 只编码 RFC 3986 userinfo 段里真正有歧义的字符（`@ / : ? # [ ] %` 与控制字符），
+ * 保留字母数字与 `-._~!$&'()*+,;=`，这样绝大多数用户名/密码生成的 URL 仍然人类可读，
+ * 与改造前完全一致。空格编码为 `%20`（而非 `+`）—— userinfo 段不做 `+`→空格 的还原。
+ */
+private fun encodeUserInfo(raw: String): String = buildString(raw.length) {
+    for (ch in raw) {
+        when {
+            ch.isLetterOrDigit() && ch.code < 128 -> append(ch)
+            ch in "-._~!\$&'()*+,;=" -> append(ch)
+            else -> {
+                for (b in ch.toString().toByteArray(Charsets.UTF_8)) {
+                    append('%').append("%02X".format(b.toInt() and 0xFF))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * userinfo 的 percent-decoding —— 与 [encodeUserInfo] 成对。
+ *
+ * 按**字节**收集再一次性 UTF-8 解码，因此 `中文%2Fabc` 这类多字节字符能正确还原；
+ * 无法解码的 `%` 序列原样保留，保证「手写的、没编码过的 URL」也能照常解析（向后兼容）。
+ */
+private fun decodeUserInfo(raw: String): String {
+    if (!raw.contains('%')) return raw
+    val bytes = ArrayList<Byte>(raw.length)
+    var i = 0
+    while (i < raw.length) {
+        val c = raw[i]
+        if (c == '%' && i + 2 < raw.length) {
+            val v = raw.substring(i + 1, i + 3).toIntOrNull(16)
+            if (v != null) {
+                bytes.add(v.toByte())
+                i += 3
+                continue
+            }
+        }
+        // 非转义字符：按 UTF-8 字节落盘（ASCII 即单字节）
+        c.toString().toByteArray(Charsets.UTF_8).forEach { bytes.add(it) }
+        i++
+    }
+    return String(bytes.toByteArray(), Charsets.UTF_8)
+}
+
+/**
  * 从 [ConnectionConfig] 的字段构建 JDBC URL。
  *
  * @param extraQuery 显式 query 参数（不含 `?`）。非空时**完全替代**方言默认参数；为空时补 MySQL 默认参数。
@@ -44,9 +92,12 @@ internal fun buildJdbcUrl(config: ConnectionConfig, extraQuery: String = ""): St
             val portPart = if (port > 0) ":$port" else ""
             val dbPart = if (database.isNotEmpty()) "/$database" else ""
             val user = config.username.trim()
+            // userinfo 必须 percent-encoding：用户名/密码里的 `@` 与 `/` 是合法字符，
+            // 不编码的话解析侧会把它们误当作 host/db 分隔符（见 parseClientServerUrl 的
+            // 「最后一个 @」约定），导致 URL 往返后 host/库名/凭据全部错位。
             val credPart =
                 if (user.isEmpty()) ""
-                else "$user${if (config.password.isNotEmpty()) ":${config.password}" else ""}@"
+                else "${encodeUserInfo(user)}${if (config.password.isNotEmpty()) ":${encodeUserInfo(config.password)}" else ""}@"
             val query = extraQuery.ifBlank {
                 if (config.dialect == DialectType.MYSQL) MYSQL_DEFAULT_PARAMS else ""
             }
@@ -123,24 +174,28 @@ private fun parseClientServerUrl(url: String, scheme: String): UrlParts {
     if (!url.startsWith(scheme, ignoreCase = true)) return UrlParts()
     val withoutScheme = url.substring(scheme.length).removePrefix("://")
 
-    val slashIdx = withoutScheme.indexOf('/')
+    // 库名分隔：取**最后一个** `/` —— 密码里未经编码的 `/` 不能截断 host 段。
+    // （由 buildJdbcUrl 生成的 URL 已对 userinfo 做 percent-encoding，因此这里的
+    //  「最后一个 /」只会落在 host:port 与库名之间。）
+    val slashIdx = withoutScheme.lastIndexOf('/')
     val hostPart = if (slashIdx >= 0) withoutScheme.substring(0, slashIdx) else withoutScheme
     val afterSlash = if (slashIdx >= 0) withoutScheme.substring(slashIdx + 1) else ""
 
     // 数据库名 = `?` 之前的部分
     val database = afterSlash.substringBefore('?')
 
-    // `credentials@host:port`
-    val atIdx = hostPart.indexOf('@')
+    // `credentials@host:port` —— 取**最后一个** `@` 作为 userinfo 分隔：
+    // 密码里未编码的 `@` 是合法字符，取首个会把 host 截断（host 变成 "ss@db.example.com"）。
+    val atIdx = hostPart.lastIndexOf('@')
     val credPart = if (atIdx >= 0) hostPart.substring(0, atIdx) else ""
     val hostColonPort = if (atIdx >= 0) hostPart.substring(atIdx + 1) else hostPart
     val colonIdx = hostColonPort.lastIndexOf(':')
     val host = if (colonIdx >= 0) hostColonPort.substring(0, colonIdx) else hostColonPort
     val port = if (colonIdx >= 0) hostColonPort.substring(colonIdx + 1) else ""
 
-    // `username[:password]`
-    val user = credPart.substringBefore(':')
-    val password = credPart.substringAfter(':', missingDelimiterValue = "")
+    // `username[:password]` —— 密码按首个 `:` 切分（用户名里的 `:` 非法）
+    val user = decodeUserInfo(credPart.substringBefore(':'))
+    val password = decodeUserInfo(credPart.substringAfter(':', missingDelimiterValue = ""))
 
     return UrlParts(
         host = host,

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * 连接配置持久化存储 (v2.12).
@@ -28,6 +29,12 @@ import java.nio.file.Paths
 object ConnectionStorage {
     /** 当前持久化格式版本（[PersistedConnectionList] 的 version） */
     private const val PERSISTED_VERSION = 2
+
+    /** 凭据目录权限：`rwx------` —— 文件内含明文口令，不给 group / other 任何访问。 */
+    private const val OWNER_ONLY_DIR = "rwx------"
+
+    /** 凭据文件权限：`rw-------`。 */
+    private const val OWNER_ONLY_FILE = "rw-------"
 
     private val json = Json {
         prettyPrint = true
@@ -167,16 +174,36 @@ object ConnectionStorage {
         return savePersisted(persisted)
     }
 
-    /** 直接写入持久化结构（迁移场景） */
+    /**
+     * 直接写入持久化结构（迁移场景）。
+     *
+     * **权限**：文件里存着明文数据库口令，因此目录与文件都收紧到仅属主可读写（0700 / 0600）。
+     * 默认 umask 下 `createDirectories` / `writeString` 产出的是 755 / 644 —— 也就是同机任何
+     * 用户都能读到口令。同项目的 `UnixSocketIpcTransport` 早就是用 `PosixFilePermissions`
+     * 收紧 socket 的，这里是同一类问题的补齐。
+     *
+     * 写完**再**收紧：文件已存在时 `createDirectories` 不会改权限，写入过程中也存在
+     * 一小段「宽权限」窗口，收敛放在最后一步。非 POSIX 文件系统（Windows）不支持该属性，
+     * 捕获后按平台默认权限继续 —— 那里 ACL 才是访问控制手段。
+     */
     private fun savePersisted(persisted: PersistedConnectionList): Boolean {
         return try {
             val dir = configDir()
             if (!Files.exists(dir)) {
-                Files.createDirectories(dir)
+                Files.createDirectories(
+                    dir,
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString(OWNER_ONLY_DIR)),
+                )
             }
             val file = configFile()
             val content = json.encodeToString(persisted)
             Files.writeString(file, content)
+            runCatching {
+                Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(OWNER_ONLY_FILE))
+            }.onFailure { err ->
+                // 非 POSIX 文件系统（Windows）没有权限属性，属预期情况
+                println("无法收紧 ${file.toAbsolutePath()} 的权限（当前平台不支持 POSIX 权限）: ${err.message}")
+            }
             true
         } catch (e: Exception) {
             e.printStackTrace()
