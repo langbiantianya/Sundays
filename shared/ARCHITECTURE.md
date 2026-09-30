@@ -784,6 +784,86 @@ main()  ── rememberThemeModeState()  ← 状态诞生
 `ThemeModeTest` 钉住循环顺序、`next`/`previous` 互逆、显式档位不受系统值影响、
 以及三击回到原点（否则「跟随系统」档会点丢）。
 
+### 5.6 双轴外观模型：`ThemePalette` × `ThemeMode`
+
+配色由「色相 + 明暗」共同决定，因此拆成两个**正交**的轴：
+
+| 轴 | 取值 | 决定 |
+|---|---|---|
+| [`ThemePalette`] 配色主题 | `BLUE_GRAY` / `CYBERPUNK` | 色相体系 |
+| [`ThemeMode`] 明暗 | `SYSTEM` / `LIGHT` / `DARK` | 亮度 |
+
+2 主题 × 3 明暗 = **6 种外观**，且每套主题自带浅 / 深两版配色。
+
+**为什么不用一个枚举列出全部组合**：那样是 4~6 项，每项都要重复描述一遍「明暗」，
+且新增明暗档会翻倍。拆开之后设置页是两个独立单选组 —— 用户心里想的本来就是
+「换个配色」与「要不要跟着系统变暗」这两件不相干的事。
+
+**约束：每套主题必须提供浅 / 深两版**。只写一版（比如只做赛博朋克深色）时，
+配到另一个明暗档就会渲染成错误底色。`SundaysPaletteTest` 遍历
+`ThemePalette.entries × {light, dark}` 断言可读性与底色方向，**新增主题自动进入断言范围**。
+
+赛博朋克深色用近黑紫底（`#0B0118`）+ 霓虹青 / 品红 / 荧光绿；浅色版**不能**直接复用
+霓虹色 —— 荧光青 `#00E5FF` 在白底上对比度只有 1.46:1（实测，远低于 AA 4.5:1），
+故浅色版整体降饱和压深。
+
+### 5.7 `SettingsScreen` —— 设置页（左分类 / 右内容）
+
+第三个 `AppDestination.SETTINGS`，与「连接管理」「数据库浏览」平级。
+入口是两个面板标题行上的 `SettingsEntryButton`（⚙）—— 日夜按钮与设置按钮并列，
+两者都是**应用级**操作而非当前连接的操作，故都放在内容区之外的标题行。
+
+| 设计点 | 说明 |
+|---|---|
+| 分类用枚举 | `SettingsCategory.entries` 遍历渲染，新增分类只需加枚举项，不用改设置页 |
+| 不接触引擎 | 系统信息**不由本文件请求**：`shared` 无 `:engine` 依赖（§1.3）。调用方实现 `onRequestSystemInfo` 去调引擎，把结果作为 `SystemInfoState` 传入 —— 与 `ConnectionManagerScreen` 把引擎调用收进 `onTestConnection` 同源。引擎调用是 `suspend` 且可能失败（gRPC 更跨进程），注入后本组件可对 loading / 成功 / 失败三态写纯 UI 测试 |
+| `SystemInfo` 不直接用 proto | `:shared` 不依赖 protobuf；desktopApp 负责把 `SystemInfoResponse` 映射成扁平数据类。内存四值扁平化，渲染时不需要二级 `MemoryInfo` 包装 |
+| 按 sealed 子类型分派 | `when (state)` 而非「取字段再判空」—— `sealed interface` 的属性无法 smart-cast，`state.loading` 写不出来 |
+| 弹窗与设置页互斥 | `AddConnectionDialog` 不提供设置入口（模态弹窗里改全局设置会让人失去判断） |
+| 左上角返回 | `onBack` 回调由 `MainScreen` 接到 `closeSettings()` —— 它记住**进入设置页前所在的屏**，返回时回到原处而非固定回首屏；若来处是浏览屏且 sheet 已被关空，则回连接管理首屏 |
+
+### 5.8 系统信息自动刷新
+
+间隔档位 `SystemInfoRefresh`：`OFF` / `10s` / `5s` / `2s` / `1s`，默认 **`OFF`**。
+
+**默认关闭是刻意的**：自动刷新会周期性发 `SYSTEM.INFO`，在 **gRPC 模式下是真实的跨进程
+往返**。默认开启会让远程引擎在用户根本没打开这一页时也持续收到请求。
+
+**定时器登记在 `SettingsScreen` 内部**，理由有两条：
+
+1. `LaunchedEffect` 的生命周期随组合 —— 放在这里自动满足「离开设置页即停止轮询」
+   与「切到别的分类即停止轮询」，调用方不需要写任何清理逻辑。若把定时器放在
+   `MainScreen` 的长生命周期 `scope` 上，就得额外实现「什么时候该取消」。
+2. key 取 `(category, systemInfoRefresh)` —— 改间隔会立即以新周期重启定时器。
+
+⚠️ 回调必须用 `rememberUpdatedState` 包住：调用方传的 lambda 每次重组都是新实例，
+直接把它放进 `LaunchedEffect` 的 key 会让定时器**每次重组都被重启**，永远等不到下一次触发。
+
+### 5.8.1 `SystemInfo` 数据源（引擎既有的 `SYSTEM.INFO`）
+
+**`SystemInfo` 数据源是引擎既有的 `SYSTEM.INFO`**：`SystemHandler.info()` 已实现
+（JVM 版本 / 供应商 / OS / 处理器数 / 堆四值 / 运行时长 / PID），`RequestDispatcher`
+已注册 `Category.SYSTEM to Action.INFO` 路由 —— **本次未新增任何 proto 消息或路由**。
+`RequestDispatcher` 对该路由的实现是 `invoke = { c, _ -> SystemHandler.info() }`，
+忽略传入的 connection；而 `EngineClient.invoke` 的签名要求非空 `ConnectionConfig`，
+故 `fetchSystemInfo` 传一个 driver/jdbcUrl 皆空的占位配置。这条捷径由
+`SystemInfoFetchTest`（真引擎）验证「空配置不会被当成真实连接去解析方言」。
+
+### 5.9 `SettingsStorage` —— 设置持久化
+
+`~/.config/sundays/settings.json`，与 `connection.json` **分文件**：后者含明文口令
+（0600），设置不含敏感信息但需独立演进；设置文件损坏时不应连带丢失用户的连接列表。
+
+| 决策 | 理由 |
+|---|---|
+| 原子写（`.tmp` → `ATOMIC_MOVE`） | 直接覆盖时若进程在写一半被杀，会留下截断 JSON，下次启动设置整体读不出来。移动失败则退化为 `REPLACE_EXISTING` |
+| 读取永远降级 | 文件缺失 / 解析失败 / 枚举值非法，一律回落默认值，绝不因配置损坏让应用起不来。损坏文件会被**顺手重写为默认值**（自愈），否则用户每次启动都走降级分支 |
+| 磁盘记录与 `AppSettings` 解耦 | 枚举将来加档位时，未知 `themeMode` 字符串由 `toThemeMode()` 降级为 `SYSTEM`，而不会因反序列化失败把整个文件作废 |
+| 落盘挂在 `ThemeModeState` 内部 | 切换入口有三处（两个面板 + 设置页），散在三个文件里。任何一处漏保存，用户就遇到「这次改了、下次启动变回去」——这类 bug 极难复现。收在状态对象里只有一个写入点，新增入口自动继承 |
+
+`SettingsStorageTest` 覆盖往返（含逐档）、路径与版本字段、损坏文件降级 + 自愈、
+未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留。
+
 ---
 
 ## 6. 通用 UI 工具
@@ -969,9 +1049,11 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
+| `ThemeModeTest` | `commonTest/.../ui/ThemeModeTest.kt` | 8 | 三档循环顺序 / `next`↔`previous` 互逆 / 显式档位不受系统值影响 / 三击闭环 |
+| `SettingsStorageTest` | `jvmTest/.../settings/SettingsStorageTest.kt` | 8 | 逐档往返 / 路径与版本字段 / 损坏文件降级 + 自愈 / 未知枚举值降级 / 未知字段忽略 / 目录自动创建 / 临时文件不残留 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
-| **合计** | | **109** | **0 失败 / 0 错误** |
+| **合计** | | **125** | **0 失败 / 0 错误** |
 
 运行命令：
 

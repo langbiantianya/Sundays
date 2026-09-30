@@ -9,4 +9,5 @@ package com.kxxnzstdsw.sundays.navigation
 enum class AppDestination(val label: String) {
     CONNECTIONS("连接管理"),
     DATABASE("数据库浏览"),
+    SETTINGS("设置"),
 }

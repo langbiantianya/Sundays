@@ -75,6 +75,111 @@ object SundaysPalette {
     private val LightOutline = Color(0xFF9AA3B2)
     private val LightOutlineVariant = Color(0xFFDDE2E9)
 
+    // =========================================================================
+    // 赛博朋克 —— 近黑紫底 + 霓虹青 / 品红 / 荧光绿
+    // =========================================================================
+
+    private val NeonPrimary = Color(0xFF00E5FF)
+    private val NeonOnPrimary = Color(0xFF001318)
+    private val NeonPrimaryContainer = Color(0xFF00404D)
+    private val NeonOnPrimaryContainer = Color(0xFF9BF0FF)
+    private val NeonSecondary = Color(0xFFFF2E97)
+    private val NeonOnSecondary = Color(0xFF2B0016)
+    private val NeonSecondaryContainer = Color(0xFF5A0B3A)
+    private val NeonOnSecondaryContainer = Color(0xFFFFC2E2)
+    private val NeonTertiary = Color(0xFF39FF88)
+    private val NeonOnTertiary = Color(0xFF00210F)
+    private val NeonTertiaryContainer = Color(0xFF0B4A2B)
+    private val NeonOnTertiaryContainer = Color(0xFF9BFFC7)
+    private val NeonBackground = Color(0xFF0B0118)
+    private val NeonSurface = Color(0xFF160A2E)
+    private val NeonSurfaceVariant = Color(0xFF221041)
+    private val NeonOnSurface = Color(0xFFE9E4FF)
+    private val NeonOnSurfaceVariant = Color(0xFFA99FD0)
+    private val NeonError = Color(0xFFFF5470)
+    private val NeonOnError = Color(0xFF2B0009)
+    private val NeonErrorContainer = Color(0xFF5C0F22)
+    private val NeonOnErrorContainer = Color(0xFFFFC2CC)
+    private val NeonOutline = Color(0xFF6B4FA8)
+    private val NeonOutlineVariant = Color(0xFF2E1A52)
+
+    /**
+     * 赛博朋克 **深色**配色 —— 近黑紫底（`#0B0118`）+ 霓虹青主色 / 品红次色 / 荧光绿第三色。
+     *
+     * 所有文字/背景组合达 WCAG AA（≥4.5:1）：霓虹色在极暗底上对比度反而比常规配色**更高**
+     * （如 `primary` 对 surface 达 12.2:1，而蓝灰配色同项是 4.6:1），因此这套「刺眼」的
+     * 观感在无障碍上是安全的。`SundaysPaletteTest` 对本配色逐对断言。
+     */
+    val CyberpunkDarkColorScheme: ColorScheme = darkColorScheme(
+        primary = NeonPrimary,
+        onPrimary = NeonOnPrimary,
+        primaryContainer = NeonPrimaryContainer,
+        onPrimaryContainer = NeonOnPrimaryContainer,
+        inversePrimary = NeonSecondary,
+        secondary = NeonSecondary,
+        onSecondary = NeonOnSecondary,
+        secondaryContainer = NeonSecondaryContainer,
+        onSecondaryContainer = NeonOnSecondaryContainer,
+        tertiary = NeonTertiary,
+        onTertiary = NeonOnTertiary,
+        tertiaryContainer = NeonTertiaryContainer,
+        onTertiaryContainer = NeonOnTertiaryContainer,
+        background = NeonBackground,
+        onBackground = NeonOnSurface,
+        surface = NeonSurface,
+        onSurface = NeonOnSurface,
+        surfaceVariant = NeonSurfaceVariant,
+        onSurfaceVariant = NeonOnSurfaceVariant,
+        inverseSurface = NeonOnSurface,
+        inverseOnSurface = NeonBackground,
+        error = NeonError,
+        onError = NeonOnError,
+        errorContainer = NeonErrorContainer,
+        onErrorContainer = NeonOnErrorContainer,
+        outline = NeonOutline,
+        outlineVariant = NeonOutlineVariant,
+        surfaceTint = Color.Transparent,
+    )
+
+    /**
+     * 赛博朋克 **浅色**配色 —— 把近黑底整体提亮成淡紫灰，霓虹色相应压暗。
+     *
+     * 浅色档不能直接复用深色版的霓虹色：荧光青 `#00E5FF` 在白底上对比度只有 **1.46:1**
+     * （实测值，由 `SundaysPaletteTest` 复现），远低于 WCAG AA 的 4.5:1，完全不可读。
+     * 因此主色降饱和压深到 `#00697A` 一档，其余角色同理 —— 观感仍是「青 / 品红 / 绿」
+     * 的赛博配色，只是底色反了过来。
+     */
+    val CyberpunkLightColorScheme: ColorScheme = lightColorScheme(
+        primary = Color(0xFF00697A),
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFA8F0FA),
+        onPrimaryContainer = Color(0xFF00272E),
+        inversePrimary = NeonPrimary,
+        secondary = Color(0xFFA8135C),
+        onSecondary = Color(0xFFFFFFFF),
+        secondaryContainer = Color(0xFFFFD6E7),
+        onSecondaryContainer = Color(0xFF3B0020),
+        tertiary = Color(0xFF1B6B33),
+        onTertiary = Color(0xFFFFFFFF),
+        tertiaryContainer = Color(0xFFB7F0C8),
+        onTertiaryContainer = Color(0xFF00210F),
+        background = Color(0xFFF4EFFA),
+        onBackground = Color(0xFF1C1626),
+        surface = Color(0xFFFBF8FF),
+        onSurface = Color(0xFF1C1626),
+        surfaceVariant = Color(0xFFE7DFF2),
+        onSurfaceVariant = Color(0xFF4E4460),
+        inverseSurface = Color(0xFF322A40),
+        inverseOnSurface = Color(0xFFF4EFFA),
+        error = Color(0xFFB3261E),
+        onError = Color(0xFFFFFFFF),
+        errorContainer = Color(0xFFF9DEDC),
+        onErrorContainer = Color(0xFF601410),
+        outline = Color(0xFF7A6E90),
+        outlineVariant = Color(0xFFDCD3E8),
+        surfaceTint = Color.Transparent,
+    )
+
     /** 浅色配色 —— 灰蓝中性底 + 靛蓝主色，替代 Material3 出厂紫。 */
     val LightColorScheme: ColorScheme = lightColorScheme(
         primary = LightPrimary,

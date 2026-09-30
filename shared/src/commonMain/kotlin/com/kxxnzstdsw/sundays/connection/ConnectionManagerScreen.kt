@@ -19,6 +19,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
@@ -118,6 +119,7 @@ fun ConnectionManagerScreen(
     // 模态弹窗里改全局主题会让人失去「当前处于什么主题」的判断，故那里不传。
     themeMode: ThemeMode? = null,
     onCycleTheme: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.fillMaxHeight()) {
@@ -133,6 +135,7 @@ fun ConnectionManagerScreen(
             onDeleteConnection = onDeleteConnection,
             themeMode = themeMode,
             onCycleTheme = onCycleTheme,
+            onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .width(250.dp)
                 .fillMaxHeight(),
@@ -231,6 +234,7 @@ private fun ConnectionListPanel(
     onDeleteConnection: (String) -> Unit,
     themeMode: ThemeMode?,
     onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -256,9 +260,10 @@ private fun ConnectionListPanel(
                     Icon(Icons.Default.Add, contentDescription = "新建连接")
                 }
                 // 日夜切换紧挨面板标题：与「快速连接 / 新建」同属面板级操作。
-                // themeMode 为 null（弹窗内嵌）时不渲染。
+                // themeMode 为 null（弹窗内嵌）时不渲染 —— 弹窗里也不提供设置入口。
                 if (themeMode != null) {
                     ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
+                    SettingsEntryButton(onClick = onOpenSettings)
                 }
             }
         }

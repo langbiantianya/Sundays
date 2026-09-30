@@ -17,7 +17,7 @@ import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionStorage
 import com.kxxnzstdsw.sundays.connection.DialectType
-import com.kxxnzstdsw.sundays.ui.rememberThemeModeState
+import com.kxxnzstdsw.sundays.ui.rememberAppearanceState
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -70,7 +70,7 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberThemeModeState()) } }
+        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
 
         // 首屏可见，无 sheet —— 顶部 nav 不渲染（连接管理首屏无 chip）
         onNodeWithText("未连接 H2").assertIsDisplayed()
@@ -101,7 +101,7 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberThemeModeState()) } }
+        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
 
         // 首屏可见该连接
         onNodeWithText("我的 H2").performClick()
@@ -139,7 +139,7 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberThemeModeState()) } }
+        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
 
         // 第一个 sheet 打开
         onNodeWithText("现有 H2").performClick()
@@ -289,7 +289,7 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberThemeModeState()) } }
+        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
 
         onNodeWithText("关闭测试 H2").performClick()
         onNodeWithText("连接").performClick()

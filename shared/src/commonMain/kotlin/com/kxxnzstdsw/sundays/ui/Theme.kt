@@ -19,15 +19,17 @@ import androidx.compose.ui.Modifier
  * 向导步骤标题、`labelLarge` 小标题等全部看不清）。由 [Surface] 统一提供
  * `background` + `onBackground` 后，所有未着色的文本在任何主题下都有正确对比度。
  *
- * @param darkTheme 是否暗色（默认跟随系统；显式传入便于测试与将来的外观设置）
+ * @param darkTheme 是否暗色（默认跟随系统；显式传入便于测试与外观设置）
+ * @param palette 配色主题（[ThemePalette]）—— 与 [darkTheme] 正交：同一主题各有浅 / 深两套配色
  */
 @Composable
 fun SundaysTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    palette: ThemePalette = ThemePalette.BLUE_GRAY,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = SundaysPalette.colorSchemeFor(darkTheme),
+        colorScheme = palette.schemeFor(darkTheme),
         shapes = SundaysPalette.Shapes,
         typography = SundaysPalette.Typography,
     ) {

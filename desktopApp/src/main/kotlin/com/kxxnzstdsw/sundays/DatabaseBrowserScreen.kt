@@ -100,6 +100,7 @@ import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
+import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
@@ -178,6 +179,7 @@ fun DatabaseBrowserScreen(
     onDisconnect: (ConnectionConfig) -> Unit,
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     onCycleTheme: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -191,6 +193,7 @@ fun DatabaseBrowserScreen(
                 onAddSheet = onAddSheet,
                 themeMode = themeMode,
                 onCycleTheme = onCycleTheme,
+                onOpenSettings = onOpenSettings,
                 modifier = Modifier.fillMaxSize(),
             )
             return@Column
@@ -203,6 +206,7 @@ fun DatabaseBrowserScreen(
             onAdd = onAddSheet,
             themeMode = themeMode,
             onCycleTheme = onCycleTheme,
+            onOpenSettings = onOpenSettings,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -248,6 +252,7 @@ private fun SheetTabRow(
     onAdd: () -> Unit,
     themeMode: ThemeMode,
     onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -302,13 +307,10 @@ private fun SheetTabRow(
                 )
             }
         }
-        // 主题切换钉在**最外层**右上角：与左侧「＋」同一行、同高 —— 不占用内容区高度，
-        // 也不随工作台切换 / sheet 内容变化而移动。
-        ThemeModeToggleButton(
-            mode = themeMode,
-            onCycle = onCycleTheme,
-            modifier = Modifier.padding(end = 4.dp),
-        )
+        // 主题切换 + 设置入口钉在**最外层**右上角：与左侧「＋」同一行、同高 ——
+        // 不占用内容区高度，也不随工作台切换 / sheet 内容变化而移动。
+        ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
+        SettingsEntryButton(onClick = onOpenSettings, modifier = Modifier.padding(end = 4.dp))
     }
 }
 
@@ -317,18 +319,20 @@ private fun EmptySheetsHint(
     onAddSheet: () -> Unit,
     themeMode: ThemeMode,
     onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
-        // 空态下没有标签条也没有工具栏，主题切换若不单独放一个就会彻底消失 ——
+        // 空态下没有标签条也没有工具栏，主题切换 / 设置入口若不单独放一个就会彻底消失 ——
         // 而空态恰恰是用户第一次打开应用最可能停留的地方。
-        ThemeModeToggleButton(
-            mode = themeMode,
-            onCycle = onCycleTheme,
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(4.dp),
-        )
+        ) {
+            ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
+            SettingsEntryButton(onClick = onOpenSettings)
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.Center)

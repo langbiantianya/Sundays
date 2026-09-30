@@ -36,10 +36,17 @@ shared/
 │   └── ui/              通用 UI 工具
 │       ├── Theme.kt                   SundaysTheme（跟随系统明暗；配色/形状/字号取自 SundaysPalette）
 │       ├── SundaysPalette.kt          视觉规范：蓝灰 IDE 配色 + 紧凑形状 + 桌面字号
-│       ├── ThemeMode.kt               ThemeMode 三档枚举（SYSTEM/LIGHT/DARK）+ ThemeModeState（状态提升）
-│       ├── ThemeModeToggle.kt         ThemeModeToggleButton（日夜切换按钮，两屏共用）
+│       ├── ThemeMode.kt               ThemeMode 明暗三档 + AppearanceState（双轴状态 + 落盘）
+│       ├── ThemePalette.kt            ThemePalette 配色主题（蓝灰 IDE / 赛博朋克）
+│       ├── SystemInfoRefresh.kt       SystemInfoRefresh 自动刷新间隔（关闭/10s/5s/2s/1s）
+│       ├── ThemeModeToggle.kt         ThemeModeToggleButton（日夜切换）+ SettingsEntryButton（⚙ 设置入口）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
+│   ├── settings/        设置页 + 设置持久化
+│   │   ├── SettingsScreen.kt          左分类 / 右内容（个性化 / 系统信息）
+│   │   ├── SettingsCategory.kt        SettingsCategory 枚举（PERSONALIZATION / SYSTEM_INFO）
+│   │   ├── SettingsStorage.kt         ~/.config/sundays/settings.json（原子写 + 损坏自愈）
+│   │   └── SystemInfo.kt              SystemInfoState（Idle/Loading/Loaded/Failed）+ SystemInfo
 ├── commonTest/          平台无关测试（tokenizer / 模型 / 集成）
 ├── jvmMain/             当前为空 —— 无平台特定实现
 └── jvmTest/             JVM 特定测试
@@ -69,8 +76,13 @@ shared/
 | `AppDestination` | `commonMain/.../navigation/AppDestination.kt` | 顶层导航目标枚举（`label` 供导航条渲染） |
 | `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `SundaysPalette` 的深 / 浅配色）；各平台入口只需创建平台容器 |
 | `SundaysPalette` | `commonMain/.../ui/SundaysPalette.kt` | 视觉规范单例：蓝灰专业 IDE 配色（`LightColorScheme` / `DarkColorScheme`）+ `Shapes` + `Typography` + `buttonShape`；设计约束与对比度见 [`ARCHITECTURE.md` §5.4](./ARCHITECTURE.md) |
-| `ThemeMode` / `ThemeModeState` | `commonMain/.../ui/ThemeMode.kt` | 主题档位三态（`SYSTEM` / `LIGHT` / `DARK`）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.5](./ARCHITECTURE.md) |
-| `ThemeModeToggleButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）；连接管理与浏览屏共用 |
+| `ThemeMode` / `ThemePalette` / `AppearanceState` | `commonMain/.../ui/ThemeMode.kt`、`ThemePalette.kt` | 双轴外观：明暗三档 × 配色主题（蓝灰 / 赛博朋克）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.6](./ARCHITECTURE.md) |
+| `SystemInfoRefresh` | `commonMain/.../ui/SystemInfoRefresh.kt` | 系统信息自动刷新间隔（关闭 / 10 / 5 / 2 / 1 秒）；默认关闭 |
+| `ThemeModeToggleButton` / `SettingsEntryButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）与 ⚙ 设置入口；两个面板标题行共用 |
+| `SettingsScreen` | `commonMain/.../settings/SettingsScreen.kt` | 设置页：左侧分类 + 右侧内容（个性化 / 系统信息）。**不接触引擎** —— 系统信息由调用方经 `onRequestSystemInfo` 回调喂进来 |
+| `SettingsCategory` | `commonMain/.../settings/SettingsCategory.kt` | 设置分类枚举；新增分类只需加枚举项，列表自动出现 |
+| `SettingsStorage` | `commonMain/.../settings/SettingsStorage.kt` | 设置持久化 `~/.config/sundays/settings.json`（原子写 + 损坏自愈 + 未知值降级） |
+| `SystemInfo` / `SystemInfoState` | `commonMain/.../settings/SystemInfo.kt` | 系统信息数据与四态；**刻意不用 proto 类型**（`:shared` 不依赖 protobuf），由 desktopApp 负责映射 |
 
 ---
 
@@ -222,6 +234,9 @@ ConnectionManagerScreen(
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）
+- `ThemeModeTest` — 8 项（三档循环顺序、`next`/`previous` 互逆、显式档位不受系统值影响、三击闭环）
+- `SettingsStorageTest` — 8 项（jvmTest：逐档往返、路径与版本字段、损坏文件降级 + 自愈、未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留）
+- `SettingsScreenTest` — 7 项（在 `:desktopApp` 跑：左分类/右内容结构、切分类触发加载、三档切换回写、落盘钩子被调用、loading/成功/失败三态渲染）
 - `ConnectionStorageTest` — 4 项（jvmTest：持久化往返重建派生字段、upsert/delete、v1 → v2 迁移回写）
 
 ---

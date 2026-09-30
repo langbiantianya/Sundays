@@ -76,23 +76,39 @@ class SundaysPaletteTest {
         assertContrast(scheme, "$label/onErrorContainer", scheme.onErrorContainer, scheme.errorContainer)
     }
 
+    /**
+     * 遍历**所有**配色主题 × 明暗组合，逐个断言可读性。
+     *
+     * 为什么遍历 `ThemePalette.entries` 而不是写死两套配色：写死的话，新增一套配色
+     * （比如本轮的赛博朋克）不会有任何测试覆盖它 —— 断言「现有的两套没问题」对新配色
+     * 等于什么都没说。遍历后，**新增配色自动进入断言范围**，配色作者绕不过去。
+     */
     @Test
-    fun light_scheme_keeps_text_readable() = assertSchemeReadable(SundaysPalette.LightColorScheme, "light")
+    fun every_palette_and_brightness_keeps_text_readable() {
+        ThemePalette.entries.forEach { palette ->
+            assertSchemeReadable(palette.schemeFor(useDark = false), "${palette.name}/light")
+            assertSchemeReadable(palette.schemeFor(useDark = true), "${palette.name}/dark")
+        }
+    }
 
+    /**
+     * 每套配色的浅色变体必须亮、深色变体必须暗。
+     *
+     * 这条抓的是「给某个主题只写了一版配色，另一版忘了改底色」：两版共用同一个
+     * `background` 时，浅色档会渲染成暗底黑字。逐主题断言，而不是只看默认主题。
+     */
     @Test
-    fun dark_scheme_keeps_text_readable() = assertSchemeReadable(SundaysPalette.DarkColorScheme, "dark")
-
-    @Test
-    fun schemes_disagree_on_brightness() {
-        // 浅色底必须是亮的、深色底必须是暗的 —— 配反了说明某套方案整体写反了
-        assertTrue(
-            luminance(SundaysPalette.LightColorScheme.background) > 0.5,
-            "light background ${SundaysPalette.LightColorScheme.background} 不是亮色",
-        )
-        assertTrue(
-            luminance(SundaysPalette.DarkColorScheme.background) < 0.2,
-            "dark background ${SundaysPalette.DarkColorScheme.background} 不是暗色",
-        )
+    fun every_palette_has_a_bright_and_a_dark_variant() {
+        ThemePalette.entries.forEach { palette ->
+            assertTrue(
+                luminance(palette.light.background) > 0.5,
+                "${palette.label} 浅色变体底色不是亮色：${palette.light.background}",
+            )
+            assertTrue(
+                luminance(palette.dark.background) < 0.2,
+                "${palette.label} 深色变体底色不是暗色：${palette.dark.background}",
+            )
+        }
     }
 
     @Test
@@ -100,7 +116,17 @@ class SundaysPaletteTest {
         // surfaceTint = transparent：`Surface(tonalElevation = …)` 在底色等于 surface 时
         // 会把 surfaceTint 叠上去（ColorScheme.applyTonalElevation）。若 tint 有色，工具栏
         // 就会叠出一层色偏；透明色让分层只由 outlineVariant 分割线表达。
-        assertEquals(Color.Transparent, SundaysPalette.LightColorScheme.surfaceTint)
-        assertEquals(Color.Transparent, SundaysPalette.DarkColorScheme.surfaceTint)
+        ThemePalette.entries.forEach { palette ->
+            assertEquals(
+                Color.Transparent,
+                palette.schemeFor(useDark = false).surfaceTint,
+                "${palette.label} 浅色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
+            )
+            assertEquals(
+                Color.Transparent,
+                palette.schemeFor(useDark = true).surfaceTint,
+                "${palette.label} 深色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
+            )
+        }
     }
 }

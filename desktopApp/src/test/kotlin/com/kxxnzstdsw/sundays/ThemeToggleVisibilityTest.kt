@@ -13,7 +13,7 @@ import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionStorage
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.ui.ThemeMode
-import com.kxxnzstdsw.sundays.ui.rememberThemeModeState
+import com.kxxnzstdsw.sundays.ui.rememberAppearanceState
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -69,11 +69,11 @@ class ThemeToggleVisibilityTest {
 
     @Test
     fun `first screen shows the theme toggle and cycles the mode`() = runComposeUiTest {
-        // rememberThemeModeState() 是 @Composable，必须在 setContent 内建；但要在测试里
+        // rememberAppearanceState() 是 @Composable，必须在 setContent 内建；但要在测试里
         // 断言 mode，就得把实例提到外面 —— 用 lateinit 在组合内赋值，组合跑完即可读。
-        lateinit var state: com.kxxnzstdsw.sundays.ui.ThemeModeState
+        lateinit var state: com.kxxnzstdsw.sundays.ui.AppearanceState
         setContent {
-            val s = rememberThemeModeState()
+            val s = rememberAppearanceState()
             state = s
             MaterialTheme { MainScreen(engine, s) }
         }
@@ -97,7 +97,7 @@ class ThemeToggleVisibilityTest {
     @Test
     fun `add connection dialog does not show the theme toggle`() = runComposeUiTest {
         seed("theme-dialog", "弹窗主题测试 H2")
-        setContent { MaterialTheme { MainScreen(engine, rememberThemeModeState()) } }
+        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
 
         // 切到第二屏（连上 → 打开 sheet），点「＋」打开 AddConnectionDialog
         onAllNodesWithText("弹窗主题测试 H2")[0].performClick()
@@ -123,9 +123,9 @@ class ThemeToggleVisibilityTest {
     @Test
     fun `browser screen keeps the toggle in the outermost layer across sheets`() = runComposeUiTest {
         seed("sheet-a", "A 连接")
-        lateinit var state: com.kxxnzstdsw.sundays.ui.ThemeModeState
+        lateinit var state: com.kxxnzstdsw.sundays.ui.AppearanceState
         setContent {
-            val s = rememberThemeModeState()
+            val s = rememberAppearanceState()
             state = s
             MaterialTheme { MainScreen(engine, s) }
         }

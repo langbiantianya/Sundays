@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -76,4 +77,29 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.SYSTEM -> "主题：跟随系统，切换为浅色"
     ThemeMode.LIGHT -> "主题：浅色，切换为深色"
     ThemeMode.DARK -> "主题：深色，切换为跟随系统"
+}
+
+/**
+ * 设置入口按钮（⚙）—— 连接管理与数据库浏览两个面板标题行各放一个。
+ *
+ * 与 [ThemeModeToggleButton] 并排放在同一行：两者都是**应用级**操作（不是当前连接的操作），
+ * 放在内容区之外的标题行里，用户在任何页面都能改设置 / 换主题。
+ */
+@Composable
+fun SettingsEntryButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier,
+        colors = IconButtonDefaults.iconButtonColors(
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Settings,
+            contentDescription = "设置",
+        )
+    }
 }
