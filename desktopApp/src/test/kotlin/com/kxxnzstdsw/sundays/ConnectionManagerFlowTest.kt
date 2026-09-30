@@ -15,7 +15,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
+import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
@@ -134,6 +136,54 @@ class ConnectionManagerFlowTest {
         waitUntil(timeoutMillis = 10_000) {
             session.statuses.values.all { it.state == ConnectionState.DISCONNECTED }
         }
+    }
+
+    /**
+     * 回归：断开后再点「连接」必须能重新连上。
+     *
+     * `connect` / `disconnect` 都用 `statusGeneration` 做「结果是否仍然有效」的判定，而
+     * `bumpStatusGeneration` 曾因运算符优先级写成 `(statusGeneration[id] ?: 0) + 1.also { … }` ——
+     * `.also` 的接收者是字面量 `1`：代次落库恒为 1，返回值却是「旧值 + 1」。第一次 connect 的
+     * 1 == 1 比对通过（所以首连正常），其后每次操作返回值 ≥ 2 与落库的 1 永不相等 → 回填结果被
+     * 全部丢弃，UI 永远停在「连接中...」（按钮被禁用，且再也点不动）。本测试断言断开后的重连
+     * 能回到 CONNECTED 且连接池真的重建。
+     */
+    @Test
+    fun `reconnect after disconnect reaches connected again`() = runComposeUiTest {
+        // 本方法不依赖执行顺序：别的测试调 `engine.close()` 会清空方言注册表，而 bootstrap 全局幂等
+        // （AtomicBoolean 只置一次）不会重扫 SPI —— 显式注入 H2 方言，约定同 DatabaseBrowserFlowTest。
+        DialectLoader.registerForTesting("H2", H2Dialect())
+
+        val session = newSession()
+        setContent { MaterialTheme { Screen(session) } }
+
+        onNodeWithText("快速连接").performClick()
+        onNodeWithText("H2").performClick()
+        onNode(hasSetTextAction()).performTextInput("reconnectflow")
+        onNodeWithText("下一步").performClick()
+
+        // 首次连接：建池 + isValid → 总览状态行「已连接」
+        onNodeWithText("连接").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+        }
+        waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() >= 1 }
+
+        // 断开：释放连接池，状态行回「未连接」
+        onNodeWithText("断开").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("未连接").fetchSemanticsNodes().isNotEmpty()
+        }
+        waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 0 }
+
+        // 重连：必须重新走完 CONNECTING → CONNECTED（修复前代次比对永久失败，结果被丢弃，
+        // 界面永远停在禁用的「连接中...」）且池重建
+        onNodeWithText("连接").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+        }
+        onNodeWithText("已连接").assertExists()
+        waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() >= 1 }
     }
 
     @Test

@@ -177,7 +177,7 @@ ConnectionManagerScreen(
 
 > 调用方需自行维护 `WizardState(editingConnection, wizardStep, flow)`，并在切换入口（新建 / 快速连接 / 编辑）时**同步**设置 `flow` —— 详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §4.6。
 >
-> 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开」全链路。
+> 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开 → 重连」全链路。
 
 端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) —— `MainScreen` 用本模块的 `TopNavBar` + `ConnectionManagerScreen` 组成顶层导航。
 

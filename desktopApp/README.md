@@ -75,7 +75,7 @@
   - 语义对两种实现一致：Direct 由本地方法直接完成；gRPC 下 `testConnection` / `disconnect` 分别走 `SYSTEM.TEST_CONNECTION` / `SYSTEM.DISCONNECT` 路由（连接池在引擎进程内，远程调用方需要有线上路由才能释放）
 - **持久化**：`ConnectionStorage` 读写 `~/.config/sundays/connection.json`，只落盘 `id` / `name` / `dialect` / `jdbcUrl` / `username` / `password` + 时间戳；`host` / `port` / `database` / `connectionType` 在加载时由 `parseJdbcUrl` 重建（按 `version` 分派 v1 / v2，v1 自动迁移回写）
 - **快速连接不持久化**：`QUICK_CONNECT` 流程最后一步是「连接」而非「保存」，仅设为当前选中并直接连库
-- **测试覆盖**：`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试连接 → 连接 → 断开」全链路（`./gradlew :desktopApp:test`）
+- **测试覆盖**：`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试连接 → 连接 → 断开 → 重连」全链路（`./gradlew :desktopApp:test`）
 
 > **来源**：[`shared/`](../shared/) 模块的 `connection/` 子包；具体 API 见 [`shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) §4。
 

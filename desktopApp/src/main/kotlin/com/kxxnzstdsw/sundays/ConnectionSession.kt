@@ -80,9 +80,20 @@ class ConnectionSession(
      */
     private val statusGeneration = mutableMapOf<String, Int>()
 
-    /** 自增该连接的状态代次，返回**自增后**的值（供发起方与回填方比对）。 */
-    private fun bumpStatusGeneration(id: String): Int =
-        (statusGeneration[id] ?: 0) + 1.also { statusGeneration[id] = it }
+    /**
+     * 自增该连接的状态代次，返回**自增后**的值（供发起方与回填方比对）。
+     *
+     * 必须用「先自增、再写回、返回自增后值」的显式多行写法：写成
+     * `(statusGeneration[id] ?: 0) + 1.also { statusGeneration[id] = it }` 时，`.also` 的接收者是
+     * 字面量 `1` 而非和 —— 落库的是常量 `1`，而返回值是「旧值 + 1」。于是第一次操作代次为 1（比对
+     * 通过），其后每次操作的返回值都 ≥ 2 而落库恒为 1：比对**永远失败**，回填结果被全部丢弃。
+     * 表现即「断开后再点连接」永远停在 CONNECTING（按钮成了禁用的「连接中...」）——连接再也建立不起来。
+     */
+    private fun bumpStatusGeneration(id: String): Int {
+        val next = (statusGeneration[id] ?: 0) + 1
+        statusGeneration[id] = next
+        return next
+    }
 
     /**
      * 已在数据库浏览区打开的 sheet（按打开顺序）—— 每条 sheet 持有完整的 `ConnectionConfig`，
