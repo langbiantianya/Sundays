@@ -24,6 +24,9 @@ import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 import com.kxxnzstdsw.sundays.navigation.AppDestination
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
+import com.kxxnzstdsw.sundays.ui.ThemeModeState
+import com.kxxnzstdsw.sundays.ui.isDark
+import com.kxxnzstdsw.sundays.ui.rememberThemeModeState
 
 /**
  * KMP Desktop 应用入口.
@@ -58,8 +61,12 @@ fun main() = application {
         },
         title = "sundays",
     ) {
-        SundaysTheme {
-            MainScreen(engine)
+        // 主题档位状态必须提升到这里（SundaysTheme 之外）：配色由 SundaysTheme 的 darkTheme
+        // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
+        // 会出现「按钮变了、界面没变」。见 ThemeModeState 的 KDoc。
+        val themeMode = rememberThemeModeState()
+        SundaysTheme(darkTheme = themeMode.isDark()) {
+            MainScreen(engine = engine, themeMode = themeMode)
         }
     }
 }
@@ -99,11 +106,17 @@ const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
  *   + 切到第二屏 + `connect()` 触发引擎建池（异步，`DatabaseBrowserScreen` 观察
  *   `CONNECTING → CONNECTED` 状态）。
  *
+ * **主题切换**：[themeMode] 由 [main] 持有（与 `SundaysTheme` 同层），两个屏幕各渲染一个
+ * [ThemeModeToggleButton] 写回同一实例 —— 因此任一屏切换，全应用（含编辑器 / 表格主题）立即生效。
+ *
  * `internal` 而非 `private`：`MainScreenNavTest` 需要渲染它来验证顶层导航切换
  * （导航状态由本函数持有，无法从外部注入）。
+ *
+ * @param themeMode 主题档位状态；`MainScreen` 只**透传**给两个屏幕，不自己改档位 ——
+ *   状态归属见 [ThemeModeState] KDoc
  */
 @Composable
-internal fun MainScreen(engine: EngineClient) {
+internal fun MainScreen(engine: EngineClient, themeMode: ThemeModeState) {
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
     // 浏览状态按 sheet id 各自持有（而非 DatabaseBrowserScreen 内部 remember）：
@@ -159,6 +172,8 @@ internal fun MainScreen(engine: EngineClient) {
                     session.openSheet(cfg)
                 },
                 onDisconnect = session::disconnect,
+                themeMode = themeMode.mode,
+                onCycleTheme = themeMode::cycle,
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {
@@ -199,6 +214,8 @@ internal fun MainScreen(engine: EngineClient) {
                     onAddSheet = { addDialogVisible = true },
                     onConnect = session::connect,
                     onDisconnect = session::disconnect,
+                    themeMode = themeMode.mode,
+                    onCycleTheme = themeMode::cycle,
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (addDialogVisible) {

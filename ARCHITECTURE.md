@@ -99,7 +99,7 @@ sundays/
 | **dialect-h2/** | [`dialect-h2/README.md`](./dialect-h2/README.md) | — | H2 嵌入式 / 集成测试 fixture / 已知约束 |
 | **dialect-duckdb/** | [`dialect-duckdb/README.md`](./dialect-duckdb/README.md) | — | DuckDB 嵌入式 OLAP / Excel 预转换 / FK table-rebuild / 已知约束 |
 | **dialect-sqlite/** | [`dialect-sqlite/README.md`](./dialect-sqlite/README.md) | — | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
-| **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单 / TopNavBar / SundaysTheme）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
+| **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单 / AppDestination / SundaysTheme + SundaysPalette 视觉规范）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
 | **desktopApp/** | [`desktopApp/README.md`](./desktopApp/README.md) | [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | KMP 工程结构 / Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览第二屏 / 生命周期管理 |
 | **历史文档** | [`docs/architecture-history-v2.9.md`](./docs/architecture-history-v2.9.md) | — | v2.9 之前的根级完整架构设计（已归档保留） |
 

@@ -21,7 +21,7 @@ shared/
 │   │   ├── language/SqlLanguage.kt   SQL token + keyword 集合
 │   │   ├── language/LuaLanguage.kt   Lua token + keyword 集合
 │   │   ├── formatter/SqlFormatter.kt / LuaFormatter.kt / CodeFormatterRegistry.kt
-│   │   └── EditorTheme.kt            CodeEditorTheme（Light / Dark / default）
+│   │   └── CodeEditorTheme.kt        CodeEditorTheme（Light / Dark / default）
 │   ├── table/           DataTable + 虚拟滚动 + 分页 + 详情面板
 │   │   ├── DataTable.kt              主 composable（DataTable + 高度策略）
 │   │   └── TableModels.kt            TableColumn / TableRow / PageSize / DataTableTheme / ContextMenuState
@@ -30,11 +30,14 @@ shared/
 │   │   ├── ConnectionConfig.kt          ConnectionConfig / DialectType / ConnectionType + 持久化精简模型 + withDialect/withConnectionType
 │   │   ├── JdbcUrl.kt                   字段 ↔ JDBC URL 折算（覆盖 5 个方言 × 连接类型，URL 为真相源）
 │   │   └── ConnectionStorage.kt         ~/.config/sundays/connection.json（按 version 分派 v1/v2，自动迁移）
-│   ├── navigation/      顶层导航（平台无关的导航条 + 目标枚举）
-│   │   ├── AppDestination.kt          AppDestination 枚举（CONNECTIONS / DATABASE）
-│   │   └── TopNavBar.kt               顶层导航条（TopNavBar + 私有 NavChip）
+│   ├── navigation/      顶层导航目标枚举
+│   │   └── AppDestination.kt          AppDestination 枚举（CONNECTIONS / DATABASE）
+│   │                                   ⚠️ 文档曾列出 TopNavBar.kt —— 该文件已不存在，见 ARCHITECTURE.md §5.2
 │   └── ui/              通用 UI 工具
-│       ├── Theme.kt                   SundaysTheme（跟随系统明暗的应用主题）
+│       ├── Theme.kt                   SundaysTheme（跟随系统明暗；配色/形状/字号取自 SundaysPalette）
+│       ├── SundaysPalette.kt          视觉规范：蓝灰 IDE 配色 + 紧凑形状 + 桌面字号
+│       ├── ThemeMode.kt               ThemeMode 三档枚举（SYSTEM/LIGHT/DARK）+ ThemeModeState（状态提升）
+│       ├── ThemeModeToggle.kt         ThemeModeToggleButton（日夜切换按钮，两屏共用）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
 ├── commonTest/          平台无关测试（tokenizer / 模型 / 集成）
@@ -62,9 +65,12 @@ shared/
 | `ConnectionStorage` | `commonMain/.../connection/ConnectionStorage.kt` | 连接配置 JSON 持久化（`~/.config/sundays/connection.json`） |
 | `buildJdbcUrl` / `parseJdbcUrl` | `commonMain/.../connection/JdbcUrl.kt` | 连接字段 ↔ JDBC URL 折算（URL 是引擎侧真相源） |
 | `DialectType.engineDriverName` | `commonMain/.../connection/ConnectionConfig.kt` | 方言枚举 → 引擎 `DatabaseDialect.driverName`（`MYSQL` → `Mysql`；proto `ConnectionConfig.driver` 必须填这个，**不能用 `Enum.name`**） |
-| `TopNavBar` | `commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（chip 列表 + 选中高亮）；纯展示，`current` / `onSelect` 由调用方的顶层屏幕持有 |
+| `TopNavBar` | **不存在** | ⚠️ 该组件已无实现（`navigation/` 下只有 `AppDestination.kt`），说明见 [`ARCHITECTURE.md` §5.2](./ARCHITECTURE.md) |
 | `AppDestination` | `commonMain/.../navigation/AppDestination.kt` | 顶层导航目标枚举（`label` 供导航条渲染） |
-| `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `darkColorScheme` / `lightColorScheme`）；各平台入口只需创建平台容器 |
+| `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `SundaysPalette` 的深 / 浅配色）；各平台入口只需创建平台容器 |
+| `SundaysPalette` | `commonMain/.../ui/SundaysPalette.kt` | 视觉规范单例：蓝灰专业 IDE 配色（`LightColorScheme` / `DarkColorScheme`）+ `Shapes` + `Typography` + `buttonShape`；设计约束与对比度见 [`ARCHITECTURE.md` §5.4](./ARCHITECTURE.md) |
+| `ThemeMode` / `ThemeModeState` | `commonMain/.../ui/ThemeMode.kt` | 主题档位三态（`SYSTEM` / `LIGHT` / `DARK`）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.5](./ARCHITECTURE.md) |
+| `ThemeModeToggleButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）；连接管理与浏览屏共用 |
 
 ---
 
@@ -179,7 +185,7 @@ ConnectionManagerScreen(
 >
 > 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开 → 重连」全链路。
 
-端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) —— `MainScreen` 用本模块的 `TopNavBar` + `ConnectionManagerScreen` 组成顶层导航。
+端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) —— `MainScreen` 用本模块的 `AppDestination` + `ConnectionManagerScreen` 组成顶层导航。
 
 ---
 
@@ -215,6 +221,7 @@ ConnectionManagerScreen(
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
+- `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）
 - `ConnectionStorageTest` — 4 项（jvmTest：持久化往返重建派生字段、upsert/delete、v1 → v2 迁移回写）
 
 ---
@@ -225,7 +232,8 @@ ConnectionManagerScreen(
 |---|---|
 | **新增语言** | 实现 `CodeLanguage` 接口 + 调用 `CodeLanguageRegistry.register(Language())`。编辑器零修改即支持 |
 | **新增 formatter** | 实现 `CodeFormatter` 接口 + 注册到 `CodeFormatterRegistry`。工具栏"格式化"按钮自动启用 |
-| **替换主题** | 提供自定义 `CodeEditorTheme` 即可 |
+| **替换主题** | 提供自定义 `CodeEditorTheme` 即可（编辑器 / 表格各自一套，不随 `SundaysPalette` 变） |
+| **改应用配色 / 形状 / 字号** | 改 `SundaysPalette` 单例；注意按钮圆角要逐个传 `SundaysPalette.buttonShape`（Material3 的 `Button` 默认形状不读 `MaterialTheme.shapes`） |
 | **替换 token 颜色** | 在 `SyntaxHighlighter.DefaultLightColors` / `DarkColors` 追加键值对 |
 | **替换上下文菜单项** | 通过 `contextMenuItems: @Composable (...) -> Unit` 插槽注入任意 `DropdownMenuItem` |
 
@@ -240,4 +248,4 @@ ConnectionManagerScreen(
 | [根 `README.md`](../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) | **内部架构设计**：高度策略、可扩展性、databind 模式、与引擎解耦边界 |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式下通过 `desktopApp/` 集成） |
-| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：`TopNavBar` 顶层导航 + `ConnectionManagerScreen` 连接管理 |
+| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：`AppDestination` 顶层导航 + `ConnectionManagerScreen` 连接管理 |

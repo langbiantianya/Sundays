@@ -15,8 +15,8 @@
 - **CodeEditor** — 语法高亮 + 行号 + 工具栏 + 格式化 + 右键菜单
 - **DataTable** — 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 + 右键菜单
 - **ConnectionManagerScreen** — 连接管理（左侧连接列表 + 右侧 4 步引导页面），支持 MySQL/PostgreSQL/H2/DuckDB/SQLite
-- **TopNavBar / AppDestination** — 顶层导航条（v2.14 自 `desktopApp` 上移）
-- **SundaysTheme** — 跟随系统明暗的应用主题（v2.14 自 `desktopApp` 上移）
+- **AppDestination** — 顶层导航目标枚举（v2.14 自 `desktopApp` 上移；同批上移的 `TopNavBar` 已无实现，见 §5.2）
+- **SundaysTheme / SundaysPalette** — 跟随系统明暗的应用主题（v2.14 自 `desktopApp` 上移）；配色 / 形状 / 字号规范见 §5.4
 - **通用 UI 工具** — `ContextMenuState<T>` + `Modifier.onRightClick`
 
 ### 1.2 KMP Source Set 布局
@@ -49,7 +49,7 @@ HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码
 
 | 代码 | 是否引用 `:engine` | 归属 |
 |---|---|---|
-| `TopNavBar` / `AppDestination` / `SundaysTheme` | 否（纯 Compose） | ✅ `shared/commonMain`（v2.14 上移） |
+| `AppDestination` / `SundaysTheme` / `SundaysPalette` | 否（纯 Compose） | ✅ `shared/commonMain`（v2.14 上移） |
 | `ConnectionManagerScreen`（回调注入） | 否（引擎调用由 `onTestConnection` 等回调注入） | ✅ `shared/commonMain` |
 | `ConnectionSession` | 是（`IdbEngine.testConnection` / `disconnect`） | ❌ 留在 `desktopApp` |
 | `DatabaseBrowserState` / `DatabaseBrowserScreen` | 是（`IdbEngine.invoke` + proto 构造器） | ❌ 留在 `desktopApp` |
@@ -662,9 +662,9 @@ enum class AppDestination(val label: String) {
 ```
 
 纯枚举，无平台 / 引擎依赖。`label` 供导航条渲染文案；**新增目标只需加一个枚举项** ——
-`TopNavBar` 自动遍历 `entries` 渲染 chip，无需改导航条代码。
+`MainScreen`（desktopApp）按 `entries` 分派目标屏幕，无需改枚举以外的代码。
 
-### 5.2 `TopNavBar` —— 顶层导航条
+### 5.2 `TopNavBar` —— 顶层导航条（⚠️ 已无实现，本节为历史残留）
 
 ```kotlin
 @Composable
@@ -675,31 +675,114 @@ fun TopNavBar(
 )
 ```
 
-| 设计点 | 说明 |
-|---|---|
-| 纯展示 + 回调 | 选中态由 `current` 传入、点击经 `onSelect` 回抛；导航状态由调用方的顶层屏幕（desktopApp 的 `MainScreen`）持有 |
-| 遍历 `entries` | 新增 `AppDestination` 成员即自动获得 chip，无需改本文件 |
-| 选中态配色 | `primary` / `onPrimary`；未选中 `surface.copy(alpha = 0.4f)` |
-| `NavChip` 私有 | 单个 chip（图标 + 文案 + 选中加粗）不是对外 API，不暴露 |
-
-调用方（`MainScreen`）持有 `AppDestination` 状态并在导航**之上**持有各屏状态机 ——
-切目标只销毁目标屏幕的组合，不销毁其状态，因此浏览标签页跨导航保留。
+> **[!] 文档漂移**：本节描述的 `TopNavBar` 在当前代码中**不存在** ——
+> `navigation/` 下只有 `AppDestination.kt`，全仓 `.kt` 中没有 `fun TopNavBar` 定义，也无任何调用方。
+> 同样地，`main.kt` 的 KDoc（`TopNavBar` / `NavChip`）与 `DatabaseBrowserSheetsTest` 的注释
+> 仍在引用它。`MainScreen` 当前直接按 `AppDestination` 分派内容，不渲染导航条
+> （`DatabaseBrowserSheetsTest` 断言首屏无「数据库浏览」chip，正对应这一现状）。
+> 保留本节只为记录曾经的组件形态；**新增功能不要依赖它**。清理属另一件事，未在本次主题改造中处理。
 
 ### 5.3 `SundaysTheme` —— 应用主题
 
 ```kotlin
 @Composable
-fun SundaysTheme(content: @Composable () -> Unit) {
+fun SundaysTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-        content = content,
-    )
+        colorScheme = SundaysPalette.colorSchemeFor(darkTheme),
+        shapes = SundaysPalette.Shapes,
+        typography = SundaysPalette.Typography,
+    ) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, content = content)
+    }
 }
 ```
 
 `isSystemInDarkTheme()` 本身即 `commonMain` API（`androidx.compose.foundation`），各平台入口
 （desktop `Window` / 未来的 Android / iOS）只需创建平台容器并套上本主题，
 明暗策略无需在每个平台重复。
+
+**必须由 `Surface` 兜底背景色**：Material3 的 `MaterialTheme` 只注入 colorScheme / shapes /
+typography，**不注入** `LocalContentColor`（其默认值是 `Color.Black`）。少了这层 `Surface`，
+未显式设色的 `Text` 在暗色下就是黑字贴黑底 —— 见 `desktopApp` 的 `ThemeContentColorTest`。
+
+### 5.4 `SundaysPalette` —— 视觉规范（蓝灰专业 IDE 风格）
+
+Material3 出厂默认是**触屏卡片**语言（大圆角、大字、色相叠色），搬到信息密集的桌面数据库工具
+里并不合适 —— 胶囊按钮在标签条里噪音过重、12dp 圆角让控件显得松垮、tonal 叠色在灰底上糊出一层
+色偏。`SundaysPalette` 把它换成 DBeaver / DataGrip 一类的桌面工具观感：
+**低饱和靛蓝主色 + 4~8dp 圆角 + 靠分割线而非阴影分层 + 字号整体下调 1sp**。
+
+| 项 | 取值 | 为什么 |
+|---|---|---|
+| 主色（浅 / 深） | `#2F5C9E` / `#5B8DEF` | 低饱和靛蓝，替代出厂紫；深色档提亮以满足对比度 |
+| `background` / `surface`（浅） | `#F4F5F7` / `#FFFFFF` | 面板与底色差 1 档，靠色阶而非阴影分层 |
+| `background` / `surface`（深） | `#1B1F27` / `#232833` | 蓝灰炭色，与 `CodeEditorTheme.Dark` / `DataTableTheme.Dark` 同源 |
+| `surfaceTint` | `Color.Transparent` | **禁用 tonal 叠色**（见下） |
+| `Shapes` | 2 / 4 / 6 / 8 / 8 dp | 按钮 4dp、chip 与输入框自动跟随、弹窗 8dp |
+| `Typography` | `bodyMedium` 13sp / `bodySmall` 12sp / `labelSmall` 11sp | 桌面密度；保住表格分页栏行高 |
+
+**三条关键约束**（改主题前必读）：
+
+1. **按钮圆角必须逐个传 `shape = SundaysPalette.buttonShape`**。Material3 的 `Button` 默认形状
+   取自 `ButtonDefaults.shape`，它由 token 固定为 `CornerFull`（**胶囊**），
+   **不读 `MaterialTheme.shapes`**（`ButtonSmallTokens.ContainerShapeRound`）。
+   改 `Shapes` 对按钮完全无效 —— 这是「调了主题但按钮还是胶囊」的根因。
+   chip / `OutlinedTextField` / `Tab` 则走 `Shapes.fromToken(...)`，自动跟随。
+2. **`surfaceTint = Color.Transparent` 即禁用 tonalElevation**。`Surface(tonalElevation = …)`
+   仅在底色**等于** `surface` 时叠加 `surfaceTint`（`ColorScheme.applyTonalElevation`）；
+   tint 透明后，即使某处仍写了 `tonalElevation` 也无视觉变化。分层因此统一由
+   `HorizontalDivider(color = outlineVariant)` 表达。
+3. **唯一该用阴影的是弹窗**（`DatabaseBrowserScreen` 的 sheet 重命名弹窗用 `shadowElevation`），
+   因为它确实浮在内容之上；其余通栏工具栏一律不投影。
+
+**对比度**：所有「文字 / 背景」组合达 WCAG AA（≥4.5:1），由
+`SundaysPaletteTest` 逐对钉住（含 `primary` / `tertiary` / `error` 当文字色用在
+`surface` **与** `background` 两处的双重断言 —— 工具栏条压在 `background` 上，只测 `surface` 会漏）。
+`outline` / `outlineVariant` 是 1~2dp 边框与分割线角色，**不纳入**文字对比度断言：
+要求它们也达 4.5:1 会让所有层级线变成刺眼粗线。
+
+### 5.5 `ThemeMode` / `ThemeModeToggleButton` —— 日夜切换
+
+三档循环：`SYSTEM`（跟随系统）→ `LIGHT` → `DARK` → `SYSTEM`。
+两处入口：连接管理左栏标题行、数据库浏览的**最外层右上角**（与左侧「＋添加连接」同一行、
+同高 —— 不占用内容区高度，也不随工作台切换 / sheet 内容变化而移动）。
+浏览屏**空态**另有一个独立副本：此时没有标签条也没有工具栏，不单独放一个按钮就会彻底消失，
+而空态恰恰是用户第一次打开应用最可能停留的地方。
+
+> `AddConnectionDialog` **不提供**切换入口：它是模态弹窗，主题是应用级设置，
+> 在弹窗里改全局外观会让人失去「当前处于什么主题」的判断。实现上靠
+> `ConnectionManagerScreen(themeMode: ThemeMode? = null)` —— 弹窗不传该参数，按钮即不渲染。
+
+**状态必须提升到 `SundaysTheme` 之外**。这是本功能唯一的技术要点：
+
+```
+main()  ── rememberThemeModeState()  ← 状态诞生
+   │
+   ├── SundaysTheme(darkTheme = themeMode.isDark())   ← 消费：配色注入最外层
+   │
+   └── MainScreen(engine, themeMode)
+         ├── ConnectionManagerScreen(themeMode, onCycleTheme)  → 按钮回写
+         └── DatabaseBrowserScreen(themeMode, onCycleTheme)    → 按钮回写
+```
+
+`SundaysTheme` 接收的是 `darkTheme: Boolean` **参数**而非读取状态。若把状态放在任一屏幕内部，
+那里的按钮只能改到自己的局部组合，改不到 `MaterialTheme.colorScheme`，
+表现为「按钮图标变了、整个界面没变」。因此单一真相源在 `main.kt`，各屏只拿到
+`onCycleTheme` 回调**写回同一实例**。
+
+| 设计点 | 说明 |
+|---|---|
+| 三档而非两档开关 | 两档开关一旦点下去就再也回不到「跟随系统」。系统改深色模式 / 笔记本合盖是真实场景，用户需要能主动「交还控制权」 |
+| 图标 = `mode.next` | 显示「点下去会变成什么」而非「当前是什么」——用户在亮色界面看到月亮才会预期「点了变暗」。三档图标两两可区分：☀ `LightMode`（将变浅色）/ 🌙 `NightsStay`（将变深色）/ 🔆 `BrightnessAuto`（将交还系统） |
+| 无障碍 | `IconButton` 自身无 `contentDescription` 参数（它只是容器），语义由内层 `Icon` 提供；`IconButton` 合并子节点语义，读屏念出「主题：深色，切换为跟随系统，按钮」 |
+| `AddConnectionDialog` 不含入口 | 弹窗内嵌的是同一个 `ConnectionManagerScreen`，故参数是 **`themeMode: ThemeMode?`（默认 `null`）**，按钮仅在非 null 时渲染。模态弹窗里改全局主题会让人失去「当前处于什么主题」的判断。⚠️ 若把默认值写成 `ThemeMode.SYSTEM` 而按钮仍无条件渲染，弹窗里就会出现一个**点了没反应的死按钮** —— 编译与测试全绿，只有真打开弹窗才看得见，故由 `ThemeToggleVisibilityTest` 钉住 |
+| 显式档位忽略系统值 | `LIGHT` / `DARK` 的 `resolveDark` 恒返回固定值 —— 否则「点了变深色但系统是浅色」永远切不过去 |
+
+`ThemeModeTest` 钉住循环顺序、`next`/`previous` 互逆、显式档位不受系统值影响、
+以及三击回到原点（否则「跟随系统」档会点丢）。
 
 ---
 
@@ -885,9 +968,10 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
+| `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
-| **合计** | | **105** | **0 失败 / 0 错误** |
+| **合计** | | **109** | **0 失败 / 0 错误** |
 
 运行命令：
 
@@ -931,7 +1015,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
-| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `SundaysTheme` + `TopNavBar` + `ConnectionManagerScreen` 的端到端用法 |
+| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `SundaysTheme` + `AppDestination` + `ConnectionManagerScreen` 的端到端用法 |
 
 ---
 

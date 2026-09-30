@@ -35,7 +35,7 @@ desktopApp/
 └── src/
     ├── main/kotlin/com/kxxnzstdsw/sundays/
     │   ├── main.kt                    # 入口：main()（Window + SundaysTheme）+ createEngineClient()（引擎实现装配点）+ MainScreen()（目标分派）
-    │   │                              # 导航条（TopNavBar）与 AppDestination 已上移 :shared/commonMain
+    │   │                              # AppDestination 与 SundaysTheme / SundaysPalette 已上移 :shared/commonMain
     │   ├── ConnectionSession.kt       # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
     │   └── DatabaseBrowserScreen.kt   # 第二屏 UI + DatabaseBrowserState / TablePreviewTab 状态机
     └── test/kotlin/com/kxxnzstdsw/sundays/
@@ -53,8 +53,8 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | 文件 | 职责 |
 |---|---|
 | `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:shared` 依赖 + **`:engine`（默认实现）与 `:engine-grpc-client`（端点实现）同时引入** + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
-| `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，渲染 `:shared` 的 `TopNavBar` + 当前目标屏幕。`main.kt` 同时是**唯一的引擎装配点**（`createEngineClient()`） |
-| （已上移 `:shared`） | `AppDestination` / `TopNavBar` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt)。三者不引用 `:engine`，故可跨平台复用 |
+| `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，按目标分派到当前屏幕。`main.kt` 同时是**唯一的引擎装配点**（`createEngineClient()`） |
+| （已上移 `:shared`） | `AppDestination` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt) + `SundaysPalette`（配色 / 形状 / 字号）。均不引用 `:engine`，故可跨平台复用 |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
 | `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`）、`SqlSheet`（SQL 工作台单个 sheet 的编辑器 + 独立结果）、`DialectType → SqlDialectProfile` 映射（SQL 高亮档位随连接的库变） |
 | `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine`（按 `EngineClient` 传入）+ 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
@@ -70,9 +70,9 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | `ENDPOINT_PROPERTY` | public `const val` | 系统属性名 `"sundays.engine.endpoint"` —— 选择 gRPC 引擎端点的唯一开关 |
 | `createEngineClient()` | **internal** | **引擎实现装配点**：读 `System.getProperty(ENDPOINT_PROPERTY)` 并 `trim()`；空白 → `IdbEngine()`（同进程，默认），否则 `GrpcEngineClient.connect(GrpcClientConfig.fromTarget(endpoint))`；端点非法时由 `fromTarget` 抛 `IllegalArgumentException` |
 | `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
-| `MainScreen(engine: EngineClient)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，渲染 `:shared` 的 `TopNavBar` 并按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
+| `MainScreen(engine: EngineClient)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
 
-> **模块边界**：导航条（`TopNavBar` / `NavChip`）、导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 依赖 `EngineClient` 调用层接口（来自 `:engine-protocol`，JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
+> **模块边界**：导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme` / `SundaysPalette`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 依赖 `EngineClient` 调用层接口（来自 `:engine-protocol`，JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
 
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 

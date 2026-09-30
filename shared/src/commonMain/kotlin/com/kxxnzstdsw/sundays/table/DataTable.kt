@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.onRightClick
 
 /**
@@ -494,11 +495,13 @@ private fun TablePagination(
             Button(
                 onClick = { onPageChange(1) },
                 enabled = currentPage > 1,
+                shape = SundaysPalette.buttonShape,
             ) { Text("首页") }
             Spacer(modifier = Modifier.width(4.dp))
             Button(
                 onClick = { onPageChange(currentPage - 1) },
                 enabled = currentPage > 1,
+                shape = SundaysPalette.buttonShape,
             ) { Text("上一页") }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
@@ -510,11 +513,13 @@ private fun TablePagination(
             Button(
                 onClick = { onPageChange(currentPage + 1) },
                 enabled = currentPage < totalPages,
+                shape = SundaysPalette.buttonShape,
             ) { Text("下一页") }
             Spacer(modifier = Modifier.width(4.dp))
             Button(
                 onClick = { onPageChange(totalPages) },
                 enabled = currentPage < totalPages,
+                shape = SundaysPalette.buttonShape,
             ) { Text("末页") }
         }
     }

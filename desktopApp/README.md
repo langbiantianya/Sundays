@@ -48,7 +48,9 @@
 
 ## 顶层导航（v2.13）
 
-`main.kt` 的 `MainScreen` 渲染**顶层导航条**（`:shared` 的 `TopNavBar`）+ 当前目标屏幕，两个目标：
+`main.kt` 的 `MainScreen` 按 `AppDestination`（`:shared`）分派当前目标屏幕，两个目标：
+（⚠️ 文档曾称此处渲染 `TopNavBar` 导航条 —— 该组件现已无实现，实际只有目标分派，见
+[`shared/ARCHITECTURE.md` §5.2](../shared/ARCHITECTURE.md)）
 
 | 目标 | 屏幕 | 职责 |
 |---|---|---|
@@ -185,7 +187,7 @@ fun main() = application {
         },
         title = "sundays",
     ) {
-        SundaysTheme {                                             // :shared 的主题（跟随系统明暗）
+        SundaysTheme {                                             // :shared 的主题（跟随系统明暗，配色/形状/字号取自 SundaysPalette）
             MainScreen(engine)                                     // 绑定 ConnectionSession → ConnectionManagerScreen / DatabaseBrowserScreen
         }
     }

@@ -4,13 +4,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * 应用主题 —— 跟随系统明暗。
+ * 应用主题 —— 跟随系统明暗，配色 / 形状 / 字号由 [SundaysPalette] 统一提供。
  *
  * 各平台入口（desktop `Window` / 未来的 Android / iOS）只负责创建平台容器，
  * 主题本身是纯 Compose 逻辑，放在 `commonMain` 供所有平台复用。
@@ -29,7 +27,9 @@ fun SundaysTheme(
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme(),
+        colorScheme = SundaysPalette.colorSchemeFor(darkTheme),
+        shapes = SundaysPalette.Shapes,
+        typography = SundaysPalette.Typography,
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),

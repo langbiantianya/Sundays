@@ -186,21 +186,28 @@ data class DataTableTheme(
             paginationBackground = Color(0xFFF5F5F5),
         )
 
-        /** 默认深色主题 — Intellij Darcula 风格。 */
+        /**
+         * 默认深色主题 — Intellij Darcula 风格，底色改用与 `SundaysPalette` 深色表面一致的
+         * 蓝灰炭色系（与 `CodeEditorTheme.Dark` 同源）。
+         *
+         * 表头 / 分页栏用 `surfaceVariant` 档而非 Darcula 的 `#3C3F41`：深色界面里表头应当
+         * 比正文**更亮**（凹槽感）才读得出是分区头；选行底 `#2C425E` 对应新的亮靛蓝主色，
+         * 选中文字转白以保住对比度。
+         */
         val Dark: DataTableTheme = DataTableTheme(
-            headerBackground = Color(0xFF3C3F41),
+            headerBackground = Color(0xFF2C3240),
             headerText = TextStyle(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFFBBBBBB),
+                color = Color(0xFFBFC7D4),
             ),
-            rowBackground = Color(0xFF2B2B2B),
-            rowBackgroundAlt = Color(0xFF313335),
-            rowBackgroundSelected = Color(0xFF214283),
-            cellText = TextStyle(fontSize = 13.sp, color = Color(0xFFA9B7C6)),
+            rowBackground = Color(0xFF232833),
+            rowBackgroundAlt = Color(0xFF262B36),
+            rowBackgroundSelected = Color(0xFF2C425E),
+            cellText = TextStyle(fontSize = 13.sp, color = Color(0xFFCBD1DC)),
             cellTextSelected = TextStyle(fontSize = 13.sp, color = Color(0xFFFFFFFF)),
-            borderColor = Color(0xFF3C3F41),
-            paginationBackground = Color(0xFF3C3F41),
+            borderColor = Color(0xFF333A48),
+            paginationBackground = Color(0xFF2C3240),
         )
 
         /**

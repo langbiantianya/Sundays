@@ -100,6 +100,9 @@ import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
+import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.ThemeMode
+import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
@@ -173,6 +176,8 @@ fun DatabaseBrowserScreen(
     onAddSheet: () -> Unit,
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onCycleTheme: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -184,6 +189,8 @@ fun DatabaseBrowserScreen(
         if (active == null) {
             EmptySheetsHint(
                 onAddSheet = onAddSheet,
+                themeMode = themeMode,
+                onCycleTheme = onCycleTheme,
                 modifier = Modifier.fillMaxSize(),
             )
             return@Column
@@ -194,6 +201,8 @@ fun DatabaseBrowserScreen(
             onSelect = onSelectSheet,
             onClose = onCloseSheet,
             onAdd = onAddSheet,
+            themeMode = themeMode,
+            onCycleTheme = onCycleTheme,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -237,6 +246,8 @@ private fun SheetTabRow(
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
     onAdd: () -> Unit,
+    themeMode: ThemeMode,
+    onCycleTheme: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -291,35 +302,57 @@ private fun SheetTabRow(
                 )
             }
         }
+        // 主题切换钉在**最外层**右上角：与左侧「＋」同一行、同高 —— 不占用内容区高度，
+        // 也不随工作台切换 / sheet 内容变化而移动。
+        ThemeModeToggleButton(
+            mode = themeMode,
+            onCycle = onCycleTheme,
+            modifier = Modifier.padding(end = 4.dp),
+        )
     }
 }
 
 @Composable
 private fun EmptySheetsHint(
     onAddSheet: () -> Unit,
+    themeMode: ThemeMode,
+    onCycleTheme: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier.padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = "尚未打开任何连接",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Box(modifier = modifier) {
+        // 空态下没有标签条也没有工具栏，主题切换若不单独放一个就会彻底消失 ——
+        // 而空态恰恰是用户第一次打开应用最可能停留的地方。
+        ThemeModeToggleButton(
+            mode = themeMode,
+            onCycle = onCycleTheme,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp),
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "点击「添加连接」配置一个新连接，或在首屏选中已有连接后点「连接」。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onAddSheet) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("添加连接")
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "尚未打开任何连接",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "点击「添加连接」配置一个新连接，或在首屏选中已有连接后点「连接」。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onAddSheet, shape = SundaysPalette.buttonShape) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("添加连接")
+            }
         }
     }
 }
@@ -341,7 +374,6 @@ private fun BrowserToolBar(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
@@ -394,6 +426,7 @@ private fun PaneToggleButton(
     Button(
         onClick = { onSelect(if (isActive) BrowserPane.TABLE else pane) },
         enabled = enabled,
+        shape = SundaysPalette.buttonShape,
         colors = if (isActive) {
             ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -788,7 +821,6 @@ private fun PreviewTabContent(
 ) {
     Column(modifier = modifier) {
         Surface(
-            tonalElevation = 1.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -874,7 +906,6 @@ private fun SqlWorkbenchPane(
     Column(modifier = modifier) {
         // 顶部信息条：当前执行的 catalog —— 说明 SQL 会落到哪个库
         Surface(
-            tonalElevation = 1.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -951,6 +982,7 @@ private fun SqlWorkbenchPane(
                         Button(
                             onClick = { state.executeSql() },
                             enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
+                            shape = SundaysPalette.buttonShape,
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
@@ -1125,8 +1157,11 @@ private fun TabRenameDialog(
     var value by remember { mutableStateOf(initialTitle) }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(12.dp),
-            tonalElevation = 6.dp,
+            shape = MaterialTheme.shapes.large,
+            // 弹窗是真正浮在内容之上的一层 —— 用 shadowElevation（真阴影），而不是
+            // tonalElevation（色相叠色）。SundaysPalette 已把 surfaceTint 设为透明，
+            // tonalElevation 不再产生任何视觉变化，这里改用阴影表达「浮起」。
+            shadowElevation = 8.dp,
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -1317,7 +1352,6 @@ private fun GenerateWorkbenchPane(
     val script = state.currentGenerateScript()
     Column(modifier = modifier) {
         Surface(
-            tonalElevation = 1.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -1414,6 +1448,7 @@ private fun GenerateWorkbenchPane(
                         Button(
                             onClick = { state.executeGenerate() },
                             enabled = connected && !state.generateRunning,
+                            shape = SundaysPalette.buttonShape,
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))

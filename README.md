@@ -53,14 +53,14 @@ sundays/
 │   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单）
 │   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
 │   │   ├── connection/   ConnectionManagerScreen：连接管理（左侧连接列表 + 右侧 4 步向导，JSON 持久化到 ~/.config/sundays/connection.json）
-│   │   ├── navigation/   TopNavBar / AppDestination：顶层导航条（平台无关，v2.14 自 desktopApp 上移）
-│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier、SundaysTheme 应用主题）
+│   │   ├── navigation/   AppDestination：顶层导航目标枚举（平台无关，v2.14 自 desktopApp 上移）
+│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier、SundaysTheme 应用主题 + SundaysPalette 蓝灰 IDE 配色）
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  依赖 :engine（本地实现）与 :engine-grpc-client（gRPC 实现）
     └── src/main/kotlin/com/kxxnzstdsw/sundays/
         ├── main.kt                  KMP Desktop 入口：Window + SundaysTheme、createEngineClient() 选实现、顶层导航分派
-        │                            （TopNavBar / AppDestination / SundaysTheme 已在 :shared/commonMain）
+        │                            （AppDestination / SundaysTheme / SundaysPalette 已在 :shared/commonMain）
         ├── ConnectionSession.kt     连接列表 / 向导 / 引擎会话状态机（持有 EngineClient 接口）
         └── DatabaseBrowserScreen.kt 数据库浏览第二屏（库表树 + 表数据预览标签页）
 ```

@@ -56,6 +56,7 @@ import com.kxxnzstdsw.sundays.editor.formatter.CodeFormatterRegistry
 import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
+import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.onRightClick
 
 /**
@@ -520,6 +521,7 @@ private fun EditorToolbar(
         Button(
             onClick = onFormat,
             enabled = hasFormatter,
+            shape = SundaysPalette.buttonShape,
         ) {
             Text("格式化")
         }

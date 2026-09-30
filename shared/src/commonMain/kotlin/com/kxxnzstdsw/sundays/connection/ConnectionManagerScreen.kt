@@ -19,6 +19,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.ThemeMode
+import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import kotlinx.coroutines.launch
 
 /**
@@ -111,6 +114,10 @@ fun ConnectionManagerScreen(
     connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     onConnect: (ConnectionConfig) -> Unit = {},
     onDisconnect: (ConnectionConfig) -> Unit = {},
+    // themeMode 为 null 时**不渲染**日夜切换按钮 —— 弹窗（AddConnectionDialog）内嵌本组件，
+    // 模态弹窗里改全局主题会让人失去「当前处于什么主题」的判断，故那里不传。
+    themeMode: ThemeMode? = null,
+    onCycleTheme: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.fillMaxHeight()) {
@@ -124,6 +131,8 @@ fun ConnectionManagerScreen(
             onQuickConnect = onQuickConnect,
             onEditConnection = onEditConnection,
             onDeleteConnection = onDeleteConnection,
+            themeMode = themeMode,
+            onCycleTheme = onCycleTheme,
             modifier = Modifier
                 .width(250.dp)
                 .fillMaxHeight(),
@@ -220,6 +229,8 @@ private fun ConnectionListPanel(
     onQuickConnect: () -> Unit,
     onEditConnection: (ConnectionConfig) -> Unit,
     onDeleteConnection: (String) -> Unit,
+    themeMode: ThemeMode?,
+    onCycleTheme: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -243,6 +254,11 @@ private fun ConnectionListPanel(
                 }
                 IconButton(onClick = onNewConnection) {
                     Icon(Icons.Default.Add, contentDescription = "新建连接")
+                }
+                // 日夜切换紧挨面板标题：与「快速连接 / 新建」同属面板级操作。
+                // themeMode 为 null（弹窗内嵌）时不渲染。
+                if (themeMode != null) {
+                    ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
                 }
             }
         }
@@ -662,21 +678,21 @@ private fun ConnectionOverviewPanel(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onDelete) { Text("删除") }
+            TextButton(onClick = onDelete, shape = SundaysPalette.buttonShape) { Text("删除") }
             Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = onEdit) {
+            OutlinedButton(onClick = onEdit, shape = SundaysPalette.buttonShape) {
                 Icon(Icons.Default.Edit, null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("编辑")
             }
             Spacer(modifier = Modifier.width(8.dp))
             when (status.state) {
-                ConnectionState.CONNECTED -> OutlinedButton(onClick = onDisconnect) {
+                ConnectionState.CONNECTED -> OutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
                     Icon(Icons.Default.LinkOff, null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("断开")
                 }
-                ConnectionState.CONNECTING -> Button(onClick = {}, enabled = false) {
+                ConnectionState.CONNECTING -> Button(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("连接中...")
@@ -684,7 +700,7 @@ private fun ConnectionOverviewPanel(
                 ConnectionState.DISCONNECTED, ConnectionState.FAILED -> Column(
                     horizontalAlignment = Alignment.End,
                 ) {
-                    Button(onClick = onConnect, enabled = connectable) {
+                    Button(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
                         Icon(Icons.Default.Bolt, null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("连接")
@@ -732,13 +748,13 @@ internal fun IdlePanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onQuickConnect) {
+        Button(onClick = onQuickConnect, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Bolt, null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("快速连接")
         }
         Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(onClick = onNewConnection) {
+        OutlinedButton(onClick = onNewConnection, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Add, null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("新建连接")
@@ -814,7 +830,7 @@ private fun QuickConnectStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Start,
         ) {
-            TextButton(onClick = onBack) { Text("← 返回") }
+            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("← 返回") }
         }
     }
 }
@@ -927,11 +943,12 @@ private fun BasicInfoStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onCancel) { Text("取消") }
+            TextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text("取消") }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = onNext,
                 enabled = editingConnection.name.isNotBlank(),
+                shape = SundaysPalette.buttonShape,
             ) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
@@ -1044,9 +1061,9 @@ private fun ConnectionTypeStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack) { Text("上一步") }
+            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onNext) {
+            Button(onClick = onNext, shape = SundaysPalette.buttonShape) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
             }
@@ -1253,9 +1270,9 @@ private fun CredentialsStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack) { Text("上一步") }
+            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onNext, enabled = canProceed) {
+            Button(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
             }
@@ -1347,6 +1364,7 @@ private fun TestSaveStep(
                     }
                 },
                 enabled = !isTesting && onTestConnection != null && canConfirm,
+                shape = SundaysPalette.buttonShape,
             ) {
                 if (isTesting) {
                     CircularProgressIndicator(
@@ -1399,11 +1417,12 @@ private fun TestSaveStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack) { Text("上一步") }
+            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = { onConfirm(editingConnection) },
                 enabled = canConfirm,
+                shape = SundaysPalette.buttonShape,
             ) {
                 Icon(
                     imageVector = if (isQuickConnect) Icons.Default.Bolt else Icons.Default.Save,
