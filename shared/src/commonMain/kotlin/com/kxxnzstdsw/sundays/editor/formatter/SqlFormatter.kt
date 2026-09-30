@@ -3,6 +3,7 @@ package com.kxxnzstdsw.sundays.editor.formatter
 import com.kxxnzstdsw.sundays.editor.CodeLanguageRegistry
 import com.kxxnzstdsw.sundays.editor.CodeToken
 import com.kxxnzstdsw.sundays.editor.TokenType
+import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 
 /**
  * SQL 代码格式化器 — **轻量级规范化**：
@@ -23,9 +24,7 @@ import com.kxxnzstdsw.sundays.editor.TokenType
  *
  * **幂等性**：格式化两次的输出与格式化一次相同（除了空格细节）— 满足"重复格式化无副作用"。
  */
-class SqlFormatter : CodeFormatter {
-
-    override val languageId: String = "sql"
+class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.languageId) : CodeFormatter {
 
     override fun format(source: String): String {
         if (source.isBlank()) return source
@@ -127,10 +126,20 @@ class SqlFormatter : CodeFormatter {
             "ON", "RETURNING", "WITH", "INSERT INTO", "DELETE FROM",
         )
 
-        /** 默认注册入口 — 应用启动时调用 `SqlFormatter().register()`。 */
+        /**
+         * SQL 家族注册入口 —— 应用启动时调用 `SqlFormatter.register()`。
+         *
+         * 逐个档位注册「语言 + formatter」：两者共用同一个 `languageId`，因此
+         * `CodeFormatterRegistry.get(languageId)` 才能命中方言档位（否则 SQL 工作台切到方言档位后
+         * 「格式化」按钮会静默消失）；formatter 内部按同一个 id 反查语言，**关键字大写也随方言**。
+         */
         fun register() {
-            CodeLanguageRegistry.register(com.kxxnzstdsw.sundays.editor.language.SqlLanguage())
-            CodeFormatterRegistry.register(SqlFormatter())
+            com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile.ALL.forEach { profile ->
+                CodeLanguageRegistry.register(
+                    com.kxxnzstdsw.sundays.editor.language.SqlLanguage(profile),
+                )
+                CodeFormatterRegistry.register(SqlFormatter(profile.languageId))
+            }
         }
     }
 }

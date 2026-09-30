@@ -5,11 +5,13 @@ import com.kxxnzstdsw.sundays.editor.CodeToken
 import com.kxxnzstdsw.sundays.editor.TokenType
 
 /**
- * SQL 语言 — 支持 5 个方言共用的核心语法子集。
+ * SQL 语言 — 支持 5 个方言共用的核心语法子集，并按 [profile] 追加**方言特有**词表。
  *
  * ## 覆盖特性
  * - 关键字识别（**大小写不敏感**：SELECT = select = SeLeCt）
  * - 标准 SQL 关键字 + DDL / DML / DCL 子集（与本项目 5 个方言一致 — MySQL/PostgreSQL/H2/DuckDB/SQLite）
+ * - **方言档位**：`SqlLanguage(SqlDialectProfile.MYSQL)` 会在基集之上追加 MySQL 专有关键字 /
+ *   类型 / 内置函数（档位即一种语言 —— 见 [SqlDialectProfile] 的 `languageId`）
  * - 字符串字面量：`'...'`（支持 `''` 转义）、`"..."`（PG 标识符）、`` `...` ``（MySQL 标识符）
  * - 注释：`-- ...` 单行、`/* ... */` 块
  * - 数字：整数、浮点、科学计数法
@@ -18,12 +20,23 @@ import com.kxxnzstdsw.sundays.editor.TokenType
  * ## 已知限制
  * - 不解析方言语义（如不会因为在 SELECT 后就跟关键字识别成 KEYWORD — 由调用方决定语法正确性）
  * - 行内 JSON 字符串、十六进制字面量 `0x...` 不识别为特殊 token（按普通 token 流过去）
- * - 关键字集合基于 SQL:2016 + 5 方言共有的子集；方言独有语法（H2 的 `MODE`、DuckDB 的 `MACRO`）按 IDENTIFIER 处理
+ * - 关键字集合基于 SQL:2016 + 5 方言共有的子集，再叠加 [profile] 的方言词表
+ *
+ * @param profile 方言档位（默认 [SqlDialectProfile.STANDARD] —— 构造 `SqlLanguage()` 得到的
+ *   仍是注册表里的 `"sql"`，与既有调用方兼容）
  */
-class SqlLanguage : CodeLanguage {
+class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : CodeLanguage {
 
-    override val id: String = "sql"
-    override val displayName: String = "SQL"
+    override val id: String = profile.languageId
+    override val displayName: String = profile.displayName
+
+    /**
+     * 基集 ∪ 方言词表 —— **在构造期合并一次**，不在 [tokenize] 里做集合运算：
+     * tokenize 每次按键都会被调用（`VisualTransformation.filter`），不能引入 O(集) 开销。
+     */
+    private val keywords: Set<String> = BASE_KEYWORDS + profile.keywords
+    private val types: Set<String> = BASE_TYPES + profile.types
+    private val builtins: Set<String> = BASE_BUILTINS + profile.builtins
 
     override fun tokenize(source: String): List<CodeToken> {
         if (source.isEmpty()) return emptyList()
@@ -149,9 +162,9 @@ class SqlLanguage : CodeLanguage {
                     while (i < len && (source[i].isLetterOrDigit() || source[i] == '_')) i++
                     val word = source.substring(start, i)
                     val type = when (word.uppercase()) {
-                        in KEYWORDS -> TokenType.KEYWORD
-                        in TYPES -> TokenType.TYPE
-                        in BUILTINS -> TokenType.BUILTIN
+                        in keywords -> TokenType.KEYWORD
+                        in types -> TokenType.TYPE
+                        in builtins -> TokenType.BUILTIN
                         else -> TokenType.IDENTIFIER
                     }
                     out.add(CodeToken(start, i, word, type))
@@ -181,8 +194,8 @@ class SqlLanguage : CodeLanguage {
     }
 
     companion object {
-        /** 标准 SQL 关键字（按 SQL:2016 + 5 方言共有子集）。 */
-        private val KEYWORDS: Set<String> = setOf(
+        /** 基线关键字（SQL:2016 + 5 方言共有子集）—— 方言档位在 [BASE_KEYWORDS] 之上追加。 */
+        private val BASE_KEYWORDS: Set<String> = setOf(
             // DQL
             "SELECT", "FROM", "WHERE", "GROUP", "BY", "HAVING", "ORDER", "LIMIT", "OFFSET",
             "FETCH", "FIRST", "NEXT", "ROW", "ROWS", "ONLY", "WITH", "RECURSIVE",
@@ -215,8 +228,8 @@ class SqlLanguage : CodeLanguage {
             "EXPLAIN", "ANALYZE", "VACUUM", "COPY", "DO",
         )
 
-        /** SQL 数据类型。 */
-        private val TYPES: Set<String> = setOf(
+        /** 基线数据类型 —— 方言档位在此之上追加。 */
+        private val BASE_TYPES: Set<String> = setOf(
             "INT", "INTEGER", "SMALLINT", "BIGINT", "TINYINT", "MEDIUMINT",
             "DECIMAL", "NUMERIC", "FLOAT", "REAL", "DOUBLE", "PRECISION",
             "CHAR", "VARCHAR", "TEXT", "TINYTEXT", "MEDIUMTEXT", "LONGTEXT",
@@ -230,8 +243,8 @@ class SqlLanguage : CodeLanguage {
             "MONEY", "CURRENCY",
         )
 
-        /** 内置函数 — 5 方言共有子集。 */
-        private val BUILTINS: Set<String> = setOf(
+        /** 基线内置函数（5 方言共有子集）—— 方言档位在此之上追加。 */
+        private val BASE_BUILTINS: Set<String> = setOf(
             "COUNT", "SUM", "AVG", "MIN", "MAX", "ABS", "ROUND", "CEIL", "FLOOR",
             "LENGTH", "CHAR_LENGTH", "UPPER", "LOWER", "SUBSTRING", "TRIM",
             "LTRIM", "RTRIM", "REPLACE", "CONCAT", "CONCAT_WS", "SPLIT",

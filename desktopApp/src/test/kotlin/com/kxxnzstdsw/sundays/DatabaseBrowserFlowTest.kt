@@ -1,6 +1,8 @@
 package com.kxxnzstdsw.sundays
 
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.sundays.connection.DialectType
+import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.pool.PoolManager
@@ -404,6 +406,28 @@ class DatabaseBrowserFlowTest {
 
         state.renameGenerateScript(0, "")
         assertEquals("订单造数", state.currentGenerateScript()!!.title, "空名应保持原名")
+    }
+
+    /**
+     * SQL 工作台的高亮档位由**连接方言**决定 —— 换库即换关键字 / 类型 / 内置函数词表。
+     */
+    @Test
+    fun `sql dialect profile follows the connected database`() {
+        val state = newBrowser()   // TestConnectionFactory 建的是 H2 连接
+        assertEquals("sql-h2", state.sqlDialectProfile().languageId)
+
+        val base = TestConnectionFactory.build(jdbcUrl)
+        state.bindConnection(base.copy(id = "mysql-1", dialect = DialectType.MYSQL))
+        assertEquals(SqlDialectProfile.MYSQL, state.sqlDialectProfile())
+
+        state.bindConnection(base.copy(id = "sqlite-1", dialect = DialectType.SQLITE))
+        assertEquals("sql-sqlite", state.sqlDialectProfile().languageId)
+
+        // 未知方言 / 未连接 → 标准档位（不冒充任何方言的关键字）
+        state.bindConnection(base.copy(id = "unknown-1", dialect = DialectType.UNKNOWN))
+        assertEquals(SqlDialectProfile.STANDARD, state.sqlDialectProfile())
+        state.bindConnection(null)
+        assertEquals(SqlDialectProfile.STANDARD, state.sqlDialectProfile())
     }
 
     @Test

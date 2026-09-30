@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -32,6 +33,7 @@ import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.connection.DialectType
+import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
@@ -412,6 +414,57 @@ class DatabaseBrowserUiTest {
         }
         waitForIdle()
         onNodeWithText("SQL 15").assertIsDisplayed()
+    }
+
+    /**
+     * SQL 工作台的高亮档位跟随连接方言。
+     *
+     * 两条可观察锚点：
+     * 1. 标题条显示当前档位名（H2 → SQLite），切方言连接即变；
+     * 2. 「格式化」按钮仍可用 —— 按钮的 enabled 取决于 `CodeFormatterRegistry.get(languageId)`，
+     *    而 `languageId` 就是方言档位 id。**漏注册方言 formatter 会让按钮静默禁用**，这里守住它。
+     */
+    @Test
+    fun `sql workbench follows the connected dialect`() = runComposeUiTest {
+        // 真实 app 在 main() 里注册语言 + formatter（见 registerBuiltinEditors 的 KDoc）；
+        // 本测试直接渲染屏幕、不跑 main()，因此复现同一步 —— 否则 languageId 查不到语言，
+        // 编辑器静默退化纯文本、「格式化」按钮也恒为 disabled，断言就失去意义。
+        registerBuiltinEditors()
+
+        val browser = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+        val sheet = SheetDescriptor(
+            connection = connection,
+            browser = browser,
+            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+        )
+        setContent {
+            MaterialTheme {
+                DatabaseBrowserScreen(
+                    sheets = listOf(sheet),
+                    activeSheetId = connection.id,
+                    connections = listOf(connection),
+                    onSelectSheet = {},
+                    onCloseSheet = {},
+                    onAddSheet = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        onNodeWithText("SQL 工作台").performClick()
+        waitForIdle()
+        // 连接是 H2 → 标题条显示 H2 档位（连接名是 UIH2、状态条是「已连接 · H2」，精确匹配不会撞上）
+        onNodeWithText("H2").assertIsDisplayed()
+        onNodeWithText("格式化").assertIsEnabled()
+
+        // 换成 SQLite 方言的连接 → 档位标签随之切换
+        browser.bindConnection(connection.copy(id = "ui-sqlite", dialect = DialectType.SQLITE))
+        waitForIdle()
+        onNodeWithText("SQLite").assertIsDisplayed()
+        onNodeWithText("H2").assertDoesNotExist()
+        onNodeWithText("格式化").assertIsEnabled()
     }
 
     /**

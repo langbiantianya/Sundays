@@ -91,7 +91,9 @@ import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
+import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
 import com.kxxnzstdsw.sundays.table.DataTable
@@ -466,6 +468,7 @@ private fun ActiveSheetContent(
                     state = sheet.browser,
                     connected = sheet.status.state == ConnectionState.CONNECTED,
                     schema = sheet.browser.currentSchema(),
+                    dialect = sheet.browser.sqlDialectProfile(),
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
@@ -847,9 +850,11 @@ private fun PreviewTabContent(
  * 文本 / 光标 / 滚动位置 / 结果都保持不变。「执行 SQL」只作用于 [DatabaseBrowserState.currentSqlSheet]。
  *
  * 编辑器用 [CodeEditorWithToolbar]（`:shared` 的 `commonMain/.../editor/ui/CodeEditor.kt`）：
- * 固定 `languageId = "sql"`（隐藏语言切换器 —— 本工作台只处理 SQL），内置「格式化」按钮
- * 走注册表里的 SQL formatter，「执行 SQL」经 `actions` 插槽注入。
- * SQL 语言与 formatter 由 app 启动时的 `registerBuiltinEditors()` 注册（幂等）。
+ * `languageId` = **当前连接方言的高亮档位**（[SqlDialectProfile.languageId]，见
+ * [DatabaseBrowserState.sqlDialectProfile]）—— 换库即换关键字 / 类型 / 内置函数词表；
+ * 隐藏语言切换器（本工作台只处理 SQL），内置「格式化」按钮走注册表里同档位的 SQL formatter，
+ * 「执行 SQL」经 `actions` 插槽注入。SQL 语言与 formatter 由 app 启动时的
+ * `registerBuiltinEditors()` 一次性注册全部档位（幂等）。
  *
  * 结果面板渲染**当前 sheet** 的四种态：
  * - `running` → 行内 spinner
@@ -863,6 +868,7 @@ private fun SqlWorkbenchPane(
     state: DatabaseBrowserState,
     connected: Boolean,
     schema: String,
+    dialect: SqlDialectProfile,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -888,6 +894,13 @@ private fun SqlWorkbenchPane(
                     text = "SQL 工作台",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                // 当前生效的高亮档位（由连接方言决定）—— 让「关键字随库变」在界面上可见
+                Text(
+                    text = dialect.displayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -930,7 +943,8 @@ private fun SqlWorkbenchPane(
                     text = sheet.editor.text,
                     editorState = sheet.editor,
                     onTextChange = { sheet.editor.setText(it) },
-                    languageId = "sql",
+                    // 方言档位即语言 id：高亮与「格式化」都走同一档位（见 SqlDialectProfile）
+                    languageId = dialect.languageId,
                     // 本工作台只处理 SQL —— 不暴露语言切换器
                     showLanguageSwitcher = false,
                     actions = {
@@ -1505,6 +1519,24 @@ private val GENERATE_RESULT_COLUMNS = listOf(
     TableColumn(key = "inserted", header = "插入行数"),
 )
 
+/**
+ * 连接方言 → SQL 高亮档位。
+ *
+ * `when` **穷举且不写 `else`**：将来新增 [DialectType] 时这里编译期就报错，
+ * 不会让新方言静默退化到标准档位。
+ *
+ * 映射放在 desktopApp 而不是 `:shared` 的编辑器模块 —— 编辑器只认 [SqlDialectProfile]，
+ * 不依赖连接配置（依赖方向见 desktopApp/ARCHITECTURE.md）。
+ */
+private fun DialectType.toSqlDialectProfile(): SqlDialectProfile = when (this) {
+    DialectType.MYSQL -> SqlDialectProfile.MYSQL
+    DialectType.POSTGRESQL -> SqlDialectProfile.POSTGRESQL
+    DialectType.H2 -> SqlDialectProfile.H2
+    DialectType.DUCKDB -> SqlDialectProfile.DUCKDB
+    DialectType.SQLITE -> SqlDialectProfile.SQLITE
+    DialectType.UNKNOWN -> SqlDialectProfile.STANDARD
+}
+
 // ============================================================================
 // 数据库浏览器状态机 —— 与 UI 解耦, 由 [DatabaseBrowserScreen] 创建
 // ============================================================================
@@ -1574,8 +1606,14 @@ class DatabaseBrowserState(
     var selectedTabIndex: Int by mutableStateOf(-1)
         private set
 
-    /** 当前选中的连接 —— 由 [DatabaseBrowserScreen] 通过 [bindConnection] 注入 */
-    private var currentConnection: ConnectionConfig? = null
+    /**
+     * 当前选中的连接 —— 由 [DatabaseBrowserScreen] 通过 [bindConnection] 注入。
+     *
+     * 是 Compose **快照状态**而不只是普通字段：SQL 工作台的高亮档位由它派生，连接（方言）变化
+     * 必须触发重组，否则切连接后关键字表还停在上一个方言上。
+     */
+    var currentConnection: ConnectionConfig? by mutableStateOf(null)
+        private set
 
     /**
      * 会话代次 —— 每次切换连接自增。
@@ -1681,6 +1719,15 @@ class DatabaseBrowserState(
      *  默认取第一个展开的数据库，若无则为 `""`（默认 catalog）。 */
     fun currentSchema(): String =
         expandedDatabases.firstOrNull() ?: ""
+
+    /**
+     * SQL 工作台的高亮档位 —— 按**当前连接的方言**选关键字 / 类型 / 内置函数词表。
+     *
+     * 未连接 / 未知方言 → 标准 SQL 档位（`"sql"`）。返回值同时决定编辑器的 `languageId`
+     * （高亮 + 格式化）与标题条上显示的方言名。
+     */
+    fun sqlDialectProfile(): SqlDialectProfile =
+        currentConnection?.dialect?.toSqlDialectProfile() ?: SqlDialectProfile.STANDARD
 
     /**
      * 执行**当前 SQL sheet** 编辑器中的 SQL —— 走 `Category.SQL` / `Action.EXECUTE` 流式通道：

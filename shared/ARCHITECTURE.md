@@ -62,7 +62,7 @@ HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码
 
 | 能力 | 实现机制 |
 |---|---|
-| **语法高亮** | `SyntaxHighlighter` + `CodeLanguageRegistry`（SPI 模式） |
+| **语法高亮** | `SyntaxHighlighter` + `CodeLanguageRegistry`（SPI 模式）；SQL 支持**方言档位**（关键字随连接的库变，见 §2.8） |
 | **行号 gutter** | `LineNumberGutter` Composable；宽度按行数位数自适应（最少 2 位） |
 | **工具栏** | `CodeEditorWithToolbar` 包裹 `EditorToolbar`（语言切换 + 格式化 + actions 插槽） |
 | **格式化** | `CodeFormatterRegistry` 自动启用；工具栏"格式化"按钮按语言可用性启用 / 禁用 |
@@ -269,6 +269,50 @@ BasicTextField(
 - `rememberCodeHighlighter(theme)` 复用 `SyntaxHighlighter` 实例，避免每次 recompose 创建
 - `transformation` 仅在 `language` / `highlighter` / `text` 变化时重新构造
 - 大文本 tokenize 在 UI 线程同步执行 —— 对 SQL/Lua 长度（典型 < 10K 行）足够快；未来可拆 `LaunchedEffect` 异步化
+
+### 2.8 SQL 方言档位 —— 关键字随库变
+
+`SqlLanguage` 的基集是「SQL:2016 + 5 方言共有子集」；连上某个库后，编辑器在基集之上追加该方言
+**特有**的关键字 / 类型 / 内置函数（`PRAGMA` 只在 SQLite 亮、`STRAIGHT_JOIN` 只在 MySQL 亮……）。
+
+```kotlin
+data class SqlDialectProfile(
+    val languageId: String,     // = CodeLanguage.id（注册表主键），也是 formatter 的 languageId
+    val displayName: String,    // 下拉框 / 工作台标题条显示的名字（"MySQL" / "PostgreSQL" / …）
+    val keywords: Set<String> = emptySet(),
+    val types: Set<String> = emptySet(),
+    val builtins: Set<String> = emptySet(),
+) { companion object { val STANDARD, MYSQL, POSTGRESQL, H2, DUCKDB, SQLITE; val ALL } }
+
+class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : CodeLanguage {
+    override val id = profile.languageId
+    override val displayName = profile.displayName
+    // 基集 ∪ 方言词表在**构造期合并一次** —— tokenize 每次按键都会跑，不能在里面做集合运算
+    private val keywords = BASE_KEYWORDS + profile.keywords
+    …
+}
+```
+
+**档位即一种语言**：换方言 = 换 `languageId`，因此 `CodeEditor` / `CodeEditorWithToolbar` 零改动，
+高亮与「格式化」自动走同一档位（formatter 也按 `languageId` 索引 —— 若另起一套映射，方言档位下
+「格式化」按钮会因找不到 formatter 而静默禁用）。`SqlFormatter(languageId)` 的默认参数即
+`STANDARD.languageId`，`SqlFormatter.register()` 一次注册全部档位（语言 + formatter 配对注册）。
+
+**不变量**（`SqlDialectProfileTest` 强制）：
+- 档位 id 唯一，且「档位声明的每个词」都 tokenize 成声明的类型 —— 该断言同时挡住两类错误：
+  同一个词被重复归类（KEYWORD → TYPE → BUILTIN 有优先级，重复归类会静默改色），
+  以及档位词与基集冲突；
+- 标准档位不认识任何方言词（否则档位形同虚设）；
+- 基集词表在所有档位继续生效（档位只追加、不覆盖）；
+- 每个档位都同时注册了语言与 formatter。
+
+**映射在 desktopApp**：「连接方言 `DialectType` → 档位」的 `when` 穷举写在 `DatabaseBrowserScreen.kt`
+（不写 `else`，新增方言时编译期报错）。编辑器模块因此**不依赖** `connection` 包，保持可复用的纯 UI 组件。
+
+> **注册时机**：`registerBuiltinEditors()` 一次注册 SQL 家族全部档位 + Lua（`main()` 调用，幂等）。
+> 未注册时 `CodeLanguageRegistry.get(languageId)` 返回 null —— 编辑器静默退化为无高亮纯文本。
+> 反过来，**测试里直接渲染编辑器而不跑 `main()` 时必须自己调一次**（见 `DatabaseBrowserUiTest`
+> 的 `sql workbench follows the connected dialect`）。
 
 ---
 
@@ -831,17 +875,19 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ## 8. 测试覆盖
 
-`shared/` 共 **97 项测试**，分布如下：
+`shared/` 共 **105 项测试**，分布如下：
 
 | 测试类 | 路径 | 项数 | 说明 |
 |---|---|---|---|
 | `LuaTokenizerTest` | `commonTest/.../editor/LuaTokenizerTest.kt` | 30 | Lua 关键字 / 字符串 / 注释 / 数字 tokenize |
 | `SqlTokenizerTest` | `commonTest/.../editor/SqlTokenizerTest.kt` | 23 | SQL 关键字 / 字符串 / 注释 tokenize |
+| `SqlDialectProfileTest` | `commonTest/.../editor/SqlDialectProfileTest.kt` | 6 | 方言档位：id / 词表分类不变量 / 标准档位不认方言词 / 注册配对（语言 + formatter）/ 格式化随档位 |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
-| **合计** | | **97** | **0 失败 / 0 错误** |
+| `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
+| **合计** | | **105** | **0 失败 / 0 错误** |
 
 运行命令：
 

@@ -54,7 +54,7 @@ import com.kxxnzstdsw.sundays.editor.EditorContextMenuState
 import com.kxxnzstdsw.sundays.editor.SyntaxHighlighter
 import com.kxxnzstdsw.sundays.editor.formatter.CodeFormatterRegistry
 import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
-import com.kxxnzstdsw.sundays.editor.language.SqlLanguage
+import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
 import com.kxxnzstdsw.sundays.ui.onRightClick
 
@@ -575,14 +575,12 @@ private class CodeVisualTransformation(
  * 重复调用是**幂等**的（registry 内部用 `synchronized` + 覆盖语义）。
  */
 fun registerBuiltinEditors() {
-    if (!CodeLanguageRegistry.contains("sql")) {
-        CodeLanguageRegistry.register(SqlLanguage())
+    // SQL 家族：SqlFormatter.register() 一次注册全部方言档位（"sql" / "sql-mysql" / …）的语言 + formatter
+    if (!CodeLanguageRegistry.contains(SqlDialectProfile.STANDARD.languageId)) {
+        com.kxxnzstdsw.sundays.editor.formatter.SqlFormatter.register()
     }
     if (!CodeLanguageRegistry.contains("lua")) {
         CodeLanguageRegistry.register(LuaLanguage())
-    }
-    if (CodeFormatterRegistry.get("sql") == null) {
-        com.kxxnzstdsw.sundays.editor.formatter.SqlFormatter.register()
     }
     if (CodeFormatterRegistry.get("lua") == null) {
         com.kxxnzstdsw.sundays.editor.formatter.LuaFormatter.register()
