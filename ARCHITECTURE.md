@@ -88,7 +88,7 @@ sundays/
 
 ### 模块导航
 
-| 模块 | 入口 README | 内部架构 CLAUDE | 内容主题 |
+| 模块 | 入口 README | 内部架构 | 内容主题 |
 |---|---|---|---|
 | **engine-protocol/** | [`engine-protocol/README.md`](./engine-protocol/README.md) | — | 调用层契约：`EngineClient` 接口 / proto 协议 / `SYSTEM.DISCONNECT` 路由 |
 | **engine/** | [`engine/README.md`](./engine/README.md) | [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) | gRPC 协议 / 14 个 handler 路由 / 强类型 envelope / 表驱动 Dispatcher / 流式响应 / 连接池 / IPC Transport SPI / `IdbEngine` 实现 / 导出子进程隔离 / v2.16 查询取消 + 事务会话 + 数据导入 |
@@ -101,7 +101,6 @@ sundays/
 | **dialect-sqlite/** | [`dialect-sqlite/README.md`](./dialect-sqlite/README.md) | — | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
 | **shared/** | [`shared/README.md`](./shared/README.md) | [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | KMP Compose 组件（CodeEditor / DataTable / 右键菜单 / AppDestination / SundaysTheme + SundaysPalette 视觉规范）/ 高度策略 / 可扩展插槽 / 与引擎解耦 |
 | **desktopApp/** | [`desktopApp/README.md`](./desktopApp/README.md) | [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | KMP 工程结构 / Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览第二屏 / 生命周期管理 |
-| **历史文档** | [`docs/architecture-history-v2.9.md`](./docs/architecture-history-v2.9.md) | — | v2.9 之前的根级完整架构设计（已归档保留） |
 
 ---
 
@@ -191,4 +190,4 @@ java -jar idb-engine.jar --mode direct
 
 > **v2.9 关键设计补充**：CodeEditor / DataTable 统一高度策略 —— `CodeEditor.maxLines` 默认 `null`（不施加高度上限，填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器。详细见 [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md)。
 
-完整迁移日志与每版本详细变更见 [`docs/architecture-history-v2.9.md`](./docs/architecture-history-v2.9.md)（v2.9 之前的根级完整文档已归档）。
+本表为简表：每个版本的详细变更见该行「详情」列指向的文档；各模块当前的深度设计见上文「模块导航」的「内部架构」列。
