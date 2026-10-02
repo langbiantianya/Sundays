@@ -78,6 +78,7 @@ class AppearanceState(
     initialPalette: ThemePalette = ThemePalette.BLUE_GRAY,
     initialMode: ThemeMode = ThemeMode.SYSTEM,
     initialSystemInfoRefresh: SystemInfoRefresh = SystemInfoRefresh.OFF,
+    initialCompactMode: Boolean = false,
     private val onChange: (AppearanceState) -> Unit = {},
 ) {
 
@@ -91,6 +92,16 @@ class AppearanceState(
 
     /** 「系统信息」分类的自动刷新间隔。 */
     var systemInfoRefresh: SystemInfoRefresh by mutableStateOf(initialSystemInfoRefresh)
+        private set
+
+    /**
+     * 紧凑模式 —— 第三根正交轴（配色 / 明暗之外）。
+     *
+     * 与 [palette] / [mode] 的差别：它是**布尔**而非枚举，且不像前两者那样由
+     * [SundaysTheme] 的参数消费，而是经 [SundaysTheme] 的 `compact` 参数转成
+     * `LocalDensity` 覆盖 —— 详见 [CompactMode.kt]。
+     */
+    var compactMode: Boolean by mutableStateOf(initialCompactMode)
         private set
 
     private fun persist() = onChange(this)
@@ -113,6 +124,21 @@ class AppearanceState(
     fun selectSystemInfoRefresh(target: SystemInfoRefresh) {
         if (target == systemInfoRefresh) return
         systemInfoRefresh = target
+        persist()
+    }
+
+    /**
+     * 切换紧凑模式。
+     *
+     * 同样走 [persist]：入口越少漏保存越不容易发生（见本类 KDoc），
+     * 新增入口只要调这一个方法即自动继承落盘。
+     *
+     * 命名与相邻的 `select*` 一族对齐，**不能**叫 `setCompactMode` —— 那会与 `compactMode`
+     * 属性由 `private set` 生成的 JVM setter `setCompactMode(Z)V` 撞签名，编译直接失败。
+     */
+    fun selectCompactMode(target: Boolean) {
+        if (target == compactMode) return
+        compactMode = target
         persist()
     }
 
@@ -146,12 +172,14 @@ fun rememberPersistentAppearanceState(): AppearanceState {
             initialPalette = settings.palette,
             initialMode = settings.themeMode,
             initialSystemInfoRefresh = settings.systemInfoRefresh,
+            initialCompactMode = settings.compactMode,
             onChange = { state ->
                 SettingsStorage.save(
                     AppSettings(
                         palette = state.palette,
                         themeMode = state.mode,
                         systemInfoRefresh = state.systemInfoRefresh,
+                        compactMode = state.compactMode,
                     )
                 )
             },

@@ -5,10 +5,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.sundays.ui.AppearanceState
 import com.kxxnzstdsw.sundays.ui.SystemInfoRefresh
@@ -16,6 +20,7 @@ import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemePalette
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -27,6 +32,7 @@ import kotlin.test.assertTrue
  * 3. **自动刷新间隔可选项**（关闭 / 10 / 5 / 2 / 1 秒）与选择回写
  * 4. 改档位要**落盘**（`onChange` 钩子被调用，不是只改内存字段）
  * 5. 系统信息三态渲染
+ * 6. **紧凑模式开关**可来回切换、反映传入档位、并与其他轴互不干扰
  */
 @OptIn(ExperimentalTestApi::class)
 class SettingsScreenTest {
@@ -49,6 +55,8 @@ class SettingsScreenTest {
                 systemInfo = systemInfo,
                 onRequestSystemInfo = onRequest,
                 onBack = onBack,
+                compactMode = state.compactMode,
+                onCompactModeChange = state::selectCompactMode,
             )
         }
     }
@@ -247,6 +255,54 @@ class SettingsScreenTest {
             val afterSwitch = requests
             onNodeWithText("刷新").performClick()
             assertTrue(requests > afterSwitch, "「刷新」按钮应再发一次请求")
+        }
+    }
+
+    @Test
+    fun `compact mode is off by default and toggles both ways`() {
+        runComposeUiTest {
+            val state = AppearanceState()
+            setContent { render(state) }
+
+            // 「界面密度」排在配色（5 项）+ 明暗（3 项）之后，测试视口下在折叠线以下 ——
+            // 必须先滚过去，否则 performClick 的坐标会落在别的节点上，且不报错。
+            onNodeWithText("紧凑模式").performScrollTo().assertIsDisplayed()
+            onNode(isToggleable()).assertIsOff()
+            assertFalse(state.compactMode, "默认应为标准密度")
+
+            onNodeWithText("紧凑模式").performClick()
+            assertTrue(state.compactMode, "点开关应切到紧凑")
+            onNode(isToggleable()).assertIsOn()
+
+            onNodeWithText("紧凑模式").performClick()
+            assertFalse(state.compactMode, "再点一次应回到标准")
+            onNode(isToggleable()).assertIsOff()
+        }
+    }
+
+    @Test
+    fun `compact mode reflects the state it was given`() {
+        // 开关渲染的是**传入的档位**而不是自己存一份：两者一旦脱节，就会出现
+        // 「重启后开关显示关闭、界面却是紧凑的」这种没法自查的现象。
+        runComposeUiTest {
+            setContent { render(AppearanceState(initialCompactMode = true)) }
+            onNode(isToggleable()).assertIsOn()
+        }
+    }
+
+    @Test
+    fun `compact toggle is persisted and independent of the other axes`() {
+        runComposeUiTest {
+            val persisted = mutableListOf<AppearanceState>()
+            val state = AppearanceState(onChange = { persisted += it })
+            setContent { render(state) }
+
+            onNodeWithText("紧凑模式").performScrollTo().performClick()
+
+            assertTrue(persisted.last().compactMode, "紧凑变更必须落盘")
+            // 尺度轴与配色 / 明暗正交：动它不该顺带改别人，也不该被别人改掉
+            assertEquals(ThemePalette.BLUE_GRAY, persisted.last().palette)
+            assertEquals(ThemeMode.SYSTEM, persisted.last().mode)
         }
     }
 }

@@ -458,6 +458,50 @@ fun selectionIndicatorColors(): androidx.compose.material3.RadioButtonColors =
         unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
+/**
+ * 开关的着色 —— 经典档用 `primary` 画轨道（经典 Win 的选中态就是主色实心）、滑块取
+ * `onPrimary` 压出「钮上的字」那层反白；现代档透传 M3 默认。
+ *
+ * 与 [selectionIndicatorColors] 同理：滑块 / 轨道的 3D 斜面属于 M3 内部绘制，无法注入
+ * token，故这里只管颜色。
+ */
+@Composable
+fun selectionSwitchColors(): androidx.compose.material3.SwitchColors =
+    androidx.compose.material3.SwitchDefaults.colors(
+        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+        checkedTrackColor = MaterialTheme.colorScheme.primary,
+        checkedBorderColor = Color.Transparent,
+        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        uncheckedTrackColor = MaterialTheme.colorScheme.surface,
+        uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+    )
+
+/**
+ * 开关 —— 设置页的布尔项（当前是「紧凑模式」）用它。
+ *
+ * 与 [WinButton] 等包装层不同，这里**现代档也要接管颜色**（[selectionSwitchColors]），
+ * 而不是透传 M3 默认：M3 出厂开关是「紫灰轨道 + 白色滑块」的触控观感，与本项目低饱和靛蓝
+ * 的桌面观感不搭。经典档的立体斜面则确实做不出来 —— M3 把滑块 / 轨道的绘制写死在内部，
+ * 与 [selectionIndicatorColors] 面临同一限制，记在本文件「已知简化」里。
+ *
+ * 尺寸随 [LocalDensity] 自动缩放，故紧凑档下轨道从 52dp 收到 44.2dp，无需额外处理。
+ */
+@Composable
+fun WinSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    androidx.compose.material3.Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
+        colors = selectionSwitchColors(),
+    )
+}
+
 // ============================================================================
 // 菜单 / 进度指示 —— 经典档的另外两处控件
 // ============================================================================

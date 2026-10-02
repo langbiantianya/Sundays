@@ -71,7 +71,12 @@ fun main() = application {
         // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
         // 会出现「按钮变了、界面没变」。见 AppearanceState 的 KDoc。
         val appearance = rememberPersistentAppearanceState()
-        SundaysTheme(darkTheme = appearance.resolvedDark(), palette = appearance.palette) {
+        SundaysTheme(
+            darkTheme = appearance.resolvedDark(),
+            palette = appearance.palette,
+            // 紧凑档与配色 / 明暗正交：只改 LocalDensity 覆盖，故照样在主题最外层消费
+            compact = appearance.compactMode,
+        ) {
             MainScreen(engine = engine, appearance = appearance)
         }
     }
@@ -154,8 +159,8 @@ internal suspend fun fetchSystemInfo(engine: EngineClient): SystemInfo {
  * `internal` 而非 `private`：`MainScreenNavTest` 需要渲染它来验证顶层导航切换
  * （导航状态由本函数持有，无法从外部注入）。
  *
- * @param appearance 外观状态（配色主题 + 明暗档位 + 系统信息刷新间隔）；`MainScreen` 只**透传**
- *   给各屏幕与设置页，不自己改 —— 状态归属见 [AppearanceState] KDoc
+ * @param appearance 外观状态（配色主题 + 明暗档位 + 紧凑模式 + 系统信息刷新间隔）；
+ *   `MainScreen` 只**透传**给各屏幕与设置页，不自己改 —— 状态归属见 [AppearanceState] KDoc
  */
 @Composable
 internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
@@ -266,6 +271,8 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                 systemInfo = systemInfo,
                 onRequestSystemInfo = ::refreshSystemInfo,
                 onBack = ::closeSettings,
+                compactMode = appearance.compactMode,
+                onCompactModeChange = appearance::selectCompactMode,
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {

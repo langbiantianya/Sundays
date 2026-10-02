@@ -54,6 +54,7 @@ object SettingsStorage {
                 palette = parsed.palette.toEnumOrDefault(ThemePalette.BLUE_GRAY),
                 themeMode = parsed.themeMode.toEnumOrDefault(ThemeMode.SYSTEM),
                 systemInfoRefresh = parsed.systemInfoRefresh.toEnumOrDefault(SystemInfoRefresh.OFF),
+                compactMode = parsed.compactMode,
             )
         } catch (_: Exception) {
             // 解析失败：重写为默认值，让文件恢复成合法 JSON，避免每次启动都走降级分支
@@ -77,6 +78,7 @@ object SettingsStorage {
                         palette = settings.palette.name,
                         themeMode = settings.themeMode.name,
                         systemInfoRefresh = settings.systemInfoRefresh.name,
+                        compactMode = settings.compactMode,
                     ),
                 ),
             )
@@ -101,6 +103,13 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /** 「系统信息」自动刷新间隔。 */
     val systemInfoRefresh: SystemInfoRefresh = SystemInfoRefresh.OFF,
+    /**
+     * 紧凑模式 —— 控件尺寸整体缩小（桌面密度）。默认 `false`（沿用 M3 出厂尺度）。
+     *
+     * 与前三项不同，它是 `Boolean` 而非枚举：没有「未知档位要降级」的语义，
+     * 旧文件缺该字段时由 kotlinx.serialization 补 `false` 即可。
+     */
+    val compactMode: Boolean = false,
 )
 
 /**
@@ -115,6 +124,7 @@ private data class PersistedSettings(
     val palette: String = ThemePalette.BLUE_GRAY.name,
     val themeMode: String = ThemeMode.SYSTEM.name,
     val systemInfoRefresh: String = SystemInfoRefresh.OFF.name,
+    val compactMode: Boolean = false,
 )
 
 /** 字符串 → 枚举；未知值（手改文件 / 降级安装）一律回落 [fallback]。 */

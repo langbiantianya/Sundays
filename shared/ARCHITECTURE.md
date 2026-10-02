@@ -17,6 +17,7 @@
 - **ConnectionManagerScreen** — 连接管理（左侧连接列表 + 右侧 4 步引导页面），支持 MySQL/PostgreSQL/H2/DuckDB/SQLite
 - **AppDestination** — 顶层导航目标枚举（v2.14 自 `desktopApp` 上移；同批上移的 `TopNavBar` 已无实现，见 §5.2）
 - **SundaysTheme / SundaysPalette** — 跟随系统明暗的应用主题（v2.14 自 `desktopApp` 上移）；配色 / 形状 / 字号规范见 §5.4
+- **CompactMode** — 紧凑档（尺度轴）：缩放 `LocalDensity` 把 M3 触屏尺寸收到桌面尺度，见 §5.6
 - **通用 UI 工具** — `ContextMenuState<T>` + `Modifier.onRightClick`
 
 ### 1.2 KMP Source Set 布局
@@ -688,14 +689,24 @@ fun TopNavBar(
 @Composable
 fun SundaysTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    palette: ThemePalette = ThemePalette.BLUE_GRAY,
+    compact: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = SundaysPalette.colorSchemeFor(darkTheme),
-        shapes = SundaysPalette.Shapes,
-        typography = SundaysPalette.Typography,
+    CompositionLocalProvider(
+        LocalPalette provides palette,
+        LocalUiTokens provides palette.uiTokens(darkTheme),
+        LocalBevelStyle provides palette.bevelStyle(darkTheme),
+        LocalCompactMode provides compact,
+        LocalDensity provides compactDensity(LocalDensity.current, compact),
     ) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, content = content)
+        MaterialTheme(
+            colorScheme = palette.schemeFor(darkTheme),
+            shapes = palette.shapes,
+            typography = SundaysPalette.Typography,
+        ) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, content = content)
+        }
     }
 }
 ```
@@ -703,6 +714,10 @@ fun SundaysTheme(
 `isSystemInDarkTheme()` 本身即 `commonMain` API（`androidx.compose.foundation`），各平台入口
 （desktop `Window` / 未来的 Android / iOS）只需创建平台容器并套上本主题，
 明暗策略无需在每个平台重复。
+
+`compact` 是第三根轴（尺度），与配色 / 明暗正交；它的实现只有 `LocalDensity` 覆盖那
+一行，细节见 §5.6。⚠️ `compactDensity(LocalDensity.current, …)` 必须在 provider **之外**求值 ——
+写在 provider 的参数位上时 `LocalDensity.current` 尚未生效，读到的仍是平台值。
 
 **必须由 `Surface` 兜底背景色**：Material3 的 `MaterialTheme` 只注入 colorScheme / shapes /
 typography，**不注入** `LocalContentColor`（其默认值是 `Color.Black`）。少了这层 `Surface`，
@@ -803,6 +818,30 @@ main()  ── rememberThemeModeState()  ← 状态诞生
 配到另一个明暗档就会渲染成错误底色。`SundaysPaletteTest` 遍历
 `ThemePalette.entries × {light, dark}` 断言可读性与底色方向，**新增主题自动进入断言范围**。
 
+#### 第三根正交轴：紧凑模式（`compact`）
+
+| 轴 | 取值 | 决定 |
+|---|---|---|
+| **`compact` 紧凑模式** | `false`（标准）/ `true`（紧凑） | **尺度**：控件几何与间距 |
+
+它与上面两轴正交 —— 5 主题 × 3 明暗 × 2 密度 = **30 种界面外观**。
+
+Material3 出厂尺寸是**触屏语言**（`Button` 最小高 40dp、`OutlinedTextField` 56dp、
+`ListItem` 72dp、`Switch` 轨道 52dp、导航栏 80dp）。这些数字在手指上刚好，在鼠标上是浪费 ——
+同样的窗口高度，DBeaver / DataGrip 能多列出三四行。§5.4 的 `SundaysPalette` 只能改颜色 / 圆角 / 字号，
+改不动这些尺寸：它们是 M3 组件内部写死的 token 常量。
+
+| 决策 | 说明 |
+|---|---|
+| **缩放 `LocalDensity.density` 而非逐组件覆写** | 所有 `dp`（含 M3 的最小高度 / 内边距 / 间距 / 圆角 / 图标）都经 `Density.toPx()` 换算像素。缩一次 `density`，整棵树等比缩小，**30+ 个调用点一行都不用改**。逐个改则每加一个组件就要再改一次，漏一个就会在界面里留下「没缩小的控件」 |
+| **字号单独一档，且比控件温和** | `sp` 的像素值是 `value × density × fontScale`，会**连带**被 density 缩放。靠 `fontScale` 反向补偿，使控件缩 `0.85` 而字号只缩 `0.92`。若不管它，13sp 正文会掉到 11.1sp，在 100% DPI 屏上开始费眼 —— 而「控件变小」不需要以牺牲可读性为代价 |
+| **默认 `false`** | M3 出厂尺度是现状，不改变既有用户的观感；紧凑是显式选择 |
+| **立即生效** | `AppearanceState` 变更 → `SundaysTheme` 的 `compact` 参数 → `LocalDensity` 覆盖 → 整棵树重组。不需要重启，也不需要重建当前屏幕 |
+
+实现见 `ui/CompactMode.kt`。`CompactModeTest`（纯函数，钉住缩放数学与补偿恒等式）
++ `CompactThemeTest`（组合，钉住 `SundaysTheme` → `LocalDensity` 的接线）
++ `SettingsScreenTest`（钉住开关行为与落盘）。
+
 #### 浅色档不能用品牌色：赛博朋克与哔哩粉踩的是同一个坑
 
 信息密集型界面对比度是硬门槛（正文一律 AA 4.5:1），而**当代品牌色几乎都过不了这一关**。
@@ -879,6 +918,7 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | 按钮与输入框的包装层 | ✅ `WinControls.kt`，42 处调用点已迁移 |
 | 默认按钮的粗黑边框 | ❌ M3 没有「哪个按钮是回车默认项」的信息 |
 | 按下瞬间的凸起↔凹陷互换 | ❌ M3 按下只改容器色，要翻转斜面需自行接管 `interactionSource` |
+| 开关的立体斜面 | ❌ M3 把滑块 / 轨道的绘制写死在内部（与单选圆点同一限制），故 `WinSwitch` 只管颜色 |
 | 虚线焦点框 / 标题栏 / 任务栏 | ❌ 超出 `MaterialTheme` 能表达的范围 |
 | 逐主题字体 | ❌ **有意不做**：MS Sans Serif 8pt 与 Tahoma 8pt 都是位图点阵字体，换成系统默认无衬线后本就没有那个观感，强行缩小只会让信息密集界面更难读
 | **界面硬编码圆角** | ✅ 11 处 `RoundedCornerShape(…)` 改走 `winShape(…)` |
@@ -945,9 +985,11 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | 读取永远降级 | 文件缺失 / 解析失败 / 枚举值非法，一律回落默认值，绝不因配置损坏让应用起不来。损坏文件会被**顺手重写为默认值**（自愈），否则用户每次启动都走降级分支 |
 | 磁盘记录与 `AppSettings` 解耦 | 枚举将来加档位时，未知 `themeMode` 字符串由 `toThemeMode()` 降级为 `SYSTEM`，而不会因反序列化失败把整个文件作废 |
 | 落盘挂在 `ThemeModeState` 内部 | 切换入口有三处（两个面板 + 设置页），散在三个文件里。任何一处漏保存，用户就遇到「这次改了、下次启动变回去」——这类 bug 极难复现。收在状态对象里只有一个写入点，新增入口自动继承 |
+| `compactMode` 存 `Boolean` 而非枚举 | 它没有「未知档位要降级」的语义。旧文件缺该字段时由 kotlinx.serialization 补 `false`（标准密度）即可 —— 新装用户与升级用户都拿到与升级前一致的观感 |
 
 `SettingsStorageTest` 覆盖往返（含逐档）、路径与版本字段、损坏文件降级 + 自愈、
-未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留。
+未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留、
+`compactMode` 两档往返（只存 `true` 的实现会让 `false` 分支永远没跑过）。
 
 ---
 
@@ -1250,6 +1292,7 @@ parameters`）。把纯逻辑抽出来后，测试与设计同时变简单。
 | `winShape(corner)` | 界面所有容器 / 卡片 / 徽标 —— 替掉硬编码的 `RoundedCornerShape(8/12.dp)` |
 | `controlShape()` | 按钮 / 输入框 |
 | `selectionContainerColor` / `selectionContentColor` | 列表项、方言选项、设置页分类 |
+| `selectionIndicatorColors()` / `selectionSwitchColors()` | 单选圆点 / 开关 —— M3 的选中标记无法注入 token，只管颜色 |
 | `buttonFaceColor` / `buttonInkColor` / `fieldFaceColor` | `WinControls.kt` 的按钮与输入框 |
 | `panelBorderStroke()` | 面板 / 卡片描边 |
 | `WinDivider` | 26 处分组线 |

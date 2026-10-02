@@ -48,6 +48,7 @@ import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import com.kxxnzstdsw.sundays.ui.ThemePalette
 import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
+import com.kxxnzstdsw.sundays.ui.WinSwitch
 import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
 import com.kxxnzstdsw.sundays.ui.selectionContentColor
 import com.kxxnzstdsw.sundays.ui.selectionContainerColor
@@ -80,6 +81,8 @@ import kotlinx.coroutines.delay
  * @param onThemeModeChange 明暗档位变更回调
  * @param systemInfoRefresh 系统信息自动刷新间隔
  * @param onSystemInfoRefreshChange 刷新间隔变更回调
+ * @param compactMode 紧凑模式（控件尺寸整体缩小）
+ * @param onCompactModeChange 紧凑模式变更回调
  * @param systemInfo 系统信息状态（loading / 成功 / 失败）
  * @param onRequestSystemInfo 请求系统信息；切到 [SettingsCategory.SYSTEM_INFO] 或点「刷新」、
  *   以及自动刷新到点时触发
@@ -96,6 +99,8 @@ fun SettingsScreen(
     systemInfo: SystemInfoState,
     onRequestSystemInfo: () -> Unit,
     onBack: () -> Unit,
+    compactMode: Boolean = false,
+    onCompactModeChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var category by remember { mutableStateOf(SettingsCategory.PERSONALIZATION) }
@@ -162,6 +167,8 @@ fun SettingsScreen(
                     onPaletteChange = onPaletteChange,
                     themeMode = themeMode,
                     onThemeModeChange = onThemeModeChange,
+                    compactMode = compactMode,
+                    onCompactModeChange = onCompactModeChange,
                 )
                 SettingsCategory.SYSTEM_INFO -> SystemInfoPane(
                     state = systemInfo,
@@ -218,10 +225,11 @@ private fun SettingsCategory.icon(): ImageVector = when (this) {
 }
 
 /**
- * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）。
+ * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）+ 紧凑模式（一个开关）。
  *
  * 拆成两组而不是合成一个列表：配色与明暗是两件独立的事，`蓝灰 + 深色` 与
- * `赛博朋克 + 深色` 是不同外观，「赛博朋克 + 浅色」同样合法。
+ * `赛博朋克 + 深色` 是不同外观，「赛博朋克 + 浅色」同样合法。紧凑模式是**尺度**轴，
+ * 与前两者都正交，故单列为一个开关而非并入任何一组单选。
  */
 @Composable
 private fun PersonalizationPane(
@@ -229,6 +237,8 @@ private fun PersonalizationPane(
     onPaletteChange: (ThemePalette) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    compactMode: Boolean,
+    onCompactModeChange: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -291,6 +301,54 @@ private fun PersonalizationPane(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        Spacer(Modifier.height(24.dp))
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(16.dp))
+
+        Text(text = "界面密度", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        // 立即生效：AppearanceState 变更 → SundaysTheme 的 compact 参数 → LocalDensity 覆盖，
+        // 整棵树重组，**不需要**重启或重建当前屏幕。
+        SwitchRow(
+            title = "紧凑模式",
+            description = "缩小控件与行距，同屏显示更多内容。",
+            checked = compactMode,
+            onCheckedChange = onCompactModeChange,
+        )
+    }
+}
+
+/**
+ * 开关行（标题 + 说明 + 右侧开关）—— 布尔项的标准形态。
+ *
+ * 整行可点：与本文件的 [ChoiceRow] 同一手法（单选点自己挂 `onClick`，外层 Row 挂
+ * `clickable`）。点击开关本身由 `Switch` 消费掉事件，不会与外层重复触发一次。
+ */
+@Composable
+private fun SwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        WinSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

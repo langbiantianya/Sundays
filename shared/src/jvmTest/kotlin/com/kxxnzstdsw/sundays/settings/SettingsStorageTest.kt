@@ -88,6 +88,27 @@ class SettingsStorageTest {
     }
 
     @Test
+    fun compact_mode_round_trips_both_ways() {
+        // 两档都验：只存 true 的实现，false 分支永远没跑过，重启后可能一直紧凑
+        listOf(true, false).forEach { compact ->
+            SettingsStorage.save(AppSettings(compactMode = compact))
+            assertEquals(compact, SettingsStorage.load().compactMode, "紧凑档 $compact 往返失败")
+        }
+    }
+
+    @Test
+    fun every_axis_survives_together() {
+        val settings = AppSettings(
+            palette = ThemePalette.WIN_XP,
+            themeMode = ThemeMode.LIGHT,
+            systemInfoRefresh = SystemInfoRefresh.S5,
+            compactMode = true,
+        )
+        SettingsStorage.save(settings)
+        assertEquals(settings, SettingsStorage.load(), "全部设置项必须一起往返")
+    }
+
+    @Test
     fun missing_fields_in_old_file_use_defaults() {
         Files.createDirectories(settingsFile.parent)
         // 模拟旧版文件：只有 themeMode，没有 palette / systemInfoRefresh
@@ -96,6 +117,7 @@ class SettingsStorageTest {
         assertEquals(ThemeMode.DARK, loaded.themeMode, "已有的字段应保留")
         assertEquals(ThemePalette.BLUE_GRAY, loaded.palette, "缺失字段回落默认配色")
         assertEquals(SystemInfoRefresh.OFF, loaded.systemInfoRefresh, "缺失字段回落「关闭」")
+        assertFalse(loaded.compactMode, "旧文件没有 compactMode，应回落标准密度而非紧凑")
     }
 
     @Test
