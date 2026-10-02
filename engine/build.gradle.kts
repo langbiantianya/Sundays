@@ -191,31 +191,30 @@ val copyDialects = tasks.register<Copy>("copyDialects") {
 
 // 打包完成后自动复制依赖、驱动和方言
 tasks.jar {
-//    finalizedBy(copyDeps, copyDrivers, copyDialects, copyWinutils)
-    finalizedBy(copyDeps, copyDrivers, copyDialects)
+    finalizedBy(copyDeps, copyDrivers, copyDialects, copyWinutils)
 }
 
 // 下载 winutils.exe 到 build/libs/bin/winutils.exe（仅 Windows 需要，Parquet 写本地文件依赖）
 // Hadoop 3.3.5 的 winutils 与 3.5.0 二进制兼容
-//val copyWinutils = tasks.register("copyWinutils") {
-//    description = "下载windows上的hadoop winutils 依赖"
-//    val winutilsUrl = "https://raw.githubusercontent.com/cdarlint/winutils/refs/heads/master/hadoop-3.3.6/bin/winutils.exe"
-//    val outDir = layout.buildDirectory.dir("libs/bin")
-//    outputs.dir(outDir)
-//    doLast {
-//        val target = outDir.get().file("winutils.exe").asFile
-//        if (target.exists() && target.length() > 0) {
-//            return@doLast
-//        }
-//        outDir.get().asFile.mkdirs()
-//        logger.lifecycle("Downloading winutils.exe to ${target.absolutePath}")
-//        // 通过 ant.get 走 Gradle 内置 HttpClient（与 Gradle 自身下载依赖相同的网络栈，最稳）
-//        ant.invokeMethod("get", mapOf(
-//            "src" to winutilsUrl,
-//            "dest" to target.absolutePath,
-//            "verbose" to true,
-//            "retries" to 3
-//        ))
-//        logger.lifecycle("winutils.exe downloaded (${target.length()} bytes)")
-//    }
-//}
+val copyWinutils = tasks.register("copyWinutils") {
+    description = "下载windows上的hadoop winutils 依赖"
+    val winutilsUrl = "https://raw.githubusercontent.com/cdarlint/winutils/refs/heads/master/hadoop-3.3.6/bin/winutils.exe"
+    val outDir = layout.buildDirectory.dir("libs/bin")
+    outputs.dir(outDir)
+    doLast {
+        val target = outDir.get().file("winutils.exe").asFile
+        if (target.exists() && target.length() > 0) {
+            return@doLast
+        }
+        outDir.get().asFile.mkdirs()
+        logger.lifecycle("Downloading winutils.exe to ${target.absolutePath}")
+        // 通过 ant.get 走 Gradle 内置 HttpClient（与 Gradle 自身下载依赖相同的网络栈，最稳）
+        ant.invokeMethod("get", mapOf(
+            "src" to winutilsUrl,
+            "dest" to target.absolutePath,
+            "verbose" to true,
+            "retries" to 3
+        ))
+        logger.lifecycle("winutils.exe downloaded (${target.length()} bytes)")
+    }
+}
