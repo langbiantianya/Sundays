@@ -2,8 +2,11 @@ package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,13 +58,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -68,8 +76,13 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -96,6 +109,7 @@ import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
+import com.kxxnzstdsw.sundays.settings.formatBytes
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
@@ -112,6 +126,7 @@ import com.kxxnzstdsw.sundays.ui.WinIconButton
 import com.kxxnzstdsw.sundays.ui.winShape
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -184,39 +199,148 @@ fun DatabaseBrowserScreen(
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
     onOpenSettings: () -> Unit = {},
+    memoryProbe: (suspend () -> EngineMemory?)? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
-        // （空列表会在测量时 IndexOutOfBounds）。关闭最后一个 sheet 时，`destination` 由
-        // MainScreen 的 LaunchedEffect 在**组合之后**才切回首屏 —— 这中间会有一帧以空列表组合，
-        // 因此这里必须走「空态引导」而不是标签条。
-        val active = sheets.firstOrNull { it.connection.id == activeSheetId }
-        if (active == null) {
-            EmptySheetsHint(
-                onAddSheet = onAddSheet,
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier.fillMaxSize(),
-            )
-            return@Column
-        }
-        SheetTabRow(
-            sheets = sheets,
-            activeSheetId = activeSheetId,
-            onSelect = onSelectSheet,
-            onClose = onCloseSheet,
-            onAdd = onAddSheet,
-            onOpenSettings = onOpenSettings,
-        )
-        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    // 堆占用的**读数与「面板是否展开」都提到屏级**，不放在状态栏自己的组合里 ——
+    // 详情面板必须画在本屏最外层 Box：若画在状态栏那个只有 20dp 高的 Box 内，
+    // 浮出父级边界的部分收不到指针事件，点击会**穿透**到面板下方的表格行上（选中一行）。
+    // 提到屏级后面板落在有完整边界的根 Box 里，既能正常接收点击，也能被 UI 测试断言。
+    var memory by remember { mutableStateOf<EngineMemory?>(null) }
+    var memoryDetailOpen by remember { mutableStateOf(false) }
+    // 面板自身的悬停。状态栏的悬停由 EngineMemoryStatusBar 内的 interactionSource 提供，
+    // 但它的值只活在那个组件里 —— 关闭判定必须在屏级做（见下面的宽限期逻辑），
+    // 故这里另存一份。
+    var memoryPanelHovered by remember { mutableStateOf(false) }
+    // 状态栏悬停 —— 同样需要在屏级可见
+    var memoryBarHovered by remember { mutableStateOf(false) }
+    // 状态栏实测高度 —— 详情面板要锚在它正上方，写死一个常数会在字体缩放 / 紧凑档下错位
+    val barHeight = remember { mutableIntStateOf(0) }
 
-        ActiveSheetContent(
-            sheet = active,
-            onConnect = onConnect,
-            onDisconnect = onDisconnect,
-            modifier = Modifier.fillMaxSize(),
-        )
+    if (memoryProbe != null) {
+        // 轮询循环的 key 必须是 Unit，不能是 memoryProbe：调用方每次重组传进来的都是**新 lambda
+        // 实例**，拿它当 key 会让定时器每次重组都被重启（永远等不到下一次触发）——
+        // 与 SettingsScreen 的 rememberUpdatedState 是同一个坑，这里用 rememberUpdatedState 避开。
+        val probe by rememberUpdatedState(memoryProbe)
+        LaunchedEffect(Unit) {
+            while (true) {
+                // 串行 await + delay：上一次没回来就不会发下一次，避免引擎被打爆。
+                // 失败保留上一帧读数，不清空 —— gRPC 偶发超时不该让数字来回闪。
+                runCatching { probe() }.onSuccess { m -> if (m != null) memory = m }
+                delay(MEMORY_POLL_MILLIS)
+            }
+        }
     }
+
+    // 悬停移出自动关闭 —— **必须有宽限期**。指针从状态栏移到面板的途中会短暂地「两边都不在」，
+    // 不延时就会在用户还没走到面板时就把面板关了。
+    // key 含两个悬停态：任一变 true 都会重启本 effect，从而取消正在跑的计时器。
+    val pointerInside = memoryBarHovered || memoryPanelHovered
+    LaunchedEffect(memoryDetailOpen, pointerInside) {
+        if (!memoryDetailOpen || pointerInside) return@LaunchedEffect
+        delay(MEMORY_PANEL_CLOSE_GRACE_MILLIS)
+        // 延时结束后再确认一次：期间指针可能已经回来了（此时 effect 已被重启，不会走到这行，
+        // 但显式判断让「宽限期」这个意图在代码里自洽，不依赖重启时机）
+        if (!memoryBarHovered && !memoryPanelHovered) memoryDetailOpen = false
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
+            // （空列表会在测量时 IndexOutOfBounds）。关闭最后一个 sheet 时，`destination` 由
+            // MainScreen 的 LaunchedEffect 在**组合之后**才切回首屏 —— 这中间会有一帧以空列表组合，
+            // 因此这里必须走「空态引导」而不是标签条。
+            val active = sheets.firstOrNull { it.connection.id == activeSheetId }
+            if (active == null) {
+                // weight(1f) 而非 fillMaxSize()：底部状态栏要占掉一条，内容区必须让出高度。
+                // 无状态栏时（memoryProbe == null）weight 仍分到全部高度，与改造前一致。
+                EmptySheetsHint(
+                    onAddSheet = onAddSheet,
+                    onOpenSettings = onOpenSettings,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                SheetTabRow(
+                    sheets = sheets,
+                    activeSheetId = activeSheetId,
+                    onSelect = onSelectSheet,
+                    onClose = onCloseSheet,
+                    onAdd = onAddSheet,
+                    onOpenSettings = onOpenSettings,
+                )
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                ActiveSheetContent(
+                    sheet = active,
+                    onConnect = onConnect,
+                    onDisconnect = onDisconnect,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            // 底部状态栏（IDEA 式的 JVM 堆占用）—— 与「有没有 sheet」无关：
+            // 空态恰恰是用户第一次打开应用停留的地方，此时恰恰最需要知道内存还剩多少。
+            if (memoryProbe != null) {
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                EngineMemoryStatusBar(
+                    memory = memory,
+                    detailOpen = memoryDetailOpen,
+                    onToggleDetail = { memoryDetailOpen = !memoryDetailOpen },
+                    onMeasuredHeight = { barHeight.intValue = it },
+                    onHoverChange = { memoryBarHovered = it },
+                )
+            }
+        }
+
+        if (memoryDetailOpen && memoryProbe != null) {
+            val density = LocalDensity.current
+            EngineMemoryDetailPanel(
+                memory = memory,
+                onDismiss = { memoryDetailOpen = false },
+                onHoverChange = { memoryPanelHovered = it },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    // 底部留出「状态栏 + 其上方那条分割线」的高度，面板正好贴在它上沿
+                    .padding(
+                        end = 10.dp,
+                        bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
+                    ),
+            )
+        }
+    }
+}
+
+/**
+ * JVM 堆占用快照 —— 底部状态栏的输入。
+ *
+ * 四个值与 `SystemHandler.info()` 返回的 `MemoryInfo` 一一对应，也与设置页
+ * 「系统信息」里那四行**完全同名同序**（堆已用 / 已分配 / 上限 / 空闲）——
+ * 状态栏弹窗就是那一段的缩小版，字段少两个就凑不齐。
+ *
+ * 之所以不直接传 `SystemInfo`：那个类带 11 个本栏用不上的字段（JVM 版本 / OS / PID…），
+ * 每 2 秒搬一遍纯属浪费，且会让「保留上一帧」这类降级逻辑要操心整个对象。
+ *
+ * @property usedBytes `Runtime.totalMemory() - Runtime.freeMemory()`
+ * @property totalBytes `Runtime.totalMemory()` —— 已向 OS **申请**到的堆
+ * @property freeBytes `Runtime.freeMemory()` —— 上述已分配堆中尚未使用的部分
+ * @property maxBytes `Runtime.maxMemory()`（即 `-Xmx`；未设时是 JVM ergonomics 算出的值）
+ */
+data class EngineMemory(
+    val usedBytes: Long,
+    val totalBytes: Long,
+    val freeBytes: Long,
+    val maxBytes: Long,
+) {
+    /**
+     * 占用率，钳在 `0f..1f`。分母用**上限**而非已分配量 —— 用户关心的是「离 OOM 还有多远」，
+     * 不是「离这次 GC 还有多远」。
+     *
+     * 钳位不是防御性冗余，是刚需：`used` 是采样瞬间的值，而 `max` 在容器里可能被调整
+     * （`Runtime.maxMemory()` 返回 `Long.MAX_VALUE` 或 0 的实现是存在的），不钳位会画出
+     * 一条冲出轨道、糊到标签上的进度条。
+     */
+    val ratio: Float
+        get() = if (maxBytes <= 0L) 0f else (usedBytes.toFloat() / maxBytes).coerceIn(0f, 1f)
 }
 
 /**
@@ -355,6 +479,325 @@ private fun EmptySheetsHint(
         }
     }
 }
+
+/**
+ * 底部状态栏 —— IDEA 式的 JVM 堆占用指示器（一条细进度条 + 「已用 / 上限」）。
+ *
+ * ## 为什么挂在最外层 Column 而不是 sheet 内容里
+ *
+ * 堆占用是**进程级**指标，不是某条连接的：同一个引擎进程服务着全部 sheet，指标挂在
+ * 任一 sheet 上都是取同一份数据，却会在「关掉最后一个 sheet」时一起消失 —— 而空态恰恰
+ * 是用户第一次打开应用停留的地方。因此它渲染在 [DatabaseBrowserScreen] 的最外层，
+ * 与 `active` 无关。
+ *
+ * ## 数据源：引擎 `SYSTEM.INFO`，不是本进程 Runtime
+ *
+ * 直接读 UI 侧 `Runtime.getRuntime()` 看着更省事，但在 **gRPC 模式**下引擎是**另一个进程**
+ * —— 真正持有查询结果集、把堆撑爆的是它，不是渲染界面的这个。此时显示 UI 堆会是一个
+ * 「看着很闲、实际快 OOM」的假指标。故复用 `fetchSystemInfo`（`SystemHandler.info()`
+ * 返回 `Runtime.totalMemory/freeMemory/maxMemory`），Direct / gRPC 两种模式都指向**引擎**堆。
+ *
+ * ## 拉取失败保留上一次的值
+ *
+ * 拉取失败保留上一次的值这件事由调用方（[DatabaseBrowserScreen]）负责 —— 它持有轮询状态，
+ * 本组件只做呈现。
+ *
+ * ## 可点击性
+ *
+ * 悬停时给出**三重**反馈：指针变手型（`pointerHoverIcon`）、底色转为 `surfaceVariant`、
+ * 文字转 `onSurface`。只做其中之一都不够 —— 只换指针在没接鼠标的触控板上等于没有，
+ * 只换底色用户仍不确定能不能点。
+ *
+ * @param memory 最新读数；`null` = 探针一次都没成功过
+ * @param detailOpen 详情面板是否展开。展开期间**保持**高亮，否则指针一移开状态栏就恢复原样，
+ *   视觉上像是面板已经关了
+ * @param onToggleDetail 点击回调（由调用方切换展开态）
+ * @param onMeasuredHeight 实测行高回调 —— 详情面板要锚在本行正上方，写死常数会在
+ *   字体缩放 / 紧凑档下错位
+ * @param onHoverChange 本行是否在指针下。屏级用它和面板的悬停一起判定「指针已移开」
+ *   （关闭逻辑必须在屏级，见 [DatabaseBrowserScreen]）
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun EngineMemoryStatusBar(
+    memory: EngineMemory?,
+    detailOpen: Boolean,
+    onToggleDetail: () -> Unit,
+    onMeasuredHeight: (Int) -> Unit,
+    onHoverChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    // 悬停态同时喂给屏级：关闭判定要的是「状态栏**或**面板都不在指针下」
+    LaunchedEffect(hovered) { onHoverChange(hovered) }
+    val highlighted = hovered || detailOpen
+    val ink = if (highlighted) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    // 外层铺满、**内容收缩并右对齐**：底部只占内容那么宽，悬停高亮也只覆盖内容本身。
+    // 铺满整行的话，那是一条横贯窗口的色带，视觉上比内存数字本身还重 ——
+    // 而且会让「可点区域」大到能在离内容很远的地方误触。
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Row(
+            modifier = Modifier
+                .onSizeChanged { onMeasuredHeight(it.height) }
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onToggleDetail,
+                )
+                .pointerHoverIcon(PointerIcon.Hand)
+                // 4~6dp：再薄就在高 DPI 屏上只剩一条抗锯齿的糊边
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+                // 底色放在 padding **之后**：高亮才是一个包住内边距的完整小块，
+                // 而不是只染了文字那一截
+                .background(
+                    color = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
+                    else MaterialTheme.colorScheme.surface,
+                    shape = winShape(4.dp),
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Text(
+                text = "堆内存",
+                style = MaterialTheme.typography.labelSmall,
+                color = ink,
+            )
+            Spacer(Modifier.width(6.dp))
+            // 轨道 + 填充两段 Box，不用 Canvas —— 圆角交给 winShape，与全应用的容器写法一致
+            Box(
+                modifier = Modifier
+                    .width(MEMORY_BAR_WIDTH)
+                    .height(5.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, winShape(2.dp)),
+            ) {
+                if (memory != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(memory.ratio)
+                            .background(memoryFillColor(memory.ratio), winShape(2.dp)),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = if (memory == null) {
+                    "— / —"
+                } else {
+                    "${formatHeapBytes(memory.usedBytes)} / ${formatHeapBytes(memory.maxBytes)}"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = ink,
+            )
+        }
+    }
+}
+
+/**
+ * 堆内存详情面板 —— 设置页「系统信息」内存段的**缩小版**。
+ *
+ * 只取内存四行（堆已用 / 已分配 / 上限 / 空闲），标签顺序与取值格式都**复用**设置页那套
+ * （`formatBytes`）：同一个数字在两处显示成同一个字符串，是「与设置中的一样」这句话的
+ * 最低要求。JVM 版本 / OS / PID 那些不在这里重复 —— 那是设置页「系统信息」分类的职责。
+ *
+ * ## 为什么是「根 Box 里的层内浮层」而不是 `Popup`
+ *
+ * 试过 desktop 的 [Popup]，两个问题让它出局：
+ *
+ * 1. desktop 的 `Popup` 会开一个**独立原生窗口** —— 点一下状态栏弹出一个新窗口去看 4 行字，
+ *    既不是 IDEA 的观感，也会抢走主窗口焦点。
+ * 2. 它的内容在另一个组合根里，**不进 UI 测试的语义树**，`onNodeWithText` 一律找不到。
+ *
+ * 故改为由 [DatabaseBrowserScreen] 在**最外层 Box** 里直接绘制。代价是要自己管
+ * 「面板画在哪」（底部留出状态栏高度，见调用点），换来的是同一棵语义树 + 不弹窗 + 不抢焦点。
+ *
+ * ## 宽度按内容收缩
+ *
+ * 不用 `widthIn(min = …)` 也不让任何一行 `fillMaxWidth()`：那会把「堆已用」和它的取值
+ * 推到面板两端，中间拉出一条空档，面板看着像一张没排版的表。改成每行自己 `Spacer` 撑开
+ * 固定间距、整块由最宽的一行决定 —— 面板宽度从 200dp 收到约 150dp。
+ *
+ * ## 悬停移出即自动关闭
+ *
+ * 见 [DatabaseBrowserScreen] 里的宽限期逻辑：面板与状态栏**都**不在指针下时延时关闭，
+ * 这样「从状态栏移到面板」的途中不会误关。
+ *
+ * [memory] 为 `null`（探针一次都没成功）时仍可打开，但逐行显示「—」而不是空白面板 ——
+ * 空面板会让用户以为程序坏了。
+ */
+@Composable
+private fun EngineMemoryDetailPanel(
+    memory: EngineMemory?,
+    onDismiss: () -> Unit,
+    onHoverChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        // testTag：面板本身不带语义，测试量不到它的边界（只能量到里面的文字节点）。
+        // 宽度契约要断言的是**面板**而不是某一行文字。
+        modifier = modifier.testTag(MEMORY_DETAIL_PANEL_TAG).reportsHover(onHoverChange),
+        shape = winShape(6.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        // 浮层是本文件里**唯一**允许投影的地方：它确实压在内容之上
+        // （见 shared/ARCHITECTURE.md §5.4 约束 3）
+        shadowElevation = 6.dp,
+    ) {
+        // IntrinsicSize.Max：面板宽度 = 最宽那一行文字，而不是容器宽度。
+        // 不用它的话 Column 会一路撑到父级最大宽度，面板变成一条横贯窗口的色带。
+        // 分组线仍是 WinDivider —— 它收到空 modifier 时不填满，在本布局里正好横跨内容宽度。
+        Column(
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "JVM 内存", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.width(6.dp))
+                // 显式关闭按钮：自动关闭只在「指针移开」时触发，指针停在面板上时
+                // 用户仍需要一个明确的关闭手段
+                WinIconButton(onClick = onDismiss, modifier = Modifier.size(20.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "关闭内存详情",
+                        modifier = Modifier.size(12.dp),
+                    )
+                }
+            }
+            Text(
+                text = "引擎 SYSTEM.INFO",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            MemoryInfoRow("堆已用", memory?.let { formatBytes(it.usedBytes) })
+            MemoryInfoRow("堆已分配", memory?.let { formatBytes(it.totalBytes) })
+            MemoryInfoRow("堆上限", memory?.let { formatBytes(it.maxBytes) })
+            MemoryInfoRow("堆空闲", memory?.let { formatBytes(it.freeBytes) })
+            Spacer(Modifier.height(2.dp))
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text(
+                text = "占用 " + (memory?.let { "${(it.ratio * 100).toInt()}%" } ?: "—"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 把本节点的**指针进出**转成布尔回调。
+ *
+ * 为什么不用现成方案：这版 Compose（1.11.1）**没有** `Modifier.pointerEnter/pointerExit`，
+ * `hoverable` 也不在本文件依赖范围内；而 `MutableInteractionSource.collectIsHoveredAsState`
+ * 需要节点挂了 `clickable` —— 给一个只读面板挂空 `onClick` 属于骗语义，读屏会念出一个
+ * 假的按钮。故直接监听 `PointerEventType.Enter/Exit`。
+ *
+ * 必须在 `PointerEventPass.Initial` 收：面板压在内容之上，事件先到它，若在 `Main` pass
+ * 才处理，可能已经被下层节点消费掉。
+ */
+private fun Modifier.reportsHover(onHoverChange: (Boolean) -> Unit): Modifier =
+    this.pointerInput(onHoverChange) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                when (event.type) {
+                    PointerEventType.Enter -> onHoverChange(true)
+                    PointerEventType.Exit -> onHoverChange(false)
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+/**
+ * 详情面板里的一行「标签 / 取值」。
+ *
+ * **不** `fillMaxWidth()` + `SpaceBetween`：那会把取值推到面板右端、与标签之间拉出一条
+ * 大空档，面板看起来像一张没排版的表。改为固定 `Spacer` 间距、整行按内容收缩，
+ * 面板宽度由最宽的一行决定。
+ *
+ * 与设置页 `InfoRow` 的差别只有排版方向（那边要顶满整栏便于纵向对齐，这边要收紧），
+ * 标签与取值的呈现完全一致。
+ */
+@Composable
+private fun MemoryInfoRow(label: String, value: String?) {
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(18.dp))
+        Text(
+            text = value ?: "—",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+/**
+ * 进度条填充色 —— 只分两档。
+ *
+ * 低于 [MEMORY_ALERT_RATIO] 用 `primary`（本应用低饱和靛蓝），到线转 `error`。
+ *
+ * **为什么不做绿→黄→红三档**：那套配色属于「仪表盘」语言，与 §5.4 定的低饱和 IDE 观感
+ * 打架，而且中间那档黄在五套配色里没有稳定、都达标的对应色（各主题 `tertiary` 的实际色相
+ * 差异很大）。两档既够用 —— 用户要的是「要不要担心」，不是「精确的连续读数」。
+ */
+@Composable
+private fun memoryFillColor(ratio: Float): Color =
+    if (ratio >= MEMORY_ALERT_RATIO) MaterialTheme.colorScheme.error
+    else MaterialTheme.colorScheme.primary
+
+/**
+ * 堆字节数 → 紧凑可读（`512M` / `2.0G`），**不带小数位与空格**。
+ *
+ * 与设置页 `SettingsScreen.formatBytes`（`512.0 MB` / `4.00 GB`）刻意不同：那边是给人
+ * 逐行对照精确数值的，宽度不敏感；这里只有 5dp 高、且右边还跟着一个「/ 上限」，
+ * 必须省掉小数点和单位里的空格才不至于把状态栏撑宽。两处不是重复，是两种呈现密度。
+ */
+internal fun formatHeapBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> {
+        val gb = bytes / (1024.0 * 1024 * 1024)
+        // 一位小数，但「2.0G」这种整值就退成「2G」—— 少一个字符是一个
+        if (gb % 1.0 == 0.0) "${gb.toInt()}G" else "%.1fG".format(gb)
+    }
+    bytes >= 1024L * 1024 -> "${bytes / (1024L * 1024)}M"
+    bytes >= 1024L -> "${bytes / 1024L}K"
+    bytes < 0 -> "—"
+    else -> "${bytes}B"
+}
+
+/** 堆占用轮询间隔（毫秒）。2 秒：肉眼能看出趋势，又不至于每秒打一次引擎。 */
+private const val MEMORY_POLL_MILLIS = 2_000L
+
+/** 进度条轨道宽度。IDEA 的指示器就是这个量级 —— 够读出比例，又不抢内容的视线。 */
+private val MEMORY_BAR_WIDTH = 140.dp
+
+/**
+ * 指针移出（状态栏 + 面板都不在指针下）到自动关闭的**宽限期**。
+ *
+ * 不是装饰性延时：指针从状态栏移到面板的途中必然有一小段「两边都不在」，不延时就会在
+ * 用户还没走到面板时把它关掉。200ms 够跨过这段空隙，又短到「我不想要它了」几乎立即生效。
+ */
+private const val MEMORY_PANEL_CLOSE_GRACE_MILLIS = 200L
+
+/** 详情面板的 UI 测试 tag —— 面板本身无语义，测试要量它的边界就得靠它。 */
+internal const val MEMORY_DETAIL_PANEL_TAG = "engineMemoryDetailPanel"
+
+/** 占用率到这个值就把进度条染成 `error`。 */
+private const val MEMORY_ALERT_RATIO = 0.85f
 
 /**
  * BrowserToolBar —— sheet 标签条之上的工具栏，操作当前激活 sheet 的右栏内容。

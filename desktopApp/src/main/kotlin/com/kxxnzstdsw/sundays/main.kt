@@ -314,6 +314,20 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                     onConnect = session::connect,
                     onDisconnect = session::disconnect,
                     onOpenSettings = ::openSettings,
+                    // 底部状态栏的堆占用探针：直接复用设置页那条 SYSTEM.INFO 通道，
+                    // 取的是**引擎进程**的堆（gRPC 模式下与 UI 不同进程，Direct 模式同进程）
+                    memoryProbe = {
+                        runCatching { fetchSystemInfo(engine) }
+                            .getOrNull()
+                            ?.let {
+                                EngineMemory(
+                                    usedBytes = it.memoryUsed,
+                                    totalBytes = it.memoryTotal,
+                                    freeBytes = it.memoryFree,
+                                    maxBytes = it.memoryMax,
+                                )
+                            }
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (addDialogVisible) {

@@ -78,7 +78,7 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
-| `DatabaseBrowserScreen(sheets, activeSheetId, connections, onSelectSheet, onCloseSheet, onAddSheet, onConnect, onDisconnect, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方按 sheet id 各自注入）。`ActiveSheetContent` 内 `LaunchedEffect(sheet.connection.id, sheet.status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools` |
+| `DatabaseBrowserScreen(sheets, activeSheetId, connections, onSelectSheet, onCloseSheet, onAddSheet, onConnect, onDisconnect, memoryProbe, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方按 sheet id 各自注入）。`ActiveSheetContent` 内 `LaunchedEffect(sheet.connection.id, sheet.status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools`。`memoryProbe` 为底部堆占用状态栏的注入探针，`null` 时不渲染 |
 | `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
 | `BrowserToolBar(activePane, connected, onSelectPane)` / `PaneToggleButton` | private `@Composable` | 激活 sheet 内容区顶部工具栏：**两个**工作台入口（「SQL 工作台」「造数工作台」）。当前正处于某个工作台时该按钮变「返回表预览」（实心），否则显示工作台名（描边）；未连接时禁用。渲染在 `ActiveSheetContent` 内（`SheetTabRow` 之下），工具与它作用的连接同属一个视觉块 |
 | `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧（`BrowserPane.TABLE`）：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
@@ -179,8 +179,41 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 | 右侧（表预览） | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
 | 右侧（SQL 工作台） | `SqlWorkbenchPane` + `WorkbenchTabStrip` + `SqlResultArea` | SQL sheet 标签条（＋ 新建 / ✎ 重命名弹窗 / × 关闭 / 滚动，每个 sheet 一份独立 SQL 与独立结果）+ 上 60% `CodeEditorWithToolbar`（`:shared` editor 模块；**高亮档位 = 当前连接方言**（H2/MySQL/PG/DuckDB/SQLite），SQL 高亮 + 格式化 + `actions` 插槽的「执行 SQL」）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道，只作用于当前 sheet |
 | 右侧（造数工作台） | `GenerateWorkbenchPane` + `WorkbenchTabStrip` + `GenerateResultArea` | 脚本标签条（多脚本按序执行，与 SQL 工作台共用同一标签条组件）+ Lua 版本 chip + 上 60% Lua 编辑器（`actions` 插槽的「执行造数」）+ 底部 40% 造数结果；「执行造数」走 `DATA.GENERATE` 流式通道，进度帧实时回填每个脚本的插入行数 |
+| **底部状态栏** | `EngineMemoryStatusBar` + `EngineMemoryDetailPanel` | IDEA 式的 JVM 堆占用：5dp 细进度条（140dp 轨道）+「已用 / 上限」，**按内容收缩右对齐**；**点击展开**内存四行详情面板。**挂在最外层**，与 `active` 无关 —— 空态也在（见下两节） |
 
 > **注意** `:shared` 的编辑器语言与 formatter 由 `registerBuiltinEditors()` 注册到全局注册表，**app 启动时必须调一次**（`main()` 开头，幂等）。不注册则 `CodeLanguageRegistry.get("sql")` 返回 null，编辑器静默退化为无高亮纯文本。
+
+### 底部状态栏：JVM 堆占用（`EngineMemoryStatusBar`）
+
+| 决策 | 理由 |
+|---|---|
+| **渲染在最外层 Column，不挂在 `active` 上** | 堆占用是**进程级**指标：同一个引擎服务全部 sheet，挂在任一 sheet 上都是同一份数据，却会在「关掉最后一个 sheet」时一起消失 —— 而空态恰恰是用户第一次打开应用停留的地方。为此 `EmptySheetsHint` / `ActiveSheetContent` 由 `fillMaxSize()` 改 `weight(1f)` 让出状态栏高度；`memoryProbe == null` 时 weight 仍分到全部高度，**渲染路径与改造前一致** |
+| **数据源是引擎 `SYSTEM.INFO`，不是本进程 `Runtime`** | Direct 模式（默认）下两者同进程；**gRPC 模式下引擎是另一个进程** —— 真正持有查询结果集、把堆撑爆的是它。读 UI 侧 `Runtime` 会得到「看着很闲、实际快 OOM」的假指标。复用 `main.kt` 的 `fetchSystemInfo`（`SystemHandler.info()` 返回 `Runtime.total/free/max`），不新增 proto 路由 |
+| **探针是注入的可空回调 `memoryProbe: (suspend () -> EngineMemory?)?`** | 同 `ConnectionManagerScreen(themeMode: ThemeMode? = null)` 的既有惯例（`null` = 不渲染）。屏因此不直接依赖 `EngineClient`，且测试可注入假探针、不必起真引擎 —— 状态栏的契约只跟「拿到什么数」有关，与「怎么取到那个数」无关 |
+| **轮询 key 固定 `Unit` + `rememberUpdatedState`** | 调用方每次重组传入的都是**新 lambda 实例**，拿它当 `LaunchedEffect` 的 key 会让定时器每次重组都被重启（永远等不到下一次触发）—— 与 `SettingsScreen` 自动刷新同一个坑。循环体 `串行 await → delay(2000)`，上一次没回来就不发下一次 |
+| **失败保留上一帧读数** | gRPC 偶发超时不至于让用户的内存数字来回闪。返回 `null` 与抛异常都走 `runCatching` 吞掉；只有**从未**成功过一次才显示「— / —」 |
+| **只分两档配色（`primary` / `error` @ 85%）** | 绿→黄→红三档属于仪表盘语言，与 [`shared/ARCHITECTURE.md` §5.4](../shared/ARCHITECTURE.md) 定的低饱和 IDE 观感打架，且中间那档黄在五套配色里没有稳定达标色（各主题 `tertiary` 色相差异大）。两档够用 —— 用户要的是「要不要担心」 |
+| **`ratio` 钳在 `0f..1f`** | 不是防御性冗余：`used` 是采样瞬时值，`maxMemory()` 在某些实现下会返回 `Long.MAX_VALUE` 或 0，不钳会画出冲出轨道、糊到标签上的进度条 |
+| **无点击动作** | IDEA 的指示器点击后打开内存设置（调 `-Xmx`），本应用没有对应设置项，强行加点击只会变成「点了没反应的死控件」。⚠️ 本行指「**不跳转到设置**」；点击展开只读详情面板是有的，见下节 |
+| **不复用 `SettingsScreen.formatBytes`** | 那处是 `512.0 MB` / `4.00 GB`，给人逐行对照精确值、宽度不敏感；这里只有 5dp 高且右侧还跟着「/ 上限」，故用紧凑的 `formatHeapBytes`（`512M` / `2G`，整值 G 去掉小数）。两处不是重复，是两种呈现密度 |
+| **详情面板用根 `Box` 浮层，不用 `Popup`** | desktop 的 `Popup` 会开一个**独立原生窗口**（点一下弹个新窗口看 4 行字、还会抢主窗口焦点），且其内容在另一个组合根里、**不进 UI 测试语义树**。故由屏在最外层 `Box` 直接绘制。代价是「读数」与「面板是否展开」两项状态必须**提升到 `DatabaseBrowserScreen`**：若画在状态栏自己那个 20dp 高的 `Box` 内，浮出父级边界的部分收不到指针事件，点击会**穿透**到面板下方的表格行上 |
+
+### 底部状态栏：堆占用详情面板
+
+| 决策 | 理由 |
+|---|---|
+| 悬停给**三重**反馈：手型指针 + `surfaceVariant` 底色 + 文字转 `onSurface` | 只换指针在没接鼠标的触控板上等于没有；只换底色用户仍不确定能不能点 |
+| **按内容收缩 + 右对齐，不铺满整行** | 铺满会得到一条横贯窗口的色带，视觉上比内存数字本身还重；而且可点区域大到能在离内容很远的地方误触。外层 `Box(fillMaxWidth, contentAlignment = CenterEnd)`，高亮底色放在 `padding` **之后**（`winShape(4.dp)`），高亮才是一个包住内边距的完整小块，而不是只染了文字那一截。实测宽度 265px / 1024px 窗口，由 `the bar hugs its content` 钉住 |
+| 详情面板同样 `width(IntrinsicSize.Max)` 收缩 | 曾用 `widthIn(min = 200.dp)` + 每行 `fillMaxWidth()` + `SpaceBetween`：取值被推到面板右端、与标签之间拉出一条大空档；更糟的是 `Column` 一路撑到父级最大宽度，**实测面板 1002px / 1024px 窗口**，几乎和状态栏一样宽。改为「每行固定 `Spacer` 间距 + Column 取内在最大宽度」后实测 **159px**。⚠️ 面板**不带语义**（`Surface` 不合并出节点），测试量不到它的边界 —— 故加 `MEMORY_DETAIL_PANEL_TAG`，量它而不是量里面的文字节点（后者恒然很窄，量了等于没测） |
+| 展开期间**保持**高亮 | 否则指针一移开状态栏就恢复原样，视觉上像是面板已经关了 |
+| 面板四行与设置页**逐字同名同序**（堆已用 / 已分配 / 上限 / 空闲） | 「与设置中的一样」的最低要求。为此把 `SettingsScreen.formatBytes` 由 `internal` 放开为 `public` 并复用 —— 同一个数字不能在两处显示成两个字符串（否则用户会以为其中一处算错了）。`EngineMemory` 也因此从两字段扩到四字段 |
+| 面板**不自动失焦关闭**，改为给一个显式「×」 | 层内浮层点外面不会自动消失；让用户只能靠再点那 20dp 高的状态栏来关，是最差的交互 |
+| **指针移出后自动关闭，带 200ms 宽限期** | 判定条件是「状态栏**与**面板都不在指针下」。宽限期不是装饰：指针从状态栏移到面板的途中必然有一小段两边都不在，不延时就会在用户还没走到面板时把它关掉。`LaunchedEffect(detailOpen, pointerInside)` 任一悬停态变 true 即重启 effect，从而取消正在跑的计时器。宽限期结束后**再确认一次**两个悬停态，让意图不依赖重启时机 |
+| 面板悬停用自写的 [reportsHover]，不用现成 API | 这版 Compose（1.11.1）**没有** `Modifier.pointerEnter/pointerExit`；`hoverable` 要靠 `clickable` 才有 interactionSource —— 给只读面板挂空 `onClick` 属于骗语义（读屏会念出假按钮）。故直接监听 `PointerEventType.Enter/Exit`，且必须在 `Initial` pass 收：面板压在内容之上，事件先到它 |
+| 面板底部偏移用**实测**状态栏行高 | 写死常数会在字体缩放 / 紧凑模式（见 [`shared/ARCHITECTURE.md` §5.6](../shared/ARCHITECTURE.md)）下错位 |
+| `MemoryInfoRow` 复制而非复用设置页的 `InfoRow` | 后者是 `private`；为省四行重复把一个纯布局细节抬到 `:shared` 公开面不划算 |
+
+回归测试：`EngineMemoryStatusBarTest`（比例算法含钳位与除零、紧凑格式化、初始「—」、成功后渲染、null / 异常降级、空态仍在、`null` 探针不渲染、面板默认关闭 / 四行与设置页一致 / 首次读数前逐行「—」 / 再点收起 / 状态栏宽度契约 / 面板宽度与定位契约 / 指针移出自动关闭 / 指针在面板内**不**关闭）。
 
 ### 标签页去重契约
 

@@ -521,8 +521,18 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-/** 字节 → 人类可读（固定单位，便于纵向对齐比较）。 */
-internal fun formatBytes(bytes: Long): String = when {
+/**
+ * 字节 → 人类可读（固定单位，便于纵向对齐比较）。
+ *
+ * `public` 而非 `internal`：浏览屏底部状态栏点击后弹出的内存详情面板**也**用它
+ * （见 desktopApp 的 `EngineMemoryStatusBar`）—— 同一个数字必须在设置页与状态栏
+ * 弹窗里显示成同一个字符串。两处各写一个格式化器的话，迟早会漂移成
+ * 「设置页 512.0 MB、状态栏 512M」，用户会以为其中一处算错了。
+ *
+ * 紧凑状态栏**那一行**另有 `formatHeapBytes`（`512M` / `2G`），那是另一种呈现密度，
+ * 不归本函数管 —— 见该函数的 KDoc。
+ */
+fun formatBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
     bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
     bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
