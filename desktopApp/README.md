@@ -99,10 +99,14 @@
 ```
 
 - **左侧树**：连接就绪（`ConnectionState.CONNECTED`）后自动调用 `SCHEMA.LIST level=database` 拉库列表；点击库节点展开时按需调用 `TABLE.LIST` 拉表列表（懒加载，见 `DatabaseBrowserState.loadTables`）
-- **打开预览**：**双击**表名 → 右侧新增一个预览标签页，调用 `DATA.LIST`（`page = 1`，`pageSize = 100`）取首页数据，用 `shared` 的 `DataTable` 渲染
-- **标签页去重**：标签页主键为 `schema::table`；重复双击同一张表只**激活**已有标签页，不会新增（`DatabaseBrowserState.openTab` 先查 key 再决定是否追加）
+- **打开预览**：单击表名 → 右侧新增一个预览标签页，调用 `DATA.LIST`（默认 `page = 1`，`pageSize = 100`）取数，用 `shared` 的 `DataTable` 渲染。表名节点挂的是 `clickable` 而非裸手势，因此**读屏有「打开表 X」语义动作、键盘 Tab + Enter 也能打开**；双击同样有效（两次 `onClick` 命中 `openTab` 的去重分支，幂等）
+- **预览分页**：分页器是**真分页**——`page` / `pageSize` 随选择下发给引擎，回包就是当前页。由于分页发生在引擎侧，`DataTable` 必须传 `serverSidePaging = true`（否则它会按本地分页再切一次，第 2 页起直接切成空表），并传 `totalCount = tab.total` 供页码计算。该模式下分页大小下拉自动隐藏「全部」——`pageSize = 0` 在 `DATA.LIST` 里是流式读取哨兵，不是一个合法分页大小
+- **翻页代次**：`TablePreviewTab` 自带 `requestGeneration`（与 `SqlSheet.generation` 同构、作用域是单个 tab）。屏级 `generation` 只管连接切换，管不到「同一张表上连着翻两页」——两次请求并发在跑，没有这个令牌就是「谁后返回谁说了算」，慢的第 1 页会盖掉快的第 2 页，表现为「信息条写着第 2 页、表里是第 1 页的行」
+- **标签页去重**：标签页主键为 `schema::table`；重复打开同一张表只**激活**已有标签页，不会新增（`DatabaseBrowserState.openTab` 先查 key 再决定是否追加）
 - **关闭 / 切换**：标签条支持逐页关闭（关闭后 `selectedTabIndex` 自动回退到最后一张或 `-1`）；切换标签页只切显示，不重新拉数据
-- **连接切换**：`bindConnection` 在连接 id 变化时清空库列表 / 展开状态 / 表缓存 / 全部标签页，并自增会话代次；in-flight 查询在挂起点后比对代次，**过期响应直接丢弃**，避免上一连接的旧数据落到新连接
+- **连接切换**：`bindConnection` 在连接 id 变化时清空库列表 / 展开状态 / 表缓存 / 全部标签页；代次自增与「正在执行 / 正在加载」标志的复位统一由 `releasePools` → `invalidateInFlight` 负责（`bindConnection` 内部只调 `releasePools`，不再另写一份 —— 两处各写一半正是「切连接后转圈停不下来」的来源）。in-flight 查询在挂起点后比对代次，**过期响应直接丢弃**，避免上一连接的旧数据落到新连接
+- **断开也会作废**：`releasePools` 的 `invalidateInFlight` 在**任何**早退之前执行，且覆盖 SQL sheet / 造数 / 预览三类 in-flight 标志。断开时连接 id 未变，`bindConnection` 会早退，若不作废则：唯一会写 `running = false` 的协程已被代次挡住，界面**永远**停在「执行中…」；重连后旧行帧还会继续写进存活的 sheet
+- **错误可读**：引擎报错常是几百字符，错误区一律用 `EmptyHint(centerContent = false)` 渲染（顶对齐 + 可纵向滚动）。早期版本用「`fillMaxSize` + 居中」，内容溢出时**首尾同时被裁**，而 `Caused by:` 恰好在末尾；预览顶部信息条里的错误则限一行省略号，避免把下方 `fillMaxSize()` 的表格挤成 0 高
 - **连接池归属**：浏览另一个 catalog 会用到另一份 proto config（`database` 参与池 key），所以连接管理页的「断开」只释放它自己那份池。本屏用 `releasePools()` 释放自己建立的池 —— 触发点：切换连接、会话断开 / 失败；窗口关闭由 `EngineClient.close()` 兜底。释放是异步的，因此状态机由 `MainScreen` 持有一个长生命周期 `CoroutineScope`（组件自身的 scope 在 dispose 时已取消，会把释放动作丢掉）
 - **状态归属**：`DatabaseBrowserState` 在 `MainScreen` 中 `remember`，**不在屏幕内部** —— 因此切到「连接管理」再切回来时已打开的标签页不丢失，同一份状态机也可脱离 UI 直接驱动
 - **引擎耦合法**：`engine.invoke(connection, { category/action/… })` 走强类型 `SCHEMA.LIST` / `TABLE.LIST` / `DATA.LIST`，与连接管理一致（默认 Direct 模式，无 gRPC；设了端点属性则同一调用打到 gRPC 引擎进程）。请求的 `driver` 填 `DialectType.engineDriverName`（引擎注册键是 `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite`，与枚举常量名大小写不同）

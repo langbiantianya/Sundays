@@ -3,6 +3,7 @@ package com.kxxnzstdsw.sundays
 import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
+import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.pool.PoolManager
@@ -66,6 +67,10 @@ class DatabaseBrowserFlowTest {
                 stmt.executeUpdate("CREATE TABLE orders (id INT PRIMARY KEY, total INT)")
                 stmt.executeUpdate("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')")
                 stmt.executeUpdate("INSERT INTO orders VALUES (1, 100), (2, 250), (3, 50)")
+                // `wide` 是**故意造的宽表**：默认每页 100 行时它只有一页，分页器就退化成装饰品，
+                // 页码相关的缺陷在 2 行的 users 上一个都测不出来。25 行 / 每页 10 行 = 3 页。
+                stmt.executeUpdate("CREATE TABLE wide (id INT PRIMARY KEY, tag VARCHAR(32))")
+                (1..25).forEach { stmt.executeUpdate("INSERT INTO wide VALUES ($it, 'row$it')") }
             }
         }
     }
@@ -544,6 +549,208 @@ class DatabaseBrowserFlowTest {
         assertEquals(0, state.generateTablesProcessed)
         assertNull(state.generateError)
         assertFalse(state.generateRunning)
+    }
+
+    // =========================================================================
+    // 宽表分页 —— 分页器曾经是装饰品
+    // =========================================================================
+
+    /**
+     * 回归：表预览的**分页器曾经是死的**。
+     *
+     * `PreviewTabContent` 传的是 `pageSize = PageSize.S100` 而**没有**传 `currentPage` /
+     * `onPageChange` / `totalCount`，`loadTabPreview` 又把请求里的 `page` 写死成 1。
+     * 两侧都停在第 1 页：信息条写着「共 25 行」，分页器却是「1 / 1」且所有按钮禁用 ——
+     * 100 行以外的数据**在界面上根本不存在**，且没有任何迹象提示还有更多。
+     */
+    @Test
+    fun `paging a wide table really asks the engine for other pages`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        val table = state.tablesFor(db, "WIDE")
+
+        state.openTab(db, table)
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+        assertNull(tab.error, "wide tab error: ${tab.error}")
+
+        // 先缩到每页 10 行，25 行 = 3 页 —— 默认的 100 行/页下宽表也只有一页，测不出翻页
+        state.changeTabPageSize(tab, PageSize.S10)
+        tab.awaitSettled()
+        assertEquals(10, tab.pageSize, "page size should follow the picker")
+        assertEquals(1, tab.page, "changing the page size must go back to page 1")
+        assertEquals(10, tab.rows.size, "page 1 should hold a full page")
+
+        // 翻到最后一页：若请求里仍写死 page=1，这里拿到的还是第 1 页那 10 行
+        state.goToTabPage(tab, 3)
+        tab.awaitSettled()
+        assertEquals(3, tab.page, "page should follow the request")
+        assertEquals(25L, tab.total, "total is the table size, not the page size")
+        assertEquals(5, tab.rows.size, "last page holds the remainder")
+        // 内容必须是第 3 页那 5 行（id 21~25），而不是第 1 页的 —— 只断言行数会被
+        // 「恰好也是 5 行」的假象骗过，必须核对具体内容
+        val tags = tab.rows.mapNotNull { it.cells["TAG"] as? String }.sorted()
+        assertEquals(listOf("row21", "row22", "row23", "row24", "row25"), tags)
+
+        // 往回翻，确认不是单向生效
+        state.goToTabPage(tab, 2)
+        tab.awaitSettled()
+        assertEquals(2, tab.page)
+        assertEquals(10, tab.rows.size)
+        assertEquals("row11", tab.rows.firstNotNullOfOrNull { it.cells["TAG"] as? String })
+    }
+
+    /**
+     * 回归：改页大小后页码必须归位；选**同一个**大小则不该触发任何重载。
+     *
+     * 10 行/页的第 3 页在 20 行/页下越界（25 行只有 2 页）。不归位就会停在一个永远加载不出
+     * 内容的页上 —— `DataTable` 的「越界自动回退」也等不到新 `totalCount` 来救。
+     */
+    @Test
+    fun `changing the page size pulls the view back to page one`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.openTab(db, state.tablesFor(db, "WIDE"))
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+
+        state.changeTabPageSize(tab, PageSize.S10)
+        tab.awaitSettled()
+        state.goToTabPage(tab, 3)
+        tab.awaitSettled()
+        assertEquals(3, tab.page)
+
+        // 选同一个大小：必须是 no-op，否则每次点开下拉都会重置用户的页码
+        state.changeTabPageSize(tab, PageSize.S10)
+        assertEquals(3, tab.page, "same page size must not reset the view")
+
+        // 换成 S20：3 页变 2 页，旧页码 3 已越界
+        state.changeTabPageSize(tab, PageSize.S20)
+        tab.awaitSettled()
+        assertEquals(1, tab.page, "page size change must reset to page 1")
+        assertEquals(20, tab.rows.size)
+        assertEquals(20, tab.pageSize)
+    }
+
+    /**
+     * 回归：**后发起的请求必须赢**。
+     *
+     * 预览原先只有屏级（连接级）代次，管不到「同一张表上连着翻页」：两次 `loadTabPreview`
+     * 并发在跑，谁先返回谁先写，**慢的那次会覆盖快的那次**。连点两次「下一页」就可能出现
+     * 「信息条写着第 2 页、表里却是第 1 页的行」。
+     *
+     * 这里**故意不等**第一次就发第二次，把并发窗口开到最大。修复前本测试是**间歇性**失败
+     * （取决于两次请求的完成顺序），所以末尾再多等一会儿、断言的是最终稳定状态。
+     */
+    @Test
+    fun `a superseded page request never overwrites the newer one`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.openTab(db, state.tablesFor(db, "WIDE"))
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+
+        state.changeTabPageSize(tab, PageSize.S10)
+        tab.awaitSettled()
+
+        // 不 await，直接连发两次翻页 —— 第 1 次的响应很可能在第 2 次之后才落地
+        state.goToTabPage(tab, 2)
+        state.goToTabPage(tab, 3)
+        tab.awaitSettled()
+        // 再给「迟到的旧响应」留出落地窗口
+        delay(300)
+        delay(300)
+
+        assertNull(tab.error, "旧请求的错误不应污染新页: ${tab.error}")
+        assertEquals(3, tab.page, "最终页码必须是最后一次请求的页")
+        assertEquals(
+            listOf("row21", "row22", "row23", "row24", "row25"),
+            tab.rows.mapNotNull { it.cells["TAG"] as? String }.sorted(),
+            "表里必须是第 3 页的行 —— 旧响应覆盖回来的话这里会是第 2 页那批",
+        )
+    }
+
+    /**
+     * 回归：**断开连接必须作废 in-flight 状态**。
+     *
+     * 池被释放不会让已发出的请求自己结束 —— 引擎端的流还挂着，协程还活着，只是会被代次挡住。
+     * 若 `releasePools` 不顺带复位「正在执行」标志，唯一会写 `running = false` 的那条协程已经
+     * 提前 return 了，界面就**永远**停在「执行中…」；更糟的是这批行帧在重连后仍会往这个
+     * 存活的 sheet 里灌。
+     *
+     * 注意走的是 `releasePools`（断开路径），不是 `bindConnection`：后者因连接 id 未变会早退，
+     * 正是原先漏作废的那条路径。
+     */
+    @Test
+    fun `releasing pools clears every in flight running flag`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.openTab(db, state.tablesFor(db, "WIDE"))
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+
+        // 摆出「三处都正在跑」的现场
+        val sheet = state.sqlSheets.first()
+        sheet.running = true
+        state.generateRunning = true
+        tab.loading = true
+
+        state.releasePools()
+
+        assertFalse(sheet.running, "SQL 工作台会永远卡在「执行中…」")
+        assertFalse(state.generateRunning, "造数工作台会永远卡在「造数中…」")
+        assertFalse(tab.loading, "预览会永远卡在转圈（loadTabPreview 早退时不清 loading）")
+    }
+
+    /**
+     * 回归：`bindConnection` 的派生状态复位不能因为重构而丢字段。
+     *
+     * 代次自增与 loading 复位曾分散在 `bindConnection` / `releasePools` 两处各写一半，
+     * 现在统一由 `releasePools` → `invalidateInFlight` 负责。切连接仍必须全部复位。
+     */
+    @Test
+    fun `binding a different connection resets the derived state`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.openTab(db, state.tablesFor(db, "WIDE"))
+        state.sqlSheets.first().running = true
+        state.generateRunning = true
+
+        state.bindConnection(TestConnectionFactory.build("jdbc:h2:mem:bdbtest_other_${System.nanoTime()};DB_CLOSE_DELAY=-1"))
+
+        assertTrue(state.tabs.isEmpty(), "预览标签页应清空")
+        assertTrue(state.databases.isEmpty(), "库列表应清空")
+        assertFalse(state.sqlSheets.first().running, "新连接的 sheet 不得继承 running")
+        assertFalse(state.generateRunning, "换连接后不得仍显示造数中")
+        assertEquals(1, state.sqlSheets.size, "SQL 工作台应复位为单个空 sheet")
+    }
+
+    // -------------------------------------------------------------------------
+    // 上面几项的公共脚手架
+    // -------------------------------------------------------------------------
+
+    /** 等库列表加载完，返回第一个库名。 */
+    private suspend fun DatabaseBrowserState.firstLoadedDatabase(): String {
+        withTimeout(5_000) { while (databases.isEmpty()) delay(50) }
+        return databases.first()
+    }
+
+    /** 展开某个库、取出指定表名（H2 归一为大写，故大小写不敏感比对）。 */
+    private suspend fun DatabaseBrowserState.tablesFor(db: String, wanted: String): String {
+        if (db !in tablesByDatabase) toggleDatabase(db)
+        withTimeout(5_000) { while (db in loadingTables) delay(50) }
+        tableLoadError[db]?.let { throw AssertionError("加载表列表失败: $it") }
+        return tablesByDatabase.getValue(db).first { it.uppercase() == wanted.uppercase() }
+    }
+
+    /** 等一个预览标签页的 in-flight 请求落定。 */
+    private suspend fun TablePreviewTab.awaitSettled() {
+        withTimeout(5_000) { while (loading) delay(10) }
     }
 }
 

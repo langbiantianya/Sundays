@@ -331,6 +331,23 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
 | **单元格可选中** | 每行包裹 `SelectionContainer`，可在单元格内拖拽选中 |
 | **右键菜单** | `@Composable (TableRow?) -> Unit` 插槽 |
 | **数据库主键承载** | `TableRow.id: Any` 承载主键（Long / String / UUID 等） |
+| **列多的横向滚动** | 表头与表体**共用同一个 `ScrollState`**（见 §3.1.1） |
+
+#### 3.1.1 表头 / 表体必须共用一个横向 `ScrollState`
+
+列宽策略是 `TableColumn.width` 优先、否则按 `weight` 分配，**两者都不约束总宽度** ——
+所以列多时内容必然超出视口。此时若表头与表体各持一份滚动状态（或表体干脆不加横向滚动），
+就会出现「表头能滚、表体不能滚」的错位：用户按列名读数会读到**隔壁那一列**。
+对数据库工具来说这是读错数据，不是体验问题。
+
+| 决策 | 理由 |
+|---|---|
+| `hScroll` 由 `DataTable` **创建后下传** | 两处各自 `rememberScrollState()` 就是缺陷的成因。状态的所有权必须与「两组内容必须一致」这件事放在一起 |
+| 表体 `LazyColumn` 也加 `horizontalScroll(hScroll)` | 纵向虚拟化与横向滚动正交，可以共存；不加则超出部分被裁且**滚不到** |
+| 回归测试读语义的 `HorizontalScrollAxisRange` 而非渲染几何 | 视口外的子节点语义边界会被裁剪钳成 0，量出来的差值是假象（会看起来像「间距变成 0」）。`ScrollAxisRange.value` / `maxValue` 都是 `() -> Float`，**要调用** |
+
+`TableColumnAlignmentTest` 断言：表体存在横向滚动轴（`maxValue > 0`）且滚动后表头与表体
+`value` 相等。已做变异验证（把表体改回自己的 `ScrollState`，测试变红）。
 
 ### 3.2 高度策略（v2.9 统一）
 
@@ -362,6 +379,37 @@ DataTable(
 ```
 
 **与 CodeEditor 高度策略保持一致**：`maxLines = null` ⇔ `fillParentHeight = true`，两者默认都不施加高度上限，而是填充父容器剩余空间。
+
+### 3.2.1 分页发生在哪一侧（`serverSidePaging`）
+
+`DataTable` 有**两种**分页模式，二者不能混用：
+
+| `serverSidePaging` | `rows` 的含义 | 谁切页 | 用在哪 |
+|---|---|---|---|
+| `false`（**默认**） | **全量**行 | `DataTable` 内部 `rows.drop((page-1)*size).take(size)` | SQL 工作台结果、造数结果 |
+| `true` | **数据源返回的当前页** | 调用方（收到 `onPageChange` 后重新取数） | 浏览屏表预览（`DATA.LIST` 引擎侧分页） |
+
+**混用的后果是静默的空表**：服务端模式下 `rows` 只有一页那么多行，`DataTable` 若再按 `currentPage` 偏移一次，第 2 页起 `start >= rows.size` 命中 `emptyList()` —— 界面变成一张零行表，不报错、不转圈，看起来就像「这张表就这么多数据」。
+
+因此服务端模式必须成对传入：
+
+```kotlin
+DataTable(
+    rows = tab.rows,                 // 引擎返回的当前页
+    pageSize = tab.pageSize.toPageSize(),
+    currentPage = tab.page,
+    onPageChange = { page -> state.goToTabPage(tab, page) },
+    onPageSizeChange = { size -> state.changeTabPageSize(tab, size) },
+    totalCount = tab.total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+    serverSidePaging = true,         // ★
+)
+```
+
+- `totalCount` 是**整表行数**（不是 `rows.size`），否则页码恒为 `1 / 1`、所有翻页按钮禁用。引擎回的是 `Long`，>21 亿行时 `toInt()` 会绕成负数，须先饱和钳位。
+- `PageSize.ALL`（`value = 0`）在数据源侧是**流式读取哨兵**，不是一个合法分页大小。该模式下分页大小下拉**自动排除**它 —— 否则用户会选到一个静默退化成「每次取 1 行」的档位。
+- 改分页大小应回到第 1 页（`changeTabPageSize`）：页大小变了以后旧页码多半越界，且 `DataTable` 的「越界自动回退」要等新 `totalCount` 才会触发。
+
+契约由 `TableServerPagingTest` / `LocalPagingUnchangedTest` 钉住（后者专门防止新参数顺手改坏本地分页路径），均已做变异验证。
 
 ### 3.3 详情面板插槽
 
@@ -923,6 +971,7 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | 逐主题字体 | ❌ **有意不做**：MS Sans Serif 8pt 与 Tahoma 8pt 都是位图点阵字体，换成系统默认无衬线后本就没有那个观感，强行缩小只会让信息密集界面更难读
 | **界面硬编码圆角** | ✅ 11 处 `RoundedCornerShape(…)` 改走 `winShape(…)` |
 | **列表选中态** | ✅ 复古档整行反色（`primary` + `onPrimary`），现代档维持淡色底 |
+| **经典档分组线的亮边** | ✅ 取 `BevelStyle.light`。**原先取 `scheme.surface` 是错的**：蚀刻线画在面板面上，而面板面**就是** `surface` —— 浅色档两者同为亮面看着还行，深色档则是 `#1A1A1A` 压在 `#1A1A1A` 上，第二条线**完全隐形**、凹槽退化成一条平线 |
 | **面板容器** | ✅ 3 个面板加凸起斜面 |
 | **分割线** | ✅ 26 处改用 `WinDivider`（复古档为「暗 1px + 亮 1px」蚀刻线） |
 | **标签页条底色** | ✅ 复古档贴窗口面而非白色内容面板 |
@@ -1291,6 +1340,7 @@ parameters`）。把纯逻辑抽出来后，测试与设计同时变简单。
 |---|---|
 | `winShape(corner)` | 界面所有容器 / 卡片 / 徽标 —— 替掉硬编码的 `RoundedCornerShape(8/12.dp)` |
 | `controlShape()` | 按钮 / 输入框 |
+| `LocalBevelStyle.current.light` | **3D 斜面的高光边**。经典档的 `WinDivider` 亮线也取它（原先取 `surface` 是错的，见下） |
 | `selectionContainerColor` / `selectionContentColor` | 列表项、方言选项、设置页分类 |
 | `selectionIndicatorColors()` / `selectionSwitchColors()` | 单选圆点 / 开关 —— M3 的选中标记无法注入 token，只管颜色 |
 | `buttonFaceColor` / `buttonInkColor` / `fieldFaceColor` | `WinControls.kt` 的按钮与输入框 |

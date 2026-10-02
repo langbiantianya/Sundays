@@ -507,7 +507,13 @@ fun WinDivider(modifier: Modifier = Modifier, color: Color = Color.Unspecified) 
     }
     val scheme = MaterialTheme.colorScheme
     val dark = if (color == Color.Unspecified) scheme.outline else color
-    val light = scheme.surface
+    // 亮线取**斜面的高光色**，不是 `surface`。
+    //
+    // 原先取 `surface` 是错的：经典档的「蚀刻线」画在面板面上，而面板面**就是** `surface`
+    // —— 浅色档两者同为亮面、看着还行，深色档则是 `#1A1A1A` 压在 `#1A1A1A` 上，
+    // 第二条线**完全隐形**，凹槽退化成一条平线。`BevelStyle.light` 本来就是逐主题备好的
+    // 高光角色值（Win2000 深色 `#C0C0C0` / WinXP 深色 `#C8D4E0`），一直没人用它。
+    val light = LocalBevelStyle.current.light
     Box(
         modifier = modifier
             .fillMaxWidth()

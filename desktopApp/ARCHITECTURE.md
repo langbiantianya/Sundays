@@ -69,10 +69,23 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 |---|---|---|
 | `ENDPOINT_PROPERTY` | public `const val` | 系统属性名 `"sundays.engine.endpoint"` —— 选择 gRPC 引擎端点的唯一开关 |
 | `createEngineClient()` | **internal** | **引擎实现装配点**：读 `System.getProperty(ENDPOINT_PROPERTY)` 并 `trim()`；空白 → `IdbEngine()`（同进程，默认），否则 `GrpcEngineClient.connect(GrpcClientConfig.fromTarget(endpoint))`；端点非法时由 `fromTarget` 抛 `IllegalArgumentException` |
-| `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
+| `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`（`rememberWindowState(size = 1280×820)` + `EnforceMinimumWindowSize` 夹住下限）、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
 | `MainScreen(engine: EngineClient)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
 
 > **模块边界**：导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme` / `SundaysPalette`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 依赖 `EngineClient` 调用层接口（来自 `:engine-protocol`，JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
+
+### 窗口尺寸
+
+浏览屏是「左树（固定 250dp）+ 右表 + 底栏」三段布局，对宽度敏感，而 `Window` **不设 `state` 时用的是平台默认尺寸**（Windows 约 800×600）—— 800 宽下左树挤掉半棵、右侧连一列都放不下。
+
+| 项 | 取值 | 理由 |
+|---|---|---|
+| 默认尺寸 | 1280 × 820 | 「左树看得全 + 右侧至少 6~7 列 + 分页栏不换行」的下限感 |
+| 最小尺寸 | 1024 × 640 | 低于 1024 宽，左树与右栏内容区（至少 350dp）开始互相挤；低于 640 高，标签条 + 工具栏 + 表格 + 分页栏四段放不下一屏 |
+
+⚠️ Compose 的 `Window` **没有** `minSize` 参数（只有 `state` / `resizable` 等），故下限只能在
+组合里用 `snapshotFlow { state.size }` 把尺寸**夹回来**（`EnforceMinimumWindowSize`）。
+用户拖标题栏缩小、或最大化后恢复，都会经过这道夹取。
 
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 

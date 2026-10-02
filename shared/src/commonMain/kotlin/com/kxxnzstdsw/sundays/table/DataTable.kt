@@ -3,6 +3,7 @@ package com.kxxnzstdsw.sundays.table
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -118,6 +120,11 @@ import com.kxxnzstdsw.sundays.ui.winShape
  * @param currentPage 当前页码（1-based）
  * @param onPageChange 页码变化回调
  * @param totalCount 总行数（用于分页计算；默认 `rows.size`）
+ * @param serverSidePaging 分页是否发生在**数据源侧**（引擎 / 服务端）而非本地；默认 `false` = 本地切片。
+ *   设为 `true` 时 [rows] 被视为「数据源返回的当前页」，[DataTable] 不再本地切片，只负责分页栏与页码计算。
+ *   两种模式混用会切空数据：第 2 页起 `rows.drop((page-1) * size)` 的起点必然越界。
+ *   该模式下分页大小下拉**自动排除** [PageSize.ALL] —— 「全部」在数据源侧是流式读取哨兵（`pageSize = 0`），
+ *   不是一个合法的分页大小，放出来会静默退化成每次取 1 行。
  * @param selectedRowId 当前选中的行 ID（`null` = 无选中）；调用方可选地传入以控制选中状态
  * @param onSelectedRowChange 选中行变化回调（参数可能为 `null` = 取消选中）
  * @param showDetailPanel 是否显示右侧详情面板（默认 `true`）
@@ -138,6 +145,7 @@ fun DataTable(
     currentPage: Int = 1,
     onPageChange: (Int) -> Unit = {},
     totalCount: Int = rows.size,
+    serverSidePaging: Boolean = false,
     selectedRowId: Any? = null,
     onSelectedRowChange: (TableRow?) -> Unit = {},
     showDetailPanel: Boolean = true,
@@ -158,8 +166,10 @@ fun DataTable(
         onSelectedRowChange(row)
     }
 
-    // 计算当前页的行
-    val pageRows: List<TableRow> = if (pageSize.isAll) {
+    // 计算当前页的行。
+    // [serverSidePaging] 时**必须**跳过本地切片：调用方给的 rows 已经是「数据源返回的那一页」，
+    // 再按 (currentPage-1) 偏移一次会在第 2 页起直接切空（start 越界 → emptyList）。
+    val pageRows: List<TableRow> = if (pageSize.isAll || serverSidePaging) {
         rows
     } else {
         val start = (currentPage - 1).coerceAtLeast(0) * pageSize.value
@@ -198,7 +208,14 @@ fun DataTable(
             border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                TableHeader(columns = columns, theme = theme)
+                // 表头与表体**共用同一个** ScrollState。
+                //
+                // 两处各 `rememberScrollState()` 时，表头能横滚、表体不能 —— 用户拖表头把
+                // 「第 20 列」的名字拖到左边，数据行还停在原处，于是**列名与数据列对不上**，
+                // 按列名读数会读到隔壁那一列。对数据库工具来说这是会读错数据的缺陷，
+                // 不是「体验不好」。
+                val hScroll = rememberScrollState()
+                TableHeader(columns = columns, theme = theme, hScroll = hScroll)
                 WinDivider(color = theme.borderColor)
                 TableBody(
                     columns = columns,
@@ -207,6 +224,7 @@ fun DataTable(
                     selectedRowId = effectiveSelectedRowId,
                     onRowClick = { row -> setSelected(if (row.id == effectiveSelectedRowId) null else row) },
                     contextMenuState = contextMenuState,
+                    hScroll = hScroll,
                 )
                 WinDivider(color = theme.borderColor)
                 TablePagination(
@@ -217,6 +235,12 @@ fun DataTable(
                     onPageChange = onPageChange,
                     totalPages = totalPages,
                     totalCount = totalCount,
+                    // 服务端分页下「全部」不是合法取值（见 KDoc），下拉里不提供
+                    pageSizeOptions = if (serverSidePaging) {
+                        PageSize.ALL_VALUES.filterNot { it.isAll }
+                    } else {
+                        PageSize.ALL_VALUES
+                    },
                 )
             }
         }
@@ -256,17 +280,31 @@ fun DataTable(
 // 子组件：表头 (TableHeader)
 // ============================================================================
 
+/** 表头容器的 UI 测试 tag —— 见 `TableColumnAlignmentTest`。 */
+const val TABLE_HEADER_TAG = "sundays.tableHeader"
+
+/** 表体容器的 UI 测试 tag —— 见 `TableColumnAlignmentTest`。 */
+const val TABLE_BODY_TAG = "sundays.tableBody"
+
+/**
+ * 表头 —— 横向滚动由 [hScroll] 与表体**共享**（见 [DataTable] 调用点的说明）。
+ *
+ * [hScroll] 必须由调用方创建而不是这里自己 `remember`：两处各自持有状态就是「表头能滚、
+ * 表体不能滚」那个缺陷的成因。
+ */
 @Composable
 private fun TableHeader(
     columns: List<TableColumn>,
     theme: DataTableTheme,
+    hScroll: ScrollState,
 ) {
-    val scrollState = rememberScrollState()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(theme.headerBackground)
-            .horizontalScroll(scrollState)
+            .horizontalScroll(hScroll)
+            // 供 TableColumnAlignmentTest 量「表头是否真的能横滚」与表体位移是否一致
+            .testTag(TABLE_HEADER_TAG)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -294,6 +332,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
     selectedRowId: Any?,
     onRowClick: (TableRow) -> Unit,
     contextMenuState: ContextMenuState,
+    hScroll: ScrollState,
 ) {
     if (rows.isEmpty()) {
         Box(
@@ -310,7 +349,10 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .weight(1f),
+            .weight(1f)
+            // 与表头共用：横向滚动一份状态，列名与数据列永远对齐
+            .horizontalScroll(hScroll)
+            .testTag(TABLE_BODY_TAG),
     ) {
         itemsIndexed(items = rows, key = { _, row -> row.id }) { index, row ->
             val isSelected = row.id == selectedRowId
@@ -451,6 +493,7 @@ private fun TablePagination(
     onPageChange: (Int) -> Unit,
     totalPages: Int,
     totalCount: Int,
+    pageSizeOptions: List<PageSize>,
 ) {
     var pageSizeExpanded by remember { mutableStateOf(false) }
     Row(
@@ -477,7 +520,7 @@ private fun TablePagination(
                     expanded = pageSizeExpanded,
                     onDismissRequest = { pageSizeExpanded = false },
                 ) {
-                    PageSize.ALL_VALUES.forEach { size ->
+                    pageSizeOptions.forEach { size ->
                         WinMenuItem(
                             text = { Text(size.label) },
                             onClick = {

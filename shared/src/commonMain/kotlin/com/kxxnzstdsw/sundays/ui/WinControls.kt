@@ -176,6 +176,10 @@ private fun ClassicButtonBase(
                     Modifier.clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null,
+                        // 必须显式给 role：现代档转调 M3 Button，自带 role = Role.Button；
+                        // 经典档是自绘基座，裸 clickable 的 role 默认为 null，读屏只会念
+                        // 「可点击」而丢掉「按钮」—— 同一个 WinButton 的语义随主题漂移。
+                        role = androidx.compose.ui.semantics.Role.Button,
                         onClick = onClick,
                     )
                 } else {
@@ -551,10 +555,9 @@ fun menuShape(): Shape =
  */
 @Composable
 fun WinProgressIndicator(modifier: Modifier = Modifier, strokeWidth: androidx.compose.ui.unit.Dp = 4.dp) {
-    val color = if (isClassicChrome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
     androidx.compose.material3.CircularProgressIndicator(
         modifier = modifier,
-        color = color,
+        color = MaterialTheme.colorScheme.primary,
         strokeWidth = if (isClassicChrome) strokeWidth + 2.dp else strokeWidth,
     )
 }

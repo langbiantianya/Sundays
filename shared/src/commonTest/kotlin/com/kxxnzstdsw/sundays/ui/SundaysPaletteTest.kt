@@ -21,9 +21,10 @@ import kotlin.test.assertTrue
  *    （默认 `Color.Black`），`SundaysTheme` 必须靠 `Surface` 兜底 —— 少一层就又变成
  *    暗色下黑字贴黑底。这里对 `onSurface` / `onSurfaceVariant` / `onBackground` 逐个断言。
  * 2. **语义色在两套配色间错位**。`primary` / `tertiary` / `error` 是被大量复用去画
- *    状态点、标签文字的（`StatusChip` / `ConnectionStatusDot` 都是拿 `colorScheme.primary`
- *    直接当文字色用），所以它们必须**同时**在 `surface` 和 `background` 上可读 —— 只测
- *    `surface` 会漏掉工具栏条这类压在 `background` 上的用法。
+ *    状态点、标签文字的（浏览屏的 `ConnectionStatusDot` 就是拿 `colorScheme.primary`
+ *    直接当色值用，连接管理页的 `connectionStateLabel` 同理），所以它们必须**同时**在
+ *    `surface` 和 `background` 上可读 —— 只测 `surface` 会漏掉工具栏条这类压在
+ *    `background` 上的用法。
  * 3. **主色反过来读**。`onPrimary` / `onPrimaryContainer` / `onErrorContainer` 这几个
  *    「反色」角色一旦配错方向，填充实心按钮时就是浅底浅字。
  *

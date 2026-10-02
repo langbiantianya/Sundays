@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -341,5 +342,45 @@ class EngineMemoryStatusBarTest {
         // 远超过宽限期也不该关
         mainClock.advanceTimeBy(2_000)
         onNodeWithText("JVM 内存").assertIsDisplayed()
+    }
+
+    /**
+     * 回归：点「×」关闭面板后，自动关闭**必须仍然有效**。
+     *
+     * 面板的悬停标志由 `reportsHover` 的 Enter/Exit 驱动，而指针事件只在节点**存在**时才会发。
+     * 点「×」时 `pointerInput` 随节点一起被销毁，**不会补发 Exit** —— 标志就永久停在 true，
+     * 屏级 `pointerInside` 恒真，宽限期关闭逻辑从此彻底失效（面板再也不自动关）。
+     *
+     * 这正是上一版自己引入的回归：上一版只覆盖了「移开指针自动关」，而自动关路径会正常发
+     * Exit，恰好绕过了 bug。要暴露它必须走「面板内点 ×」这条唯一的非 Exit 关闭路径。
+     */
+    @Test
+    fun `the panel still auto closes after being dismissed with the close button`() = runComposeUiTest {
+        renderBar(probe = { sample })
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // 1) 打开面板并把指针**移进面板**（此时面板悬停标志 = true）
+        onNodeWithText("堆内存").performMouseInput { moveTo(center) }.performClick()
+        val panelCenter = onNodeWithTag(MEMORY_DETAIL_PANEL_TAG).fetchSemanticsNode().boundsInRoot.center
+        onRoot().performMouseInput { moveTo(panelCenter) }
+
+        // 2) 用面板上的「×」关闭 —— 这是唯一会让指针离开面板边界的关闭方式，
+        //    节点随之消失，Exit 永远等不到
+        onNodeWithContentDescription("关闭内存详情").performClick()
+        onNodeWithText("JVM 内存").assertDoesNotExist()
+
+        // 3) 指针彻底移开
+        onRoot().performMouseInput { moveTo(Offset(4f, 4f)) }
+
+        // 4) 重新打开再移开：若悬停标志已卡死为 true，这里就永远关不掉
+        onNodeWithText("堆内存").performClick()
+        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onRoot().performMouseInput { moveTo(Offset(4f, 4f)) }
+
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithText("JVM 内存").fetchSemanticsNodes().isEmpty()
+        }
     }
 }

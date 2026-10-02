@@ -4,11 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
@@ -54,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
@@ -83,7 +85,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.google.protobuf.Value as ProtoValue
@@ -638,6 +642,19 @@ private fun EngineMemoryDetailPanel(
     onHoverChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // **离开组合时必须主动回报「未悬停」**。这是上一版埋下的自引入回归：
+    // 面板的悬停标志由 reportsHover 的 Enter/Exit 驱动，而指针事件只在节点**存在**时才会发。
+    // 用户点面板上的「×」关闭时（以及任何让面板离开组合的路径），`pointerInput` 随节点一起
+    // 被销毁，**不会**补发一个 Exit —— 标志就永久停在 true。屏级 `pointerInside` 于是恒真，
+    // 宽限期关闭逻辑此后彻底失效（面板再也不会自动关）。
+    // 只在 onDismiss 里置位是不够的：断开连接、切换 tab、memoryProbe 变 null 同样会让面板消失。
+    // 用 DisposableEffect 兜住「组合销毁」这一统一出口，并经 rememberUpdatedState 取最新回调，
+    // 避免每次重组都重启 effect（重启会先跑一次 onDispose，等于凭空制造一次 false 抖动）。
+    val latestHoverCallback by rememberUpdatedState(onHoverChange)
+    DisposableEffect(Unit) {
+        onDispose { latestHoverCallback(false) }
+    }
+
     Surface(
         // testTag：面板本身不带语义，测试量不到它的边界（只能量到里面的文字节点）。
         // 宽度契约要断言的是**面板**而不是某一行文字。
@@ -963,27 +980,6 @@ private fun ActiveSheetContent(
     }
 }
 
-@Composable
-private fun StatusChip(status: ConnectionStatus) {
-    val (label, color) = when (status.state) {
-        ConnectionState.CONNECTED -> "已连接 · ${status.message}" to MaterialTheme.colorScheme.primary
-        ConnectionState.CONNECTING -> "连接中…" to MaterialTheme.colorScheme.tertiary
-        ConnectionState.FAILED -> "失败 · ${status.message}" to MaterialTheme.colorScheme.error
-        ConnectionState.DISCONNECTED -> "未连接" to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(
-        color = color.copy(alpha = 0.12f),
-        shape = winShape(6.dp),
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = color,
-        )
-    }
-}
-
 /**
  * 连接状态点 —— sheet 标签上展示引擎会话状态的小色点。
  */
@@ -1011,6 +1007,12 @@ private fun SchemaTreePanel(
     onOpenTable: (schema: String, table: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // **必须显式持有** —— LazyColumn 不传 state 时内部用的是 `rememberLazyListState()`，
+    // 而这个 remember 的宿主是**调用点的组合作用域**：右栏 pane 切换（表预览 ⇄ SQL ⇄ 造数）
+    // 会把整棵子树移出再移回组合，remember 随之销毁、滚动位置回到顶部。
+    // 结果就是「看一眼 SQL 回来，树又滚回顶部，得重新展开找到刚才那张表」——
+    // 与本屏「每 sheet 状态互相独立、跨视图不丢失」的既有契约直接冲突。
+    val listState = rememberLazyListState()
     Surface(
         color = MaterialTheme.colorScheme.surface,
         modifier = modifier,
@@ -1046,7 +1048,10 @@ private fun SchemaTreePanel(
                     title = "无数据库",
                     description = "当前连接下未发现任何数据库。",
                 )
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                     items(state.databases) { db ->
                         DatabaseNode(
                             name = db,
@@ -1133,6 +1138,20 @@ private fun DatabaseNode(
     }
 }
 
+/**
+ * 树上的一个表叶子 —— 单击打开数据预览。
+ *
+ * ## 为什么从 `detectTapGestures(onDoubleTap)` 换成 `clickable`
+ *
+ * 旧写法只挂手势，**不带任何语义**：读屏用户听到的只是一个静态文本，没有「打开表」这个动作，
+ * 键盘用户 Tab 过去按 Enter 也没反应 —— 等于这条路径对两类用户完全不存在。
+ * 换用 `clickable` 后三者一起拿到：语义动作（`onClickLabel`）、键盘焦点与 Enter/Space 激活、
+ * 鼠标单击。
+ *
+ * **双击不会因此失效**：一次双击会产生两次 `onClick`，第二次进 [DatabaseBrowserState.openTab]
+ * 时该表已存在，按 key 命中「只激活、不新增」的分支，是幂等的。旧的手势检测器还要额外
+ * 引入 `awaitPointerEventScope`，与 [reportsHover] 里同样的手写监听重复。
+ */
 @Composable
 private fun TableLeaf(
     tableName: String,
@@ -1141,9 +1160,11 @@ private fun TableLeaf(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(tableName) {
-                detectTapGestures(onDoubleTap = { onOpen() })
-            }
+            .clickable(
+                onClickLabel = "打开表 $tableName",
+                role = Role.Button,
+                onClick = onOpen,
+            )
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1162,27 +1183,64 @@ private fun TableLeaf(
     }
 }
 
+/**
+ * 空态 / 错误态占位 —— 标题 + 可选的说明文字。
+ *
+ * ## 为什么必须能滚
+ *
+ * [description] 在实际使用中常常是**引擎返回的整段报错**（几百字符起步），不是一句提示语。
+ * 原来的写法是「`fillMaxSize()` + `verticalArrangement = Center`」：内容一旦超出容器高度，
+ * 居中溢出会**同时裁掉首尾** —— 而报错最关键的位置（`Caused by:`、出错的表名列名）恰恰
+ * 在末尾，等于把诊断线索藏起来，且用户没有任何手段去看它。
+ *
+ * ## 为什么「滚动」与「居中」要分两层
+ *
+ * 不能简单地把 `verticalScroll` 挂在原来那个 `Column` 上：`verticalScroll` 会用
+ * 「高度无上界」的约束去测量子节点，于是 `Arrangement.Center` 恒等于顶对齐，短文案
+ * 就不再居中了。故外层 `Box` 负责居中、内层 `Column` 负责滚动，两者职责分开。
+ *
+ * @param centerContent 是否垂直居中。占位提示（无数据 / 无结果）居中好看；
+ *   错误则传 `false` 顶对齐 —— 报错要从上往下顺着读，居中会让首行悬在半空。
+ */
 @Composable
-private fun EmptyHint(title: String, description: String?, modifier: Modifier = Modifier) {
+private fun EmptyHint(
+    title: String,
+    description: String?,
+    modifier: Modifier = Modifier,
+    centerContent: Boolean = true,
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (!description.isNullOrBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = if (centerContent) Alignment.Center else Alignment.TopCenter,
+        ) {
+            Column(
+                modifier = Modifier
+                    // fillMaxWidth 在**内**层：宽度必须占满，否则长单词（无空格的 SQL 片段 /
+                    // 堆栈行）会按固有宽度撑出去、反而触发外层的横向裁切。
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!description.isNullOrBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -1215,6 +1273,8 @@ private fun PreviewTabArea(
             if (current != null) {
                 PreviewTabContent(
                     tab = current,
+                    onPageChange = { page -> state.goToTabPage(current, page) },
+                    onPageSizeChange = { size -> state.changeTabPageSize(current, size) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1261,6 +1321,8 @@ private fun TabStrip(
 @Composable
 private fun PreviewTabContent(
     tab: TablePreviewTab,
+    onPageChange: (Int) -> Unit,
+    onPageSizeChange: (PageSize) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1290,6 +1352,12 @@ private fun PreviewTabContent(
                         text = "错误: ${tab.error}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
+                        // **必须限一行**：这一行与下方 `fillMaxSize()` 的 DataTable 同处一个
+                        // Column，报错有几百字符时会把表格挤成 0 高 —— 表格整个消失，
+                        // 而用户真正需要看的长报错反而被压在这一行里。完整内容在下方错误区可滚。
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     else -> Text(
                         text = "共 ${tab.total} 行 · 第 ${tab.page} 页 · 每页 ${tab.pageSize}",
@@ -1301,11 +1369,29 @@ private fun PreviewTabContent(
         }
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
+            // 错误分支**必须排在最前**：翻页失败时 columns 仍留着上一页的、rows 已清空，
+            // 若按「有列就画表格」的顺序判断，用户看到的是一张有表头但零行的空表，
+            // 真正的失败原因只在上方那一行被省略号截断的提示里。
+            tab.error != null -> EmptyHint(
+                title = "读取失败",
+                description = tab.error,
+                centerContent = false,
+                modifier = Modifier.fillMaxSize(),
+            )
             tab.columns.isNotEmpty() || tab.rows.isNotEmpty() -> DataTable(
                 columns = tab.columns,
                 rows = tab.rows,
                 modifier = Modifier.fillMaxSize(),
-                pageSize = PageSize.S100,
+                pageSize = tab.pageSize.toPageSize(),
+                onPageSizeChange = onPageSizeChange,
+                currentPage = tab.page,
+                onPageChange = onPageChange,
+                // 引擎回的是 Long（表可能上亿行），DataTable 要 Int。
+                // 饱和到 Int.MAX_VALUE 而不是直接 toInt()：后者在 >21 亿行时会绕成负数，
+                // 算出 totalPages 为负，分页栏直接消失。
+                totalCount = tab.total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+                // 预览是**引擎侧**分页：rows 已经是当前页，DataTable 再本地切一次就见不到第 2 页了
+                serverSidePaging = true,
                 fillParentHeight = false,
             )
             !tab.loading && tab.error == null -> EmptyHint(
@@ -1707,15 +1793,13 @@ private fun SqlResultArea(
                     Text("执行中…", style = MaterialTheme.typography.labelMedium)
                 }
             }
-            sheet.error != null -> Box(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-            ) {
-                Text(
-                    text = "错误: ${sheet.error}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            sheet.error != null -> EmptyHint(
+                title = "执行失败",
+                description = sheet.error,
+                // 报错顶对齐、从上往下读
+                centerContent = false,
+                modifier = Modifier.fillMaxSize(),
+            )
             sheet.affectedRows != null -> Box(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
             ) {
@@ -1944,17 +2028,12 @@ private fun GenerateResultArea(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-            state.generateError != null -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-            ) {
-                Text(
-                    text = "错误: ${state.generateError}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            state.generateError != null -> EmptyHint(
+                title = "造数失败",
+                description = state.generateError,
+                centerContent = false,
+                modifier = Modifier.fillMaxSize(),
+            )
             state.hasGenerateResult -> Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier
@@ -2043,7 +2122,31 @@ class TablePreviewTab(
     var total: Long by mutableStateOf(0L)
     var page: Int by mutableStateOf(1)
     var pageSize: Int by mutableStateOf(100)
+
+    /**
+     * 本 tab 的 in-flight 失效代次 —— 语义与 [SqlSheet.generation] 一致，但作用域是**单个 tab**。
+     *
+     * 之前预览只有屏级的 [DatabaseBrowserState.generation]（连接级），管不到「同一张表上
+     * 连着翻两页」：两次 `loadTabPreview` 并发在跑，谁先返回谁先写，**慢的那次会覆盖快的那次**。
+     * 症状是信息条写着「第 2 页」而表里是第 1 页的行 —— 翻页越快越容易撞上。
+     * 这与「旧流异常抹掉新请求的 running」是同一类缺陷：多个 in-flight 请求写同一份状态，
+     * 却没有一个把它们区分开的令牌。
+     */
+    internal var requestGeneration: Int = 0
 }
+
+/**
+ * 引擎侧的 [TablePreviewTab.pageSize]（Int）→ UI 侧的 [PageSize]（枚举）。
+ *
+ * 之所以两边类型不同：协议里 pageSize 是整数，而分页下拉要展示的是带标签的固定档位。
+ * 精确匹配不到时（引擎把 500 钳成了 1000 之类）取数值最接近的档位 ——
+ * 宁可让下拉显示一个近似值，也不要退化成 [PageSize.ALL]：那会让分页栏在服务端分页下
+ * 变成「不分页」，而 rows 只有一页，界面看着正常、翻页却永远不出新数据。
+ */
+private fun Int.toPageSize(): PageSize =
+    PageSize.entries.firstOrNull { it.value == this }
+        ?: PageSize.entries.filterNot { it.isAll }.minByOrNull { kotlin.math.abs(it.value - this) }
+        ?: PageSize.S100
 
 /**
  * 数据库浏览屏幕的状态机 —— 维护数据库/表加载、标签页打开/关闭/选择,
@@ -2295,8 +2398,14 @@ class DatabaseBrowserState(
                     }
                 }
             } catch (e: Exception) {
-                if (gen == sheet.generation) sheet.error = e.message ?: e.javaClass.simpleName
-                sheet.running = false
+                // **两行都要在代次守卫内**。running 是「这个 sheet 正在执行」的单一真相源，
+                // 一旦过期请求把它抹成 false，用户会看到转圈消失、以为没在跑，于是**再点一次执行** ——
+                // 两次执行叠在一起，后一次的结果被后一代次接管，前一次的错误也再没机会显示。
+                // 守卫外的写法正是在制造这个「看起来空闲、实际在跑」的空窗。
+                if (gen == sheet.generation) {
+                    sheet.error = e.message ?: e.javaClass.simpleName
+                    sheet.running = false
+                }
                 return@launch
             }
             if (gen != sheet.generation) return@launch
@@ -2494,8 +2603,12 @@ class DatabaseBrowserState(
                     }
                 }
             } catch (e: Exception) {
-                if (gen == generateGeneration) generateError = e.message ?: e.javaClass.simpleName
-                generateRunning = false
+                // 同 executeSql：错误与 running 必须一起在代次守卫内，
+                // 否则上一次造数请求的异常会抹掉新请求的「执行中」，用户就会再点一次，两次造数叠着跑。
+                if (gen == generateGeneration) {
+                    generateError = e.message ?: e.javaClass.simpleName
+                    generateRunning = false
+                }
                 return@launch
             }
             if (gen != generateGeneration) return@launch
@@ -2525,30 +2638,27 @@ class DatabaseBrowserState(
      */
     fun bindConnection(config: ConnectionConfig?) {
         if (currentConnection?.id == config?.id) return
-        releasePools()          // 先释放上一连接在本屏建立的池（池 key 含连接字段，换连接后不再可达）
+        // 先释放上一连接在本屏建立的池（池 key 含连接字段，换连接后不再可达）。
+        // releasePools 内部会调 invalidateInFlight —— 代次自增 / loading 复位都在那里做，
+        // 这里**不要**再写一遍：曾经两份各写一半，漏掉的那一半就是「切连接后转圈停不下来」的来源。
+        releasePools()
         currentConnection = config
-        generation++
         databases = emptyList()
-        loadingDatabases = false   // 切连接时若有 in-flight 刷新，其响应会被代次丢弃 —— 必须在此复位，否则转圈停不下来
         errorMessage = null
         expandedDatabases.clear()
         _tablesByDatabase.clear()
-        loadingTables.clear()
         _tableLoadError.clear()
         tabs = emptyList()
         selectedTabIndex = -1
         // SQL 工作台状态跨连接无意义 —— 整体复位为单个空 sheet。旧 sheet 对象被丢弃，
-        // 其 in-flight 响应写进已脱离的实例，不会再出现在 UI 上；仍自增代次让协程尽早停止累积。
-        sqlSheets.forEach { it.generation++ }
+        // 其 in-flight 响应写进已脱离的实例，不会再出现在 UI 上；代次已在 invalidateInFlight 里自增。
         sqlSheets.clear()
         sqlSheets.add(SqlSheet("SQL 1"))
         selectedSqlIndex = 0
-        // 造数工作台同理 —— 脚本与统计都绑定在上一连接上，整体复位（自增代次使 in-flight 进度帧失效）
+        // 造数工作台同理 —— 脚本与统计都绑定在上一连接上，整体复位
         generateScripts.clear()
         generateScripts.add(GenerateScript("脚本 1"))
         selectedGenerateIndex = 0
-        generateRunning = false
-        generateGeneration++
         generateTablesProcessed = 0
         generateError = null
         generateResultPage = 1
@@ -2561,6 +2671,10 @@ class DatabaseBrowserState(
      * 在「切换连接」与「会话不再处于已连接」时调用；不改动其它配置或其它连接管理页建立的池。
      */
     fun releasePools() {
+        // **必须**在下面两行早退之前作废 in-flight：「没有当前连接」和「一个池都没建过」
+        // 都是合法且常见的路径（首次进入就断开 / 只读了一屏就断开），跳过这一步的后果见
+        // [invalidateInFlight] 的 KDoc —— 最典型的是界面永远卡在「执行中…」。
+        invalidateInFlight()
         val config = currentConnection ?: return
         if (activeDatabases.isEmpty()) return
         val targets = activeDatabases.toList()
@@ -2569,6 +2683,39 @@ class DatabaseBrowserState(
             targets.forEach { database ->
                 runCatching { engine.disconnect(engineConnFor(config, database)) }
             }
+        }
+    }
+
+    /**
+     * 作废本屏全部 in-flight 请求，并复位所有「正在执行 / 正在加载」标志。
+     *
+     * 池被释放**不会**让先前的请求自己结束：引擎端的流可能还挂着，协程还活着并仍会往
+     * 已复位（或已换连接）的状态里写。不同步作废就有两个后果：
+     *
+     * 1. **转圈停不下来** —— 唯一会写 `running = false` 的是那条协程本身，而它此时要么已被
+     *    代次挡住提前 return、要么还卡在流上。界面于是永远显示「执行中…」，用户既看不到结果
+     *    也无法再点一次。
+     * 2. **重连后旧数据继续写入** —— 同一个 sheet 对象跨断开/重连是存活的，上一条连接的
+     *    行帧会落进新连接的结果表。
+     *
+     * 标签页的 `loading` 同样要复位：`loadTabPreview` 在代次不符时是 `return@launch` **早退**、
+     * 不清 loading，漏掉这一项表预览就会一直转。
+     */
+    private fun invalidateInFlight() {
+        generation++
+        loadingDatabases = false
+        loadingTables.clear()
+        sqlSheets.forEach { sheet ->
+            sheet.generation++
+            sheet.running = false
+        }
+        generateGeneration++
+        generateRunning = false
+        // 预览同理：自增 tab 级代次让在飞的载入作废，再手动清 loading ——
+        // `loadTabPreview` 的守卫是**早退**（不清 loading），漏了这一项表预览会一直转。
+        tabs.forEach {
+            it.requestGeneration++
+            it.loading = false
         }
     }
 
@@ -2684,8 +2831,48 @@ class DatabaseBrowserState(
         }
     }
 
-    private fun loadTabPreview(tab: TablePreviewTab) {
-        val requestGeneration = generation
+    /**
+     * 翻到指定页。页码先落到 tab 上再发请求，这样加载中信息条显示的就是**目标页**
+     * 而不是上一页（否则会出现「点了下一页，转圈时却写着第 1 页」的错位）。
+     */
+    fun goToTabPage(tab: TablePreviewTab, page: Int) {
+        if (page < 1 || page == tab.page) return
+        tab.page = page
+        // 换页后旧页的选中行不再存在于本页，清掉避免详情面板显示上一批数据
+        tab.rows = emptyList()
+        loadTabPreview(tab, page)
+    }
+
+    /**
+     * 改分页大小。**必须回到第 1 页** —— 页大小变了以后旧页码多半越界
+     * （100 行/页的第 5 页在 20 行/页下变成第 25 页，而表只有 100 行 = 5 页），
+     * 不归位就会停在一个永远加载不出内容、又没有「越界回退」可救的页上。
+     */
+    fun changeTabPageSize(tab: TablePreviewTab, size: PageSize) {
+        val next = size.value.coerceAtLeast(1)
+        if (next == tab.pageSize) return
+        tab.pageSize = next
+        tab.page = 1
+        tab.rows = emptyList()
+        loadTabPreview(tab, targetPage = 1)
+    }
+
+    /**
+     * 载入某个表预览标签页的**指定页**。
+     *
+     * [targetPage] 默认取 tab 自己记的页码：翻页是「改 tab.page + 重新载入」这一对动作，
+     * 页码的唯一真相源在 tab 上，把默认值放在这里可以让首次打开（tab.page 初始为 1）
+     * 与翻页共用同一条路径，不会出现两条逻辑漂移。
+     *
+     * 参数名不叫 `page`：`dataListRequest` 的 DSL 里同名属性会把它解析成 builder 自己的
+     * `val page`，导致「给 builder 赋值」变成给只读局部变量赋值，编译直接失败。
+     */
+    private fun loadTabPreview(tab: TablePreviewTab, targetPage: Int = tab.page) {
+        val sessionGeneration = generation
+        // tab 级代次：同一张表上的并发载入靠它区分。连翻两页时两次请求都在飞，
+        // 没有这个令牌就是「谁后返回谁说了算」—— 慢的第 1 页会盖掉快的第 2 页。
+        tab.requestGeneration++
+        val tabGeneration = tab.requestGeneration
         tab.loading = true
         tab.error = null
         activeDatabases.add(tab.schema)   // 预览用的池绑定在 tab.schema 这个 catalog 上
@@ -2697,7 +2884,9 @@ class DatabaseBrowserState(
                     dataRequest = dataRequest {
                         list = dataListRequest {
                             tableName = tab.tableName
-                            page = 1
+                            // **不能写死 1**：写死等于分页器是装饰品 —— 引擎每次都回第 1 页，
+                            // 而表超过一页时用户永远看不到后面的行。
+                            page = targetPage.coerceAtLeast(1)
                             // `pageSize = 0` 在 DATA.LIST 里是**流式**哨兵（逐行 frame，无 paged body），
                             // 预览固定走分页路径，故下限钳到 1。
                             pageSize = tab.pageSize.coerceAtLeast(1)
@@ -2705,7 +2894,10 @@ class DatabaseBrowserState(
                     }
                 }
             }
-            if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
+            // 两级守卫都要在**写任何状态之前**判：连接换了，或这个 tab 已经翻到别的页去了。
+            // 早退时**不清 loading** 是有意的 —— 清它会把新一轮的转圈也一并抹掉。
+            if (sessionGeneration != generation) return@launch
+            if (tabGeneration != tab.requestGeneration) return@launch
             // 同 refreshDatabases / loadTables：先写数据、最后清 loading
             result.fold(
                 onSuccess = { resp ->

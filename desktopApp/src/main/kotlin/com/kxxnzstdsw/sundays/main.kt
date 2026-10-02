@@ -11,9 +11,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.client.grpc.GrpcClientConfig
@@ -60,13 +67,19 @@ fun main() = application {
     // 不注册则 CodeLanguageRegistry.get("sql") 返回 null，编辑器退化为无高亮纯文本。
     registerBuiltinEditors()
     val engine: EngineClient = createEngineClient()
+    // 窗口尺寸：不设的话用平台默认（Windows 约 800×600），而浏览屏是「左树 + 右表 +
+    // 底栏」三段布局，800 宽下左树挤掉半棵、右边一列都放不下。
+    // 1280×820 是「左树看得全 + 右侧至少 6~7 列 + 分页栏不换行」的下限感。
+    val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
     Window(
         onCloseRequest = {
             engine.close()
             exitApplication()
         },
+        state = windowState,
         title = "sundays",
     ) {
+        EnforceMinimumWindowSize(windowState)
         // 主题档位状态必须提升到这里（SundaysTheme 之外）：配色由 SundaysTheme 的 darkTheme
         // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
         // 会出现「按钮变了、界面没变」。见 AppearanceState 的 KDoc。
@@ -79,6 +92,34 @@ fun main() = application {
         ) {
             MainScreen(engine = engine, appearance = appearance)
         }
+    }
+}
+
+/**
+ * 窗口最小尺寸 —— 低于这个值，三段式布局就有一��被挤没了。
+ *
+ * Compose 的 [Window] **没有** `minSize` 参数（它只有 `state` / `resizable` 等），所以
+ * 只能在组合里把 `size` 夹回来：用户在标题栏把窗口拖到很小、或双击标题栏最大化后恢复，
+ * 都会经过 `LaunchedEffect` 这道夹取。
+ *
+ * 取 1024×640：低于 1024 宽，左树（固定 250dp）+ 右栏内容区（至少 350dp）开始互相挤；
+ * 低于 640 高，sheet 标签条 + 工具栏 + 表格 + 分页栏四段就放不下一屏。
+ */
+private val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
+
+/** 把窗口尺寸夹到 [MIN_WINDOW_SIZE] 以上，就地生效（每次拖动窗口都会过一遍）。 */
+@Composable
+private fun FrameWindowScope.EnforceMinimumWindowSize(state: WindowState) {
+    LaunchedEffect(state) {
+        snapshotFlow { state.size }
+            .collect { size ->
+                if (size.width < MIN_WINDOW_SIZE.width || size.height < MIN_WINDOW_SIZE.height) {
+                    state.size = DpSize(
+                        width = maxOf(size.width, MIN_WINDOW_SIZE.width),
+                        height = maxOf(size.height, MIN_WINDOW_SIZE.height),
+                    )
+                }
+            }
     }
 }
 
