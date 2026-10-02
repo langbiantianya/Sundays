@@ -41,7 +41,7 @@ shared/
 │       ├── UiChrome.kt                外观 token 单一来源：UiThemeTokens（8 项决策）+ 派生函数 winShape / selectionColorsFor / buttonFaceColor / WinDivider / tabStripContainerColor + Modifier.uiBevel
 │       ├── WinControls.kt             WinButton / WinOutlinedButton / WinTextButton / WinTextField / WinIconButton / WinSurface（现代主题透传 M3）
 │       ├── SystemInfoRefresh.kt       SystemInfoRefresh 自动刷新间隔（关闭/10s/5s/2s/1s）
-│       ├── ThemeModeToggle.kt         ThemeModeToggleButton（日夜切换）+ SettingsEntryButton（⚙ 设置入口）
+│       ├── ThemeModeToggle.kt         SettingsEntryButton（⚙ 设置入口）+ ThemeModeToggleButton（日夜切换，仅设置页在用）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
 │   ├── settings/        设置页 + 设置持久化
@@ -81,7 +81,8 @@ shared/
 | `ThemeMode` / `ThemePalette` / `AppearanceState` | `commonMain/.../ui/ThemeMode.kt`、`ThemePalette.kt` | 双轴外观：明暗三档 × 配色主题（蓝灰 / 赛博朋克 / 哔哩粉 / Win2000 / WinXP）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.6](./ARCHITECTURE.md) |
 | `UiThemeTokens` / `LocalUiTokens` | `commonMain/.../ui/UiChrome.kt` | 界面外观的**唯一真相来源**：3D 斜面 / 按钮填充 / 输入框底色 / 选中态画法 / 分割线画法 / 容器描边 / 斑马纹 / 禁用文字色。**新增主题只需在 `ThemePalette.uiTokens` 加一个分支**，组件侧不含任何主题名判断，见 [`ARCHITECTURE.md` §5.6.1](./ARCHITECTURE.md) |
 | `SystemInfoRefresh` | `commonMain/.../ui/SystemInfoRefresh.kt` | 系统信息自动刷新间隔（关闭 / 10 / 5 / 2 / 1 秒）；默认关闭 |
-| `ThemeModeToggleButton` / `SettingsEntryButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）与 ⚙ 设置入口；两个面板标题行共用 |
+| `SettingsEntryButton` | `commonMain/.../ui/ThemeModeToggle.kt` | ⚙ 设置入口；两个面板标题行各一个（弹窗内嵌时不渲染） |
+| `ThemeModeToggleButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）。**只在设置页使用** —— 面板标题行的按钮已移除，明暗档位是设置页「个性化」里唯一的切换入口 |
 | `SettingsScreen` | `commonMain/.../settings/SettingsScreen.kt` | 设置页：左侧分类 + 右侧内容（个性化 / 系统信息）。**不接触引擎** —— 系统信息由调用方经 `onRequestSystemInfo` 回调喂进来 |
 | `SettingsCategory` | `commonMain/.../settings/SettingsCategory.kt` | 设置分类枚举；新增分类只需加枚举项，列表自动出现 |
 | `SettingsStorage` | `commonMain/.../settings/SettingsStorage.kt` | 设置持久化 `~/.config/sundays/settings.json`（原子写 + 损坏自愈 + 未知值降级） |

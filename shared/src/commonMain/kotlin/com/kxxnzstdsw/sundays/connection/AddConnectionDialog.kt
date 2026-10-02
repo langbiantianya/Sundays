@@ -98,6 +98,7 @@ fun AddConnectionDialog(
                 // 这里把宽度也撑满（默认由父容器决定宽度）。
                 ConnectionManagerScreen(
                     connections = connections,
+                    isEmbeddedInDialog = true,
                     selectedConnection = selectedConnection,
                     editingConnection = editingConnection,
                     wizardStep = wizardStep,

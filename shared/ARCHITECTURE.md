@@ -891,8 +891,12 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 ### 5.7 `SettingsScreen` —— 设置页（左分类 / 右内容）
 
 第三个 `AppDestination.SETTINGS`，与「连接管理」「数据库浏览」平级。
-入口是两个面板标题行上的 `SettingsEntryButton`（⚙）—— 日夜按钮与设置按钮并列，
-两者都是**应用级**操作而非当前连接的操作，故都放在内容区之外的标题行。
+入口是两个面板标题行上的 `SettingsEntryButton`（⚙）—— 它是**应用级**操作而非当前连接的操作，
+故放在内容区之外的标题行。
+
+⚠️ 标题行上原本还有**日夜切换按钮**，现已移除：明暗档位只从设置页「个性化 → 明暗档位」
+单选组进入。收敛到单一入口的理由是 `AppearanceState` 的落盘只挂在状态对象上（见 `ThemeMode.kt`），
+入口越多越容易出现「某处改了没落盘」。`ThemeToggleVisibilityTest` 以负向断言钉住这条契约。
 
 | 设计点 | 说明 |
 |---|---|

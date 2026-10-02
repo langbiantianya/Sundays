@@ -148,8 +148,8 @@ internal suspend fun fetchSystemInfo(engine: EngineClient): SystemInfo {
  *   + 切到第二屏 + `connect()` 触发引擎建池（异步，`DatabaseBrowserScreen` 观察
  *   `CONNECTING → CONNECTED` 状态）。
  *
- * **外观切换**：[appearance] 由 [main] 持有（与 `SundaysTheme` 同层），两个面板标题行各渲染
- * 明暗切换按钮、设置页渲染完整选项，全部写回同一实例 —— 任一入口改动，全应用立即生效。
+ * **外观切换**：[appearance] 由 [main] 持有（与 `SundaysTheme` 同层），**只在设置页**渲染
+ * 明暗切换与配色选择，全部写回同一实例 —— 切换路径唯一，落盘不会漏。
  *
  * `internal` 而非 `private`：`MainScreenNavTest` 需要渲染它来验证顶层导航切换
  * （导航状态由本函数持有，无法从外部注入）。
@@ -252,14 +252,13 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                     session.openSheet(cfg)
                 },
                 onDisconnect = session::disconnect,
-                themeMode = appearance.mode,
-                onCycleTheme = appearance::cycleMode,
                 onOpenSettings = ::openSettings,
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.SETTINGS -> SettingsScreen(
                 palette = appearance.palette,
                 onPaletteChange = appearance::selectPalette,
+                // 明暗档位现在**只在设置页**可改（面板标题行的日夜按钮已移除）
                 themeMode = appearance.mode,
                 onThemeModeChange = appearance::selectMode,
                 systemInfoRefresh = appearance.systemInfoRefresh,
@@ -307,8 +306,6 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                     onAddSheet = { addDialogVisible = true },
                     onConnect = session::connect,
                     onDisconnect = session::disconnect,
-                    themeMode = appearance.mode,
-                    onCycleTheme = appearance::cycleMode,
                     onOpenSettings = ::openSettings,
                     modifier = Modifier.fillMaxSize(),
                 )

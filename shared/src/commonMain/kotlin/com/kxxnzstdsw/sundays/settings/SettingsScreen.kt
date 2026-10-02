@@ -275,7 +275,7 @@ private fun PersonalizationPane(
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(16.dp))
 
-        // 快捷切换：与两个面板标题行上的按钮同一逻辑（明暗三档循环）
+        // 快捷切换（明暗三档循环）—— 面板标题行的按钮已移除，这里是**唯一**的切换入口
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "快速切换明暗",

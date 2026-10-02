@@ -196,6 +196,12 @@ data class DataTableTheme(
         @ReadOnlyComposable
         fun themed(scheme: ColorScheme = MaterialTheme.colorScheme): DataTableTheme {
             val tokens = LocalUiTokens.current
+            // ⚠️ 现代档**必须原样返回** Dark / Light —— 这两套的行底 / 表头 / 选行色是
+            // 独立调过的（表头比正文更亮形成凹槽感、选行 `#E3F2FD` 是淡蓝而非主色染）。
+            // 曾一度在这里统一改成从 `ColorScheme` 取色，结果现代三套主题的表格整体变色。
+            // 代价：现代档下表格仍按**系统**明暗而非应用的明暗档切换（与改造前一致）。
+            if (!tokens.isClassic) return if (isSystemInDarkTheme()) Dark else Light
+
             return DataTableTheme(
                 headerBackground = scheme.surfaceVariant,
                 headerText = TextStyle(

@@ -82,8 +82,10 @@ private fun ThemeMode.label(): String = when (this) {
 /**
  * 设置入口按钮（⚙）—— 连接管理与数据库浏览两个面板标题行各放一个。
  *
- * 与 [ThemeModeToggleButton] 并排放在同一行：两者都是**应用级**操作（不是当前连接的操作），
- * 放在内容区之外的标题行里，用户在任何页面都能改设置 / 换主题。
+ * 放在内容区之外的标题行里，用户在任何页面都能进入设置页。
+ *
+ * ⚠️ 同文件里的 [ThemeModeToggleButton]（日夜切换）**已不在任何面板标题行使用** ——
+ * 明暗改到设置页「个性化 → 明暗档位」单选组，该按钮目前只被设置页引用。
  */
 @Composable
 fun SettingsEntryButton(

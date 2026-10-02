@@ -102,8 +102,6 @@ import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
 import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
-import com.kxxnzstdsw.sundays.ui.ThemeMode
-import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
@@ -185,8 +183,6 @@ fun DatabaseBrowserScreen(
     onAddSheet: () -> Unit,
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
-    themeMode: ThemeMode = ThemeMode.SYSTEM,
-    onCycleTheme: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -199,8 +195,6 @@ fun DatabaseBrowserScreen(
         if (active == null) {
             EmptySheetsHint(
                 onAddSheet = onAddSheet,
-                themeMode = themeMode,
-                onCycleTheme = onCycleTheme,
                 onOpenSettings = onOpenSettings,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -212,8 +206,6 @@ fun DatabaseBrowserScreen(
             onSelect = onSelectSheet,
             onClose = onCloseSheet,
             onAdd = onAddSheet,
-            themeMode = themeMode,
-            onCycleTheme = onCycleTheme,
             onOpenSettings = onOpenSettings,
         )
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -258,8 +250,6 @@ private fun SheetTabRow(
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
     onAdd: () -> Unit,
-    themeMode: ThemeMode,
-    onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(
@@ -315,9 +305,9 @@ private fun SheetTabRow(
                 )
             }
         }
-        // 主题切换 + 设置入口钉在**最外层**右上角：与左侧「＋」同一行、同高 ——
+        // 设置入口（⚙）钉在**最外层**右上角：与左侧「＋」同一行、同高 ——
         // 不占用内容区高度，也不随工作台切换 / sheet 内容变化而移动。
-        ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
+        // 日夜切换**已从本屏移除**，明暗改到设置页的「个性化 → 明暗档位」。
         SettingsEntryButton(onClick = onOpenSettings, modifier = Modifier.padding(end = 4.dp))
     }
 }
@@ -325,20 +315,17 @@ private fun SheetTabRow(
 @Composable
 private fun EmptySheetsHint(
     onAddSheet: () -> Unit,
-    themeMode: ThemeMode,
-    onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
-        // 空态下没有标签条也没有工具栏，主题切换 / 设置入口若不单独放一个就会彻底消失 ——
+        // 空态下没有标签条也没有工具栏，设置入口若不单独放一个就会彻底消失 ——
         // 而空态恰恰是用户第一次打开应用最可能停留的地方。
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(4.dp),
         ) {
-            ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
             SettingsEntryButton(onClick = onOpenSettings)
         }
         Column(

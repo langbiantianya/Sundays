@@ -96,28 +96,29 @@ data class CodeEditorTheme(
         @ReadOnlyComposable
         fun themed(): CodeEditorTheme {
             val tokens = com.kxxnzstdsw.sundays.ui.LocalUiTokens.current
+            // ⚠️ 现代档**必须原样返回** Dark / Light —— 这两套的底色（#1E232D / #FAFAFA）
+            // 与行号槽底色是刻意选的，不是随手取的 `ColorScheme.surface`：
+            // 它们的注释写着「编辑器是嵌在应用界面里的一块*区域*…换成同色底色后工作台与主界面
+            // 糊成一团」。曾一度在这里用 `scheme.surface` / `scheme.surfaceVariant` 覆盖，
+            // 结果现代三套主题的编辑器底色与行号槽全部变色 —— 工作台工具栏（执行 SQL /
+            // 执行造数按钮所在的那一行）跟着一起「看着不对」，而根因离按钮有两层之远。
+            //
+            // 代价：现代档下编辑器仍按**系统**明暗而非应用的明暗档切换（与改造前一致）。
+            // 这是已知的历史行为，不在本次复古改造的范围内。
+            if (!tokens.isClassic) return if (isSystemInDarkTheme()) Dark else Light
+
             val scheme = androidx.compose.material3.MaterialTheme.colorScheme
-            val classic = tokens.isClassic
-            val (text, face) = if (classic) {
-                // 经典档：底色取输入框面（纯白面上斜面亮边会隐形），文字取前景色
-                scheme.onBackground to com.kxxnzstdsw.sundays.ui.fieldFaceColor()
-            } else {
-                val base = if (com.kxxnzstdsw.sundays.ui.isClassicChrome) Dark else Light
-                return base.copy(
-                    backgroundColor = scheme.surface,
-                    gutterColor = scheme.surfaceVariant,
-                )
-            }
             return CodeEditorTheme(
                 colors = tokens.syntax.asTokenColors(),
                 textStyle = TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Normal,
-                    color = text,
+                    color = scheme.onBackground,
                 ),
-                backgroundColor = face,
-                gutterColor = if (classic) scheme.outlineVariant else scheme.surfaceVariant,
+                // 经典档底色取输入框面：纯白面上凹陷边的亮侧会完全隐形
+                backgroundColor = com.kxxnzstdsw.sundays.ui.fieldFaceColor(),
+                gutterColor = scheme.outlineVariant,
             )
         }
     }

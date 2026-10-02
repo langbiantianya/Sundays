@@ -13,9 +13,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.input.VisualTransformation
@@ -53,6 +63,138 @@ import androidx.compose.ui.unit.dp
  * **不含任何主题名判断** —— 新增主题只需在 [ThemePalette.uiTokens] 加一个分支。
  */
 
+/**
+ * 解析控件形状 —— **所有包装函数共用的唯一入口**。
+ *
+ * ## 为什么要区分「有没有显式传 shape」
+ *
+ * 改造前 37 个按钮 / 输入框调用点中有 **19 个没有显式传 `shape`**，它们拿到的是各自
+ * M3 组件由 token 决定的默认形状。若把 `WinButton` 的默认参数直接写成
+ * `SundaysPalette.buttonShape`（4dp 圆角），这些点会在**现代主题下也被悄悄改掉形状** ——
+ * 而 hover / press 的状态层是跟着形状轮廓走的，于是「M3 按钮的 hover 样式变了」这类问题
+ * 会以完全看不出根因的形式出现。
+ *
+ * ## 为什么 [modernDefault] 必须由调用方传
+ *
+ * 各组件的 M3 默认形状**互不相同**，统一兜底成 `ButtonDefaults.shape` 就会串味：
+ *
+ * | 组件 | M3 默认形状 | 实际形状 |
+ * |---|---|---|
+ * | `Button` / `OutlinedButton` / `TextButton` | `ButtonSmallTokens.ContainerShapeRound` | **胶囊**（全圆角） |
+ * | `OutlinedTextField` | `FilledTextFieldTokens.ContainerShape` = `CornerExtraSmallTop` | `shapes.extraSmall.top()` —— **只有上方两角 2dp，左 / 右 / 下是方角** |
+ *
+ * 曾一度对输入框也用 `ButtonDefaults.shape` 兜底，结果 9 个输入框的左右边全变成了圆弧。
+ * [resolveTextFieldShape] 是正确的那个。
+ *
+ * 规则：**包装层只在经典主题下改变形状**；现代主题必须逐像素保持改造前的行为。
+ *
+ * @param modernDefault 该组件在 M3 里的默认形状（由各包装函数按自己的组件传入）
+ */
+@Composable
+fun resolveControlShape(shape: Shape?, modernDefault: Shape): Shape =
+    shape ?: if (isClassicChrome) controlShape() else modernDefault
+
+/**
+ * 只保留上方两角、下方两角置方 —— 复现 M3 `internal fun CornerBasedShape.top()`。
+ *
+ * M3 的 `Shapes.fromToken` 与 `CornerBasedShape.top()` 都是 **internal**，外部模块调不到，
+ * 而输入框的默认形状恰恰是这个「上圆下方」的形状。故显式复现：把下方两角置 0。
+ *
+ * [MaterialTheme.shapes] 的各档都是 [CornerBasedShape]，因此 `copy` 可用。
+ */
+private fun Shape.squaredBottom(): Shape {
+    // `MaterialTheme.shapes.extraSmall` 的静态类型是 Shape 而非 CornerBasedShape，
+    // 故做一次运行时判定；非 CornerBasedShape（如 CircleShape）原样返回。
+    if (this !is androidx.compose.foundation.shape.CornerBasedShape) return this
+    return copy(
+        bottomStart = androidx.compose.foundation.shape.CornerSize(0.dp),
+        bottomEnd = androidx.compose.foundation.shape.CornerSize(0.dp),
+    )
+}
+
+/** 三个按钮的形状解析 —— M3 默认是胶囊。 */
+@Composable
+fun resolveButtonShape(shape: Shape?): Shape = resolveControlShape(shape, ButtonDefaults.shape)
+
+/**
+ * 输入框的形状解析 —— M3 默认是 `shapes.extraSmall.top()`，**不是**按钮的胶囊。
+ *
+ * `FilledTextFieldTokens.ContainerShape` 对应 `ShapeKeyTokens.CornerExtraSmallTop`，而
+ * `Shapes.fromToken` 是 `internal`，外部调不到，故在此显式复现该映射（`extraSmall.top()`
+ *）。若 M3 将来改了 token，这里需要同步 —— 见 `ModernThemeParityTest` 的断言。
+ */
+@Composable
+fun resolveTextFieldShape(shape: Shape?): Shape =
+    resolveControlShape(shape, MaterialTheme.shapes.extraSmall.squaredBottom())
+
+/**
+ * 空操作指示器占位（经典档不再使用）。
+ *
+ * 曾尝试用 `LocalIndication provides …` 关掉状态层，但 M3 的 `Surface(onClick)` 把
+ * `indication = ripple()` **硬编码**在实现里、不读 `LocalIndication`，那条路无效。
+ * 故经典档改为不走 `Surface`，直接用 [androidx.compose.foundation.clickable] 且
+ * `indication = null`（该参数本身可空）。
+ */
+private object NoIndication
+
+/**
+ * 经典档的按钮基座 —— 窗口面 + 3D 斜边，**没有投影、没有悬停高光**。
+ *
+ * ## 为什么不直接用 M3 `Button` 再调参
+ *
+ * M3 的 `Button` 内部是 `Surface(onClick=…)`，而 `Surface` 把 `indication = ripple()`
+ * 写死在实现里，`Button` 也不暴露 `indication` / `interactionSource` 形参 —— 想在
+ * 保留 M3 按钮的前提下关掉悬停高光是做不到的。经典控件的交互反馈本就应该由那圈 3D
+ * 斜边表达（真实 Win 按钮鼠标移上去纹丝不动），所以这里自绘基座。
+ *
+ * ## 尺寸必须与 M3 按钮一致
+ *
+ * 尺寸直接取 [ButtonDefaults.MinWidth] / [ButtonDefaults.MinHeight] / [contentPaddingFor]，
+ * **不自己拍数字** —— 否则经典档的按钮会比现代档大一号，而这类差异在混排时非常刺眼
+ * （此前就因为默认参数吃掉了调用方的形状，导致现代档按钮集体变形）。
+ */
+@Composable
+private fun ClassicButtonBase(
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    raised: Boolean,
+    shape: Shape,
+    colors: ButtonColors,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .defaultMinSize(
+                minWidth = androidx.compose.material3.ButtonDefaults.MinWidth,
+                minHeight = androidx.compose.material3.ButtonDefaults.MinHeight,
+            )
+            .clip(shape)
+            .background(colors.containerColor)
+            .then(
+                if (enabled) {
+                    Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            // 斜面画在最后：它是「内容之后」的一层，压在容器色之上
+            .uiBevel(raised = raised)
+            .padding(androidx.compose.material3.ButtonDefaults.contentPaddingFor(androidx.compose.material3.ButtonDefaults.MinHeight)),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides (if (enabled) colors.contentColor else colors.disabledContentColor),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) { content() }
+        }
+    }
+}
+
 /** 经典档的按钮配色：窗口面 + 前景色。容器色 / 文字色 / 禁用色全部由 token 派生。 */
 @Composable
 private fun classicButtonColors(): ButtonColors =
@@ -81,7 +223,7 @@ fun WinButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     selected: Boolean = false,
-    shape: Shape = SundaysPalette.buttonShape,
+    shape: Shape? = null,
     colors: ButtonColors? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
@@ -90,17 +232,18 @@ fun WinButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
-            shape = shape,
+            shape = resolveButtonShape(shape),
             colors = colors ?: ButtonDefaults.buttonColors(),
             content = content,
         )
         return
     }
-    Button(
+    ClassicButtonBase(
         onClick = onClick,
-        modifier = modifier.uiBevel(raised = !selected),
+        modifier = modifier,
         enabled = enabled,
-        shape = shape,
+        raised = !selected,
+        shape = resolveButtonShape(shape),
         colors = classicButtonColors(),
         content = content,
     )
@@ -112,25 +255,21 @@ fun WinOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: Shape = SundaysPalette.buttonShape,
+    shape: Shape? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     if (!isClassicChrome) {
-        OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = shape, content = content)
+        OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = resolveButtonShape(shape), content = content)
         return
     }
-    OutlinedButton(
+    // 同 [WinButton]：经典档去掉投影与悬停状态层，立体感只由斜边表达
+    ClassicButtonBase(
         onClick = onClick,
-        modifier = modifier.uiBevel(raised = true),
+        modifier = modifier,
         enabled = enabled,
-        shape = shape,
-        border = panelBorderStroke(),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = buttonFaceColor(),
-            contentColor = buttonInkColor(),
-            disabledContainerColor = buttonFaceColor(),
-            disabledContentColor = disabledInkOrNull() ?: MaterialTheme.colorScheme.outlineVariant,
-        ),
+        raised = true,
+        shape = resolveButtonShape(shape),
+        colors = classicButtonColors(),
         content = content,
     )
 }
@@ -141,24 +280,20 @@ fun WinTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: Shape = SundaysPalette.buttonShape,
+    shape: Shape? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     if (!isClassicChrome) {
-        TextButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = shape, content = content)
+        TextButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = resolveButtonShape(shape), content = content)
         return
     }
-    TextButton(
+    ClassicButtonBase(
         onClick = onClick,
-        modifier = modifier.uiBevel(raised = true),
+        modifier = modifier,
         enabled = enabled,
-        shape = shape,
-        colors = ButtonDefaults.textButtonColors(
-            containerColor = buttonFaceColor(),
-            contentColor = buttonInkColor(),
-            disabledContainerColor = buttonFaceColor(),
-            disabledContentColor = disabledInkOrNull() ?: MaterialTheme.colorScheme.outlineVariant,
-        ),
+        raised = true,
+        shape = resolveButtonShape(shape),
+        colors = classicButtonColors(),
         content = content,
     )
 }
@@ -182,7 +317,7 @@ fun WinTextField(
     singleLine: Boolean = false,
     minLines: Int = 1,
     maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
-    shape: Shape = SundaysPalette.buttonShape,
+    shape: Shape? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
@@ -199,7 +334,7 @@ fun WinTextField(
             singleLine = singleLine,
             minLines = minLines,
             maxLines = maxLines,
-            shape = shape,
+            shape = resolveTextFieldShape(shape),
             keyboardOptions = keyboardOptions,
             visualTransformation = visualTransformation,
         )
@@ -217,7 +352,8 @@ fun WinTextField(
         singleLine = singleLine,
         minLines = minLines,
         maxLines = maxLines,
-        shape = shape,
+        // 输入框的形状解析与按钮不同（见 resolveTextFieldShape 的说明）
+        shape = resolveTextFieldShape(shape),
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
         colors = OutlinedTextFieldDefaults.colors(

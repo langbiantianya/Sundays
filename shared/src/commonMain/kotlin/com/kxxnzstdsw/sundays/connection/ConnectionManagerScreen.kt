@@ -21,8 +21,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
-import com.kxxnzstdsw.sundays.ui.ThemeMode
-import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinMenuItem
@@ -129,10 +127,9 @@ fun ConnectionManagerScreen(
     connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     onConnect: (ConnectionConfig) -> Unit = {},
     onDisconnect: (ConnectionConfig) -> Unit = {},
-    // themeMode 为 null 时**不渲染**日夜切换按钮 —— 弹窗（AddConnectionDialog）内嵌本组件，
-    // 模态弹窗里改全局主题会让人失去「当前处于什么主题」的判断，故那里不传。
-    themeMode: ThemeMode? = null,
-    onCycleTheme: () -> Unit = {},
+    // 嵌在模态弹窗（AddConnectionDialog）里时为 true —— 弹窗中不渲染 ⚙ 设置入口：
+    // 模态弹窗里跳去改应用级设置会让人失去「当前处于什么界面」的判断。
+    isEmbeddedInDialog: Boolean = false,
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -147,8 +144,7 @@ fun ConnectionManagerScreen(
             onQuickConnect = onQuickConnect,
             onEditConnection = onEditConnection,
             onDeleteConnection = onDeleteConnection,
-            themeMode = themeMode,
-            onCycleTheme = onCycleTheme,
+            isEmbeddedInDialog = isEmbeddedInDialog,
             onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .width(250.dp)
@@ -246,8 +242,7 @@ private fun ConnectionListPanel(
     onQuickConnect: () -> Unit,
     onEditConnection: (ConnectionConfig) -> Unit,
     onDeleteConnection: (String) -> Unit,
-    themeMode: ThemeMode?,
-    onCycleTheme: () -> Unit,
+    isEmbeddedInDialog: Boolean,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -273,10 +268,10 @@ private fun ConnectionListPanel(
                 WinIconButton(onClick = onNewConnection) {
                     Icon(Icons.Default.Add, contentDescription = "新建连接")
                 }
-                // 日夜切换紧挨面板标题：与「快速连接 / 新建」同属面板级操作。
-                // themeMode 为 null（弹窗内嵌）时不渲染 —— 弹窗里也不提供设置入口。
-                if (themeMode != null) {
-                    ThemeModeToggleButton(mode = themeMode, onCycle = onCycleTheme)
+                // 只留设置入口（⚙）。日夜切换**已从本屏移除** —— 明暗改到设置页的
+                // 「个性化 → 明暗档位」单选组里，标题行不再放应用级外观按钮。
+                // 嵌在弹窗里时连设置入口也不渲染。
+                if (!isEmbeddedInDialog) {
                     SettingsEntryButton(onClick = onOpenSettings)
                 }
             }
