@@ -790,12 +790,12 @@ main()  ── rememberThemeModeState()  ← 状态诞生
 
 | 轴 | 取值 | 决定 |
 |---|---|---|
-| [`ThemePalette`] 配色主题 | `BLUE_GRAY` / `CYBERPUNK` / `BILI_PINK` | 色相体系 |
+| [`ThemePalette`] 配色主题 | `BLUE_GRAY` / `CYBERPUNK` / `BILI_PINK` / `WIN_2000` / `WIN_XP` | 色相体系 |
 | [`ThemeMode`] 明暗 | `SYSTEM` / `LIGHT` / `DARK` | 亮度 |
 
-3 主题 × 3 明暗 = **9 种外观**，且每套主题自带浅 / 深两版配色。
+5 主题 × 3 明暗 = **15 种外观**，且每套主题自带浅 / 深两版配色。
 
-**为什么不用一个枚举列出全部组合**：那样是 6~9 项，每项都要重复描述一遍「明暗」，
+**为什么不用一个枚举列出全部组合**：那样是 10~15 项，每项都要重复描述一遍「明暗」，
 且新增明暗档会翻倍。拆开之后设置页是两个独立单选组 —— 用户心里想的本来就是
 「换个配色」与「要不要跟着系统变暗」这两件不相干的事。
 
@@ -803,21 +803,90 @@ main()  ── rememberThemeModeState()  ← 状态诞生
 配到另一个明暗档就会渲染成错误底色。`SundaysPaletteTest` 遍历
 `ThemePalette.entries × {light, dark}` 断言可读性与底色方向，**新增主题自动进入断言范围**。
 
-#### 浅色档不能用品牌色：两套主题踩的是同一个坑
+#### 浅色档不能用品牌色：赛博朋克与哔哩粉踩的是同一个坑
 
-信息密集型界面对比度是硬门槛（正文一律 AA 4.5:1），而**品牌色几乎都过不了这一关**。
-现有两套主题的浅色档都被迫偏离品牌色：
+信息密集型界面对比度是硬门槛（正文一律 AA 4.5:1），而**当代品牌色几乎都过不了这一关**。
+这两套主题的浅色档都被迫偏离品牌色：
 
 | 主题 | 品牌 / 标志性色 | 压在浅底上的对比度 | 浅色档实际取值 |
 |---|---|---|---|
 | 赛博朋克 | 荧光青 `#00E5FF` | **1.46:1** | 压深到 `#00697A`（青调保留，明度大幅下调） |
 | 哔哩粉 | 品牌粉 `#FB7299` | **2.64:1** | 压深到 `#A81C4C`（玫瑰 → 酒红） |
 
-两个数值都是实测的（后者可由 WCAG 公式复现），且都远低于 4.5:1。结论是：
+两个数值都是实测的，且都远低于 4.5:1。结论是：
 **深色档可以「还原」品牌色，浅色档必须主动牺牲品牌色的明度**——
 哔哩粉的粉色主要活在深色档（`#FF93B6` 压在深色 surface 上 8.16:1），
 浅色档只能以酒红示人。第三色刻意用暖琥珀而非第二个粉：整套界面若只有一种色相，
 表格里「主色 / 第三色」两类状态标记会难以区分。
+
+#### 复古配色（Win2000 / WinXP）：反例的方向
+
+上面两套是「为可读性牺牲品牌色」，Win2000 / WinXP 恰好相反 —— 它们的招牌色
+**本来就是为在 2001 年的 CRT 上读得清而设计的**，因此天然高对比，几乎无需让步：
+
+| 主题 | 招牌色 | 配黑字的对比度 | 是否需为可读性让步 |
+|---|---|---|---|
+| Win2000 | 银灰控件面 `#C0C0C0` | **11.54:1** | 否，可直接用作 `background` |
+| WinXP | Luna 奶油底 `#ECE9D8` | **17.21:1** | 底色不必动，但**选区蓝 `#316AC5` 需要** |
+
+XP 是个典型陷阱：`#316AC5` 压在白色内容区有 5.25:1（看起来没问题），压回 Luna
+奶油底却只剩 4.31:1 —— 只测 `surface` 会漏掉工具栏条这类压在 `background` 上的用法。
+故改用同色系的 `#255EA1`（5.39:1 / 6.57:1）。
+
+- **Win2000 银灰亮度余量极薄**。`#C0C0C0` 相对亮度 0.527，距「浅色档底色 > 0.5」这条
+  硬约束只剩 0.027。该值正是 Win2000 的真实取值不宜改动，因此保留原值、依赖
+  `SundaysPaletteTest` 守住 —— 若有人为「提亮一点」微调，测试会立即报错而不是悄悄
+  退化成暗底。
+- **深浅两版不能沿用同一组色值**。XP 的 `#255EA1` 压在其深色底 `#101820` 上只有
+  2.72:1 —— 这正是「深浅两版共用一套色」最常见的翻车方式，深色档必须整体提亮重配。
+
+### 5.6.1 复古控件外观：形状 + 3D 斜面
+
+光换配色与圆角不足以让复古主题成立。经典 Win 控件的辨识度**主要来自双色 3D 斜面** ——
+同一控件的左上边用亮色、右下边用暗色，夹一条外圈色，制造凸起 / 凹陷的立体错觉。
+Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个颜色，**表达不了
+「成对异色边」**，所以这套描边只能自绘。
+
+复古两套因此比另外三套多出**两条**主题维度：形状与斜面。
+
+| 维度 | 蓝灰 / 赛博朋克 / 哔哩粉 | Win2000 | WinXP |
+|---|---|---|---|
+| 形状阶梯 | 共用紧凑圆角 2~8dp | **全直角 0dp** | Luna 递增圆角 2~8dp（按钮档 3dp） |
+| 3D 斜面 | **不启用**（`BevelStyle.NONE`） | 2px 双线：外圈同色 + 内圈亮暗成对 | 1px 单线，明暗差收得很小 |
+| 按钮填充 | M3 默认 `primary` | **窗口面 `background` + 黑字** | 同左 |
+| 输入框 | M3 默认 | 凹陷斜面 + `surfaceVariant` 灰面 | 同左 |
+
+三条设计决定值得单独说明：
+
+1. **现代三套必须是彻底的空操作**。`winBevel` 在 `BevelStyle.NONE` 下直接 `return this`，
+   不产生任何绘制或图层；`WinControls.kt` 的四个包装函数也直接转调同名 M3 组件。
+   这样现代主题的渲染路径与引入复古主题之前**逐像素一致**。
+2. **按钮填充必须从 `primary` 换成窗口面**。M3 实心按钮用 `colorScheme.primary` 作容器色，
+   而 Win2000 的 `primary` 是 navy `#000080` —— 那是它的**选区色**。不换的话按钮会变成
+   深蓝底白字，和「银灰按钮配黑字」的实物完全对不上。斜面只能补回立体感，补不回色相。
+3. **输入框用 `surfaceVariant` 而不是 `surface`**。Win2000 浅色档的 `surface` 是纯白
+   `#FFFFFF`，而经典凹陷边有一侧就是纯白 `ButtonHighlight` —— 贴在纯白面上那一侧会
+   **完全隐形**。退回「Windows Standard」的 `#D4D0C8` 灰面，亮边才读得出来。
+   `WinChromeTest` 的「斜面必须比它所在的两种控件面都更亮 / 更暗」正是钉这一条
+   （这个隐形问题是写测试时才被发现的）。
+
+**已实现 / 未实现**：
+
+| | 状态 |
+|---|---|
+| 逐主题形状阶梯 | ✅ `ThemePalette.shapes`，27 处 `buttonShape` 调用点**零改动** |
+| 3D 斜面（按钮凸起 / 输入框凹陷 / 切换态凹陷） | ✅ `Modifier.winBevel(raised = …)` |
+| 按钮与输入框的包装层 | ✅ `WinControls.kt`，42 处调用点已迁移 |
+| 默认按钮的粗黑边框 | ❌ M3 没有「哪个按钮是回车默认项」的信息 |
+| 按下瞬间的凸起↔凹陷互换 | ❌ M3 按下只改容器色，要翻转斜面需自行接管 `interactionSource` |
+| 虚线焦点框 / 标题栏 / 任务栏 | ❌ 超出 `MaterialTheme` 能表达的范围 |
+| 逐主题字体 | ❌ **有意不做**：MS Sans Serif 8pt 与 Tahoma 8pt 都是位图点阵字体，换成系统默认无衬线后本就没有那个观感，强行缩小只会让信息密集界面更难读
+| **界面硬编码圆角** | ✅ 11 处 `RoundedCornerShape(…)` 改走 `winShape(…)` |
+| **列表选中态** | ✅ 复古档整行反色（`primary` + `onPrimary`），现代档维持淡色底 |
+| **面板容器** | ✅ 3 个面板加凸起斜面 |
+| **分割线** | ✅ 26 处改用 `WinDivider`（复古档为「暗 1px + 亮 1px」蚀刻线） |
+| **标签页条底色** | ✅ 复古档贴窗口面而非白色内容面板 |
+| **表格配色** | ✅ `DataTableTheme` 改为跟随应用配色（见下方「顺带修掉的既有缺陷」） |
 
 ### 5.7 `SettingsScreen` —— 设置页（左分类 / 右内容）
 
@@ -1123,3 +1192,88 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | v2.6 | 引入 `RequestDispatcher` envelope options（`traceId` / `dryRun` / `timeoutMs`）；`shared/` 不受影响 |
 | v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`（填充父容器剩余高度但不超父容器）；`DataTable.fillParentHeight` 默认 `true`（同语义）。两个组件均无需调用方显式指定高度即自适应父容器；只在显式传入参数时才启用硬上限；新增 `ConnectionManagerScreen` 连接管理组件 + `ConnectionStorage` JSON 持久化 |
 | v2.14 | **① 顶层导航与应用主题上移**：新增 `navigation/`（`AppDestination` + `TopNavBar`）与 `ui/Theme.kt`（`SundaysTheme`），均自 `desktopApp` 的 `Navigation.kt` / `main.kt` 提取 —— 不引用 `:engine`，可在 `commonMain` 跨平台复用；`desktopApp` 瘦身为「平台窗口 + 引擎状态机接线」。`ConnectionSession` / `DatabaseBrowserState` 因直连 `IdbEngine` 仍留在 `desktopApp`（见 §1.3）<br>**② 模块整理**：删除 KMP 脚手架样板 `App` / `Greeting` / `getPlatform` 及 `composeResources` logo，移除 `compose.components.resources` 依赖（`jvmMain` 随之清空）；删除两个恒真冒烟测试（`assertEquals(3, 1 + 2)`）与无生产调用方的 `PageSize.fromInt` 及其 2 项测试，测试数 101 → 97<br>**死代码清理**：`DataTable.primaryKey`（从未被读取、无调用方、KDoc 描述的行为未实现）、`CodeVisualTransformation.source` 及其恒等三元式、两处无 modifier 单子节点的 `Box` 包裹、预览里从不重新赋值的 `mutableStateOf`、`QuickConnectStep.editingConnection` 未读参数<br>**去兼容层**：删除 `ContextMenuState.targetRow` 别名（唯一真实调用方 `DataTable` 改为直接读 `payload`）<br>**去重**：`DataTable` 表头/数据行的列布局抽为 `RowScope.TableRowCells`；`DialectOption` / `ConnectionTypeOption` 抽为 `SelectableOptionRow`；14 个编辑器预览共用 `EditorPreview` 外壳<br>**性能**：`TableBody` 的 `rows.indexOf(row)`（每可见行 O(n) 扫描）改为 `itemsIndexed` 下标<br>**文档纠偏**：KDoc 中「异步 tokenize」「滚动共享 `ScrollState` 参数」「空行填充」「`[DarkColors]` / `[TokenType]` / `[CodeFormatter]` / `[ScrollState]` / `[WizardState]` / `[JdbcUrl]` / `[DataTable.detailPanel]`」等与实现不符的描述或失效链接，以及 `WizardState` 字段名写错（`wizardStep` → `step`）的示例，全部按实现改正 |
+
+#### 界面层：外观 token 单一来源
+
+只换按钮与输入框不够 —— 界面骨架上还有七八项「长什么样」的决策（3D 斜面、按钮填充色、
+输入框底色、选中态画法、分割线画法、容器描边、表格斑马纹、禁用文字色）。
+
+**这些决策若散落在各组件里，加新主题就得翻遍全代码**：每套新外观要把所有 `if (isClassic)`
+再挖一遍，漏一个判断就有一块控件出戏，而且**不会报任何错**。所以它们被抽成一份 token：
+
+```
+ThemePalette ──uiTokens(useDark)──> UiThemeTokens ──CompositionLocal(LocalUiTokens)──> 组件
+   （唯一需要改的地方）              （8 项决策）                    （只读，不判断）
+```
+
+| token | 取值 | 界面表现 |
+|---|---|---|
+| `chrome` | `MODERN` / `CLASSIC` | 总档位；其余各项应当与它一致（由测试钉住） |
+| `bevel` | `BevelStyle` | 3D 斜面：外圈 / 亮 / 暗 / 线宽 / 单双边 / 圆角 |
+| `buttonFace` | `PRIMARY` / `WINDOW` | 实心按钮取 `primary` 还是取窗口面配黑字 |
+| `fieldFace` | `SURFACE` / `SURFACE_VARIANT` | 输入框底色（见下方纯白陷阱） |
+| `selection` | `TINTED` / `INVERTED` | 淡色容器底 还是 整行反色 |
+| `divider` | `FLAT` / `ETCHED` | 实心单线 还是 暗 1px + 亮 1px 蚀刻凹槽 |
+| `panelBorder` | `LINE` / `BEVEL` / `NONE` | 容器描边：单色细线 / 3D 斜面 / 无 |
+| `zebraRows` | `Boolean` | 表格隔行底色（经典 Win 列表视图**没有**） |
+| `disabledInk` | `Color` | 禁用态文字色；`Unspecified` 表示交回 M3 自己算 |
+
+**用枚举而不是布尔**（`isRetro: Boolean`）：布尔会让「再加一种外观」变成给每个判断点加一个
+`||`，而枚举是封闭集合 —— 新增一档只需在下面加一行，编译器会把所有 `when` 的漏网处指出来。
+
+**调用点不含任何主题名**。组件侧只问「当前 token 的这个字段是什么」，主题判断（`when`）
+只出现在 `UiChrome.kt` 的派生函数里。因此：
+
+- **加新主题 = 在 `ThemePalette.uiTokens` 加一个分支**，其余组件自动生效；
+- **现代档天然零风险** —— `UiThemeTokens.MODERN` 把每一项都设成「不做」，`uiBevel` 直接
+  `return this`，`WinDivider` 委托给 M3 的 `HorizontalDivider`，渲染路径与引入本机制之前
+  逐像素一致。
+
+`UiTokensTest` 是这套契约的护栏：逐主题 × 明暗两档断言经典档把**每一项**都打开、现代档
+把**每一项**都关掉。这条是「所有 UI 都要改」的机器可验证形式 —— 将来新增一项 token 而某个
+主题忘了配，测试会直接点名。
+
+**纯函数化的理由**：`uiTokens` / `shapeFor` / `selectionColorsFor` 都不依赖组合，因此
+测试不需要 `runComposeUiTest`。这不是洁癖 —— JUnit4 反射会把 `@Composable` 的合成
+`composer` 参数当成测试方法形参而拒绝加载整个类（`InvalidTestClassError: should have no
+parameters`）。把纯逻辑抽出来后，测试与设计同时变简单。
+
+#### 仍在组件侧、但已由 token 派生的取值
+
+| 派生函数 | 供谁用 |
+|---|---|
+| `winShape(corner)` | 界面所有容器 / 卡片 / 徽标 —— 替掉硬编码的 `RoundedCornerShape(8/12.dp)` |
+| `controlShape()` | 按钮 / 输入框 |
+| `selectionContainerColor` / `selectionContentColor` | 列表项、方言选项、设置页分类 |
+| `buttonFaceColor` / `buttonInkColor` / `fieldFaceColor` | `WinControls.kt` 的按钮与输入框 |
+| `panelBorderStroke()` | 面板 / 卡片描边 |
+| `WinDivider` | 26 处分组线 |
+| `tabStripContainerColor()` | 标签页条底色 |
+| `zebraRowsEnabled()` | 表格隔行底色 |
+| `Modifier.uiBevel(raised)` | 3D 斜面（凸起 / 凹陷） |
+
+##### 纯白陷阱：为什么输入框不能用 `surface`
+
+Win2000 浅色档的 `surface` 是纯白 `#FFFFFF`，而经典凹陷边有一侧就是纯白 `ButtonHighlight`
+—— 贴在纯白面上那一侧会**完全隐形**，凹陷效果只剩一半。这正是真实 Windows 当年用
+「Windows Standard」灰（`#D4D0C8`）而非纯白做控件面的原因。故 `FieldFace.SURFACE_VARIANT`。
+`UiTokensTest.classic_bevel_contrasts_against_every_face_it_lands_on` 同时验两种面
+（按钮面 `background` + 输入框面 `surfaceVariant`），这个隐形问题正是它先报出来的。
+
+#### 顺带修掉的既有缺陷：`DataTableTheme` 不跟随应用配色
+
+改造界面时发现的**与复古主题无关的既有 bug**：`DataTableTheme` 是一套独立硬编码色值
+（选中行 `#E3F2FD`、行底 `#FFFFFF`），`default()` 只按 `isSystemInDarkTheme()` 在两个写死
+常量间二选一。由此有两个问题：
+
+1. **无视用户选的明暗档**。`AppearanceState` 允许强制「始终浅色 / 始终深色」，而表格看的
+   是系统设置 —— 用户强制浅色、系统是深色时，表格会与整个界面相反。
+2. **无视配色主题**。五套配色下表格都是同一块现代表格。
+
+已改为 `DataTableTheme.themed()` 从 `MaterialTheme.colorScheme` 取色；`Light` / `Dark`
+两个常量保留但标 `@Deprecated`（仅供需要与宿主外观解耦的预览 / 截图场景）。复古档另有两处
+专门处理：**选行反色**，以及**取消斑马纹**（`rowBackgroundAlt = null`）—— Win98/2000/XP 的
+列表视图都没有隔行底色，斑马纹是现代表格的标志，在信息密集的行里还会干扰跨行读数。
+
+⚠️ 这条改动**对现代主题同样生效**：表格现在跟随用户选的明暗档而非系统设置。这是对既有行为
+的修正，但也意味着任何依赖「表格永远跟系统走」的预期需要重新评估。

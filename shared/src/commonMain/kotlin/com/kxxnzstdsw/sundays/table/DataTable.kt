@@ -46,7 +46,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.WinButton
+import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.WinMenuItem
 import com.kxxnzstdsw.sundays.ui.onRightClick
+import com.kxxnzstdsw.sundays.ui.winShape
 
 /**
  * 可扩展的虚拟滚动数据表格 —— 支持：
@@ -97,8 +101,8 @@ import com.kxxnzstdsw.sundays.ui.onRightClick
  *     ),
  *     rows = rows,
  *     contextMenuItems = { row ->
- *         DropdownMenuItem(text = { Text("复制") }, onClick = { ... })
- *         DropdownMenuItem(text = { Text("删除") }, onClick = { ... })
+ *         WinMenuItem(text = { Text("复制") }, onClick = { ... })
+ *         WinMenuItem(text = { Text("删除") }, onClick = { ... })
  *     },
  * )
  * ```
@@ -190,12 +194,12 @@ fun DataTable(
                 .weight(1f - detailPanelRatio.coerceAtLeast(0f))
                 .fillMaxHeight(),
             color = theme.rowBackground,
-            shape = RoundedCornerShape(4.dp),
+            shape = winShape(4.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 TableHeader(columns = columns, theme = theme)
-                HorizontalDivider(color = theme.borderColor)
+                WinDivider(color = theme.borderColor)
                 TableBody(
                     columns = columns,
                     rows = pageRows,
@@ -204,7 +208,7 @@ fun DataTable(
                     onRowClick = { row -> setSelected(if (row.id == effectiveSelectedRowId) null else row) },
                     contextMenuState = contextMenuState,
                 )
-                HorizontalDivider(color = theme.borderColor)
+                WinDivider(color = theme.borderColor)
                 TablePagination(
                     theme = theme,
                     pageSize = pageSize,
@@ -223,7 +227,7 @@ fun DataTable(
                     .weight(detailPanelRatio.coerceAtLeast(0.05f))
                     .fillMaxHeight(),
                 color = theme.rowBackground,
-                shape = RoundedCornerShape(4.dp),
+                shape = winShape(4.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
             ) {
                 detailPanel(selectedRow, theme)
@@ -319,7 +323,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
                 onClick = { onRowClick(row) },
                 contextMenuState = contextMenuState,
             )
-            HorizontalDivider(color = theme.borderColor)
+            WinDivider(color = theme.borderColor)
         }
     }
 }
@@ -474,7 +478,7 @@ private fun TablePagination(
                     onDismissRequest = { pageSizeExpanded = false },
                 ) {
                     PageSize.ALL_VALUES.forEach { size ->
-                        DropdownMenuItem(
+                        WinMenuItem(
                             text = { Text(size.label) },
                             onClick = {
                                 onPageSizeChange(size)
@@ -492,13 +496,13 @@ private fun TablePagination(
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(
+            WinButton(
                 onClick = { onPageChange(1) },
                 enabled = currentPage > 1,
                 shape = SundaysPalette.buttonShape,
             ) { Text("首页") }
             Spacer(modifier = Modifier.width(4.dp))
-            Button(
+            WinButton(
                 onClick = { onPageChange(currentPage - 1) },
                 enabled = currentPage > 1,
                 shape = SundaysPalette.buttonShape,
@@ -510,13 +514,13 @@ private fun TablePagination(
                 color = theme.headerText.color,
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Button(
+            WinButton(
                 onClick = { onPageChange(currentPage + 1) },
                 enabled = currentPage < totalPages,
                 shape = SundaysPalette.buttonShape,
             ) { Text("下一页") }
             Spacer(modifier = Modifier.width(4.dp))
-            Button(
+            WinButton(
                 onClick = { onPageChange(totalPages) },
                 enabled = currentPage < totalPages,
                 shape = SundaysPalette.buttonShape,
@@ -550,7 +554,7 @@ fun DefaultDetailPanel(
             style = theme.headerText,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        HorizontalDivider(color = theme.borderColor, modifier = Modifier.padding(bottom = 12.dp))
+        WinDivider(color = theme.borderColor, modifier = Modifier.padding(bottom = 12.dp))
         if (row == null) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -570,10 +574,10 @@ fun DefaultDetailPanel(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     DetailField("主键", row.id.toString(), theme)
-                    HorizontalDivider(color = theme.borderColor, modifier = Modifier.padding(vertical = 4.dp))
+                    WinDivider(color = theme.borderColor, modifier = Modifier.padding(vertical = 4.dp))
                     columns.forEach { column ->
                         DetailField(column.header, row.formatted(column), theme)
-                        HorizontalDivider(color = theme.borderColor.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 2.dp))
+                        WinDivider(color = theme.borderColor.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 2.dp))
                     }
                 }
             }
@@ -687,11 +691,11 @@ private fun DataTableContextMenuPreview() {
         rows = rows,
         theme = DataTableTheme.Light,
         contextMenuItems = { row ->
-            DropdownMenuItem(
+            WinMenuItem(
                 text = { Text("复制 ${row?.id ?: ""}") },
                 onClick = { },
             )
-            DropdownMenuItem(
+            WinMenuItem(
                 text = { Text("删除 ${row?.id ?: ""}") },
                 onClick = { },
             )

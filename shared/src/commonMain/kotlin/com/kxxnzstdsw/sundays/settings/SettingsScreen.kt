@@ -47,6 +47,14 @@ import com.kxxnzstdsw.sundays.ui.SystemInfoRefresh
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import com.kxxnzstdsw.sundays.ui.ThemePalette
+import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
+import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
+import com.kxxnzstdsw.sundays.ui.selectionContentColor
+import com.kxxnzstdsw.sundays.ui.selectionContainerColor
+import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.WinTextButton
+import com.kxxnzstdsw.sundays.ui.WinIconButton
+import com.kxxnzstdsw.sundays.ui.winShape
 import kotlinx.coroutines.delay
 
 /**
@@ -117,7 +125,7 @@ fun SettingsScreen(
         ) {
             // 左上角返回
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
+                WinIconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
@@ -177,9 +185,9 @@ private fun SettingsCategoryRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
+        shape = winShape(6.dp),
+        contentColor = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
+        color = selectionContainerColor(selected, MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(
             modifier = Modifier
@@ -190,8 +198,7 @@ private fun SettingsCategoryRow(
             Icon(
                 imageVector = category.icon(),
                 contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(10.dp))
@@ -199,8 +206,7 @@ private fun SettingsCategoryRow(
                 text = category.label,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
             )
         }
     }
@@ -251,7 +257,7 @@ private fun PersonalizationPane(
         }
 
         Spacer(Modifier.height(24.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(16.dp))
 
         Text(text = "明暗模式", style = MaterialTheme.typography.titleSmall)
@@ -266,7 +272,7 @@ private fun PersonalizationPane(
         }
 
         Spacer(Modifier.height(24.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(16.dp))
 
         // 快捷切换：与两个面板标题行上的按钮同一逻辑（明暗三档循环）
@@ -308,7 +314,7 @@ private fun SystemInfoPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = "系统信息", style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = onRefreshNow, shape = SundaysPalette.buttonShape) { Text("刷新") }
+            WinTextButton(onClick = onRefreshNow, shape = SundaysPalette.buttonShape) { Text("刷新") }
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -345,7 +351,7 @@ private fun SystemInfoPane(
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    WinProgressIndicator()
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = "读取系统信息…",
@@ -366,14 +372,14 @@ private fun SystemInfoPane(
                 InfoRow("JVM 版本", info.jvmVersion)
                 InfoRow("JVM 供应商", info.jvmVendor)
                 InfoRow("JVM 名称", info.jvmName)
-                HorizontalDivider(
+                WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
                 InfoRow("操作系统", "${info.osName} ${info.osVersion}".trim())
                 InfoRow("系统架构", info.osArch)
                 InfoRow("可用处理器", "${info.availableProcessors} 个")
-                HorizontalDivider(
+                WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
@@ -381,7 +387,7 @@ private fun SystemInfoPane(
                 InfoRow("JVM 堆已分配", formatBytes(info.memoryTotal))
                 InfoRow("JVM 堆上限", formatBytes(info.memoryMax))
                 InfoRow("JVM 堆空闲", formatBytes(info.memoryFree))
-                HorizontalDivider(
+                WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
@@ -407,7 +413,7 @@ private fun ChoiceRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onClick)
+        RadioButton(colors = selectionIndicatorColors(), selected = selected, onClick = onClick)
         Spacer(Modifier.width(8.dp))
         Column {
             Text(text = title, style = MaterialTheme.typography.bodyMedium)
@@ -425,9 +431,9 @@ private fun ChoiceRow(
 private fun RefreshOptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
+        shape = winShape(6.dp),
+        contentColor = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
+        color = selectionContainerColor(selected, MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Text(
             text = label,

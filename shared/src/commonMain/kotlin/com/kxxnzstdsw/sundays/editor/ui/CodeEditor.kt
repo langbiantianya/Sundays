@@ -57,7 +57,9 @@ import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.onRightClick
+import com.kxxnzstdsw.sundays.ui.winShape
 
 /**
  * 编辑器内部状态 —— 文本 + 光标/选区 + 滚动位置。
@@ -221,8 +223,8 @@ fun CodeEditor(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .background(theme.backgroundColor, RoundedCornerShape(6.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+            .background(theme.backgroundColor, winShape(6.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, winShape(6.dp))
             .then(sizeModifier),
     ) {
         // 编辑框可视高度 —— 用于把 BasicTextField 撑满整框。
@@ -355,7 +357,7 @@ private fun LineNumberGutter(
  *     onTextChange = { sql = it },
  *     languageId = lang,
  *     onLanguageChange = { lang = it },
- *     actions = { Button(onClick = { execute(sql) }) { Text("执行") } },
+ *     actions = { WinButton(onClick = { execute(sql) }) { Text("执行") } },
  * )
  * ```
  *
@@ -377,7 +379,7 @@ private fun LineNumberGutter(
  *     onTextChange = { notes = it },
  *     languageId = "plain",
  *     showLanguageSwitcher = false,
- *     actions = { Button(onClick = { save() }) { Text("保存") } },
+ *     actions = { WinButton(onClick = { save() }) { Text("保存") } },
  * )
  * ```
  *
@@ -518,7 +520,7 @@ private fun EditorToolbar(
                 }
             }
         }
-        Button(
+        WinButton(
             onClick = onFormat,
             enabled = hasFormatter,
             shape = SundaysPalette.buttonShape,
@@ -916,13 +918,13 @@ private fun CodeEditorWithToolbarCustomActionsPreview() {
             theme = CodeEditorTheme.Light,
             // 演示：调用方注入「执行」「清空」「复制」三个自定义按钮
             actions = {
-                Button(onClick = {}) {
+                WinButton(onClick = {}) {
                     Text("执行 ▶")
                 }
-                Button(onClick = {}) {
+                WinButton(onClick = {}) {
                     Text("清空")
                 }
-                Button(onClick = {}) {
+                WinButton(onClick = {}) {
                     Text("复制")
                 }
             },
@@ -968,8 +970,8 @@ private fun CodeEditorWithToolbarFixedLangActionsPreview() {
             theme = CodeEditorTheme.Light,
             showLanguageSwitcher = false,
             actions = {
-                Button(onClick = {}) { Text("保存") }
-                Button(onClick = {}) { Text("执行 ▶") }
+                WinButton(onClick = {}) { Text("保存") }
+                WinButton(onClick = {}) { Text("执行 ▶") }
             },
         )
     }

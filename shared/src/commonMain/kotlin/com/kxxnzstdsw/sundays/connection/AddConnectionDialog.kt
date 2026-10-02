@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.WinTextButton
 
 /**
  * 「添加数据库连接」弹窗 —— 在已有界面（例如 [DatabaseBrowserScreen] 的「＋」按钮）调用，
@@ -87,10 +89,10 @@ fun AddConnectionDialog(
                         text = "添加数据库连接",
                         style = MaterialTheme.typography.titleLarge,
                     )
-                    TextButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("关闭") }
+                    WinTextButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("关闭") }
                 }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // 弹窗内容占满剩余空间；ConnectionManagerScreen 外层 Row 为 fillMaxHeight，
                 // 这里把宽度也撑满（默认由父容器决定宽度）。

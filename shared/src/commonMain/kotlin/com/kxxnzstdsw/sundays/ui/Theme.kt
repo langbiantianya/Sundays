@@ -5,10 +5,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 
 /**
- * 应用主题 —— 跟随系统明暗，配色 / 形状 / 字号由 [SundaysPalette] 统一提供。
+ * 应用主题 —— 跟随系统明暗，配色 / 形状由 [palette] 决定，字号为全局共享。
  *
  * 各平台入口（desktop `Window` / 未来的 Android / iOS）只负责创建平台容器，
  * 主题本身是纯 Compose 逻辑，放在 `commonMain` 供所有平台复用。
@@ -19,6 +20,13 @@ import androidx.compose.ui.Modifier
  * 向导步骤标题、`labelLarge` 小标题等全部看不清）。由 [Surface] 统一提供
  * `background` + `onBackground` 后，所有未着色的文本在任何主题下都有正确对比度。
  *
+ * ## 复古两套需要额外注入两个 CompositionLocal
+ *
+ * - [LocalPalette] —— `Button` 的形状由 M3 token 固定、**不读** `MaterialTheme.shapes`，
+ *   必须显式传参；[SundaysPalette.buttonShape] 靠它拿到当前主题的圆角。
+ * - [LocalBevelStyle] —— Win2000 / WinXP 的 3D 斜面配色。[Modifier.winBevel] 读它决定
+ *   画不画、画什么色；现代三套拿到 `BevelStyle.NONE`，于是斜面彻底是空操作。
+ *
  * @param darkTheme 是否暗色（默认跟随系统；显式传入便于测试与外观设置）
  * @param palette 配色主题（[ThemePalette]）—— 与 [darkTheme] 正交：同一主题各有浅 / 深两套配色
  */
@@ -28,15 +36,24 @@ fun SundaysTheme(
     palette: ThemePalette = ThemePalette.BLUE_GRAY,
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = palette.schemeFor(darkTheme),
-        shapes = SundaysPalette.Shapes,
-        typography = SundaysPalette.Typography,
+    CompositionLocalProvider(
+        LocalPalette provides palette,
+        // 界面外观的唯一真相来源：组件只读这个 token，不含任何主题名判断
+        LocalUiTokens provides palette.uiTokens(darkTheme),
+        LocalBevelStyle provides palette.bevelStyle(darkTheme),
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
-            content = content,
-        )
+        MaterialTheme(
+            colorScheme = palette.schemeFor(darkTheme),
+            // 形状逐主题：现代三套共用紧凑圆角，Win2000 全直角，WinXP 用 Luna 圆角
+            shapes = palette.shapes,
+            // 字号**不**逐主题：有意的取舍，见 SundaysPalette 字号小节的说明
+            typography = SundaysPalette.Typography,
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+                content = content,
+            )
+        }
     }
 }

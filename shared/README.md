@@ -34,10 +34,12 @@ shared/
 │   │   └── AppDestination.kt          AppDestination 枚举（CONNECTIONS / DATABASE）
 │   │                                   ⚠️ 文档曾列出 TopNavBar.kt —— 该文件已不存在，见 ARCHITECTURE.md §5.2
 │   └── ui/              通用 UI 工具
-│       ├── Theme.kt                   SundaysTheme（跟随系统明暗；配色/形状/字号取自 SundaysPalette）
-│       ├── SundaysPalette.kt          视觉规范：3 套配色（蓝灰 / 赛博朋克 / 哔哩粉，各带浅深两版）+ 紧凑形状 + 桌面字号
+│       ├── Theme.kt                   SundaysTheme（配色/形状逐主题 + 注入 LocalPalette / LocalBevelStyle；字号全局共用）
+│       ├── SundaysPalette.kt          视觉规范：5 套配色（蓝灰 / 赛博朋克 / 哔哩粉 / Win2000 / WinXP，各带浅深两版）+ 逐主题形状 + 复古斜面色 + 桌面字号
 │       ├── ThemeMode.kt               ThemeMode 明暗三档 + AppearanceState（双轴状态 + 落盘）
-│       ├── ThemePalette.kt            ThemePalette 配色主题（蓝灰 IDE / 赛博朋克 / 哔哩粉）
+│       ├── ThemePalette.kt            ThemePalette 配色主题（蓝灰 IDE / 赛博朋克 / 哔哩粉 / Win2000 / WinXP）+ LocalPalette
+│       ├── UiChrome.kt                外观 token 单一来源：UiThemeTokens（8 项决策）+ 派生函数 winShape / selectionColorsFor / buttonFaceColor / WinDivider / tabStripContainerColor + Modifier.uiBevel
+│       ├── WinControls.kt             WinButton / WinOutlinedButton / WinTextButton / WinTextField / WinIconButton / WinSurface（现代主题透传 M3）
 │       ├── SystemInfoRefresh.kt       SystemInfoRefresh 自动刷新间隔（关闭/10s/5s/2s/1s）
 │       ├── ThemeModeToggle.kt         ThemeModeToggleButton（日夜切换）+ SettingsEntryButton（⚙ 设置入口）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
@@ -75,8 +77,9 @@ shared/
 | `TopNavBar` | **不存在** | ⚠️ 该组件已无实现（`navigation/` 下只有 `AppDestination.kt`），说明见 [`ARCHITECTURE.md` §5.2](./ARCHITECTURE.md) |
 | `AppDestination` | `commonMain/.../navigation/AppDestination.kt` | 顶层导航目标枚举（`label` 供导航条渲染） |
 | `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `SundaysPalette` 的深 / 浅配色）；各平台入口只需创建平台容器 |
-| `SundaysPalette` | `commonMain/.../ui/SundaysPalette.kt` | 视觉规范单例：3 套配色（蓝灰 `LightColorScheme`/`DarkColorScheme`、赛博朋克 `Cyberpunk*`、哔哩粉 `BiliPink*`，各带浅深两版）+ `Shapes` + `Typography` + `buttonShape`；设计约束与对比度见 [`ARCHITECTURE.md` §5.4](./ARCHITECTURE.md) |
-| `ThemeMode` / `ThemePalette` / `AppearanceState` | `commonMain/.../ui/ThemeMode.kt`、`ThemePalette.kt` | 双轴外观：明暗三档 × 配色主题（蓝灰 / 赛博朋克 / 哔哩粉）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.6](./ARCHITECTURE.md) |
+| `SundaysPalette` | `commonMain/.../ui/SundaysPalette.kt` | 视觉规范单例：5 套配色（蓝灰 `LightColorScheme`/`DarkColorScheme`、赛博朋克 `Cyberpunk*`、哔哩粉 `BiliPink*`、Win2000 `Win2000*`、WinXP `WinXp*`，各带浅深两版）+ `Shapes` + `Typography` + `buttonShape`；设计约束与对比度见 [`ARCHITECTURE.md` §5.4](./ARCHITECTURE.md) |
+| `ThemeMode` / `ThemePalette` / `AppearanceState` | `commonMain/.../ui/ThemeMode.kt`、`ThemePalette.kt` | 双轴外观：明暗三档 × 配色主题（蓝灰 / 赛博朋克 / 哔哩粉 / Win2000 / WinXP）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.6](./ARCHITECTURE.md) |
+| `UiThemeTokens` / `LocalUiTokens` | `commonMain/.../ui/UiChrome.kt` | 界面外观的**唯一真相来源**：3D 斜面 / 按钮填充 / 输入框底色 / 选中态画法 / 分割线画法 / 容器描边 / 斑马纹 / 禁用文字色。**新增主题只需在 `ThemePalette.uiTokens` 加一个分支**，组件侧不含任何主题名判断，见 [`ARCHITECTURE.md` §5.6.1](./ARCHITECTURE.md) |
 | `SystemInfoRefresh` | `commonMain/.../ui/SystemInfoRefresh.kt` | 系统信息自动刷新间隔（关闭 / 10 / 5 / 2 / 1 秒）；默认关闭 |
 | `ThemeModeToggleButton` / `SettingsEntryButton` | `commonMain/.../ui/ThemeModeToggle.kt` | 日夜切换按钮（图标显示「点下去会变成什么」）与 ⚙ 设置入口；两个面板标题行共用 |
 | `SettingsScreen` | `commonMain/.../settings/SettingsScreen.kt` | 设置页：左侧分类 + 右侧内容（个性化 / 系统信息）。**不接触引擎** —— 系统信息由调用方经 `onRequestSystemInfo` 回调喂进来 |

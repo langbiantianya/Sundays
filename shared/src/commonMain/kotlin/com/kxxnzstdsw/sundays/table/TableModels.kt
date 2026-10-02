@@ -1,6 +1,8 @@
 package com.kxxnzstdsw.sundays.table
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
@@ -9,6 +11,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.kxxnzstdsw.sundays.ui.LocalUiTokens
+import com.kxxnzstdsw.sundays.ui.SelectionMode
 
 // ============================================================================
 // 列定义 (TableColumn)
@@ -169,7 +173,60 @@ data class DataTableTheme(
     val paginationBackground: Color,
 ) {
     companion object {
-        /** 默认浅色主题 — Material Design 风格。 */
+        /**
+         * 跟随应用主题的表格配色 —— **这是 [DataTable] 的实际默认值**。
+         *
+         * ## 为什么要从硬编码常量改成跟随配色
+         *
+         * 原先 `default()` 只按 [isSystemInDarkTheme] 在 [Light] / [Dark] 两个**写死色值**的
+         * 常量间二选一，由此产生两个问题：
+         *
+         * 1. **无视用户选的明暗档**。`AppearanceState` 允许强制「始终浅色 / 始终深色」，
+         *    而这里看的是系统设置 —— 用户强制浅色、系统是深色时，表格会与整个界面相反。
+         * 2. **无视配色主题**。五套配色（含 Win2000 / WinXP 两套复古）下表格都是同一块
+         *    `#FFFFFF` + `#E3F2FD` 淡蓝选行的现代表格，与复古主题并排时尤其刺眼。
+         *
+         * 复古档另有三处专门处理：
+         * - **选行反色**：用 `primary` 实心填充 + `onPrimary` 文字（经典 Win 的列表选中即反蓝）。
+         * - **取消斑马纹**：`rowBackgroundAlt = null`。Win98/2000/XP 的列表视图都没有隔行
+         *   底色，斑马纹是现代表格的标志；在信息密集的行里它还会干扰跨行读数。
+         * - **表头用面角色**而非更亮的档，凹陷感交给表头下方的蚀刻分割线表达。
+         */
+        @Composable
+        @ReadOnlyComposable
+        fun themed(scheme: ColorScheme = MaterialTheme.colorScheme): DataTableTheme {
+            val tokens = LocalUiTokens.current
+            return DataTableTheme(
+                headerBackground = scheme.surfaceVariant,
+                headerText = TextStyle(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.onSurfaceVariant,
+                ),
+                rowBackground = scheme.surface,
+                rowBackgroundAlt = if (tokens.zebraRows) scheme.surface else null,
+                rowBackgroundSelected = if (tokens.selection == SelectionMode.INVERTED) scheme.primary else scheme.primaryContainer,
+                cellText = TextStyle(fontSize = 13.sp, color = scheme.onSurface),
+                cellTextSelected = if (tokens.selection == SelectionMode.INVERTED) {
+                    TextStyle(fontSize = 13.sp, color = scheme.onPrimary)
+                } else {
+                    TextStyle(fontSize = 13.sp, color = scheme.onPrimaryContainer)
+                },
+                borderColor = scheme.outlineVariant,
+                paginationBackground = scheme.surfaceVariant,
+            )
+        }
+
+        /**
+         * 固定色值的浅 / 深配色常量。
+         *
+         * ⚠️ 它们**不跟随应用配色**，仅供需要与宿主外观解耦的场景（如导出预览、截图）使用。
+         * 应用内的表格请用 [themed]。
+         */
+        @Deprecated(
+            "不跟随应用配色，Retro 主题下会与界面割裂；应用内请改用 themed()",
+            ReplaceWith("DataTableTheme.themed()"),
+        )
         val Light: DataTableTheme = DataTableTheme(
             headerBackground = Color(0xFFF5F5F5),
             headerText = TextStyle(
@@ -211,12 +268,11 @@ data class DataTableTheme(
         )
 
         /**
-         * 默认主题 — 根据当前系统设置自动选择。
-         * 必须在 `@Composable` 上下文调用（依赖 [isSystemInDarkTheme]）。
+         * 默认主题 — 跟随应用配色与明暗档（见 [themed]）。
+         * 必须在 `@Composable` 上下文调用。
          */
         @Composable
         @ReadOnlyComposable
-        fun default(): DataTableTheme =
-            if (isSystemInDarkTheme()) Dark else Light
+        fun default(): DataTableTheme = themed()
     }
 }

@@ -23,6 +23,20 @@ import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
+import com.kxxnzstdsw.sundays.ui.WinButton
+import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.WinMenuItem
+import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
+import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
+import com.kxxnzstdsw.sundays.ui.uiBevel
+import com.kxxnzstdsw.sundays.ui.WinOutlinedButton
+import com.kxxnzstdsw.sundays.ui.WinTextButton
+import com.kxxnzstdsw.sundays.ui.WinTextField
+import com.kxxnzstdsw.sundays.ui.isClassicChrome
+import com.kxxnzstdsw.sundays.ui.WinIconButton
+import com.kxxnzstdsw.sundays.ui.winShape
+import com.kxxnzstdsw.sundays.ui.selectionContainerColor
+import com.kxxnzstdsw.sundays.ui.selectionContentColor
 import kotlinx.coroutines.launch
 
 /**
@@ -253,10 +267,10 @@ private fun ConnectionListPanel(
                 style = MaterialTheme.typography.titleMedium,
             )
             Row {
-                IconButton(onClick = onQuickConnect) {
+                WinIconButton(onClick = onQuickConnect) {
                     Icon(Icons.Default.Bolt, contentDescription = "快速连接")
                 }
-                IconButton(onClick = onNewConnection) {
+                WinIconButton(onClick = onNewConnection) {
                     Icon(Icons.Default.Add, contentDescription = "新建连接")
                 }
                 // 日夜切换紧挨面板标题：与「快速连接 / 新建」同属面板级操作。
@@ -322,13 +336,13 @@ private fun ConnectionListItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
+        shape = winShape(8.dp),
+        contentColor = selectionContentColor(isSelected),
+        color = selectionContainerColor(isSelected),
+        border = if (isClassicChrome) null else BorderStroke(
             1.dp,
             if (isSelected) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.outlineVariant,
+            else MaterialTheme.colorScheme.outlineVariant,
         ),
     ) {
         Row(
@@ -373,14 +387,14 @@ private fun ConnectionListItem(
             }
 
             Box {
-                IconButton(onClick = { showMenu = true }) {
+                WinIconButton(onClick = { showMenu = true }) {
                     Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
                 }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
-                    DropdownMenuItem(
+                    WinMenuItem(
                         text = { Text("编辑") },
                         onClick = {
                             showMenu = false
@@ -388,7 +402,7 @@ private fun ConnectionListItem(
                         },
                         leadingIcon = { Icon(Icons.Default.Edit, null) },
                     )
-                    DropdownMenuItem(
+                    WinMenuItem(
                         text = { Text("删除") },
                         onClick = {
                             showMenu = false
@@ -641,8 +655,8 @@ private fun ConnectionOverviewPanel(
         Spacer(modifier = Modifier.height(16.dp))
 
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth().uiBevel(raised = true),
+            shape = winShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -683,29 +697,29 @@ private fun ConnectionOverviewPanel(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onDelete, shape = SundaysPalette.buttonShape) { Text("删除") }
+            WinTextButton(onClick = onDelete, shape = SundaysPalette.buttonShape) { Text("删除") }
             Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = onEdit, shape = SundaysPalette.buttonShape) {
+            WinOutlinedButton(onClick = onEdit, shape = SundaysPalette.buttonShape) {
                 Icon(Icons.Default.Edit, null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("编辑")
             }
             Spacer(modifier = Modifier.width(8.dp))
             when (status.state) {
-                ConnectionState.CONNECTED -> OutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
+                ConnectionState.CONNECTED -> WinOutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
                     Icon(Icons.Default.LinkOff, null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("断开")
                 }
-                ConnectionState.CONNECTING -> Button(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                ConnectionState.CONNECTING -> WinButton(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
+                    WinProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("连接中...")
                 }
                 ConnectionState.DISCONNECTED, ConnectionState.FAILED -> Column(
                     horizontalAlignment = Alignment.End,
                 ) {
-                    Button(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
+                    WinButton(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
                         Icon(Icons.Default.Bolt, null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("连接")
@@ -753,13 +767,13 @@ internal fun IdlePanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onQuickConnect, shape = SundaysPalette.buttonShape) {
+        WinButton(onClick = onQuickConnect, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Bolt, null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("快速连接")
         }
         Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(onClick = onNewConnection, shape = SundaysPalette.buttonShape) {
+        WinOutlinedButton(onClick = onNewConnection, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Add, null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("新建连接")
@@ -835,7 +849,7 @@ private fun QuickConnectStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Start,
         ) {
-            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("← 返回") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("← 返回") }
         }
     }
 }
@@ -853,7 +867,7 @@ private fun QuickConnectCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = winShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
@@ -881,7 +895,7 @@ private fun QuickConnectCard(
             }
             if (port != null) {
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
+                    shape = winShape(4.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Text(
@@ -918,7 +932,7 @@ private fun BasicInfoStep(
         totalSteps = totalSteps,
         onCancel = onCancel,
     ) {
-        OutlinedTextField(
+        WinTextField(
             value = editingConnection.name,
             onValueChange = onNameChange,
             label = { Text("连接名称") },
@@ -948,9 +962,9 @@ private fun BasicInfoStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text("取消") }
+            WinTextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text("取消") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(
+            WinButton(
                 onClick = onNext,
                 enabled = editingConnection.name.isNotBlank(),
                 shape = SundaysPalette.buttonShape,
@@ -979,20 +993,20 @@ private fun SelectableOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
+        shape = winShape(8.dp),
+        contentColor = selectionContentColor(isSelected),
+        color = selectionContainerColor(isSelected),
+        border = if (isClassicChrome) null else BorderStroke(
             1.dp,
             if (isSelected) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.outlineVariant,
+            else MaterialTheme.colorScheme.outlineVariant,
         ),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RadioButton(selected = isSelected, onClick = onClick)
+            RadioButton(colors = selectionIndicatorColors(), selected = isSelected, onClick = onClick)
             Spacer(modifier = Modifier.width(8.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.bodyMedium)
@@ -1066,9 +1080,9 @@ private fun ConnectionTypeStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onNext, shape = SundaysPalette.buttonShape) {
+            WinButton(onClick = onNext, shape = SundaysPalette.buttonShape) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
             }
@@ -1155,7 +1169,7 @@ private fun CredentialsStep(
     ) {
         when (editingConnection.connectionType) {
             ConnectionType.CLIENT_SERVER -> {
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.host,
                     onValueChange = { apply(editingConnection.copy(host = it)) },
                     label = { Text("主机地址") },
@@ -1167,7 +1181,7 @@ private fun CredentialsStep(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.port?.takeIf { it > 0 }?.toString() ?: "",
                     onValueChange = { apply(editingConnection.copy(port = it.filter(Char::isDigit).toIntOrNull())) },
                     label = { Text("端口") },
@@ -1178,7 +1192,7 @@ private fun CredentialsStep(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.database,
                     onValueChange = { apply(editingConnection.copy(database = it)) },
                     label = { Text("数据库名") },
@@ -1190,7 +1204,7 @@ private fun CredentialsStep(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.username,
                     onValueChange = { apply(editingConnection.copy(username = it)) },
                     label = { Text("用户名") },
@@ -1201,7 +1215,7 @@ private fun CredentialsStep(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.password,
                     onValueChange = { apply(editingConnection.copy(password = it)) },
                     label = { Text("密码") },
@@ -1211,9 +1225,9 @@ private fun CredentialsStep(
                     visualTransformation = PasswordVisualTransformation(),
                 )
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+                WinDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.jdbcUrl,
                     onValueChange = ::applyUrl,
                     label = { Text("JDBC URL") },
@@ -1229,7 +1243,7 @@ private fun CredentialsStep(
             ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED -> {
                 val (label, placeholder, icon) = embeddedFieldSpec(editingConnection)
 
-                OutlinedTextField(
+                WinTextField(
                     value = editingConnection.database,
                     onValueChange = { apply(editingConnection.copy(database = it)) },
                     label = { Text(label) },
@@ -1245,7 +1259,7 @@ private fun CredentialsStep(
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(6.dp),
+                    shape = winShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     Text(
@@ -1275,9 +1289,9 @@ private fun CredentialsStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
+            WinButton(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
                 Text("下一步")
                 Icon(Icons.Default.ArrowForward, null)
             }
@@ -1337,8 +1351,8 @@ private fun TestSaveStep(
     ) {
         // 连接信息摘要
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth().uiBevel(raised = true),
+            shape = winShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -1355,9 +1369,9 @@ private fun TestSaveStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
         ) {
-            Button(
+            WinButton(
                 onClick = {
-                    val probe = onTestConnection ?: return@Button
+                    val probe = onTestConnection ?: return@WinButton
                     scope.launch {
                         isTesting = true
                         testResult = try {
@@ -1372,7 +1386,7 @@ private fun TestSaveStep(
                 shape = SundaysPalette.buttonShape,
             ) {
                 if (isTesting) {
-                    CircularProgressIndicator(
+                    WinProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                     )
@@ -1390,8 +1404,8 @@ private fun TestSaveStep(
         testResult?.let { result ->
             Spacer(modifier = Modifier.height(16.dp))
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().uiBevel(raised = true),
+                shape = winShape(8.dp),
                 color = if (result.success) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.errorContainer,
             ) {
@@ -1422,9 +1436,9 @@ private fun TestSaveStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(
+            WinButton(
                 onClick = { onConfirm(editingConnection) },
                 enabled = canConfirm,
                 shape = SundaysPalette.buttonShape,
@@ -1508,7 +1522,7 @@ private fun StepLayout(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onCancel) {
+            WinIconButton(onClick = onCancel) {
                 Icon(Icons.Default.Close, contentDescription = "关闭")
             }
         }
@@ -1528,7 +1542,7 @@ private fun StepLayout(
                         .background(
                             if (index < step) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(2.dp),
+                            winShape(2.dp),
                         ),
                 )
             }

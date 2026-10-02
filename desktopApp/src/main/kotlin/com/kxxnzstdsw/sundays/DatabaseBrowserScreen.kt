@@ -104,6 +104,14 @@ import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
+import com.kxxnzstdsw.sundays.ui.WinButton
+import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
+import com.kxxnzstdsw.sundays.ui.WinTextButton
+import com.kxxnzstdsw.sundays.ui.WinTextField
+import com.kxxnzstdsw.sundays.ui.tabStripContainerColor
+import com.kxxnzstdsw.sundays.ui.WinIconButton
+import com.kxxnzstdsw.sundays.ui.winShape
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
@@ -208,7 +216,7 @@ fun DatabaseBrowserScreen(
             onCycleTheme = onCycleTheme,
             onOpenSettings = onOpenSettings,
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ActiveSheetContent(
             sheet = active,
@@ -262,7 +270,7 @@ private fun SheetTabRow(
     ) {
         // 「＋添加连接」按钮：固定在最左，独立于 sheet 标签条；
         // 点击后由调用方弹出 AddConnectionDialog。
-        IconButton(
+        WinIconButton(
             onClick = onAdd,
             modifier = Modifier.padding(horizontal = 4.dp),
         ) {
@@ -279,7 +287,7 @@ private fun SheetTabRow(
         SecondaryScrollableTabRow(
             selectedTabIndex = sheets.indexOfFirst { it.connection.id == activeSheetId }.coerceAtLeast(0),
             edgePadding = 0.dp,
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = tabStripContainerColor(),
             contentColor = MaterialTheme.colorScheme.onSurface,
             divider = {},
             modifier = Modifier.weight(1f),
@@ -352,7 +360,7 @@ private fun EmptySheetsHint(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onAddSheet, shape = SundaysPalette.buttonShape) {
+            WinButton(onClick = onAddSheet, shape = SundaysPalette.buttonShape) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("添加连接")
@@ -427,10 +435,12 @@ private fun PaneToggleButton(
     onSelect: (BrowserPane) -> Unit,
 ) {
     val isActive = activePane == pane
-    Button(
+    WinButton(
         onClick = { onSelect(if (isActive) BrowserPane.TABLE else pane) },
         enabled = enabled,
         shape = SundaysPalette.buttonShape,
+        // 复古两套下由 WinButton 把斜面翻转为凹陷；现代主题仍用 primary 填充表达激活态
+        selected = isActive,
         colors = if (isActive) {
             ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -479,7 +489,7 @@ private fun ActiveSheetContent(
             connected = sheet.status.state == ConnectionState.CONNECTED,
             onSelectPane = sheet.browser::selectPane,
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Row(modifier = Modifier.fillMaxSize()) {
             SchemaTreePanel(
@@ -533,7 +543,7 @@ private fun StatusChip(status: ConnectionStatus) {
     }
     Surface(
         color = color.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(6.dp),
+        shape = winShape(6.dp),
     ) {
         Text(
             text = label,
@@ -590,7 +600,7 @@ private fun SchemaTreePanel(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             when {
                 !connected -> EmptyHint(
@@ -659,7 +669,7 @@ private fun DatabaseNode(
             )
             if (loading) {
                 Spacer(Modifier.width(8.dp))
-                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
             }
         }
         if (expanded) {
@@ -770,7 +780,7 @@ private fun PreviewTabArea(
                 onSelect = state::selectTab,
                 onClose = state::closeTab,
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             val current = state.tabs.getOrNull(state.selectedTabIndex)
             if (current != null) {
                 PreviewTabContent(
@@ -792,7 +802,7 @@ private fun TabStrip(
     SecondaryScrollableTabRow(
         selectedTabIndex = selectedIndex,
         edgePadding = 0.dp,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = tabStripContainerColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
         divider = {},
     ) {
@@ -842,7 +852,7 @@ private fun PreviewTabContent(
                 Spacer(Modifier.width(12.dp))
                 when {
                     tab.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                        WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("加载中…", style = MaterialTheme.typography.labelMedium)
                     }
@@ -859,7 +869,7 @@ private fun PreviewTabContent(
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
             tab.columns.isNotEmpty() || tab.rows.isNotEmpty() -> DataTable(
                 columns = tab.columns,
@@ -945,7 +955,7 @@ private fun SqlWorkbenchPane(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         WorkbenchTabStrip(
             leadingLabel = "SQL",
@@ -959,7 +969,7 @@ private fun SqlWorkbenchPane(
             onRemove = state::removeSqlSheet,
             onRename = state::renameSqlSheet,
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         val sheet = state.currentSqlSheet()
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
@@ -983,7 +993,7 @@ private fun SqlWorkbenchPane(
                     // 本工作台只处理 SQL —— 不暴露语言切换器
                     showLanguageSwitcher = false,
                     actions = {
-                        Button(
+                        WinButton(
                             onClick = { state.executeSql() },
                             enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
                             shape = SundaysPalette.buttonShape,
@@ -998,7 +1008,7 @@ private fun SqlWorkbenchPane(
                         .weight(0.6f),
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SqlResultArea(
                 sheet = sheet,
                 modifier = Modifier
@@ -1075,7 +1085,7 @@ private fun WorkbenchTabStrip(
             selectedTabIndex = selectedIndex.coerceIn(0, (titles.size - 1).coerceAtLeast(0)),
             scrollState = scrollState,
             edgePadding = 0.dp,
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = tabStripContainerColor(),
             contentColor = MaterialTheme.colorScheme.onSurface,
             divider = {},
             modifier = Modifier
@@ -1107,7 +1117,7 @@ private fun WorkbenchTabStrip(
                 )
             }
         }
-        IconButton(
+        WinIconButton(
             onClick = { renameTarget = selectedIndex.takeIf { it in titles.indices } },
             enabled = titles.isNotEmpty() && selectedIndex in titles.indices,
         ) {
@@ -1117,7 +1127,7 @@ private fun WorkbenchTabStrip(
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
-        IconButton(onClick = onAdd) {
+        WinIconButton(onClick = onAdd) {
             Icon(
                 imageVector = Icons.Filled.Add,
                 contentDescription = addDescription,
@@ -1175,7 +1185,7 @@ private fun TabRenameDialog(
                     text = "重命名标签",
                     style = MaterialTheme.typography.titleMedium,
                 )
-                OutlinedTextField(
+                WinTextField(
                     value = value,
                     onValueChange = { value = it },
                     singleLine = true,
@@ -1197,8 +1207,8 @@ private fun TabRenameDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                    TextButton(onClick = { onConfirm(value) }) { Text("确定") }
+                    WinTextButton(onClick = onDismiss) { Text("取消") }
+                    WinTextButton(onClick = { onConfirm(value) }) { Text("确定") }
                 }
             }
         }
@@ -1262,7 +1272,7 @@ private fun SqlResultArea(
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                    WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("执行中…", style = MaterialTheme.typography.labelMedium)
                 }
@@ -1298,7 +1308,7 @@ private fun SqlResultArea(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 DataTable(
                     columns = sheet.columns,
                     rows = sheet.rows,
@@ -1384,7 +1394,7 @@ private fun GenerateWorkbenchPane(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         WorkbenchTabStrip(
             leadingLabel = "脚本",
@@ -1428,7 +1438,7 @@ private fun GenerateWorkbenchPane(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Column(modifier = Modifier.fillMaxSize()) {
             if (script == null) {
@@ -1449,7 +1459,7 @@ private fun GenerateWorkbenchPane(
                     // 本工作台只处理 Lua —— 不暴露语言切换器
                     showLanguageSwitcher = false,
                     actions = {
-                        Button(
+                        WinButton(
                             onClick = { state.executeGenerate() },
                             enabled = connected && !state.generateRunning,
                             shape = SundaysPalette.buttonShape,
@@ -1464,7 +1474,7 @@ private fun GenerateWorkbenchPane(
                         .weight(0.6f),
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             GenerateResultArea(
                 state = state,
                 modifier = Modifier
@@ -1498,7 +1508,7 @@ private fun GenerateResultArea(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                 Text(
                     text = "造数中… 已插入 ${state.generateTotalInserted} 行",
                     style = MaterialTheme.typography.labelMedium,
@@ -1528,7 +1538,7 @@ private fun GenerateResultArea(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 DataTable(
                     columns = GENERATE_RESULT_COLUMNS,
                     rows = state.generateResultRows(),
