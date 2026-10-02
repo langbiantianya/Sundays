@@ -886,7 +886,7 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | **面板容器** | ✅ 3 个面板加凸起斜面 |
 | **分割线** | ✅ 26 处改用 `WinDivider`（复古档为「暗 1px + 亮 1px」蚀刻线） |
 | **标签页条底色** | ✅ 复古档贴窗口面而非白色内容面板 |
-| **表格配色** | ✅ `DataTableTheme` 改为跟随应用配色（见下方「顺带修掉的既有缺陷」） |
+| **表格 / 编辑器配色** | ✅ 仅经典档走 token（现代档原样保留，见下） |
 
 ### 5.7 `SettingsScreen` —— 设置页（左分类 / 右内容）
 
@@ -1134,7 +1134,8 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
-| `ThemeModeTest` | `commonTest/.../ui/ThemeModeTest.kt` | 8 | 三档循环顺序 / `next`↔`previous` 互逆 / 显式档位不受系统值影响 / 三击闭环 |
+| `UiTokensTest` | `commonTest/.../ui/UiTokensTest.kt` | 8 | 逐主题 × 明暗断言经典档把**每一项**造型决策都打开、现代档都关掉；形状解析在现代档原样透传 / 经典档按主题抹平；反色选中行过 AA 4.5:1；斜面对两种控件面（按钮面 / 输入框面）均有明暗差 |
+| `ThemeModeTest` | `commonTest/.../ui/ThemeModeTest.kt` | 13 | 三档循环顺序 / `next`↔`previous` 互逆 / 显式档位不受系统值影响 / 三击闭环 |
 | `SettingsStorageTest` | `jvmTest/.../settings/SettingsStorageTest.kt` | 8 | 逐档往返 / 路径与版本字段 / 损坏文件降级 + 自愈 / 未知枚举值降级 / 未知字段忽略 / 目录自动创建 / 临时文件不残留 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
@@ -1264,20 +1265,77 @@ Win2000 浅色档的 `surface` 是纯白 `#FFFFFF`，而经典凹陷边有一侧
 `UiTokensTest.classic_bevel_contrasts_against_every_face_it_lands_on` 同时验两种面
 （按钮面 `background` + 输入框面 `surfaceVariant`），这个隐形问题正是它先报出来的。
 
-#### 顺带修掉的既有缺陷：`DataTableTheme` 不跟随应用配色
+#### 编辑器 / 表格：现代档**原样保留**，只有经典档走 token
 
-改造界面时发现的**与复古主题无关的既有 bug**：`DataTableTheme` 是一套独立硬编码色值
-（选中行 `#E3F2FD`、行底 `#FFFFFF`），`default()` 只按 `isSystemInDarkTheme()` 在两个写死
-常量间二选一。由此有两个问题：
+`CodeEditorTheme` 与 `DataTableTheme` 都是独立的写死色值，`default()` 按
+`isSystemInDarkTheme()` 在 `Light` / `Dark` 两个常量间二选一。
 
-1. **无视用户选的明暗档**。`AppearanceState` 允许强制「始终浅色 / 始终深色」，而表格看的
-   是系统设置 —— 用户强制浅色、系统是深色时，表格会与整个界面相反。
-2. **无视配色主题**。五套配色下表格都是同一块现代表格。
+| | 现代三套 | Win2000 / WinXP |
+|---|---|---|
+| 语法高亮 | 原样 `Light` / `Dark`（VS / Darcula） | `UiThemeTokens.syntax`（Delphi / VS6 系统色） |
+| 编辑器底色 | 原样 `#FAFAFA` / `#1E232D` | `fieldFaceColor()` |
+| 表格选行 | 原样 `#E3F2FD` / `#2C425E` | `primary` 实心 + `onPrimary` 文字（整行反色） |
+| 表格斑马纹 | 保留 | **取消**（`rowBackgroundAlt = null`） |
 
-已改为 `DataTableTheme.themed()` 从 `MaterialTheme.colorScheme` 取色；`Light` / `Dark`
-两个常量保留但标 `@Deprecated`（仅供需要与宿主外观解耦的预览 / 截图场景）。复古档另有两处
-专门处理：**选行反色**，以及**取消斑马纹**（`rowBackgroundAlt = null`）—— Win98/2000/XP 的
-列表视图都没有隔行底色，斑马纹是现代表格的标志，在信息密集的行里还会干扰跨行读数。
+**为什么现代档必须原样保留**：改造过程中曾把现代分支也改成从 `MaterialTheme.colorScheme`
+取色，结果现代三套主题的表格与编辑器整体变色 —— 表头、行底、选行、边框、编辑器底色、
+行号槽全部与改造前不同。工作台工具栏（SQL / 造数工作台的「执行」按钮所在那一行）跟着
+一起「看着不对」，而根因离按钮有两层之远。
 
-⚠️ 这条改动**对现代主题同样生效**：表格现在跟随用户选的明暗档而非系统设置。这是对既有行为
-的修正，但也意味着任何依赖「表格永远跟系统走」的预期需要重新评估。
+其中 `CodeEditorTheme.Light` 的底色 `#FAFAFA` 与行号槽 `#E8E8E8` 是**刻意**选出来的，
+其 KDoc 写着「编辑器是嵌在应用界面里的一块*区域*，不是独立窗口…换成同色底色后工作台与
+主界面糊成一团」。这不是随手取的色，不该在复古改造里被顺手改掉。
+
+⚠️ **已知历史行为（非本次引入，未修）**：编辑器与表格按**系统**明暗切换，而非
+`AppearanceState` 的明暗档。用户在设置页强制「始终浅色」而系统是深色时，这两块区域会与
+界面相反。修它属于独立课题 —— 一旦动，就会再次改变现代主题的观感，需要单独评估。
+
+#### 形状解析：包装层只在经典档改形状
+
+`resolveControlShape(shape, modernDefault)` 是所有包装函数共用的形状解析入口：
+
+| 调用方 | 现代档 | 经典档 |
+|---|---|---|
+| 显式传了 `shape` | 用传入值 | 用传入值 |
+| **没传** | **该组件自己的 M3 默认形状** | 主题的复古形状 |
+
+`modernDefault` **必须由各包装函数按自己的组件传入**，因为 M3 各组件的默认值互不相同：
+
+| 组件 | M3 默认 | 观感 |
+|---|---|---|
+| `Button` / `OutlinedButton` / `TextButton` | `ButtonSmallTokens.ContainerShapeRound` | 胶囊（全圆角） |
+| `OutlinedTextField` | `FilledTextFieldTokens.ContainerShape` = `CornerExtraSmallTop` | `extraSmall.top()`：只有上方两角 2dp，左 / 右 / 下是方角 |
+
+对应 [WinControls] 里的 `resolveButtonShape` / `resolveTextFieldShape`。M3 的
+`Shapes.fromToken` 与 `CornerBasedShape.top()` 都是 **internal**，外部调不到，故用
+`squaredBottom()`（把下方两角置 0）显式复现。
+
+**这里踩过两次**：① 把默认参数写成 `SundaysPalette.buttonShape`，导致 10 个没传 shape
+的按钮在现代档集体变成 4dp 圆角 —— 而 M3 的 hover / press 状态层沿 shape 轮廓绘制，
+于是表现为「M3 按钮的 hover 变了」；② 把按钮的胶囊当成统一兜底，导致 9 个输入框的左右边
+全变成圆弧。两次都是「我替调用方做了决定」。
+
+#### 经典档的按钮基座：`ClassicButtonBase`
+
+经典 Win 按钮**没有投影**，立体感全部来自那圈 3D 斜边；M3 的悬停 / 按下还会盖一层
+半透明高光，而经典控件完全没有这个反馈（鼠标移上去应当纹丝不动）。
+
+试过 `LocalIndication provides …`，编译报错才查清：M3 的 `Surface(onClick=…)` 把
+`indication = ripple()` **硬编码**在实现里，既不读 `LocalIndication`，`Button` 也不暴露
+`indication` / `interactionSource` 形参 —— 保留 M3 按钮的前提下关不掉。故经典档改为
+**不走 `Surface`**，自绘 `ClassicButtonBase`：`clickable(indication = null)` + 无 elevation。
+
+尺寸直接取 `ButtonDefaults.MinWidth` / `MinHeight` / `contentPaddingFor`，**不自己拍
+数字** —— 否则经典档按钮会比现代档大一号，而这类差异在混排时非常刺眼。
+
+⚠️ 已知简化：按下时**没有**凹陷反馈（真实经典 Win 是凸起↔凹陷互换）。要做到需自行接管
+`interactionSource` 的 pressed 状态并翻转斜面。
+
+#### 平价契约由测试守住
+
+`ModernThemeParityTest`（desktopApp，6 项）把「现代主题必须逐像素保持改造前」钉成契约：
+按钮形状、输入框形状、编辑器与表格主题各自原样取回各自的 M3 默认值，并断言**输入框与
+按钮的默认值必须不相等**（相等即说明其中一边的兜底又写错了）。
+
+其中一项做过变异验证：把修复退回成原来的错误写法后 2 项立即变红 —— 证明断言真的咬住了
+新代码，而不是因为没覆盖到才通过。

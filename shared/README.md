@@ -238,7 +238,8 @@ ConnectionManagerScreen(
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）
-- `ThemeModeTest` — 8 项（三档循环顺序、`next`/`previous` 互逆、显式档位不受系统值影响、三击闭环）
+- `UiTokensTest` — 8 项（逐主题 × 明暗：经典档每一项造型决策都打开 / 现代档都关掉；形状解析的透传与抹平；反色选中行对比度；斜面对两种控件面的明暗差）
+- `ThemeModeTest` — 13 项（三档循环顺序、`next`/`previous` 互逆、显式档位不受系统值影响、三击闭环、逐配色解析双档）
 - `SettingsStorageTest` — 8 项（jvmTest：逐档往返、路径与版本字段、损坏文件降级 + 自愈、未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留）
 - `SettingsScreenTest` — 7 项（在 `:desktopApp` 跑：左分类/右内容结构、切分类触发加载、三档切换回写、落盘钩子被调用、loading/成功/失败三态渲染）
 - `ConnectionStorageTest` — 4 项（jvmTest：持久化往返重建派生字段、upsert/delete、v1 → v2 迁移回写）
@@ -251,9 +252,12 @@ ConnectionManagerScreen(
 |---|---|
 | **新增语言** | 实现 `CodeLanguage` 接口 + 调用 `CodeLanguageRegistry.register(Language())`。编辑器零修改即支持 |
 | **新增 formatter** | 实现 `CodeFormatter` 接口 + 注册到 `CodeFormatterRegistry`。工具栏"格式化"按钮自动启用 |
-| **替换主题** | 提供自定义 `CodeEditorTheme` 即可（编辑器 / 表格各自一套，不随 `SundaysPalette` 变） |
-| **改应用配色 / 形状 / 字号** | 改 `SundaysPalette` 单例；注意按钮圆角要逐个传 `SundaysPalette.buttonShape`（Material3 的 `Button` 默认形状不读 `MaterialTheme.shapes`） |
-| **替换 token 颜色** | 在 `SyntaxHighlighter.DefaultLightColors` / `DarkColors` 追加键值对 |
+| **替换编辑器 / 表格主题** | 提供自定义 `CodeEditorTheme` / `DataTableTheme` 即可。**现代档下它们与 `SundaysPalette` 无关**（这是刻意保留的平价契约）；复古档下 `themed()` 会改读 `UiThemeTokens` 的 `syntax` / 选行 / 斑马纹 |
+| **改应用配色** | 改 `SundaysPalette` 里的 `ColorScheme` 常量 |
+| **改形状** | 改 `SundaysPalette.Shapes` / `Win2000Shapes` / `WinXpShapes`。按钮圆角由 `resolveControlShape` 统一解析，**调用点不必再逐个传 `shape`** |
+| **改界面造型（斜面 / 填充 / 选中态 / 分割线…）** | 改 `ThemePalette.uiTokens(useDark)` 里的 `UiThemeTokens`；**新增配色主题只需在这里加一个分支** |
+| **改字号** | 改 `SundaysPalette.Typography`（全局共用，刻意不逐主题分叉） |
+| **替换语法 token 颜色** | 现代档改 `SyntaxHighlighter.DefaultLightColors` / `DarkColors`；复古档改 `SundaysPalette.Win2000*Syntax` / `WinXp*Syntax`（每个槽位的对比度实测值记在该常量注释里） |
 | **替换上下文菜单项** | 通过 `contextMenuItems: @Composable (...) -> Unit` 插槽注入任意 `DropdownMenuItem` |
 
 详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §7 设计原则。

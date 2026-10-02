@@ -98,7 +98,7 @@ enum class PanelBorder {
  * `ColorScheme` 只提供一组「已按明暗选好」的值，粒度对不上。
  *
  * 每个槽位都必须在自己那档的编辑器底色上过对比度 —— 写入时的实测值记在
- * [SundaysPalette] 对应常量的注释里，由 `CodeEditorThemeTest` 复核。
+ * [SundaysPalette] 对应常量的注释里，由 `UiTokensTest` 的对比度断言复核。
  */
 @Immutable
 data class SyntaxColors(
