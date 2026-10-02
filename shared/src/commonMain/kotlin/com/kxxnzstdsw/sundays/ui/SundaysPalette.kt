@@ -180,6 +180,93 @@ object SundaysPalette {
         surfaceTint = Color.Transparent,
     )
 
+    // =========================================================================
+    // 哔哩粉 —— 暖玫瑰粉主色（浅色档为酒红，深色档为亮粉）
+    // =========================================================================
+
+    /**
+     * 哔哩粉 **浅色**配色 —— 近白暖粉底 + **酒红**主色。
+     *
+     * 与赛博朋克浅色档是同一个坑：品牌粉 `#FB7299` 在白底上对比度只有 **2.64:1**
+     * （实测），远低于 WCAG AA 的 4.5:1，用作文字色不可读。因此浅色档把主色整体压深到
+     * `#A81C4C`（7.15:1），底色只保留极淡的暖粉倾向（`#FFF7F9`，亮度 0.946）——
+     * 观感仍是「粉」，但承担文字的是深酒红而不是品牌粉本身。
+     *
+     * 第三色刻意用**暖琥珀**而非第二个粉：整套界面若只有一种色相，表格里「主色 / 第三色」
+     * 两类状态标记会难以区分，暖琥珀在白底上压深到 `#8A5A00`（5.93:1）后仍可作文字色。
+     */
+    val BiliPinkLightColorScheme: ColorScheme = lightColorScheme(
+        primary = Color(0xFFA81C4C),
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFFFD9E4),
+        onPrimaryContainer = Color(0xFF4A0019),
+        inversePrimary = Color(0xFFFFB0C8),
+        secondary = Color(0xFF8A5568),
+        onSecondary = Color(0xFFFFFFFF),
+        secondaryContainer = Color(0xFFF5DCE4),
+        onSecondaryContainer = Color(0xFF3B1220),
+        tertiary = Color(0xFF8A5A00),
+        onTertiary = Color(0xFFFFFFFF),
+        tertiaryContainer = Color(0xFFFFE0B2),
+        onTertiaryContainer = Color(0xFF2C1900),
+        background = Color(0xFFFFF7F9),
+        onBackground = Color(0xFF2B1A21),
+        surface = Color(0xFFFFFFFF),
+        onSurface = Color(0xFF2B1A21),
+        surfaceVariant = Color(0xFFFBE9EF),
+        onSurfaceVariant = Color(0xFF6B4C58),
+        inverseSurface = Color(0xFF35242C),
+        inverseOnSurface = Color(0xFFFFF7F9),
+        error = Color(0xFFB3261E),
+        onError = Color(0xFFFFFFFF),
+        errorContainer = Color(0xFFF9DEDC),
+        onErrorContainer = Color(0xFF601410),
+        outline = Color(0xFF9C7D88),
+        outlineVariant = Color(0xFFEFDCE3),
+        // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
+        surfaceTint = Color.Transparent,
+    )
+
+    /**
+     * 哔哩粉 **深色**配色 —— 近黑暖李紫底 + 亮玫瑰粉主色。
+     *
+     * 深色档与浅色档是**两套独立配色**而非同一组颜色的明暗翻转：近黑底（`#1C1015`，
+     * 亮度 0.007）让品牌粉一系在这里重新变得可用 —— `#FF93B6` 压在 surface 上达 8.16:1，
+     * 比浅色档同角色的 7.15:1 还高。也就是说这套主题的「粉」主要活在深色档，
+     * 浅色档为了可读性只能退到酒红。
+     */
+    val BiliPinkDarkColorScheme: ColorScheme = darkColorScheme(
+        primary = Color(0xFFFF93B6),
+        onPrimary = Color(0xFF3D0018),
+        primaryContainer = Color(0xFF6E1339),
+        onPrimaryContainer = Color(0xFFFFD9E5),
+        inversePrimary = Color(0xFFA81C4C),
+        secondary = Color(0xFFD5A8BB),
+        onSecondary = Color(0xFF34101F),
+        secondaryContainer = Color(0xFF4C2534),
+        onSecondaryContainer = Color(0xFFF2D6E1),
+        tertiary = Color(0xFFF0C070),
+        onTertiary = Color(0xFF3B2600),
+        tertiaryContainer = Color(0xFF5A3D00),
+        onTertiaryContainer = Color(0xFFFFE0B2),
+        background = Color(0xFF1C1015),
+        onBackground = Color(0xFFFCE9EF),
+        surface = Color(0xFF271820),
+        onSurface = Color(0xFFFCE9EF),
+        surfaceVariant = Color(0xFF38222C),
+        onSurfaceVariant = Color(0xFFD6B7C3),
+        inverseSurface = Color(0xFFFCE9EF),
+        inverseOnSurface = Color(0xFF1C1015),
+        error = Color(0xFFFF8A80),
+        onError = Color(0xFF4A0004),
+        errorContainer = Color(0xFF6B1F17),
+        onErrorContainer = Color(0xFFFFDAD5),
+        outline = Color(0xFF8C6C78),
+        outlineVariant = Color(0xFF4A303A),
+        // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
+        surfaceTint = Color.Transparent,
+    )
+
     /** 浅色配色 —— 灰蓝中性底 + 靛蓝主色，替代 Material3 出厂紫。 */
     val LightColorScheme: ColorScheme = lightColorScheme(
         primary = LightPrimary,

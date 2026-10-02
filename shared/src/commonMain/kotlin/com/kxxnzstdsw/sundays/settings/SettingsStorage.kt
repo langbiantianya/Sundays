@@ -95,7 +95,7 @@ object SettingsStorage {
  * kotlinx.serialization 的默认值补齐（`ignoreUnknownKeys` 保证删字段也不会崩）。
  */
 data class AppSettings(
-    /** 配色主题轴（蓝灰 / 赛博朋克）。 */
+    /** 配色主题轴（蓝灰 / 赛博朋克 / 哔哩粉）。 */
     val palette: ThemePalette = ThemePalette.BLUE_GRAY,
     /** 明暗轴（跟随系统 / 浅 / 深）。 */
     val themeMode: ThemeMode = ThemeMode.SYSTEM,

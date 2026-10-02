@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * 主题配色契约 —— [SundaysPalette] 的两套配色必须满足界面可读性的硬约束。
+ * 主题配色契约 —— [SundaysPalette] 的每套配色都必须满足界面可读性的硬约束。
  *
  * ## 为什么这些断言必须存在
  *
