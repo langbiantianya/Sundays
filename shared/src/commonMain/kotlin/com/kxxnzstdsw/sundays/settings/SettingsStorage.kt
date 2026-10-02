@@ -40,6 +40,18 @@ object SettingsStorage {
     private fun configFile(): Path = configDir().resolve("settings.json")
 
     /**
+     * 设置文件**此前是否存在** —— 「是否首次启动」的判据。
+     *
+     * 为什么不直接看 `AppSettings.onboardingCompleted`：老版本用户升级上来时该字段必然缺失、
+     * 反序列化成默认 `false`，于是每次升级都会被引导页拦一次。引导只该出现在**真的没配置过**
+     * 的机器上，所以判据必须是「文件存不存在」而不是「某个字段是不是默认值」。
+     *
+     * 也因此这个判断**只在 [rememberPersistentAppearanceState] 的 `remember` 里问一次**：
+     * 引导一旦完成，字段与文件同时为真，之后再问多少次都还是同一个答案。
+     */
+    fun exists(): Boolean = Files.exists(configFile())
+
+    /**
      * 读取设置；文件不存在或损坏时返回**默认值**而非抛异常。
      *
      * 损坏的 JSON 会被顺手重写为默认值（自愈）—— 否则用户每次启动都会看到一个静默失效的设置。
@@ -55,6 +67,7 @@ object SettingsStorage {
                 themeMode = parsed.themeMode.toEnumOrDefault(ThemeMode.SYSTEM),
                 systemInfoRefresh = parsed.systemInfoRefresh.toEnumOrDefault(SystemInfoRefresh.OFF),
                 compactMode = parsed.compactMode,
+                onboardingCompleted = parsed.onboardingCompleted,
             )
         } catch (_: Exception) {
             // 解析失败：重写为默认值，让文件恢复成合法 JSON，避免每次启动都走降级分支
@@ -79,6 +92,7 @@ object SettingsStorage {
                         themeMode = settings.themeMode.name,
                         systemInfoRefresh = settings.systemInfoRefresh.name,
                         compactMode = settings.compactMode,
+                        onboardingCompleted = settings.onboardingCompleted,
                     ),
                 ),
             )
@@ -110,6 +124,16 @@ data class AppSettings(
      * 旧文件缺该字段时由 kotlinx.serialization 补 `false` 即可。
      */
     val compactMode: Boolean = false,
+    /**
+     * 首次启动引导是否已完成 —— 为 `false` 时应用渲染引导页而不是主界面。
+     *
+     * 默认 `false`（= 要引导）而不是 `true`：这是个**默认值即功能**的开关，
+     * 只有显式完成引导后才会变真。
+     *
+     * ⚠️ 老版本用户升级上来时该字段一定缺失、必然是 `false`，若直接拿它当「首次启动」的判据，
+     * 每次升级都会被拦一次。故真正的判据是 [SettingsStorage.exists]（见其 KDoc）。
+     */
+    val onboardingCompleted: Boolean = false,
 )
 
 /**
@@ -125,6 +149,7 @@ private data class PersistedSettings(
     val themeMode: String = ThemeMode.SYSTEM.name,
     val systemInfoRefresh: String = SystemInfoRefresh.OFF.name,
     val compactMode: Boolean = false,
+    val onboardingCompleted: Boolean = false,
 )
 
 /** 字符串 → 枚举；未知值（手改文件 / 降级安装）一律回落 [fallback]。 */

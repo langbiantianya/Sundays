@@ -79,6 +79,7 @@ class AppearanceState(
     initialMode: ThemeMode = ThemeMode.SYSTEM,
     initialSystemInfoRefresh: SystemInfoRefresh = SystemInfoRefresh.OFF,
     initialCompactMode: Boolean = false,
+    initialOnboardingCompleted: Boolean = true,
     private val onChange: (AppearanceState) -> Unit = {},
 ) {
 
@@ -102,6 +103,22 @@ class AppearanceState(
      * `LocalDensity` 覆盖 —— 详见 [CompactMode.kt]。
      */
     var compactMode: Boolean by mutableStateOf(initialCompactMode)
+        private set
+
+    /**
+     * 首次启动引导是否已完成 —— 顶层据此决定渲染引导页还是主界面。
+     *
+     * ## 为什么这个字段必须在 [AppearanceState] 里
+     *
+     * 看起来它与外观无关、似乎该由 `main.kt` 单独持有一个布尔量。但 [persist] 的写入载荷是
+     * **整份** `AppSettings`：只要外观有任何一次变更（换配色、按明暗…），就会把一份
+     * `onboardingCompleted = 默认值(false)` 的设置写回磁盘，把「已完成」的事实抹掉 ——
+     * 于是用户完成引导、进主界面、改一次主题，下次启动又被引导页拦一次。
+     *
+     * 放进本类后 [persist] 的载荷自然带上它，[completeOnboarding] 也只有唯一写入点，
+     * 与本类 KDoc 里「新增入口自动继承落盘」的设计意图一致。
+     */
+    var onboardingCompleted: Boolean by mutableStateOf(initialOnboardingCompleted)
         private set
 
     private fun persist() = onChange(this)
@@ -142,8 +159,19 @@ class AppearanceState(
         persist()
     }
 
-    /** 当前应生效的配色 —— 明暗由 [resolvedDark] 决定。 */
-    fun colorScheme(resolvedDark: Boolean) = palette.schemeFor(resolvedDark)
+    /**
+     * 标记首次启动引导已完成。
+     *
+     * 单独一个方法而不是让调用方直接写属性（`private set` 挡着），是为了让「完成引导」这件事
+     * 也经由 [persist] 落盘 —— 否则这次点击只在本次会话生效，下次启动引导页会重新出现。
+     */
+    fun completeOnboarding() {
+        if (onboardingCompleted) return
+        onboardingCompleted = true
+        persist()
+    }
+
+    /** 当前应生效的配色 —— 明暗由 [resolvedDark] 决定。 */    fun colorScheme(resolvedDark: Boolean) = palette.schemeFor(resolvedDark)
 
     /**
      * 明暗在当前系统主题下的解析结果。
@@ -153,6 +181,38 @@ class AppearanceState(
     @Composable
     fun resolvedDark(): Boolean = mode.resolveDark(isSystemInDarkTheme())
 }
+
+/**
+ * 首次启动判定 —— 是否**跳过**引导页。
+ *
+ * 两个输入里**任一**为真都算「不是首次启动」：
+ *
+ * - [fileExists]：设置文件此前就存在。老版本用户升级上来时 [AppSettings.onboardingCompleted]
+ *   这个字段必然缺失、反序列化成默认 `false`，只看字段的话**每次升级**都会被引导页拦一次。
+ * - [settings].[AppSettings.onboardingCompleted]：已经完成过引导（且文件仍在）。
+ *
+ * 提成独立函数而不是内联表达式：这是「老用户不该被升级打扰」这条产品决策的**唯一**实现点，
+ * 值得被单独断言。`fileExists` 由调用方传入而非本函数自己去读文件，
+ * 于是这条判据可以脱离文件系统被测试。
+ */
+internal fun resolveOnboardingCompleted(settings: AppSettings, fileExists: Boolean): Boolean =
+    settings.onboardingCompleted || fileExists
+
+/**
+ * [AppearanceState] 的**完整落盘载荷**。
+ *
+ * 与 [rememberPersistentAppearanceState] 的 `onChange` 共用同一个构造点 ——
+ * 这不是洁癖：[onboardingCompleted] 一旦在这里漏掉，用户完成引导后任何一次外观变更都会把
+ * 标记重置为 `false`，下次启动又回到引导页。而这种 bug 只在「改完主题 → 重启」两步之后
+ * 才显形，靠读代码极难发现，只能靠一条断言把它钉住。
+ */
+internal fun AppearanceState.toAppSettings(): AppSettings = AppSettings(
+    palette = palette,
+    themeMode = mode,
+    systemInfoRefresh = systemInfoRefresh,
+    compactMode = compactMode,
+    onboardingCompleted = onboardingCompleted,
+)
 
 /** 创建并 [remember] 一个 [AppearanceState]（不落盘，供测试与预览）。 */
 @Composable
@@ -173,16 +233,10 @@ fun rememberPersistentAppearanceState(): AppearanceState {
             initialMode = settings.themeMode,
             initialSystemInfoRefresh = settings.systemInfoRefresh,
             initialCompactMode = settings.compactMode,
-            onChange = { state ->
-                SettingsStorage.save(
-                    AppSettings(
-                        palette = state.palette,
-                        themeMode = state.mode,
-                        systemInfoRefresh = state.systemInfoRefresh,
-                        compactMode = state.compactMode,
-                    )
-                )
-            },
+            // 判据见 resolveOnboardingCompleted：老用户升级上来时字段必然缺失，
+            // 只看字段会让每次升级都被引导页拦一次。
+            initialOnboardingCompleted = resolveOnboardingCompleted(settings, SettingsStorage.exists()),
+            onChange = { state -> SettingsStorage.save(state.toAppSettings()) },
         )
     }
 }

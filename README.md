@@ -271,6 +271,19 @@ java -jar engine/build/libs/idb-engine.jar --mode grpc --ipc tcp --port 50051
 默认运行时，引擎和方言插件通过 `:engine` 依赖直接共享在同一 JVM，无需部署子进程；
 设置 `-Dsundays.engine.endpoint` 后，UI 改由 `:engine-grpc-client` 经 gRPC 调用独立引擎进程。
 
+### 首次启动引导
+
+第一次运行（`~/.config/sundays/settings.json` **不存在**时）不会直接进主界面，而是先渲染一页引导，
+让你先挑**配色主题 / 明暗模式 / 界面密度**：
+
+- **预览是免费的** —— 引导页渲染在 `SundaysTheme` 内部，每点一下立刻重绘整页，
+  配色色卡、明暗、控件尺寸全部即时生效，不需要「预览图 + 应用按钮」。
+- 点「开始使用」即完成并落盘。默认值本身也是一份合法答案，所以**没有**单独的「跳过」按钮。
+- **老用户不会被升级打扰**：判据是「设置文件此前存不存在」，而不是磁盘里那个
+  `onboardingCompleted` 字段 —— 老版本用户升级上来时那个字段根本不存在，
+  只看字段会导致每次升级都被引导页拦一次。
+- 想重新看引导，删掉 `~/.config/sundays/settings.json` 即可（会一并重置外观设置）。
+
 ---
 
 ## 共享 UI 组件（`shared/` 模块）

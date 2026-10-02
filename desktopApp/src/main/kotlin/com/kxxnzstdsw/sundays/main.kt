@@ -34,6 +34,7 @@ import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 import com.kxxnzstdsw.sundays.navigation.AppDestination
+import com.kxxnzstdsw.sundays.onboarding.OnboardingScreen
 import com.kxxnzstdsw.sundays.settings.SettingsScreen
 import com.kxxnzstdsw.sundays.settings.SystemInfo
 import com.kxxnzstdsw.sundays.settings.SystemInfoState
@@ -90,7 +91,29 @@ fun main() = application {
             // 紧凑档与配色 / 明暗正交：只改 LocalDensity 覆盖，故照样在主题最外层消费
             compact = appearance.compactMode,
         ) {
-            MainScreen(engine = engine, appearance = appearance)
+            // 首次启动引导 —— 放在 `SundaysTheme` **内部**是刻意的：这样每一次点选都会立刻
+            // 重绘整页，用户看到的就是真实效果，不需要「预览图 + 应用按钮」那套。
+            //
+            // 判据是 `appearance.onboardingCompleted`，它由 `rememberPersistentAppearanceState`
+            // 依据「设置文件此前存不存在」初始化（见 SettingsStorage.exists 的 KDoc），
+            // 完成后经 `completeOnboarding()` 落盘。没有额外的本地 state：写状态即触发重组，
+            // 主界面自然接管，**不存在两处真相源**。
+            if (appearance.onboardingCompleted) {
+                MainScreen(engine = engine, appearance = appearance)
+            } else {
+                OnboardingScreen(
+                    palette = appearance.palette,
+                    onPaletteChange = appearance::selectPalette,
+                    themeMode = appearance.mode,
+                    onThemeModeChange = appearance::selectMode,
+                    // 色卡要展示「各主题在当前明暗下的真实取色」，故要的是**生效**明暗而非档位
+                    dark = appearance.resolvedDark(),
+                    compactMode = appearance.compactMode,
+                    onCompactModeChange = appearance::selectCompactMode,
+                    onFinish = appearance::completeOnboarding,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }

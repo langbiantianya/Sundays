@@ -1036,6 +1036,32 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | 落盘挂在 `ThemeModeState` 内部 | 切换入口有三处（两个面板 + 设置页），散在三个文件里。任何一处漏保存，用户就遇到「这次改了、下次启动变回去」——这类 bug 极难复现。收在状态对象里只有一个写入点，新增入口自动继承 |
 | `compactMode` 存 `Boolean` 而非枚举 | 它没有「未知档位要降级」的语义。旧文件缺该字段时由 kotlinx.serialization 补 `false`（标准密度）即可 —— 新装用户与升级用户都拿到与升级前一致的观感 |
 
+### 5.10 首次启动引导（`OnboardingScreen`）
+
+`shared/commonMain/.../onboarding/OnboardingScreen.kt` —— 真装用户第一次看到的是这一页，
+而不是主界面。三组控件：配色主题（5 张色卡）/ 明暗模式（3 档）/ 界面密度（开关）。
+
+| 决策 | 理由 |
+|---|---|
+| 放在 `SundaysTheme` **内部** | 每次点选立刻重绘整页，**预览是免费的** —— 不需要「预览图 + 应用按钮」那套，本页自己就是预览 |
+| 配色用色卡而不是纯文字单选 | 用户看到界面的第一眼就在判断外观；「哔哩粉」「赛博朋克」这类名字不直观，色卡直接把该主题**自己**的 `surface` / `primary` / `onSurface` 摆出来 |
+| `dark` 由调用方传入 | 色卡要展示「各主题在**当前明暗**下的取色」。不能就地取 `MaterialTheme.colorScheme` 反推明暗 —— 那是**已选中**主题的配色，恰恰是待比较的其它主题要超越的对象 |
+| 收尾条固定在滚动区**外面** | 三组控件在 1024×768 下约 900px 高。按钮原先放在滚动区内，语义 bounds 实测是 `Rect(0,0,0,0)` —— 一屏之内的引导，唯一的出口却完全在视口外，用户可能直接当成死路 |
+| 配色卡用 `selectable` 而非 `clickable(role = RadioButton)` | 后者只设 role、**不设** `selected` 语义，读屏会念「单选按钮」却永远不说是否选中 —— 比不给 role 更糟。`selectable` 同时给出 role 与 selected |
+| 不设独立「跳过」按钮 | 默认值本身就是一份合法答案，「开始使用」已兼任跳过；两个按钮只会让「跳过到底跳到哪」变模糊 |
+
+**首次启动的判据是 `resolveOnboardingCompleted(settings, fileExists)`** ——
+`settings.onboardingCompleted || fileExists`，两个输入任一为真即**不**引导：
+
+- 真正的判据是 `SettingsStorage.exists()`（文件存不存在），**不是**那个字段本身。
+  老版本用户升级上来时磁盘上的 JSON 里根本没有 `onboardingCompleted`，
+  反序列化补成默认 `false`；只看字段的话**每次升级**都会被引导页拦一次，且用户无法关掉。
+- `onboardingCompleted` 放在 `AppearanceState` 里而不是 `main.kt` 的局部 state：
+  落盘载荷是**整份** `AppSettings`，载荷里一旦漏掉这个字段，用户完成引导后在设置页换一次配色，
+  磁盘上的标记就被重置为 `false`，下次启动又被拦一次。这个 bug 要
+  「完成 → 改主题 → 重启」三步才显形，靠读代码几乎发现不了 ——
+  故载荷构造被提成 `AppearanceState.toAppSettings()` 这个**唯一**构造点，并由测试钉住。
+
 `SettingsStorageTest` 覆盖往返（含逐档）、路径与版本字段、损坏文件降级 + 自愈、
 未知枚举值降级、未知字段忽略、目录自动创建、临时文件不残留、
 `compactMode` 两档往返（只存 `true` 的实现会让 `false` 分支永远没跑过）。
@@ -1228,6 +1254,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `UiTokensTest` | `commonTest/.../ui/UiTokensTest.kt` | 8 | 逐主题 × 明暗断言经典档把**每一项**造型决策都打开、现代档都关掉；形状解析在现代档原样透传 / 经典档按主题抹平；反色选中行过 AA 4.5:1；斜面对两种控件面（按钮面 / 输入框面）均有明暗差 |
 | `ThemeModeTest` | `commonTest/.../ui/ThemeModeTest.kt` | 13 | 三档循环顺序 / `next`↔`previous` 互逆 / 显式档位不受系统值影响 / 三击闭环 |
 | `SettingsStorageTest` | `jvmTest/.../settings/SettingsStorageTest.kt` | 8 | 逐档往返 / 路径与版本字段 / 损坏文件降级 + 自愈 / 未知枚举值降级 / 未知字段忽略 / 目录自动创建 / 临时文件不残留 |
+| `OnboardingStateTest` | `commonTest/.../ui/OnboardingStateTest.kt` | 9 | 首次启动判据（无文件=引导 / 已有文件=不打扰老用户 / 已完成=不引导）/ `exists()` 只看文件不解析内容 / 完成引导落盘 / **外观变更不得抹掉已完成标记** / 重复完成幂等 / 默认状态不拦截应用 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
 | **合计** | | **125** | **0 失败 / 0 错误** |

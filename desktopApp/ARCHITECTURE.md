@@ -87,21 +87,44 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 组合里用 `snapshotFlow { state.size }` 把尺寸**夹回来**（`EnforceMinimumWindowSize`）。
 用户拖标题栏缩小、或最大化后恢复，都会经过这道夹取。
 
+### 启动序列：首次引导 → 主界面
+
+`main()` 里 `SundaysTheme` 的 content 按 `appearance.onboardingCompleted` 二选一：
+
+```kotlin
+if (appearance.onboardingCompleted) {
+    MainScreen(engine = engine, appearance = appearance)
+} else {
+    OnboardingScreen(..., onFinish = appearance::completeOnboarding)
+}
+```
+
+| 决策 | 理由 |
+|---|---|
+| 引导页放在 `SundaysTheme` **内部** | 每次点选立刻重绘整页，预览是免费的 —— 不需要「预览图 + 应用按钮」那套 |
+| **不引入额外的本地 state** | 「是否显示引导」只有 `appearance.onboardingCompleted` 一个真相源；`completeOnboarding()` 写状态即触发重组，主界面自然接管 |
+| 判据是「设置文件此前存不存在」 | 老用户升级上来时磁盘 JSON 里没有 `onboardingCompleted` 字段，只看字段会让**每次升级**都被拦一次（见 [`shared/ARCHITECTURE.md` §5.10](../shared/ARCHITECTURE.md)） |
+| `onboardingCompleted` 挂在 `AppearanceState` 上 | 落盘载荷是整份 `AppSettings`，漏掉这个字段就会被后续的外观变更重置掉 |
+
+引导页本体在 `:shared` 的 `commonMain/.../onboarding/OnboardingScreen.kt`（平台无关纯 UI，
+与 `SettingsScreen` / `TopNavBar` 同层）。注意 `main()` 里 `EngineClient` 的创建**早于**引导判定 ——
+引擎的装配点与用户是否看引导无关，提前创建避免了「先看引导再连引擎」这条不必要的时序耦合。
+
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 
 | 符号 | 可见性 | 职责 |
 |---|---|---|
 | `DatabaseBrowserScreen(sheets, activeSheetId, connections, onSelectSheet, onCloseSheet, onAddSheet, onConnect, onDisconnect, memoryProbe, modifier)` | public `@Composable` | 第二屏根组合（纯展示 + 事件转发，状态由调用方按 sheet id 各自注入）。`ActiveSheetContent` 内 `LaunchedEffect(sheet.connection.id, sheet.status.state)`：先 `bindConnection`，已连接则 `refreshDatabases`，否则（断开 / 失败）`releasePools`。`memoryProbe` 为底部堆占用状态栏的注入探针，`null` 时不渲染 |
-| `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（`detectTapGestures(onDoubleTap)` 打开预览） |
+| `SchemaTreePanel` / `DatabaseNode` / `TableLeaf` | private `@Composable` | 左侧树：库节点（点击展开，懒加载表）+ 表叶子（**单击**打开预览）。`SchemaTreePanel` 显式持有 `rememberLazyListState()` —— 不传时用的是调用点的 `remember`，右栏 pane 切换会把整棵子树移出再移回组合、滚动位置随之回到顶部。`TableLeaf` 挂 `clickable` 而非裸手势，读屏才有「打开表」语义、键盘 Tab+Enter 才打得开；双击仍幂等有效（两次 `onClick` 命中 `openTab` 的去重分支） |
 | `BrowserToolBar(activePane, connected, onSelectPane)` / `PaneToggleButton` | private `@Composable` | 激活 sheet 内容区顶部工具栏：**两个**工作台入口（「SQL 工作台」「造数工作台」）。当前正处于某个工作台时该按钮变「返回表预览」（实心），否则显示工作台名（描边）；未连接时禁用。渲染在 `ActiveSheetContent` 内（`SheetTabRow` 之下），工具与它作用的连接同属一个视觉块 |
 | `PreviewTabArea` / `TabStrip` / `PreviewTabContent` | private `@Composable` | 右侧（`BrowserPane.TABLE`）：`SecondaryScrollableTabRow` + 关闭按钮；内容区信息条 + `DataTable` 渲染预览行 |
 | `SqlWorkbenchPane` / `WorkbenchTabStrip` / `SqlResultArea` | private `@Composable` | 右侧（`BrowserPane.SQL`）：SQL sheet 标签条（＋ 新建 / ✎ 重命名 / × 删除 / 滚轮横向滚动，每个 sheet 一份独立 SQL 与独立结果）+ 标题条（当前**方言档位** + schema）+ 上 `CodeEditorWithToolbar`（`:shared` editor 模块，`languageId = 当前连接方言的档位 id` —— 关键字随库变，见 [`shared/ARCHITECTURE.md` §2.8](../shared/ARCHITECTURE.md)；占 60%——内置格式化按钮 + `actions` 插槽注入「执行 SQL」）+ 下结果面板（占 40%，渲染**当前 sheet** 的结果）；结果四态 = `running` / `error` / `affectedRows` / `DataTable` |
 | `GenerateWorkbenchPane` / `WorkbenchTabStrip` / `GenerateResultArea` | private `@Composable` | 右侧（`BrowserPane.GENERATE`）：标题条（schema 提示）+ 脚本标签条（**与 SQL 工作台共用 `WorkbenchTabStrip`**；＋ 新建 / ✎ 重命名 / × 删除，顺序 = 执行顺序）+ Lua 版本 chip 行 + `CodeEditorWithToolbar`（`languageId = "lua"`，`editorState` 取自状态机，占 60%——内置 Lua 格式化 + `actions` 插槽注入「执行造数」）+ 下结果面板（占 40%）；结果三态 = `running`（实时已插入行数）/ `error` / `DataTable`（每脚本一行：脚本 / 目标表 / 插入行数） |
 | `WorkbenchTabStrip(leadingLabel, titles, selectedIndex, …)` / `TabRenameDialog` | private `@Composable` | 两个工作台共用的标签条：`SecondaryScrollableTabRow`（自带拖拽滚动 + 选中项自动滚入可视区）+ `verticalWheelScrollsHorizontally`（纵向滚轮 → 横向滚动）+ 「✎」为当前标签弹出 `TabRenameDialog`（确定提交 / 取消放弃，空名保持原名；底层 `Dialog`，同 `AddConnectionDialog`）。**不用双击**：`Tab` 的 `selectable` 已在 Main pass 消费 down（`Clickable.handleDownEvent`），外层 `detectTapGestures(onDoubleTap)` 收不到手势。**不用内联编辑**：把自抢焦点的 `BasicTextField` 放进 `Tab` 的文本槽（`SecondaryScrollableTabRow` 的 SubcomposeLayout 内）会让场景永远有待渲染帧 —— 实测 `SkikoComposeUiTest.waitForIdle()` 永不返回（界面卡死），弹窗把它与标签条的测量 / 焦点链路解耦 |
 | `BrowserPane` | public enum | 右栏展示模式：`TABLE`（表预览，初始）/ `SQL`（SQL 工作台）/ `GENERATE`（造数工作台）；每 sheet 独立，三者共享同一份 sheet 状态 |
-| `EmptyHint(title, description, modifier)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位 |
-| `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize`；`key = "$schema::$tableName"` 为去重主键 |
-| `DatabaseBrowserState(engine: EngineClient, scope)` | public class | 状态机：`currentConnection`（**Compose 快照状态** —— 方言派生高亮档位，必须触发重组） / `databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex` / `activePane` + SQL 工作台**多 sheet** 状态（`sqlSheets: SnapshotStateList<SqlSheet>` / `selectedSqlIndex`，每个 `SqlSheet` 持有 `title`（可重命名）+ `editor: CodeEditorState`（文本 / 光标 / 滚动）+ 该 sheet 自己的执行结果 `running` / `columns` / `rows` / `rowCount` / `affectedRows` / `error` / `resultPage` / `resultPageSize` / `selectedRowId` + `generation` 失效代次）+ 造数工作台状态（`generateScripts`（每项 `title` 可重命名）/ `selectedGenerateIndex` / `generateRunning` / `generateTablesProcessed` / `generateError` / `generateLuaVersion` / 结果区视图）；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `selectTab` / `closeTab` / `releasePools` / `selectPane` / `executeSql` / `addSqlSheet` / `removeSqlSheet` / `selectSqlSheet` / `renameSqlSheet` / `executeGenerate` / `addGenerateScript` / `removeGenerateScript` / `selectGenerateScript` / `renameGenerateScript` / `sqlDialectProfile`（连接方言 → SQL 高亮档位）；`generation` 代次用于丢弃跨连接过期响应，`SqlSheet.generation` / `generateGeneration` 用于丢弃两个工作台的过期执行结果…
+| `EmptyHint(title, description, modifier, centerContent)` | private `@Composable` | 空态 / 错误态 / 未连接态的统一占位。`description` 常是引擎返回的整段报错（几百字符），故**必须可纵向滚动** —— 早期版本用「`fillMaxSize` + 居中」，内容溢出时**首尾同时被裁**，而 `Caused by` 恰好在末尾。滚动与居中分两层（`verticalScroll` 用无上界约束量子节点，同一 `Column` 里 `Arrangement.Center` 会恒等于顶对齐）。错误态传 `centerContent = false` 顶对齐 |
+| `TablePreviewTab(schema, tableName, title)` | public class | 单个预览标签页状态：`columns` / `rows` / `loading` / `error` / `total` / `page` / `pageSize` / **`requestGeneration`**（tab 级 in-flight 失效代次，与 `SqlSheet.generation` 同构）；`key = "$schema::$tableName"` 为去重主键 |
+| `DatabaseBrowserState(engine: EngineClient, scope)` | public class | 状态机：`currentConnection`（**Compose 快照状态** —— 方言派生高亮档位，必须触发重组） / `databases` / `expandedDatabases`（`SnapshotStateSet`）/ `tablesByDatabase` / `tabs` / `selectedTabIndex` / `activePane` + SQL 工作台**多 sheet** 状态（`sqlSheets: SnapshotStateList<SqlSheet>` / `selectedSqlIndex`，每个 `SqlSheet` 持有 `title`（可重命名）+ `editor: CodeEditorState`（文本 / 光标 / 滚动）+ 该 sheet 自己的执行结果 `running` / `columns` / `rows` / `rowCount` / `affectedRows` / `error` / `resultPage` / `resultPageSize` / `selectedRowId` + `generation` 失效代次）+ 造数工作台状态（`generateScripts`（每项 `title` 可重命名）/ `selectedGenerateIndex` / `generateRunning` / `generateTablesProcessed` / `generateError` / `generateLuaVersion` / 结果区视图）；行为 `bindConnection` / `refreshDatabases` / `toggleDatabase` / `openTab` / `goToTabPage` / `changeTabPageSize` / `selectTab` / `closeTab` / `releasePools` / `selectPane` / `executeSql` / `addSqlSheet` / `removeSqlSheet` / `selectSqlSheet` / `renameSqlSheet` / `executeGenerate` / `addGenerateScript` / `removeGenerateScript` / `selectGenerateScript` / `renameGenerateScript` / `sqlDialectProfile`（连接方言 → SQL 高亮档位）；`generation` 代次用于丢弃跨连接过期响应，`SqlSheet.generation` / `TablePreviewTab.requestGeneration` / `generateGeneration` 用于丢弃两个工作台与表预览的过期执行结果…
 
 **工作台状态保持（切 pane 契约）**：右栏三个 pane 是**同一份 sheet 状态**的不同渲染，切换只改变渲染目标，不清空任何状态。工作台被摘出组合的部分状态由状态机持有（SQL 与造数两个工作台都是**多 sheet/脚本**，且每个 sheet 一份独立状态）：
 
@@ -147,7 +170,7 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 |---|---|---|---|
 | `refreshDatabases` | `SCHEMA.LIST` | `schemaListRequest { level = "database" }` | `databases`（失败 → `errorMessage`） |
 | `toggleDatabase`（首次展开） | `TABLE.LIST` | `tableListRequest {}` | `tablesByDatabase[db]`（失败 → `tableLoadError[db]`） |
-| `openTab`（新表） | `DATA.LIST` | `dataListRequest { tableName; page = 1; pageSize = tab.pageSize }` | `TablePreviewTab.columns` / `.rows` / `.total` |
+| `openTab`（新表） | `DATA.LIST` | `dataListRequest { tableName; page = tab.page; pageSize = tab.pageSize }` | `TablePreviewTab.columns` / `.rows` / `.total` |
 | `executeSql`（当前 SQL sheet） | `SQL.EXECUTE` | `sqlRequest { execute = sqlExecuteRequest { sql; schema = "" } }`（`sql` 取自 `currentSqlSheet()!!.editor.text`） | SELECT：`sqlRowFrame` 逐帧攒成**该 sheet** 的 `columns` / `rows` / `rowCount`；非 SELECT：终止帧 `sql.execute.affectedRows` → 该 sheet 的 `affectedRows`；失败 → 该 sheet 的 `error` |
 | `executeGenerate` | `DATA.GENERATE` | `dataRequest { generate = dataGenerateRequest { schema = ""; luaVersion; tables += generateTable { script } } }` | `gen_progress_frame` 逐帧回填 `generateScripts[frame.scriptIndex - 1].inserted`（**`script_index` 是 1-based**）/ `.lastTable`；终止帧 `generate_terminal.tables_processed` → `generateTablesProcessed`；失败 → `generateError` |
 
