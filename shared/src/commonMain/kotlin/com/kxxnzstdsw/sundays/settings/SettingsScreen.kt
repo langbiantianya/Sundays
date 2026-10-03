@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +48,7 @@ import com.kxxnzstdsw.sundays.ui.SystemInfoRefresh
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemeModeToggleButton
 import com.kxxnzstdsw.sundays.ui.ThemePalette
+import com.kxxnzstdsw.sundays.ui.WinOutlinedButton
 import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
 import com.kxxnzstdsw.sundays.ui.WinSwitch
 import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
@@ -83,6 +85,8 @@ import kotlinx.coroutines.delay
  * @param onSystemInfoRefreshChange 刷新间隔变更回调
  * @param compactMode 紧凑模式（控件尺寸整体缩小）
  * @param onCompactModeChange 紧凑模式变更回调
+ * @param onOpenOnboarding 「重新打开引导」—— 以**浮层**形式展示首次启动引导页；
+ *   默认 `{}` = 该调用方不提供这个入口（如只读的预览 / 测试）
  * @param systemInfo 系统信息状态（loading / 成功 / 失败）
  * @param onRequestSystemInfo 请求系统信息；切到 [SettingsCategory.SYSTEM_INFO] 或点「刷新」、
  *   以及自动刷新到点时触发
@@ -101,6 +105,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     compactMode: Boolean = false,
     onCompactModeChange: (Boolean) -> Unit = {},
+    onOpenOnboarding: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var category by remember { mutableStateOf(SettingsCategory.PERSONALIZATION) }
@@ -169,6 +174,7 @@ fun SettingsScreen(
                     onThemeModeChange = onThemeModeChange,
                     compactMode = compactMode,
                     onCompactModeChange = onCompactModeChange,
+                    onOpenOnboarding = onOpenOnboarding,
                 )
                 SettingsCategory.SYSTEM_INFO -> SystemInfoPane(
                     state = systemInfo,
@@ -225,7 +231,7 @@ private fun SettingsCategory.icon(): ImageVector = when (this) {
 }
 
 /**
- * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）+ 紧凑模式（一个开关）。
+ * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）+ 紧凑模式（一个开关）+ 重进引导的入口。
  *
  * 拆成两组而不是合成一个列表：配色与明暗是两件独立的事，`蓝灰 + 深色` 与
  * `赛博朋克 + 深色` 是不同外观，「赛博朋克 + 浅色」同样合法。紧凑模式是**尺度**轴，
@@ -239,6 +245,7 @@ private fun PersonalizationPane(
     onThemeModeChange: (ThemeMode) -> Unit,
     compactMode: Boolean,
     onCompactModeChange: (Boolean) -> Unit,
+    onOpenOnboarding: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -316,6 +323,33 @@ private fun PersonalizationPane(
             checked = compactMode,
             onCheckedChange = onCompactModeChange,
         )
+
+        Spacer(Modifier.height(24.dp))
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(16.dp))
+
+        // 重进引导。放在「个性化」底部而不是另开一个分类：引导页做的正是这三组事，
+        // 放到系统信息那边会让入口与它要配置的东西失去关联。
+        Text(text = "外观引导", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "重新打开首次启动时那一页，把配色、明暗、界面密度一次挑完。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        WinOutlinedButton(
+            onClick = onOpenOnboarding,
+            shape = SundaysPalette.buttonShape,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.RocketLaunch,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("重新打开引导")
+        }
     }
 }
 

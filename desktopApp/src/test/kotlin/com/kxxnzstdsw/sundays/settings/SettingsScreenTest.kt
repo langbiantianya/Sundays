@@ -43,6 +43,7 @@ class SettingsScreenTest {
         systemInfo: SystemInfoState = SystemInfoState.Idle,
         onRequest: () -> Unit = {},
         onBack: () -> Unit = {},
+        onOpenOnboarding: () -> Unit = {},
     ) {
         MaterialTheme {
             SettingsScreen(
@@ -57,13 +58,51 @@ class SettingsScreenTest {
                 onBack = onBack,
                 compactMode = state.compactMode,
                 onCompactModeChange = state::selectCompactMode,
+                onOpenOnboarding = onOpenOnboarding,
             )
         }
     }
 
+    // =========================================================================
+    // 「重新打开引导」入口
+    // =========================================================================
+
     @Test
-    fun `both categories are listed and default to personalization`() {
+    fun `the personalization pane offers a way back into the onboarding`() {
         runComposeUiTest {
+            setContent { render(AppearanceState()) }
+            // 引导页做的正是这三组事，入口必须和它们在**同一个分类**里；
+            // 放到「系统信息」那边会让入口与它要配置的东西失去关联。
+            // 该分组在滚动区下方（5 配色 + 3 明暗 + 密度 + 入口），需先滚到底再断言。
+            onNodeWithText("重新打开引导").performScrollTo().assertIsDisplayed()
+            onNodeWithText("外观引导").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `the onboarding entry invokes its callback`() {
+        runComposeUiTest {
+            var opened = 0
+            setContent { render(AppearanceState(), onOpenOnboarding = { opened++ }) }
+
+            onNodeWithText("重新打开引导").performScrollTo().performClick()
+            assertEquals(1, opened, "按钮应触发 onOpenOnboarding")
+        }
+    }
+
+    @Test
+    fun `the onboarding entry is absent from the system info category`() {
+        // 引导只管外观；混进系统信息分类会让人以为它还能配别的东西
+        runComposeUiTest {
+            setContent { render(AppearanceState()) }
+            onNodeWithText("系统信息").performClick()
+            waitForIdle()
+            onNodeWithText("重新打开引导").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun `both categories are listed and default to personalization`() {        runComposeUiTest {
             setContent { render(AppearanceState()) }
 
             // 「个性化」出现两次是预期结构：左侧分类行 + 右侧内容标题

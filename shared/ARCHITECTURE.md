@@ -1049,6 +1049,7 @@ Material3 的 `BorderStroke` 只有单色，`Modifier.border` 也只接受一个
 | 收尾条固定在滚动区**外面** | 三组控件在 1024×768 下约 900px 高。按钮原先放在滚动区内，语义 bounds 实测是 `Rect(0,0,0,0)` —— 一屏之内的引导，唯一的出口却完全在视口外，用户可能直接当成死路 |
 | 配色卡用 `selectable` 而非 `clickable(role = RadioButton)` | 后者只设 role、**不设** `selected` 语义，读屏会念「单选按钮」却永远不说是否选中 —— 比不给 role 更糟。`selectable` 同时给出 role 与 selected |
 | 不设独立「跳过」按钮 | 默认值本身就是一份合法答案，「开始使用」已兼任跳过；两个按钮只会让「跳过到底跳到哪」变模糊 |
+| `firstRun` 参数（默认 `true`） | 「欢迎使用 / 先挑一套顺手的界面」是**首启**话术。从设置页主动重进时传 `false`，标题变「外观引导」、收尾变「完成」—— 否则用户在主界面里点一下又看到「欢迎使用」，会以为应用被重置了 |
 
 **首次启动的判据是 `resolveOnboardingCompleted(settings, fileExists)`** ——
 `settings.onboardingCompleted || fileExists`，两个输入任一为真即**不**引导：

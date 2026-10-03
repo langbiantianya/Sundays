@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.HorizontalDivider
@@ -239,6 +240,14 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
     var addDialogVisible by remember { mutableStateOf(false) }
     // 进入设置页前所在的屏 —— 设置页左上角「返回」按钮据此回到原处，而不是固定回首屏。
     var destinationBeforeSettings by remember { mutableStateOf(AppDestination.CONNECTIONS) }
+    // 「重新打开外观引导」的浮层开关（设置 → 个性化底部那个按钮）。
+    //
+    // 为什么是浮层而不是**替换** destination：替换会让 SettingsScreen 离开组合，
+    // 它内部的 `remember(category)` 随之销毁 —— 用户点完引导回来会落回「个性化」分类，
+    // 更好情况也要重新渲染一遍。更糟的是若改成在 `main()` 里二选一（首启那条路），
+    // 整个 MainScreen 会被重建，浏览屏的 sheet / 滚动位置全丢。
+    // 浮层叠加在下层之上：下层保持组合，关闭即原地返回。
+    var onboardingReplay by remember { mutableStateOf(false) }
 
     fun openSettings() {
         // 已经在设置页时不覆盖记录，否则「设置 → 返回 → 返回」会退化成原地踏步
@@ -290,6 +299,9 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
         }
     }
 
+    // 浮层容器：下层保持组合（设置页的分类状态、浏览屏的 sheet 与滚动位置都不受影响），
+    // 引导页叠在上层不透明渲染。
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         if (destination == AppDestination.DATABASE) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -337,6 +349,8 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                 onBack = ::closeSettings,
                 compactMode = appearance.compactMode,
                 onCompactModeChange = appearance::selectCompactMode,
+                // 「重新打开外观引导」入口 —— 以浮层展示，不是替换当前屏
+                onOpenOnboarding = { onboardingReplay = true },
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {
@@ -439,6 +453,26 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                     )
                 }
             }
+        }
+        }
+
+        if (onboardingReplay) {
+            OnboardingScreen(
+                palette = appearance.palette,
+                onPaletteChange = appearance::selectPalette,
+                themeMode = appearance.mode,
+                onThemeModeChange = appearance::selectMode,
+                dark = appearance.resolvedDark(),
+                compactMode = appearance.compactMode,
+                onCompactModeChange = appearance::selectCompactMode,
+                // 重进时**不**碰 onboardingCompleted —— 它早就是 true；
+                // 这里只是收起浮层，回调的每一次外观变更各自已经落盘了。
+                onFinish = { onboardingReplay = false },
+                // firstRun = false：这一屏此刻不是「首次启动」，说「欢迎使用」会让用户
+                // 以为应用被重置了。标题与收尾按钮随之改成「外观引导」/「完成」。
+                firstRun = false,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

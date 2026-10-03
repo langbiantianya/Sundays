@@ -110,6 +110,22 @@ if (appearance.onboardingCompleted) {
 与 `SettingsScreen` / `TopNavBar` 同层）。注意 `main()` 里 `EngineClient` 的创建**早于**引导判定 ——
 引擎的装配点与用户是否看引导无关，提前创建避免了「先看引导再连引擎」这条不必要的时序耦合。
 
+### 从设置页重进引导（浮层，不是替换）
+
+`SettingsScreen(palette, …, onOpenOnboarding)` 的「个性化」分类底部有一项「重新打开引导」，
+点开后引导页以**浮层**形式盖在当前屏之上。
+
+| 决策 | 理由 |
+|---|---|
+| 浮层叠加而非替换 `destination` | 替换会让 `SettingsScreen` 离开组合，它内部的 `remember(category)` 随之销毁 —— 用户点完回来会落回默认分类。更好情况是整个 `MainScreen` 被重建（若把二选一放到 `main()` 里），浏览屏的 sheet / 滚动位置全丢 |
+| `firstRun = false` | 此刻不是首启，说「欢迎使用 sundays」会让用户以为应用被重置了。标题改为「外观引导」、收尾按钮从「开始使用」改为「完成」 |
+| `onFinish` 只收起浮层，**不碰** `onboardingCompleted` | 它早就是 `true`；重进过程中每一次外观变更各自经 `AppearanceState` 落盘了 |
+| 入口放在「个性化」而非新开分类 | 引导页做的正是配色 / 明暗 / 密度这三组事，放到「系统信息」那边会让入口与它要配置的东西失去关联 |
+
+该分组在个性化栏的**滚动区下方**（前面是 5 配色 + 3 明暗 + 密度），这与首启时
+「唯一的出口按钮完全在视口外」不是一回事：设置栏本来就长、可滚动，
+而首启页若不滚就够不着唯一的出口，是会让人以为走进死路的。
+
 **`DatabaseBrowserScreen.kt` 内符号分解**：
 
 | 符号 | 可见性 | 职责 |

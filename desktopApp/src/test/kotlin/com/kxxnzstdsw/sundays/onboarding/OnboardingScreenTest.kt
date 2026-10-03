@@ -251,4 +251,84 @@ class OnboardingScreenTest {
         assertEquals(ThemeMode.DARK, state.mode)
         assertTrue(state.onboardingCompleted, "完成后应标记为已完成")
     }
+
+    // =========================================================================
+    // 设置页重进（firstRun = false）
+    // =========================================================================
+
+    private fun androidx.compose.ui.test.ComposeUiTest.renderReplay(
+        state: AppearanceState,
+        onFinish: () -> Unit = {},
+    ) {
+        setContent {
+            SundaysTheme(darkTheme = false, palette = state.palette, compact = state.compactMode) {
+                OnboardingScreen(
+                    palette = state.palette,
+                    onPaletteChange = state::selectPalette,
+                    themeMode = state.mode,
+                    onThemeModeChange = state::selectMode,
+                    dark = false,
+                    compactMode = state.compactMode,
+                    onCompactModeChange = state::selectCompactMode,
+                    onFinish = onFinish,
+                    firstRun = false,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        waitForIdle()
+    }
+
+    @Test
+    fun `the replay must not claim it is a first run`() = runComposeUiTest {
+        // 用户在设置里主动点「重新打开引导」时若还看到「欢迎使用 sundays」，
+        // 会以为应用被重置了 —— 首启话术只属于首启。
+        renderReplay(AppearanceState())
+        onNodeWithText("外观引导").assertIsDisplayed()
+        onAllNodesWithText("欢迎使用 sundays").fetchSemanticsNodes().let {
+            assertTrue(it.isEmpty(), "重进引导不应再自称「欢迎使用」")
+        }
+    }
+
+    @Test
+    fun `the replay finishes with a neutral label`() = runComposeUiTest {
+        // 已经在主界面里了，再说「开始使用」语义不对
+        renderReplay(AppearanceState())
+        onNodeWithText("完成").assertIsDisplayed()
+        onAllNodesWithText("开始使用").fetchSemanticsNodes().let {
+            assertTrue(it.isEmpty(), "重进引导的收尾按钮不应叫「开始使用」")
+        }
+    }
+
+    @Test
+    fun `the replay still applies and persists the choices`() = runComposeUiTest {
+        // 重进不是只读回顾 —— 它是同一套外观状态的另一个编辑入口。
+        // 若这条转绿而落盘没跟上，用户会觉得「改了没反应，下次启动又变回去」。
+        var finished = false
+        val state = AppearanceState(initialOnboardingCompleted = true)
+        renderReplay(state, onFinish = { finished = true })
+
+        onNodeWithText(ThemePalette.WIN_2000.label).performClick()
+        onNodeWithText(ThemeMode.LIGHT.label).performClick()
+        waitForIdle()
+        assertEquals(ThemePalette.WIN_2000, state.palette)
+        assertEquals(ThemeMode.LIGHT, state.mode)
+
+        onNodeWithText("完成").performClick()
+        waitForIdle()
+        assertTrue(finished, "「完成」应收起浮层")
+        // 重进**不**改 onboardingCompleted —— 它早就是 true
+        assertTrue(state.onboardingCompleted)
+    }
+
+    @Test
+    fun `the replay offers exactly the same three groups`() = runComposeUiTest {
+        // 「重新打开引导」应当等价于首启那一页；若某组控件被条件编译 / 漏传，
+        // 用户会觉得重进了个简化版
+        renderReplay(AppearanceState())
+        onNodeWithText("配色主题").assertIsDisplayed()
+        onNodeWithText("明暗模式").assertIsDisplayed()
+        onNodeWithText("界面密度").assertIsDisplayed()
+        ThemePalette.entries.forEach { onNodeWithText(it.label).assertIsDisplayed() }
+    }
 }

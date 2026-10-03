@@ -73,7 +73,11 @@ import com.kxxnzstdsw.sundays.ui.winShape
  * @param dark 当前**实际生效**的明暗（供色卡取对应明暗档的配色，见 [PaletteCard]）
  * @param compactMode 紧凑模式
  * @param onCompactModeChange 紧凑模式变更
- * @param onFinish 「开始使用」—— 同时把引导标记为已完成并落盘
+ * @param onFinish 「开始使用」—— 首次启动时同时把引导标记为已完成并落盘
+ * @param firstRun 是否为**首次启动**。默认 `true`；由设置页主动重进时传 `false` ——
+ *   「欢迎使用 / 先挑一套顺手的界面」是**首启**的话术，用户在设置里点「重新打开引导」时
+ *   再看到它会以为是应用重置了。同一个参数还把收尾按钮从「开始使用」改成「完成」，
+ *   避免在主界面里说「开始使用」。
  */
 @Composable
 fun OnboardingScreen(
@@ -86,6 +90,7 @@ fun OnboardingScreen(
     onCompactModeChange: (Boolean) -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
+    firstRun: Boolean = true,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -111,13 +116,17 @@ fun OnboardingScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "欢迎使用 sundays",
+                        text = if (firstRun) "欢迎使用 sundays" else "外观引导",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "先挑一套顺手的界面。每一项都立即生效，之后可在「设置 → 个性化」随时改。",
+                        text = if (firstRun) {
+                            "先挑一套顺手的界面。每一项都立即生效，之后可在「设置 → 个性化」随时改。"
+                        } else {
+                            "和首次启动时一样，改动立即生效并落盘。改完点「完成」回到设置页。"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -214,7 +223,10 @@ fun OnboardingScreen(
                         .widthIn(max = 960.dp)
                         .fillMaxWidth(),
                 ) {
-                    Text("开始使用", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (firstRun) "开始使用" else "完成",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
