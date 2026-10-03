@@ -69,7 +69,8 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 |---|---|---|
 | `ENDPOINT_PROPERTY` | public `const val` | 系统属性名 `"sundays.engine.endpoint"` —— 选择 gRPC 引擎端点的唯一开关 |
 | `createEngineClient()` | **internal** | **引擎实现装配点**：读 `System.getProperty(ENDPOINT_PROPERTY)` 并 `trim()`；空白 → `IdbEngine()`（同进程，默认），否则 `GrpcEngineClient.connect(GrpcClientConfig.fromTarget(endpoint))`；端点非法时由 `fromTarget` 抛 `IllegalArgumentException` |
-| `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`（`rememberWindowState(size = 1280×820)` + `EnforceMinimumWindowSize` 夹住下限）、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
+| `main()` | public | `application { ... }` 入口；`val engine: EngineClient = createEngineClient()`、创建 `Window`（`rememberWindowState(size = DEFAULT_WINDOW_SIZE)` + `EnforceMinimumWindowSize` 夹住下限）、套 `:shared` 的 `SundaysTheme`、渲染 `MainScreen(engine)`；`onCloseRequest` 调 `engine.close()` |
+| `DEFAULT_WINDOW_SIZE` / `MIN_WINDOW_SIZE` | `internal` `val` | 默认 1152×720 / 下限 1024×640。`internal` 而非 `private`：`WindowSizeTest` 要断言「默认 ≥ 下限」「默认高度放得下 768 屏」「右栏放得下 6 列」等契约，纯数字没有代码依赖但每条都对应一个可见的坏结果 |
 | `MainScreen(engine: EngineClient)` | **internal** `@Composable` | 持有 `AppDestination` 状态 + `remember { ConnectionSession(engine, scope) }` + `remember { DatabaseBrowserState(engine, scope) }`，按目标分派到 `ConnectionManagerScreen` / `DatabaseBrowserScreen`（`internal` 便于导航测试渲染）。**两个状态机都在此持有**：切换目标只销毁屏幕组合，不销毁状态 —— 浏览标签页因此跨导航保留 |
 
 > **模块边界**：导航目标枚举（`AppDestination`）与应用主题（`SundaysTheme` / `SundaysPalette`）已上移 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`。本文件因此只剩「平台窗口 + 引擎状态机接线」。`ConnectionSession` 与 `DatabaseBrowserState` 依赖 `EngineClient` 调用层接口（来自 `:engine-protocol`，JVM-only 模块），**必须**留在 desktopApp —— 详见 [`shared/ARCHITECTURE.md` §1.3](../shared/ARCHITECTURE.md)。
@@ -80,8 +81,13 @@ desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrow
 
 | 项 | 取值 | 理由 |
 |---|---|---|
-| 默认尺寸 | 1280 × 820 | 「左树看得全 + 右侧至少 6~7 列 + 分页栏不换行」的下限感 |
+| 默认尺寸 | 1152 × 720 | 原 1280×820 是照「左树看得全 + 右侧 6~7 列」算的，但 **820dp 高在 1366×768 这类笔记本上放不下**——窗口比屏幕还高，第一眼就是被截断的窗口。720 能完整显示并留出任务栏。宽度收到 1152 后左树 250dp + 右栏仍约 900dp（6 列上下），引导页的 960dp 内容列也仍排得下一行色卡 |
 | 最小尺寸 | 1024 × 640 | 低于 1024 宽，左树与右栏内容区（至少 350dp）开始互相挤；低于 640 高，标签条 + 工具栏 + 表格 + 分页栏四段放不下一屏 |
+
+`WindowSizeTest` 把这两组数字的关系钉住：默认必须 ≥ 下限（否则 `EnforceMinimumWindowSize`
+会在启动第一帧就改写窗口，用户看到「窗口自己跳了一下」）、默认高度必须放得下 768 高的屏、
+右栏仍要放得下 6 列、引导页 960dp 内容列不被迫换行。纯数字没有代码依赖，但每一条都对应
+一个用户立刻能看到的坏结果，值得断言而不是只写在注释里。
 
 ⚠️ Compose 的 `Window` **没有** `minSize` 参数（只有 `state` / `resizable` 等），故下限只能在
 组合里用 `snapshotFlow { state.size }` 把尺寸**夹回来**（`EnforceMinimumWindowSize`）。

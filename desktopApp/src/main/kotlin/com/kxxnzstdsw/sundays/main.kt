@@ -71,8 +71,7 @@ fun main() = application {
     val engine: EngineClient = createEngineClient()
     // 窗口尺寸：不设的话用平台默认（Windows 约 800×600），而浏览屏是「左树 + 右表 +
     // 底栏」三段布局，800 宽下左树挤掉半棵、右边一列都放不下。
-    // 1280×820 是「左树看得全 + 右侧至少 6~7 列 + 分页栏不换行」的下限感。
-    val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
+    val windowState = rememberWindowState(size = DEFAULT_WINDOW_SIZE)
     Window(
         onCloseRequest = {
             engine.close()
@@ -120,7 +119,20 @@ fun main() = application {
 }
 
 /**
- * 窗口最小尺寸 —— 低于这个值，三段式布局就有一��被挤没了。
+ * 窗口**默认**尺寸 —— 打开应用时第一次呈现的大小（用户拖过之后由系统自己记住）。
+ *
+ * 取 1152×720：原先的 1280×820 是照着「左树看得全 + 右侧 6~7 列」算的，但 **820dp 的高度
+ * 在 1366×768 这类笔记本上根本放不下** —— 窗口比屏幕还高，用户第一眼看到的就是一个被
+ * 截断的窗口，想看全还得先手动缩一次。720 能在 768 高的屏上完整显示并留出任务栏。
+ * 宽度从 1280 收到 1152：左树固定 250dp，右栏仍有约 900dp（6 列上下），够用。
+ *
+ * 与 [MIN_WINDOW_SIZE] 的关系由 `WindowSizeTest` 钉住（默认必须 ≥ 下限，
+ * 否则启动第一帧就会被夹取逻辑改写，用户看到窗口「自己跳了一下」）。
+ */
+internal val DEFAULT_WINDOW_SIZE = DpSize(1152.dp, 720.dp)
+
+/**
+ * 窗口最小尺寸 —— 低于这个值，三段式布局就有一段被挤没了。
  *
  * Compose 的 [Window] **没有** `minSize` 参数（它只有 `state` / `resizable` 等），所以
  * 只能在组合里把 `size` 夹回来：用户在标题栏把窗口拖到很小、或双击标题栏最大化后恢复，
@@ -129,7 +141,7 @@ fun main() = application {
  * 取 1024×640：低于 1024 宽，左树（固定 250dp）+ 右栏内容区（至少 350dp）开始互相挤；
  * 低于 640 高，sheet 标签条 + 工具栏 + 表格 + 分页栏四段就放不下一屏。
  */
-private val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
+internal val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
 
 /** 把窗口尺寸夹到 [MIN_WINDOW_SIZE] 以上，就地生效（每次拖动窗口都会过一遍）。 */
 @Composable
