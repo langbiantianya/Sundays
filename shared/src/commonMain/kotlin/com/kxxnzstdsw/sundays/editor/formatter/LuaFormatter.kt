@@ -2,7 +2,6 @@ package com.kxxnzstdsw.sundays.editor.formatter
 
 import com.kxxnzstdsw.sundays.editor.CodeLanguageRegistry
 import com.kxxnzstdsw.sundays.editor.TokenType
-
 /**
  * Lua 代码格式化器 — **轻量级规范化**（**安全优先** — 不会破坏代码）：
  *
@@ -37,72 +36,64 @@ class LuaFormatter(
         if (tokens.isEmpty()) return source
 
         val sb = StringBuilder(source.length)
-        var pendingSpace = false
-        var lastWasNewline = true
+        // 本行尚未输出有效内容（行首 / 只有缩进）→ 任何前导空格都不该补
+        var atLineStart = true
+        // 上一个**非空白** token（空格判定的左邻居）—— 规则见 [TokenSpacing]
+        var prevText: String? = null
+        var prevType: TokenType? = null
+
+        fun emit(type: TokenType, text: String) {
+            val left = prevText
+            if (!atLineStart && left != null) {
+                val glued = TokenSpacing.bindsRight(left, prevType!!) ||
+                    TokenSpacing.bindsLeft(text, type, left, prevType, EXTRA_TIGHT)
+                if (!glued) sb.append(' ')
+            }
+            sb.append(text)
+            prevText = text
+            prevType = type
+            atLineStart = false
+        }
 
         for (token in tokens) {
             when (token.type) {
                 TokenType.WHITESPACE -> {
-                    if (token.text.contains('\n')) {
-                        pendingSpace = false
-                        lastWasNewline = true
-                    } else if (!lastWasNewline) {
-                        pendingSpace = true
+                    val newlines = token.text.count { it == '\n' }
+                    if (newlines > 0) {
+                        // 至多保留一个空行作为分段，多的压掉
+                        repeat(minOf(newlines, 2)) { sb.append('\n') }
+                        // 续行缩进原样搬运：Lua 的缩进只做视觉分组，绝不改动它
+                        sb.append(token.text.substringAfterLast('\n'))
+                        atLineStart = true
                     }
+                    // 同行内的空白不携带信息 —— 贴不贴只看 token 身份（见 [TokenSpacing]）
                 }
-                TokenType.COMMENT -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(token.text)
-                    lastWasNewline = token.text.endsWith('\n')
-                }
-                TokenType.STRING, TokenType.ERROR -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(token.text)
-                    lastWasNewline = false
-                }
-                TokenType.KEYWORD -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(if (normalizeCase) token.text.lowercase() else token.text)
-                    pendingSpace = true
-                    lastWasNewline = false
-                }
-                TokenType.IDENTIFIER, TokenType.BUILTIN, TokenType.TYPE, TokenType.NUMBER -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(token.text)
-                    pendingSpace = true
-                    lastWasNewline = false
-                }
-                TokenType.OPERATOR -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(token.text)
-                    // 多数 Lua 操作符两侧不加空格：`a+b`、`x==y`、`fn(arg)` 都对
-                    pendingSpace = false
-                    lastWasNewline = false
-                }
-                TokenType.PUNCTUATION -> {
-                    flushPendingSpace(sb, pendingSpace, lastWasNewline)
-                    pendingSpace = false
-                    sb.append(token.text)
-                    // 开括号 `(` 后不留空格（`func (arg)` 应为 `func(arg)`）；
-                    // 闭括号 `)` 前不留；逗号 `,` 后可留（`a, b, c`）— 留 1 空格
-                    pendingSpace = token.text == "," || token.text == ";"
-                    lastWasNewline = false
-                }
+                // 注释内容原样搬，只清行尾空白
+                TokenType.COMMENT -> emit(TokenType.COMMENT, stripTrailingSpacePerLine(token.text))
+                TokenType.STRING, TokenType.ERROR -> emit(token.type, token.text)
+                TokenType.KEYWORD ->
+                    emit(TokenType.KEYWORD, if (normalizeCase) token.text.lowercase() else token.text)
+                TokenType.IDENTIFIER, TokenType.BUILTIN, TokenType.TYPE, TokenType.NUMBER,
+                TokenType.OPERATOR, TokenType.PUNCTUATION,
+                -> emit(token.type, token.text)
             }
         }
         return sb.toString().trimEnd()
     }
 
-    private fun flushPendingSpace(sb: StringBuilder, pending: Boolean, atLineStart: Boolean) {
-        if (pending && !atLineStart) sb.append(' ')
-    }
+    /**
+     * 清掉注释 token 的行尾空白 —— 内部每一行 + 整个 token 结尾。
+     *
+     * 单行注释的尾随空白最容易漏（写完随手敲空格），旧实现在无换行时直接原样返回，
+     * 格式化后行尾仍挂着空白，diff 全是噪音。
+     */
+    private fun stripTrailingSpacePerLine(text: String): String =
+        text.trimEnd().split('\n').joinToString("\n") { it.trimEnd() }
 
     companion object {
+        /** Lua 私有的贴标点：方法调用冒号 `obj:method()` 两向都贴。 */
+        private val EXTRA_TIGHT: Set<String> = setOf(":")
+
         /** 默认注册入口。 */
         fun register() {
             CodeLanguageRegistry.register(com.kxxnzstdsw.sundays.editor.language.LuaLanguage())

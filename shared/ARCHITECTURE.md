@@ -63,10 +63,10 @@ HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码
 
 | 能力 | 实现机制 |
 |---|---|
-| **语法高亮** | `SyntaxHighlighter` + `CodeLanguageRegistry`（SPI 模式）；SQL 支持**方言档位**（关键字随连接的库变，见 §2.8） |
+| **语法高亮** | `SyntaxHighlighter` + `CodeLanguageRegistry`（SPI 模式）；SQL 支持**方言档位**（关键字随连接的库变，见 §2.9） |
 | **行号 gutter** | `LineNumberGutter` Composable；宽度按行数位数自适应（最少 2 位） |
 | **工具栏** | `CodeEditorWithToolbar` 包裹 `EditorToolbar`（语言切换 + 格式化 + actions 插槽） |
-| **格式化** | `CodeFormatterRegistry` 自动启用；工具栏"格式化"按钮按语言可用性启用 / 禁用 |
+| **格式化** | `CodeFormatterRegistry` 自动启用；工具栏"格式化"按钮按语言可用性启用 / 禁用；空格 / 缩进 / 注释契约见 §2.8 |
 | **右键菜单** | `Modifier.onRightClick` + `EditorContextMenuState` + `contextMenuItems` 插槽 |
 | **语言切换下拉框** | `AssistChip` 触发；可隐藏（`showLanguageSwitcher = false`） |
 | **滚动同步** | 行号 gutter 与 `BasicTextField` 共享同一个 `ScrollState` |
@@ -271,7 +271,42 @@ BasicTextField(
 - `transformation` 仅在 `language` / `highlighter` / `text` 变化时重新构造
 - 大文本 tokenize 在 UI 线程同步执行 —— 对 SQL/Lua 长度（典型 < 10K 行）足够快；未来可拆 `LaunchedEffect` 异步化
 
-### 2.8 SQL 方言档位 —— 关键字随库变
+### 2.8 格式化契约 —— 空格只看 token 身份
+
+`SqlFormatter` / `LuaFormatter` 走同一条规则，判定逻辑抽在 `TokenSpacing`：
+
+```
+两个相邻 token 之间要空格  ⟺  左 token 不贴右  且  右 token 不贴左
+```
+
+| 规则 | 效果 |
+|---|---|
+| `bindsRight`：`(` `[` `{` `.` `::` | `count(*)`、`t.c`、`a::int` |
+| `bindsLeft`：闭括号 `,` `;` `.` `::` | `a, b`、`(1)` |
+| 开括号 `(` `[` `{` **条件**贴左 | 跟在「可调用」token 后贴（`count(`、`t[`），跟在关键字/操作符后留空格（`IN (`、`= {`） |
+| 其余一律两侧留一个空格 | `a > 1`、`a AND b` |
+
+**为什么不用 `pendingSpace` 标志**：那个写法（写 token 之前决定补不补空格）必然踩三个坑 ——
+逗号前多空格（`id , name`）、比较符左粘右不粘（`id> 1`），以及 token 说好贴紧、**空白 token 又把标志翻回去**
+导致的反复横跳（`a:: int`、`t. col`、`( 1 )`）。最后一个最阴险：它看着像幂等性 bug，
+其实只是判断依据被中途改写。改成两个纯函数后，**空格决策与输入原有空白完全无关**，
+这同时消灭了「格式化两次才收敛」的一整类诡异现象。
+
+**不做重新缩进**：缩进**原样搬运**（`select\n  a` → `SELECT\n  a`）。重新缩进需要真正的语法分析
+（`()` 嵌套层级、`CASE` 块），半吊子重排比不改更糟 —— 用户的视觉分组被改乱却看不出原因。
+早期 KDoc 声称「保持输入缩进」而实现实际**丢弃**了它，属文档与实现不符，已改正。
+
+**注释是只读的**（`FormatterSpacingTest` 逐条锁定）：
+- 注释内容原样搬运 —— 大小写、内部空格、分隔符一律不动（块注释里常放代码样例 / ASCII 图）
+- 只清**行尾空白**：块注释每行 + 整个 token 结尾（行注释 `-- 备注␣␣␣` 是最常见的一类）
+- 注释**不会**被主子句换行规则吞掉 —— 把 `-- 注释` 之后的真实 SQL 挪到注释行上，整条语句就废了
+- 注释内的关键字不参与大写（`-- select from where` 保持原样）
+
+**空行**：至多保留一个（2 个 `\n`）作为分段，多的压掉 —— 否则段间空行会逐次累积。
+
+**幂等性**：格式化两次 ≡ 格式化一次。测试里有一批样本专门锁这条。
+
+### 2.9 SQL 方言档位 —— 关键字随库变
 
 `SqlLanguage` 的基集是「SQL:2016 + 5 方言共有子集」；连上某个库后，编辑器在基集之上追加该方言
 **特有**的关键字 / 类型 / 内置函数（`PRAGMA` 只在 SQLite 亮、`STRAIGHT_JOIN` 只在 MySQL 亮……）。
@@ -1250,6 +1285,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `SqlTokenizerTest` | `commonTest/.../editor/SqlTokenizerTest.kt` | 23 | SQL 关键字 / 字符串 / 注释 tokenize |
 | `SqlDialectProfileTest` | `commonTest/.../editor/SqlDialectProfileTest.kt` | 6 | 方言档位：id / 词表分类不变量 / 标准档位不认方言词 / 注册配对（语言 + formatter）/ 格式化随档位 |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
+| `FormatterSpacingTest` | `commonTest/.../editor/FormatterSpacingTest.kt` | 27 | 格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读（不被换行规则吞、不改内容）、空行折叠、幂等性、无行尾空白 |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
