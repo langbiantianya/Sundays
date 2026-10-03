@@ -237,6 +237,31 @@ class OnboardingScreenTest {
     }
 
     @Test
+    fun `the content block stays horizontally centered in both density modes`() = runComposeUiTest {
+        // 回归：滚动区那个 Column 曾**漏掉 `fillMaxWidth()`**，于是它按内容宽度（960dp）
+        // 收缩后被父级左对齐，`horizontalAlignment` 只在这 960dp 内部生效。
+        // 后果是窗口越宽右侧空得越离谱（用户 1580px 窗口下右侧空了约 530px），
+        // 而紧凑档更明显：内容缩到 816px，1024px 窗口里标题中心偏左 84px。
+        //
+        // 断言「内容块中心 == 窗口中心」，两档都测 —— 紧凑档是当初暴露它的那一档。
+        for (compact in listOf(false, true)) {
+            render(AppearanceState(initialCompactMode = compact))
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            val section = onNodeWithText("界面密度").fetchSemanticsNode().boundsInRoot
+            val title = onNodeWithText("欢迎使用 sundays").fetchSemanticsNode().boundsInRoot
+
+            assertEquals(
+                root.center.x, section.center.x, absoluteTolerance = 1f,
+                "紧凑=$compact 时分组标题应水平居中（内容块中心 ${section.center.x} vs 窗口 ${root.center.x}）",
+            )
+            assertEquals(
+                root.center.x, title.center.x, absoluteTolerance = 1f,
+                "紧凑=$compact 时页面大标题应水平居中（${title.center.x} vs ${root.center.x}）",
+            )
+        }
+    }
+
+    @Test
     fun `choices made before finishing survive`() = runComposeUiTest {
         // 用户先调好外观再点「开始使用」—— 这些选择必须**保留**，不能被引导的默认值覆盖。
         val state = AppearanceState(initialOnboardingCompleted = false)

@@ -101,13 +101,29 @@ fun OnboardingScreen(
             // 按钮会被推到视口外（实测语义 bounds 直接是 Rect(0,0,0,0)）—— 一屏之内的引导
             // 却要滚动才够得着唯一的出口，用户很可能直接当成「没有下一步」而卡住。
             // 故底部收尾条固定在滚动区**外面**。
-            Column(
+            //
+            // **两个轴各由一处负责，合在一层会各丢一半**：
+            //
+            // - 水平：内层 Column 的 `fillMaxWidth()` + `horizontalAlignment = CenterHorizontally`
+            //   才是把 960dp 内容块居中的那一对。**漏掉 `fillMaxWidth()` 时** Column 按内容宽度
+            //   （960dp）收缩，`horizontalAlignment` 只在这 960dp 内部生效，父级直接左对齐 ——
+            //   窗口越宽右侧空得越离谱（实测 1580px 窗口右侧空 530px）。紧凑档更明显：
+            //   内容缩到 816px，1024px 窗口里标题中心偏左 84px。
+            // - 垂直：外层 Box 的 `contentAlignment = Center`。`verticalScroll` 用「高度无上界」
+            //   的约束量子节点，若把居中交给同一层，垂直居中会恒等于顶对齐（与 EmptyHint 同理）。
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp, vertical = 28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                 // 限宽并居中：窗口默认就有 1280px 宽，不限的话内容会被拉到左右两端，
                 // 单行文字拉得太长反而难读。960dp 刚好容纳 5 张 180dp 色卡 + 间距排成一行
                 // （排成一行能把配色段从两行压到一行，省下约 130px 高度）。
@@ -200,6 +216,7 @@ fun OnboardingScreen(
                         }
                         Spacer(Modifier.width(8.dp))
                         WinSwitch(checked = compactMode, onCheckedChange = onCompactModeChange)
+                    }
                     }
                 }
             }
