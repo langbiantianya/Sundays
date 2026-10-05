@@ -18,7 +18,7 @@ shared/
 │   │   ├── EditorContextMenu.kt      EditorContextMenuPayload + rememberEditorContextMenuState
 │   │   ├── Completion.kt             补全数据模型（CompletionItem / CompletionKind）+ 前缀切分 + 接受替换
 │   │   ├── GenerateHelpers.kt        造数沙箱宿主函数清单（上下文专属候选 + 沙箱禁用项记录）
-│   │   ├── ui/CompletionPopup.kt     补全弹层（贴光标，置于滚动容器内，不撑大编辑器高度）
+│   │   ├── ui/CompletionPopup.kt     补全弹层（贴光标，靠右时向左翻转；按内容自适应宽度 + 纯函数 completionPopupMaxWidth / completionPopupX；置于滚动容器内，不撑大编辑器高度）
 │   │   ├── CodeLanguage.kt           CodeLanguage SPI（tokenize + completionCandidates 默认空）+ CodeLanguageRegistry
 │   │   ├── SyntaxHighlighter.kt      token → 颜色映射
 │   │   ├── language/SqlLanguage.kt   SQL token + keyword 集合 + 补全候选池（大小写不敏感）
@@ -47,6 +47,7 @@ shared/
 │       ├── SystemInfoRefresh.kt       SystemInfoRefresh 自动刷新间隔（关闭/10s/5s/2s/1s）
 │       ├── ThemeModeToggle.kt         SettingsEntryButton（⚙ 设置入口）+ ThemeModeToggleButton（日夜切换，仅设置页在用）
 │       ├── ContextMenu.kt            ContextMenuState<T> 通用右键菜单状态
+│       ├── DragHandle.kt             DragHandle 可拖拽分隔条（命中区 8dp / 画线 1dp / 双击复位）+ 纯函数 nextPaneWidth / clampPaneWidth
 │       └── RightClick.kt             Modifier.onRightClick（鼠标右键检测 modifier）
 │   ├── settings/        设置页 + 设置持久化
 │   │   ├── SettingsScreen.kt          左分类 / 右内容（个性化 / 系统信息）
@@ -74,6 +75,7 @@ shared/
 | `DataTable` | `commonMain/.../table/DataTable.kt` | 虚拟滚动数据表格；主键承载（数据库行标识） |
 | `ContextMenuState<T>` | `commonMain/.../ui/ContextMenu.kt` | 通用右键菜单状态（被 editor / table 共用） |
 | `Modifier.onRightClick` | `commonMain/.../ui/RightClick.kt` | 鼠标右键检测 modifier（基于 `awaitPointerEventScope`） |
+| `DragHandle` | `commonMain/.../ui/DragHandle.kt` | 可拖拽竖向分隔条：拖动实时跟手、双击复位、宽度钳在 `[minWidth, maxWidth]`；**受控组件**（宽度由调用方持有），算术部分拆成纯函数 `nextPaneWidth` / `clampPaneWidth` 供单测。宽度该存哪一层见 [`ARCHITECTURE.md` §6.4](./ARCHITECTURE.md) |
 | `ConnectionManagerScreen` | `commonMain/.../connection/ConnectionManagerScreen.kt` | 连接管理（左侧列表 + 引导式配置向导 + 连接总览）；回调注入，**不依赖 `:engine`** |
 | `ConnectionStorage` | `commonMain/.../connection/ConnectionStorage.kt` | 连接配置 JSON 持久化（`~/.config/sundays/connection.json`） |
 | `buildJdbcUrl` / `parseJdbcUrl` | `commonMain/.../connection/JdbcUrl.kt` | 连接字段 ↔ JDBC URL 折算（URL 是引擎侧真相源） |

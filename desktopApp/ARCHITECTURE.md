@@ -46,7 +46,7 @@ desktopApp/
         └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
 
-desktopApp 现有 **139 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
+desktopApp 现有 **145 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
 
 **文件清单**：
 
@@ -56,7 +56,7 @@ desktopApp 现有 **139 个测试**（`ConnectionManagerFlowTest` / `DatabaseBro
 | `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，按目标分派到当前屏幕。`main.kt` 同时是**唯一的引擎装配点**（`createEngineClient()`） |
 | （已上移 `:shared`） | `AppDestination` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt) + `SundaysPalette`（配色 / 形状 / 字号）。均不引用 `:engine`，故可跨平台复用 |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
-| `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`）、`SqlSheet`（SQL 工作台单个 sheet 的编辑器 + 独立结果）、`DialectType → SqlDialectProfile` 映射（SQL 高亮档位随连接的库变）、`sqlSchemaCompletions` / `schemaCompletionSignature`（SQL 工作台补全候选） |
+| `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`）、`SqlSheet`（SQL 工作台单个 sheet 的编辑器 + 独立结果）、`DialectType → SqlDialectProfile` 映射（SQL 高亮档位随连接的库变）、`sqlSchemaCompletions` / `schemaCompletionSignature`（SQL 工作台补全候选）、`SCHEMA_PANEL_TAG` / `SCHEMA_DRAG_HANDLE_TAG`（树面板宽度契约的 UI 测试锚点） |
 | `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine`（按 `EngineClient` 传入）+ 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
 | `DatabaseBrowserFlowTest.kt` | 状态机测试（H2 内存库）：库列表 / 表列表 / 预览行数据 / 标签页去重 / `closeTab` 选中回退 / `selectPane` 三 pane / `executeSql` SELECT+DDL / SQL sheet 增删、逐 sheet 结果隔离与重命名 / **方言档位随连接变** / `executeGenerate` 造数落库与统计 / 造数脚本增删与重命名 / **补全候选覆盖库·表·已访问表的字段且按 库→表→字段 排序** / **缓存签名只跟 columns 不跟 rows** |
 | `DatabaseBrowserUiTest.kt` | 真点击测试：展开库 → 双击表 → 预览标签页出现且 `Role=TAB` 数量恒为 1；SQL 工作台执行 + 「＋」新建 sheet / 切 sheet 显示各自文本与结果 / 「✎」重命名（确定提交、取消放弃）/ 「×」关闭 / 滚轮横向滚动 / **标题条方言档位与「格式化」可用性**；造数工作台执行；两个工作台切 pane 后文本 + 光标 + 滚动 + 结果回显 |
@@ -233,7 +233,7 @@ if (appearance.onboardingCompleted) {
 |---|---|---|
 | sheet 标签条 | `SheetTabRow` | 左侧「＋」入口 + 每 sheet 一个标签（连接状态点 + 名称 + 「×」关闭，关闭时释放池并断开引擎会话） |
 | 内容区顶部工具栏 | `BrowserToolBar` | 「SQL 工作台」「造数工作台」两个入口切换右栏内容（`BrowserPane`）；处于某个工作台时该按钮显示「返回表预览」；未连接时禁用。**位于 `ActiveSheetContent` 内**（sheet 标签条之下），工具与它作用的连接同属一个视觉块 |
-| 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab` |
+| 左侧 | `SchemaTreePanel` → `DatabaseNode` → `TableLeaf` | `SCHEMA.LIST` 结果按库分组；点击库节点懒加载 `TABLE.LIST`；**双击**表叶子 → `openTab`。宽度由 `DragHandle` 分隔条调整（默认 320dp，双击复位，钳在 `[180dp, 容器宽 × 62%]`） |
 | 右侧（表预览） | `TabStrip` + `PreviewTabContent` | `SecondaryScrollableTabRow` 标签条（可逐页关闭）；内容为信息条 + `DataTable` |
 | 右侧（SQL 工作台） | `SqlWorkbenchPane` + `WorkbenchTabStrip` + `SqlResultArea` | SQL sheet 标签条（＋ 新建 / ✎ 重命名弹窗 / × 关闭 / 滚动，每个 sheet 一份独立 SQL 与独立结果）+ 上 60% `CodeEditorWithToolbar`（`:shared` editor 模块；**高亮档位 = 当前连接方言**（H2/MySQL/PG/DuckDB/SQLite），SQL 高亮 + 格式化 + `actions` 插槽的「执行 SQL」）+ 底部 40% 结果面板；「执行 SQL」走 `SQL.EXECUTE` 流式通道，只作用于当前 sheet |
 | 右侧（造数工作台） | `GenerateWorkbenchPane` + `WorkbenchTabStrip` + `GenerateResultArea` | 脚本标签条（多脚本按序执行，与 SQL 工作台共用同一标签条组件）+ Lua 版本 chip + 上 60% Lua 编辑器（`actions` 插槽的「执行造数」）+ 底部 40% 造数结果；「执行造数」走 `DATA.GENERATE` 流式通道，进度帧实时回填每个脚本的插入行数 |
@@ -362,6 +362,38 @@ tab.loading = false                                  // ← 必须在 fold 之�
 H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持小写。预览行的主键承载因此做
 **大小写不敏感**匹配（`k.equals("id", ignoreCase = true)`），找不到时退化为行号。
 引擎 `DataHandler.buildRow` 对非 LOB 列一律 `rs.getString` —— 单元格值在 UI 侧都是字符串。
+
+### 库/表树宽度可拖拽 —— 状态放在哪一层
+
+左侧树与右栏之间用 [`DragHandle`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/DragHandle.kt)
+分隔，拖动实时改变树宽，双击复位。
+
+| 参数 | 值 | 理由 |
+|---|---|---|
+| 默认宽 | 320dp | — |
+| 下限 | 180dp | 再窄就看不到表名 |
+| 上限 | `容器宽 × 0.62f` | **按比例而非固定 dp**：窗口窄时若还允许拉到 600dp，右侧工作台会被挤到没法用 |
+
+**状态必须放在 `DatabaseBrowserScreen` 层，不能放 `ActiveSheetContent` 里。**
+这是本屏最容易踩的坑：同一时刻只渲染**一个**激活 sheet，宽度若存在 `ActiveSheetContent` 内，
+切 sheet 时那棵组合被拆掉重建、`remember` 随之丢失 —— 表现就是「在 A 连接把树拉宽，
+切到 B 连接又缩回 320dp」。
+
+判据是：**布局宽度是窗口级偏好，不是 per-sheet 的**。
+（对照：树本身的展开 / 滚动 / 已加载表由每 sheet 的 `DatabaseBrowserState` 持有，
+那才是真正的 per-sheet 状态。别把两者混在一起。）
+
+**不落盘**（用户明确选择）：拖好的宽度只活在本次会话，重启回 320dp。
+要落盘的话得走 `SettingsStorage`，但「窗口级布局偏好」目前还没有持久化通道，
+为此新开一条配置项不划算。
+
+**上限取自 `BoxWithConstraints`**：`ActiveSheetContent` 的内容区被 `BoxWithConstraints` 包住，
+`maxWidth` 是真实容器宽。注意弹层所在的内层 `Box` 有自己的 `constraints` 接收者会**遮蔽**外层，
+所以必须在进入内层之前把值取出来 —— 与 `CodeEditor` 里捕获 `editorMaxHeightPx` 是同一个坑。
+
+`SchemaTreePanel` 与分隔条都挂了 testTag：面板与分隔条本身不带语义，
+测试量不到边界，只能靠 tag。**量面板而不是量里面的文字** —— 表名长度各不相同，
+量文字等于在断言「你的表名有多长」。
 
 ---
 

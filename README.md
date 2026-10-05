@@ -456,7 +456,7 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 ## 运行测试
 
 ```bash
-# 全部 873 测试
+# 全部 902 测试
 ./gradlew test
 
 # 单个方言模块
@@ -471,18 +471,18 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 ./gradlew :engine-grpc-client:test  # 21 测试（真实 gRPC server + 真实 H2 端到端）
 
 # Desktop App（含引擎实现装配测试）
-./gradlew :desktopApp:test          # 139 项
+./gradlew :desktopApp:test          # 145 项
 
 # Desktop App 共享代码测试
-./gradlew :shared:jvmTest           # 共享 UI / 逻辑测试（编辑器 + 表格 + 右键菜单，217 项）
+./gradlew :shared:jvmTest           # 共享 UI / 逻辑测试（编辑器 + 表格 + 右键菜单 + 分隔条，240 项）
 ```
 
 测试覆盖率：
 - **engine:test**（288 项，v2.16 起）：IPC config + transport round-trip + HikariCP pool + DialectLoader + handler 集成（typed proto builders）+ envelope options + DuckDB / SQLite 端到端 + LIST_DRIVERS + **Direct 模式契约** + **SYSTEM.DISCONNECT 路由与 dryRun（v2.15）** + **v2.16 新引擎能力**：`SqlScriptSplitterTest`（多语句切分）、`importer/CsvReaderTest` / `JsonLinesReaderTest` / `ImportFormatTest` / `ImportSourceFactoryTest`（导入阅读器）、`integration/CancelIntegrationTest`（4 项查询取消）、`integration/MultiStatementIntegrationTest`（6 项多语句）、`integration/TransactionIntegrationTest`（7 项事务）、`integration/ImportIntegrationTest`（9 项导入）、`handlers/GenerateSandboxContractTest`（3 项造数沙箱契约，防 UI 补全清单漂移）
 - **engine-grpc-client:test**（21 项，v2.15）：**真实 gRPC 服务端**（`NettyServerBuilder.forPort(0)` + `IdbEngineImpl`）+ **真实 H2** —— 远程连接初始化 / **与同进程实现的响应平价** / 流式分帧 / 远程连接释放 / 传输层故障 / 端点解析边界
-- **desktopApp:test**（139 项）：连接流程 / 数据库浏览 / 顶层导航 / 方言名契约 + 引擎实现装配（v2.15）+ 造数工作台 + **补全 schema 候选与缓存签名**
+- **desktopApp:test**（145 项）：连接流程 / 数据库浏览 / 顶层导航 / 方言名契约 + 引擎实现装配（v2.15）+ 造数工作台 + 补全 schema 候选与缓存签名 + **库/表树宽度拖拽**（`SchemaPanelWidthTest`，真指针事件）
 - **dialect-h2 / -duckdb / -sqlite:test**：方言 SPI 方法全量覆盖（208 项；`dialect-mysql` / `dialect-postgresql` 暂无测试）
-- **shared:jvmTest**（217 项）：Kotlin Multiplatform 共享代码 —— 编辑器（`FormatterSpacingTest` 27 / `CompletionTest` 32 / tokenizer / 方言档位）/ 表格 / 右键菜单 / 连接管理 / 主题
+- **shared:jvmTest**（240 项）：Kotlin Multiplatform 共享代码 —— 编辑器（`FormatterSpacingTest` 27 / `CompletionTest` 32 / **`CompletionPopupLayoutTest` 11** / tokenizer / 方言档位）/ 表格 / 右键菜单 / 连接管理 / 主题 / **`DragHandleTest` 12**
 
 > **Windows 环境下有 11 项基线失败**（`ConnectionStorage` 系列的 POSIX 0600 权限断言 3 项、`ConnectionManagerFlowTest` 3 项、`DatabaseBrowserSheetsTest` 4 项、`ThemeToggleVisibilityTest` 1 项）。它们是既有环境问题，与功能改动无关。
 
@@ -544,6 +544,7 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 | v2.17 | **`shared/editor` 编辑器能力补齐**<br>**两向贴合的空格判定**：抽 `formatter/TokenSpacing.kt`（两个纯函数 `bindsLeft` / `bindsRight`），规则「两相邻 token 之间要空格 ⟺ 左不贴右 且 右不贴左」。换掉旧版「写前决定下一个」的 `pendingSpace` 标志；彻底消灭 `id , name` / `id> 1` / `a:: int` / `t. col` / `( 1 )` 一类反复出现的畸形，以及「格式化两次才收敛」的伪幂等性。注释只读（块注释里常放代码样例，碰了就是破坏），只清行尾空白，**不被主子句换行规则吞掉**；缩进原样搬运；空行折叠至多一个；幂等性逐样本锁定<br>**编辑器补全（「提示」）**：`CodeLanguage` SPI 新增 `completionCandidates(prefix, limit)`，默认实现返回空列表（只支持高亮的语言零改动）。SQL 忽略大小写、Lua 大小写敏感 ——「谁拥有大小写规则谁说了算」，把 `Pri` 补成 `print` 是制造 bug。词字符限定 ASCII（`Char.isLetterOrDigit()` 对中文返回 `true`，会让中文注释吞掉英文词）。接受候选替换**整个词**（光标在词中间时），弹层置于滚动容器内 + `Modifier.atCaret` 自绘 0×0 报告（不撑大编辑器高度，天然跟着代码滚），按键走 `onPreviewKeyEvent` 才能 `consume` `Tab`/`Enter` 的默认行为<br>**造数沙箱宿主函数进入补全**：`CodeEditor(extraCompletions = …)` 注入**上下文专属**候选 —— 造数工作台据此补出引擎注入的 13 个全局（`insert` / `lastId` / `random_*`）并显示签名。它们**绝不进** `LuaLanguage.BUILTINS`：那批函数只在造数沙箱里存在，普通 Lua 编辑器中调用会报 `attempt to call a nil value`，塞进语言词表等于让所有 Lua 补全都推荐不存在的函数。清单是静态复制（`:shared` 不能反向依赖 `:engine`），由 `GenerateSandboxContractTest` 读引擎源码抽取实际注册的全局名并断言**集合相等**来防漂移<br>测试：`FormatterSpacingTest`（27 项）+ `CompletionTest`（32 项，含「宿主函数不得进 `LuaLanguage`」不变量）+ `GenerateSandboxContractTest`（3 项）。变异验证 7 处全部如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.8 / §2.10](./shared/ARCHITECTURE.md) |
 | v2.18 | **SQL 工作台补全接入真实 schema**<br>`CompletionKind` 追加 `DATABASE` / `TABLE` / `COLUMN`（**必须追加在枚举末尾** —— `buildCompletionPool` 用 `kind.ordinal` 当类别排序键，插中间会打乱既有词表次序）。候选**全部来自已有状态、零额外请求**：库 ← 连接时的 `SCHEMA.LIST`；表 ← 展开该库时的 `TABLE.LIST`（复用树上的懒加载结果）；字段 ← **打开过预览的表**的 `columns`<br>字段只覆盖「访问过的表」是刻意的：全库全表 = 每张表一次 `TABLE.COLUMN_LIST`，200 张表就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。零等待、零额外往返，用得越多越全<br>库/表/字段整体**优先于**关键字（`FROM us` 想要 `users` 这张表，不是 `USING`）。关键字那一路本就由 `languageId` = 方言档位自动带来，无需重复注入。`extraCompletionsCaseSensitive = false`：标识符大小写因方言而异，敲 `FROM USERS` 该能补出 `users`；这里不存在造数宿主函数那种「改写语义」风险 —— 接受是用户主动点的动作，插入的是数据库里真实存在的名字<br>缓存签名 `schemaCompletionSignature` 刻意**不含 `tab.rows`**：那是真正的数据（可能上千行），牵进 `remember` 的 key 会让每次翻页都重建整份候选；而直接用 `tabs` 当 key 更糟 —— 双击打开表只改 `tab.columns`，`tabs` 引用不变，字段候选永远出不来<br>测试：`DatabaseBrowserFlowTest` +3（候选覆盖与 detail、库→表→字段 排序、签名只跟 columns 不跟 rows）、`CompletionTest` +2（大小写策略是调用方的选择、新类别须追加在末尾）。变异验证 2 处如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.10.2](./shared/ARCHITECTURE.md) |
 | v2.19 | **补全触发阈值 2 → 1**<br>敲第一个字母就弹候选。**推翻 v2.17 的一条决策并记录推翻过程**：当时定 2 的理由是「单字符前缀几乎命中整个语言（`a` → `AND`/`ADD`/`AVG`…），弹层刚开就铺满屏幕，反而挡视线」—— 该理由**站不住**：弹层条数被 `maxCompletionItems` 封在 8 条，无论前缀多短都只显示 8 条，我把「**命中**数量多」误当成了「**显示**数量多」；且权衡方向也算错了，少按一次键的收益每次都发生，而「显得吵」是主观且能按 `Esc` 关掉的<br>「命中太多导致排序变差」的顾虑由两条规则兜住：上下文候选（库/表/字段/沙箱宿主函数）**整体优先**于关键字 —— 输入 `u` 时当前库里的 `users` 排在 `USING` 前面；语言候选按 类别→长度→字典序 排 —— 输入 `a` 时 `ADD`/`ALL` 靠前<br>阈值降到 1 **不等于**「没词字符时也弹」：空格/逗号/换行后 `wordPrefixBefore` 返回空串，仍然安静（单独断言）<br>测试：`CompletionTest` +3（阈值必须是 1、空前缀仍安静、limit 是硬约束）。变异验证：改回 2 → 第一条如期变红<br>**文档数字一并订正**（此前长期与实际脱节）：shared 97 → **217**、desktopApp 18 → **139**、engine 277 → **288**、`CompletionTest` 21 → **32**；并把「总计 619 失败」改成如实标注 Windows 下 11 项基线失败及其清单 |
+| v2.20 | **库/表树宽度可拖拽 + 补全弹层靠右翻转**<br>**新增 `DragHandle`**（`shared/ui/DragHandle.kt`，留在 `commonMain`）：可拖拽竖向分隔条，拖动实时跟手、**双击复位**、宽度钳在 `[minWidth, maxWidth]`。项目此前没有任何拖拽交互，为一条分隔条引入整个 `reorderable` 不划算 —— 只用 Foundation 自带的 `detectDragGestures` / `detectTapGestures`，将来接 Android / iOS 无需平台适配。三个手感上的刻意选择：**命中区 8dp 而画线 1dp**（1dp 的线在鼠标下极难点中）、**拖动时高亮**（让用户知道抓住了）、**`change.consume()`**（不消费的话拖分隔条会顺带把父级列表滚了）<br>**宽度状态放在 `DatabaseBrowserScreen` 层，不放 `ActiveSheetContent` 里** —— 这是本轮最容易踩的坑：同一时刻只渲染**一个**激活 sheet，宽度若存在 `ActiveSheetContent` 内，切 sheet 时组合被拆掉重建、`remember` 随之丢失，表现就是「在 A 连接把树拉宽，切到 B 连接又缩回 320dp」。判据是**布局宽度是窗口级偏好，不是 per-sheet 的**（树的展开/滚动/已加载表仍由每 sheet 的 `DatabaseBrowserState` 持有，那才是 per-sheet 状态）。上限用**容器比例 62%** 而非固定 dp：窗口窄时若还允许拉到 600dp，右栏会被挤到没法用。**不落盘**（用户明确选择），重启回 320dp<br>**补全弹层改为按内容自适应宽度 + 靠右时向左翻转**（`CompletionPopup.kt`）：此前 `.width(maxWidth)` 会把 2 条短候选（`ID`/`NAME`）也拉伸到 320dp，遮住下面好几行代码 —— 改 `widthIn(min = 120.dp, max = …)`。弹层位于**滚动容器内部**，越界会被父级裁掉，光标靠行尾时按「左边缘 = 光标」摆会让右半截直接消失，所以放不下时**翻转**而非**钳位**：钳位虽让弹层完整可见，但右边缘离光标很远、视觉上「不知道弹层属于谁」；翻转让弹层大致与光标右对齐，锚点始终在光标上。判定用 `>` 不用 `>=`（恰好放得下时不该翻，超 1px 必须翻）。**已知的取舍**：实际宽度布局后才知道，落点在布局前只能用上限估算，弹层很窄时翻转后会略偏右；精确解法要 `onSizeChanged` 二次定位，代价是多一帧闪烁，不值当<br>测试 **+29**：`DragHandleTest` 12 / `CompletionPopupLayoutTest` 11 / `SchemaPanelWidthTest` 6（真指针拖拽 + 真双击）。变异验证 **8 条全部如期变红**：去掉 density 换算（1x 机上正常、高 DPI 拖拽快一倍）、去掉钳位、比例上限换成固定 600dp、去掉翻转、`>` 改 `>=`、去掉负坐标钳位、宽度比例 0.70→0.85、上限 460→700<br>测试数：shared 217 → **240**、desktopApp 139 → **145**、项目总计 873 → **902**；同时把 `shared/ARCHITECTURE.md` §8 那张长期失准的测试表（写着 105 / 合计 125）按实测重建 |
 
 ---
 

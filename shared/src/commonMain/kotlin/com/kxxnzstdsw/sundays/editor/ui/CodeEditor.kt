@@ -365,6 +365,10 @@ fun CodeEditor(
         // 弹层所在的 `Box` 也有自己的 `constraints` 接收者，在其内部读到的是那个（会遮蔽外层）。
         val editorMaxHeightPx = constraints.maxHeight
         val editorMaxWidthDp = maxWidth
+        // 补全弹层的横向落点要在 px 里比（光标坐标也是 px），所以这里存一份像素宽度。
+        // 与 `editorMaxHeightPx` 同源 —— 都是外层 BoxWithConstraints 的 constraints，
+        // 不是弹层所在那个内层 `Box` 的（那个会遮蔽外层）。
+        val editorMaxWidthPx = constraints.maxWidth
 
         Row(
             modifier = Modifier
@@ -432,6 +436,15 @@ fun CodeEditor(
                     } else {
                         caretBottom
                     }
+                    // 宽度上限与横向落点都走纯函数 —— 定位规则要能单测，
+                    // 而且这两条规则（贴光标 / 靠右翻转）是肉眼在界面上证伪不了的。
+                    val popupMaxWidth = completionPopupMaxWidth(editorMaxWidthDp)
+                    val popupMaxWidthPx = with(density) { popupMaxWidth.roundToPx() }
+                    val x = completionPopupX(
+                        caretX = caretX,
+                        editorWidth = editorMaxWidthPx,
+                        popupMaxWidthPx = popupMaxWidthPx,
+                    )
                     CompletionPopup(
                         items = completionItems,
                         selectedIndex = completionIndex.coerceIn(
@@ -439,9 +452,9 @@ fun CodeEditor(
                             (completionItems.size - 1).coerceAtLeast(0),
                         ),
                         onAccept = ::acceptCompletion,
-                        maxWidth = (editorMaxWidthDp - 24.dp).coerceAtLeast(160.dp),
+                        maxWidth = popupMaxWidth,
                         modifier = Modifier.atCaret(
-                            x = caretX,
+                            x = x,
                             y = y.coerceAtLeast(0),
                         ),
                     )

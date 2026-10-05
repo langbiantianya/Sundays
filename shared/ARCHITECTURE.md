@@ -457,6 +457,44 @@ SQL 工作台的候选**全部来自已有状态，零额外请求**（`Database
 > Compose 的 `remember` 用 `equals` 比较 key，签名里的 `Pair` / `List` 是结构相等，
 > 所以两边都能正确命中。`DatabaseBrowserFlowTest` 对这两条各有一个方向的断言。
 
+### 2.10.3 弹层定位契约 —— 贴光标 + 靠右翻转
+
+弹层有两个尺寸问题，一个定位问题，全部落在 `CompletionPopup.kt` 的三个纯函数里。
+
+#### 宽度：按内容自适应，只封顶
+
+```kotlin
+.widthIn(min = 120.dp, max = popupMaxWidth)   // 不是 .width(max = …)
+```
+
+`.width(maxWidth)` 会把短内容**拉伸**到上限：2 条短候选（`ID` / `NAME`）也会占掉
+320dp，把下面好几行代码全遮住。`widthIn` 让内容决定宽度，只用上限封顶。
+上限本身 = 编辑器宽度的 70%，夹在 160dp ~ 460dp（两端理由见 KDoc）。
+
+#### 定位：贴光标，靠右时向左翻转
+
+弹层位于**滚动容器内部**，越界部分由父级裁掉。光标靠在行尾时按「弹层左边缘 = 光标」摆，
+右半截会直接消失 —— 而且弹层一开就挡住光标右边那片代码，正是用户正在读的位置。
+
+| 函数 | 职责 |
+|---|---|
+| `completionPopupMaxWidth(editorWidth)` | 宽度上限（70%，夹在 160~460dp） |
+| `completionPopupX(caretX, editorWidth, popupMaxWidthPx)` | 横向落点：放得下贴光标，放不下就翻转 |
+
+**翻转优先于钳位**：钳位（`min(caretX, editorWidth - w)`）虽然让弹层完整可见，
+但右边缘会离光标很远，点候选时鼠标要横跨那段距离，视觉上「不知道弹层属于谁」。
+翻转则让弹层大致与光标右对齐 —— 无论往哪边展开，锚点都在光标上。
+
+**判定用 `>` 不用 `>=`**：恰好放得下时不该翻转（那会让「本来放得下」变成「莫名其妙翻到左边」）；
+而超 1px 就必须翻，否则最后一列候选被裁掉半截。
+
+**已知的近似**：弹层实际宽度是**布局后**才知道的（内容自适应），而落点在布局前只能拿
+上限估算。所以弹层很窄时，翻转后会略微偏右一点。精确解法要用 `onSizeChanged` 拿实测宽度
+二次定位，代价是多一帧闪烁（弹层先出现、再跳一下）—— 对一个补全列表来说不值当。
+**这是取舍，不是疏漏。**
+
+---
+
 ## 3. DataTable 设计
 
 ### 3.1 核心能力
@@ -1304,6 +1342,66 @@ if (menuState.visible) {
 
 ---
 
+### 6.4 `DragHandle` —— 可拖拽分隔条
+
+```kotlin
+DragHandle(
+    width = currentWidth,              // 当前宽度，由调用方持有
+    onWidthChange = { currentWidth = it },
+    defaultWidth = 320.dp,             // 双击复位到这
+    minWidth = 180.dp,
+    maxWidth = containerWidth * 0.62f, // 上限由调用方按容器给
+    color = …, highlightColor = …,
+)
+```
+
+拖动实时跟手（不是松手才跳），双击复位，宽度钳在 `[minWidth, maxWidth]`。
+
+#### 为什么自己写而不引 `reorderable`
+
+项目此前**没有任何拖拽交互**（`DataTable` 的列拖拽还列在 §9.2「未来可能」里），
+为一条分隔条引入整个 `reorderable` 依赖不划算。这里只用 Compose Foundation 自带的
+`detectDragGestures` / `detectTapGestures`，因此**仍留在 `commonMain`** ——
+将来 Android / iOS 目标接上时无需平台适配。
+
+#### 三个手感上的刻意选择
+
+1. **命中区比视觉宽度宽**（`hitWidth` = 8dp，画线 1dp）。1dp 的线在鼠标下极难点中，
+   这是所有 IDE 分隔条的通行做法。
+2. **拖动时高亮**。让用户知道「抓住了」，否则拖到一半不知道从哪松手。
+3. **`change.consume()`**。不消费的话这个 8dp 宽的 Box 会把拖拽事件往父级滚动容器传，
+   拖分隔条时顺带把列表滚了。
+
+#### 纯函数切缝
+
+拖拽本身要真指针事件，测不了；所以算术部分拆成两个纯函数放在同一文件里：
+
+| 函数 | 职责 |
+|---|---|
+| `clampPaneWidth(value, minWidth, maxWidth)` | 唯一的钳位入口 |
+| `nextPaneWidth(current, dragDeltaPx, density, minWidth, maxWidth)` | 像素增量 → dp → 钳位 |
+
+**拖拽和双击复位必须共用 `clampPaneWidth`**：两处各写一次 `coerceIn` 的日子不长，
+早晚漏掉一处，而漏掉的后果是「双击能复位成一个比下限还窄的宽度」—— 这种 bug 在界面上
+极难看出根因。默认值在极窄容器里也可能已经超出上限，复位同样要过钳位。
+
+另有一个前提值得记住：`maxWidth` 由容器宽度按比例算出，**窗口缩窄后它会小于调用方
+记忆中的当前宽度**，钳位会在那一帧把宽度往回拽。这是要的行为（布局必须服从当前窗口），
+但也意味着窗口缩窄后不会保留用户之前拖到的宽度。
+
+#### 宽度的状态归属
+
+`DragHandle` **不持有**宽度，它是个纯受控组件。宽度存在哪一层是调用方的决定，
+但有一条经验：**布局宽度应当提升到「同一时刻只渲染一个实例」的那一层之外**。
+
+浏览屏踩过这个坑：宽度若存在 `ActiveSheetContent` 里，因为同一时刻只渲染**一个**激活 sheet，
+切 sheet 时那棵组合被拆掉重建、`remember` 随之丢失 —— 表现就是「在 A 连接把树拉宽，
+切到 B 连接又缩回默认」。布局宽度是**窗口级偏好**，不是每个 sheet 各自的。
+（对照：树本身的展开 / 滚动 / 已加载表仍由每 sheet 的 `DatabaseBrowserState` 持有，
+那是真正的 per-sheet 状态，两回事。）
+
+---
+
 ## 7. 设计原则
 
 ### 7.1 Slot-based 可扩展性
@@ -1382,7 +1480,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 ## 8. 测试覆盖
 
-`shared/` 共 **105 项测试**，分布如下：
+`shared/` 共 **240 项测试**，分布如下（数字为 `:shared:jvmTest` 实测值，非估算）：
 
 | 测试类 | 路径 | 项数 | 说明 |
 |---|---|---|---|
@@ -1392,16 +1490,24 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `FormatterSpacingTest` | `commonTest/.../editor/FormatterSpacingTest.kt` | 27 | 格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读（不被换行规则吞、不改内容）、空行折叠、幂等性、无行尾空白 |
 | `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 32 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离、上下文专属候选（大小写由调用方定 / 保持传入顺序）、**触发阈值 1 字符 / 空前缀仍安静 / limit 是硬约束**、新类别须追加在枚举末尾、**宿主函数不得进入 `LuaLanguage`** |
+| `CompletionPopupLayoutTest` | `commonTest/.../editor/ui/CompletionPopupLayoutTest.kt` | 11 | 弹层定位契约：宽度上限（70% + 160/460 两端夹取）、贴光标、靠右时**翻转**而非钳位、`>` 与 `>=` 的边界差异、翻转后不取负坐标 |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
-| `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
+| `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 3 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
 | `UiTokensTest` | `commonTest/.../ui/UiTokensTest.kt` | 8 | 逐主题 × 明暗断言经典档把**每一项**造型决策都打开、现代档都关掉；形状解析在现代档原样透传 / 经典档按主题抹平；反色选中行过 AA 4.5:1；斜面对两种控件面（按钮面 / 输入框面）均有明暗差 |
 | `ThemeModeTest` | `commonTest/.../ui/ThemeModeTest.kt` | 13 | 三档循环顺序 / `next`↔`previous` 互逆 / 显式档位不受系统值影响 / 三击闭环 |
-| `SettingsStorageTest` | `jvmTest/.../settings/SettingsStorageTest.kt` | 8 | 逐档往返 / 路径与版本字段 / 损坏文件降级 + 自愈 / 未知枚举值降级 / 未知字段忽略 / 目录自动创建 / 临时文件不残留 |
+| `CompactModeTest` | `commonTest/.../ui/CompactModeTest.kt` | 6 | 紧凑档 `density` 数学：非紧凑档必须**返回同一个实例**、几何按 `UI_SCALE` 缩、文字按文本缩放缩（反向补偿 `fontScale`） |
+| `DragHandleTest` | `commonTest/.../ui/DragHandleTest.kt` | 12 | 分隔条拖拽数学：像素增量**必须经 density 换算**（1x 机上正常、高 DPI 快一倍的隐形缺陷）、上下限钳位、超量增量一次性落边界、零增量帧不抖动、逐帧累积、窗口缩窄后把旧宽度拉回上限、双击复位与拖拽共用同一钳位 |
+| `SettingsStorageTest` | `jvmTest/.../settings/SettingsStorageTest.kt` | 14 | 逐档往返 / 路径与版本字段 / 损坏文件降级 + 自愈 / 未知枚举值降级 / 未知字段忽略 / 目录自动创建 / 临时文件不残留 |
 | `OnboardingStateTest` | `commonTest/.../ui/OnboardingStateTest.kt` | 9 | 首次启动判据（无文件=引导 / 已有文件=不打扰老用户 / 已完成=不引导）/ `exists()` 只看文件不解析内容 / 完成引导落盘 / **外观变更不得抹掉已完成标记** / 重复完成幂等 / 默认状态不拦截应用 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
-| **合计** | | **125** | **0 失败 / 0 错误** |
+| **合计** | | **240** | **237 通过 / 3 失败** |
+
+> **3 项失败是 Windows 环境的既有基线**，与本仓代码无关：
+> `ConnectionStoragePermissionsTest` 1 + `ConnectionStorageTest` 2。
+> 它们断言的是 POSIX 文件权限位（0600）与凭据文件内容，在 Windows 上无法成立。
+> **不要**为了让构建变绿去改这两个测试。
 
 运行命令：
 
@@ -1419,7 +1525,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | 约束 | 影响 |
 |---|---|
 | `CodeEditor` tokenize 同步执行 | 大文本（> 50K 行）可能短暂卡帧；未来可拆 `LaunchedEffect` 异步化 |
-| `DataTable` 不支持列拖拽 / 列排序 | UI 层面缺失；调用方需自己用 `TableColumn.weight` 重新排列表头 |
+| `DataTable` 不支持列拖拽 / 列排序 | UI 层面缺失；调用方需自己用 `TableColumn.weight` 重新排列表头。**分隔条**（不是列拖拽）已由 §6.4 的 `DragHandle` 提供 |
 | `DataTable` 不支持多列排序 / 过滤 | 调用方需在外层维护 `pageSize` / `currentPage` / `where` / `orderBy` 状态 |
 | `CodeEditor` 不支持查找替换 | IDE 习惯功能；可作为未来增量 |
 | 不支持 IME composition 输入 | 中文 / 日文输入法合成中文本期间显示可能异常 |
@@ -1432,7 +1538,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | 新平台目标（`androidMain` / `iosMain` / `wasmJsMain`） | 现有 `commonMain` 零修改复用；仅需平台特定 `pointerInput` 适配 |
 | `CodeEditor` 增加查找替换 | 工具栏 `actions` 插槽可承载；纯 `commonMain` 增量 |
 | `CodeEditor` 异步 tokenize | `LaunchedEffect` + `produceState` 包装；不影响 API |
-| `DataTable` 列拖拽 | 引入 `reorderable` 库或自实现 `Modifier.draggable` 包裹表头 |
+| `DataTable` 列拖拽 | 引入 `reorderable` 库或自实现 `Modifier.draggable` 包裹表头；§6.4 的 `DragHandle` 已把「拖拽 + 钳位 + 受控宽度」这套手感趟了一遍，可直接复用其模式 |
 | `DataTable` 多列排序 / 过滤 | 引入 `TableSortSpec` / `TableFilterSpec` 数据模型 + 工具栏插槽 |
 
 ---

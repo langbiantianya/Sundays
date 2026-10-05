@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,6 +89,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.google.protobuf.Value as ProtoValue
@@ -121,6 +123,7 @@ import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
+import com.kxxnzstdsw.sundays.ui.DragHandle
 import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
@@ -251,6 +254,17 @@ fun DatabaseBrowserScreen(
         if (!memoryBarHovered && !memoryPanelHovered) memoryDetailOpen = false
     }
 
+    // 左侧库/表树宽度 —— **刻意放在这一层**（而不是 `ActiveSheetContent` 里）。
+    //
+    // 理由：同一时刻只渲染**一个**激活 sheet，宽度若存在 `ActiveSheetContent` 内，
+    // 切 sheet 时那棵组合被拆掉重建，`remember` 随之丢失 —— 于是「在 A 连接把树拉宽，
+    // 切到 B 连接又缩回 320dp」。布局宽度是**窗口级偏好**，不是每个 sheet 各自的。
+    //
+    // 不落盘（用户明确选择）：拖好的宽度只活在本次会话，重启回 320dp。
+    // 树本身的状态（展开 / 滚动 / 已加载的表）由每 sheet 的 `DatabaseBrowserState` 持有，
+    // 与这里的纯布局宽度是两回事，别混。
+    var schemaPanelWidth by remember { mutableStateOf(SCHEMA_PANEL_DEFAULT_WIDTH) }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
@@ -281,6 +295,8 @@ fun DatabaseBrowserScreen(
                     sheet = active,
                     onConnect = onConnect,
                     onDisconnect = onDisconnect,
+                    schemaPanelWidth = schemaPanelWidth,
+                    onSchemaPanelWidthChange = { schemaPanelWidth = it },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -369,6 +385,18 @@ data class SheetDescriptor(
  * 三个 pane 是**同一份 sheet 状态**的两种以上渲染 —— 切换只改变渲染目标，不清空任何状态。
  */
 enum class BrowserPane { TABLE, SQL, GENERATE }
+
+/** 左侧库/表树的默认宽度 —— 双击分隔条即复位到这个值。 */
+private val SCHEMA_PANEL_DEFAULT_WIDTH: Dp = 320.dp
+
+/** 左侧库/表树宽度的下限 —— 再窄就看不到表名了。 */
+private val SCHEMA_PANEL_MIN_WIDTH: Dp = 180.dp
+
+/** 库/表树面板的 UI 测试 tag —— 面板本身无语义，量宽度得靠它。 */
+internal const val SCHEMA_PANEL_TAG = "schemaTreePanel"
+
+/** 分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
+internal const val SCHEMA_DRAG_HANDLE_TAG = "schemaDragHandle"
 
 // ============================================================================
 // Sheet 标签条 / 数据列表：并 ＋ 入口
@@ -919,6 +947,8 @@ private fun ActiveSheetContent(
     sheet: SheetDescriptor,
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
+    schemaPanelWidth: Dp,
+    onSchemaPanelWidthChange: (Dp) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 注入当前连接（连接变化时清空派生状态），随后在已连接时自动加载数据库列表。
@@ -941,43 +971,55 @@ private fun ActiveSheetContent(
         )
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        Row(modifier = Modifier.fillMaxSize()) {
-            SchemaTreePanel(
-                state = sheet.browser,
-                connected = sheet.status.state == ConnectionState.CONNECTED,
-                onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
-                modifier = Modifier
-                    .width(320.dp)
-                    .fillMaxHeight(),
-            )
-            VerticalDivider(
-                modifier = Modifier.fillMaxHeight(),
-                color = MaterialTheme.colorScheme.outlineVariant,
-            )
-            when (sheet.browser.activePane) {
-                BrowserPane.TABLE -> PreviewTabArea(
-                    state = sheet.browser,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                )
-                BrowserPane.SQL -> SqlWorkbenchPane(
+        // 宽度上限按容器比例给，而不是固定 dp：窗口窄时若还允许拉到 600dp，
+        // 右侧工作台会被挤到没法用。0.62 留足了右栏的最低可读宽度。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val maxPanelWidth = maxWidth * 0.62f
+            Row(modifier = Modifier.fillMaxSize()) {
+                SchemaTreePanel(
                     state = sheet.browser,
                     connected = sheet.status.state == ConnectionState.CONNECTED,
-                    schema = sheet.browser.currentSchema(),
-                    dialect = sheet.browser.sqlDialectProfile(),
+                    onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
                     modifier = Modifier
-                        .weight(1f)
+                        .width(schemaPanelWidth)
                         .fillMaxHeight(),
                 )
-                BrowserPane.GENERATE -> GenerateWorkbenchPane(
-                    state = sheet.browser,
-                    connected = sheet.status.state == ConnectionState.CONNECTED,
-                    schema = sheet.browser.currentSchema(),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
+                DragHandle(
+                    width = schemaPanelWidth,
+                    onWidthChange = onSchemaPanelWidthChange,
+                    defaultWidth = SCHEMA_PANEL_DEFAULT_WIDTH,
+                    minWidth = SCHEMA_PANEL_MIN_WIDTH,
+                    maxWidth = maxPanelWidth,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    highlightColor = MaterialTheme.colorScheme.primary,
+                    // testTag：分隔条画出来只有 1dp 宽，没有 tag 的话测试只能靠坐标猜
+                    modifier = Modifier.testTag(SCHEMA_DRAG_HANDLE_TAG),
                 )
+                when (sheet.browser.activePane) {
+                    BrowserPane.TABLE -> PreviewTabArea(
+                        state = sheet.browser,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                    BrowserPane.SQL -> SqlWorkbenchPane(
+                        state = sheet.browser,
+                        connected = sheet.status.state == ConnectionState.CONNECTED,
+                        schema = sheet.browser.currentSchema(),
+                        dialect = sheet.browser.sqlDialectProfile(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                    BrowserPane.GENERATE -> GenerateWorkbenchPane(
+                        state = sheet.browser,
+                        connected = sheet.status.state == ConnectionState.CONNECTED,
+                        schema = sheet.browser.currentSchema(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                }
             }
         }
     }
@@ -1018,7 +1060,9 @@ private fun SchemaTreePanel(
     val listState = rememberLazyListState()
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        modifier = modifier,
+        // testTag：面板本身不带语义，测试量不到它的边界（里面的文字节点宽度会随表名变化）。
+        // 宽度契约要断言的恰恰是**面板**，所以必须给它一个锚点。
+        modifier = modifier.testTag(SCHEMA_PANEL_TAG),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
@@ -2535,7 +2579,7 @@ class DatabaseBrowserState(
     /**
      * 造数脚本 —— 一份 Lua 脚本 + 该脚本的造数统计。
      *
- * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切到表预览再切回来保持不变
+     * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切到表预览再切回来保持不变
      * - [inserted] / [lastTable] 由引擎 `gen_progress_frame` 流实时回填
      */
     class GenerateScript(title: String) {
