@@ -31,13 +31,21 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
@@ -49,13 +57,18 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.editor.CodeLanguage
 import com.kxxnzstdsw.sundays.editor.CodeLanguageRegistry
+import com.kxxnzstdsw.sundays.editor.CompletionItem
+import com.kxxnzstdsw.sundays.editor.DEFAULT_COMPLETION_LIMIT
 import com.kxxnzstdsw.sundays.editor.EditorContextMenuPayload
 import com.kxxnzstdsw.sundays.editor.EditorContextMenuState
+import com.kxxnzstdsw.sundays.editor.MIN_COMPLETION_PREFIX
 import com.kxxnzstdsw.sundays.editor.SyntaxHighlighter
+import com.kxxnzstdsw.sundays.editor.applyCompletion
 import com.kxxnzstdsw.sundays.editor.formatter.CodeFormatterRegistry
 import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
+import com.kxxnzstdsw.sundays.editor.wordPrefixBefore
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.onRightClick
@@ -163,6 +176,9 @@ fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
  * @param contextMenuState 右键菜单状态；通常用 [rememberEditorContextMenuState] 创建
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
  *   payload 通过 [EditorContextMenuPayload]（包含当前 text + languageId）传入
+ * @param enableCompletion 是否启用关键字 / 函数补全（「提示」功能，见 §2.10）。默认开启；
+ *   `languageId = null`（纯文本）或语言未实现 `completionCandidates` 时自动不生效
+ * @param maxCompletionItems 弹层最多同时展示的候选条数
  */
 @Composable
 fun CodeEditor(
@@ -177,6 +193,8 @@ fun CodeEditor(
     editorState: CodeEditorState = rememberCodeEditorState(text),
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
+    enableCompletion: Boolean = true,
+    maxCompletionItems: Int = DEFAULT_COMPLETION_LIMIT,
 ) {
     val language = remember(languageId) {
         languageId?.let { CodeLanguageRegistry.get(it) }
@@ -193,6 +211,85 @@ fun CodeEditor(
 
     val transformation = remember(language, highlighter, fieldValue.text) {
         CodeVisualTransformation(language, highlighter)
+    }
+
+    // 输入区内边距 —— 光标坐标取自**文本**布局，而文本原点在输入区内边距之后，
+    // 所以补全弹层定位时必须把内边距加回去。用常量而非字面量，避免两处数值漂移。
+    val EDITOR_PADDING_H = 12.dp
+    val EDITOR_PADDING_V = 8.dp
+    // 弹层单行高度估算（字体 14 + 上下各 6dp 内边距）—— 仅用于「上翻」判断，允许误差
+    val COMPLETION_ROW_HEIGHT = 28.dp
+
+    // =========================================================================
+    // 补全（「提示」功能）状态
+    //
+    // 为什么用 LaunchedEffect 而不是 onValueChange 里直接算：候选取决于「光标位置 + 当前词」，
+    // 而 onValueChange 只在**文本**变化时触发 —— 纯移动光标（如方向键跳到别处）不会重新计算，
+    // 弹层会留在旧位置不跟。用 effect 把 selection 也纳入 key 就没这个问题。
+    // =========================================================================
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var completionItems by remember { mutableStateOf(emptyList<CompletionItem>()) }
+    var completionIndex by remember { mutableIntStateOf(0) }
+
+    val selectionStart = fieldValue.selection.start
+    val textNow = fieldValue.text
+    val collapsedSelection = fieldValue.selection.collapsed
+
+    LaunchedEffect(enableCompletion, language, textNow, selectionStart, collapsedSelection) {
+        val lang = language
+        if (!enableCompletion || lang == null || !collapsedSelection) {
+            completionItems = emptyList()
+            return@LaunchedEffect
+        }
+        val prefix = wordPrefixBefore(textNow, selectionStart)
+        completionItems = if (prefix.length < MIN_COMPLETION_PREFIX) {
+            emptyList()
+        } else {
+            lang.completionCandidates(prefix, maxCompletionItems)
+        }
+        // 候选集一变就回到第一条：保留旧下标会指向一条不相干的词
+        completionIndex = 0
+    }
+
+    fun acceptCompletion(item: CompletionItem) {
+        val (newText, newCaret) = applyCompletion(textNow, selectionStart, item)
+        editorState.onValueChange(TextFieldValue(newText, TextRange(newCaret)))
+        if (newText != text) onTextChange(newText)
+        completionItems = emptyList()
+    }
+
+    /**
+     * 弹层打开时的按键分发。
+     *
+     * 用 `onPreviewKeyEvent` 而非 `onKeyEvent`：Tab 与 Enter 在 `BasicTextField` 上有**默认行为**
+     * （移动焦点 / 换行），只有 preview 阶段能先截住并 `consume` 掉。
+     */
+    fun onCompletionKey(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        if (completionItems.isEmpty()) return false
+        val size = completionItems.size
+        return when (event.key) {
+            // 桌面端小键盘的回车同样上报为 Key.Enter，无需单独处理 NumPadEnter
+            Key.Tab, Key.Enter -> {
+                acceptCompletion(completionItems[completionIndex.coerceIn(0, size - 1)])
+                true
+            }
+            Key.Escape -> {
+                // 显式关闭：仅清候选即可，用户下次敲字会重新触发
+                completionItems = emptyList()
+                true
+            }
+            Key.DirectionDown -> {
+                completionIndex = (completionIndex + 1) % size
+                true
+            }
+            Key.DirectionUp -> {
+                // Kotlin 的 % 会给出负余数，这里补 size 再取模实现**向上循环**
+                completionIndex = (completionIndex - 1 + size) % size
+                true
+            }
+            else -> false
+        }
     }
 
     val minHeight = (theme.textStyle.fontSize.value * minLines + 16).dp
@@ -243,6 +340,11 @@ fun CodeEditor(
             null
         }
 
+        // 补全弹层「上翻」判断需要的可视边界 —— **必须在这里取**：
+        // 弹层所在的 `Box` 也有自己的 `constraints` 接收者，在其内部读到的是那个（会遮蔽外层）。
+        val editorMaxHeightPx = constraints.maxHeight
+        val editorMaxWidthDp = maxWidth
+
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -258,20 +360,72 @@ fun CodeEditor(
                     theme = theme,
                 )
             }
-            BasicTextField(
-                value = fieldValue,
-                onValueChange = { newValue ->
-                    editorState.onValueChange(newValue)
-                    if (newValue.text != text) onTextChange(newValue.text)
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                textStyle = theme.textStyle,
-                visualTransformation = transformation,
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.textStyle.color),
-            )
+            // 弹层被放在这个 Box 里（**滚动容器内部**），因此天然跟着代码一起滚 ——
+            // 不用手算滚动偏移，也就不会出现「代码滚了、弹层没滚」的错位。
+            Box(modifier = Modifier.weight(1f)) {
+                BasicTextField(
+                    value = fieldValue,
+                    onValueChange = { newValue ->
+                        editorState.onValueChange(newValue)
+                        if (newValue.text != text) onTextChange(newValue.text)
+                    },
+                    onTextLayout = { layoutResult = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier)
+                        .padding(horizontal = EDITOR_PADDING_H, vertical = EDITOR_PADDING_V)
+                        .onPreviewKeyEvent { onCompletionKey(it) },
+                    textStyle = theme.textStyle,
+                    visualTransformation = transformation,
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.textStyle.color),
+                )
+
+                // 补全弹层 —— 定位到光标正下方；空间不够时上翻
+                if (completionItems.isNotEmpty()) {
+                    // **必须钳位**：`layoutResult` 来自上一次布局，可能比当前文本短
+                    // （打字过程中 selection 先于布局更新）。直接传 selection.start
+                    // 会让 `getBoundingBox` 因越界抛 IllegalArgumentException ——
+                    // 一次就足以打断整轮 recompose，把弹层变成崩溃的开关。
+                    // 用 `getCursorRect` 而非 `getBoundingBox`：前者才是「光标矩形」的正解，
+                    // 光标落在末尾时也不会偏到最后一个字符的左边。
+                    val caretRect = layoutResult?.let { lr ->
+                        val len = lr.layoutInput.text.length
+                        if (len <= 0) null
+                        else lr.getCursorRect(fieldValue.selection.start.coerceIn(0, len - 1))
+                    }
+                    val density = LocalDensity.current
+                    // 光标坐标取自**文本**布局，而文本原点落在输入区内边距之后，
+                    // 所以这里要把内边距加回去，否则弹层会整体左上偏移一个内边距的距离。
+                    val paddingH = with(density) { EDITOR_PADDING_H.roundToPx() }
+                    val paddingV = with(density) { EDITOR_PADDING_V.roundToPx() }
+                    val caretX = paddingH + (caretRect?.left ?: 0f).toInt()
+                    val caretBottom = paddingV + (caretRect?.bottom ?: 0f).toInt()
+                    val caretTop = paddingV + (caretRect?.top ?: 0f).toInt()
+                    // 上翻阈值：按行高估算弹层高度，放不下就退到光标上方
+                    val estimatedHeight = with(density) {
+                        // Dp 的 `times` 只在接收者一侧，Int * Dp 不成立 —— 必须是 Dp * Int
+                        (COMPLETION_ROW_HEIGHT * completionItems.size + 12.dp).roundToPx()
+                    }
+                    val y = if (caretBottom + estimatedHeight > editorMaxHeightPx) {
+                        caretTop - estimatedHeight
+                    } else {
+                        caretBottom
+                    }
+                    CompletionPopup(
+                        items = completionItems,
+                        selectedIndex = completionIndex.coerceIn(
+                            0,
+                            (completionItems.size - 1).coerceAtLeast(0),
+                        ),
+                        onAccept = ::acceptCompletion,
+                        maxWidth = (editorMaxWidthDp - 24.dp).coerceAtLeast(160.dp),
+                        modifier = Modifier.atCaret(
+                            x = caretX,
+                            y = y.coerceAtLeast(0),
+                        ),
+                    )
+                }
+            }
         }
     }
 
@@ -414,6 +568,7 @@ private fun LineNumberGutter(
  * @param contextMenuState 右键菜单状态；通常用 [rememberEditorContextMenuState] 创建
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
  *   payload 通过 [EditorContextMenuPayload]（包含当前 text + languageId）传入
+ * @param enableCompletion 是否启用关键字 / 函数补全（「提示」功能）；默认开启
  */
 @Composable
 fun CodeEditorWithToolbar(
@@ -431,6 +586,7 @@ fun CodeEditorWithToolbar(
     onLanguageChange: (String) -> Unit = {},
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
+    enableCompletion: Boolean = true,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         EditorToolbar(
@@ -461,6 +617,7 @@ fun CodeEditorWithToolbar(
             editorState = editorState,
             contextMenuState = contextMenuState,
             contextMenuItems = contextMenuItems,
+            enableCompletion = enableCompletion,
         )
     }
 }

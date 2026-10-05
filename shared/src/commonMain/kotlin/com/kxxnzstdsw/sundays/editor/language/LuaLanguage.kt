@@ -2,7 +2,11 @@ package com.kxxnzstdsw.sundays.editor.language
 
 import com.kxxnzstdsw.sundays.editor.CodeLanguage
 import com.kxxnzstdsw.sundays.editor.CodeToken
+import com.kxxnzstdsw.sundays.editor.CompletionItem
+import com.kxxnzstdsw.sundays.editor.CompletionKind
 import com.kxxnzstdsw.sundays.editor.TokenType
+import com.kxxnzstdsw.sundays.editor.buildCompletionPool
+import com.kxxnzstdsw.sundays.editor.selectCompletions
 
 /**
  * Lua 语言 — 兼容 Lua 5.1 / 5.2 / 5.3 / 5.4 / 5.5 / LuaJIT（共享核心语法）。
@@ -23,6 +27,23 @@ class LuaLanguage : CodeLanguage {
 
     override val id: String = "lua"
     override val displayName: String = "Lua"
+
+    /** 补全候选池 —— 构造期排好序，每次按键只做线性过滤。 */
+    private val completionPool: List<CompletionItem> = buildCompletionPool(
+        CompletionKind.KEYWORD to KEYWORDS,
+        CompletionKind.BUILTIN to BUILTINS,
+    )
+
+    /**
+     * Lua 关键字**大小写敏感**（`local` 是关键字，`LOCAL` 是普通标识符），因此补全也**必须**
+     * 大小写敏感。
+     *
+     * 这一点不能图省事改成忽略大小写：用户敲 `Pri` 时补成 `print`，看起来是「贴心」，
+     * 实际上是把一个**语义不同的标识符**塞进了他们的代码 —— 在大小写敏感的语言里这属于改 bug。
+     * 宁可少提示，也不能改语义。
+     */
+    override fun completionCandidates(prefix: String, limit: Int): List<CompletionItem> =
+        selectCompletions(completionPool, prefix, caseSensitive = true, limit = limit)
 
     override fun tokenize(source: String): List<CodeToken> {
         if (source.isEmpty()) return emptyList()

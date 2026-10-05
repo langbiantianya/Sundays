@@ -2,7 +2,11 @@ package com.kxxnzstdsw.sundays.editor.language
 
 import com.kxxnzstdsw.sundays.editor.CodeLanguage
 import com.kxxnzstdsw.sundays.editor.CodeToken
+import com.kxxnzstdsw.sundays.editor.CompletionItem
+import com.kxxnzstdsw.sundays.editor.CompletionKind
 import com.kxxnzstdsw.sundays.editor.TokenType
+import com.kxxnzstdsw.sundays.editor.buildCompletionPool
+import com.kxxnzstdsw.sundays.editor.selectCompletions
 
 /**
  * SQL 语言 — 支持 5 个方言共用的核心语法子集，并按 [profile] 追加**方言特有**词表。
@@ -37,6 +41,26 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
     private val keywords: Set<String> = BASE_KEYWORDS + profile.keywords
     private val types: Set<String> = BASE_TYPES + profile.types
     private val builtins: Set<String> = BASE_BUILTINS + profile.builtins
+
+    /**
+     * 补全候选池 —— **构造期排好序**，每次按键只做一次线性过滤（见 [selectCompletions]）。
+     *
+     * 构造期算而不是每次调用现算：候选总数是几百条，而 `completionCandidates` 每次按键都跑。
+     * 词表本身是 `private` 的，这里等于给补全开一个只读快照。
+     */
+    private val completionPool: List<CompletionItem> = buildCompletionPool(
+        CompletionKind.KEYWORD to keywords,
+        CompletionKind.TYPE to types,
+        CompletionKind.BUILTIN to builtins,
+    )
+
+    /**
+     * SQL 关键字**大小写不敏感**（`select` = `SELECT`），所以匹配忽略大小写、插入大写形式。
+     * 这与 [tokenize] 的 `word.uppercase()` 判定、以及 `SqlFormatter` 的关键字大写完全一致 ——
+     * 三处口径统一，用户看到的补全结果就是格式化后的样子。
+     */
+    override fun completionCandidates(prefix: String, limit: Int): List<CompletionItem> =
+        selectCompletions(completionPool, prefix, caseSensitive = false, limit = limit)
 
     override fun tokenize(source: String): List<CodeToken> {
         if (source.isEmpty()) return emptyList()

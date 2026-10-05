@@ -67,6 +67,7 @@ HikariCP / JDBC 驱动 / gRPC / Hadoop-Parquet），而 `shared` 的业务代码
 | **行号 gutter** | `LineNumberGutter` Composable；宽度按行数位数自适应（最少 2 位） |
 | **工具栏** | `CodeEditorWithToolbar` 包裹 `EditorToolbar`（语言切换 + 格式化 + actions 插槽） |
 | **格式化** | `CodeFormatterRegistry` 自动启用；工具栏"格式化"按钮按语言可用性启用 / 禁用；空格 / 缩进 / 注释契约见 §2.8 |
+| **补全提示** | `CodeLanguage.completionCandidates`（默认返回空）；`Tab`/`Enter` 接受、`↑↓` 选择、`Esc` 关闭，契约见 §2.10 |
 | **右键菜单** | `Modifier.onRightClick` + `EditorContextMenuState` + `contextMenuItems` 插槽 |
 | **语言切换下拉框** | `AssistChip` 触发；可隐藏（`showLanguageSwitcher = false`） |
 | **滚动同步** | 行号 gutter 与 `BasicTextField` 共享同一个 `ScrollState` |
@@ -351,6 +352,42 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
 > 的 `sql workbench follows the connected dialect`）。
 
 ---
+
+### 2.10 补全（「提示」）—— 关键字 / 函数
+
+输入时在光标下方弹出候选列表，`Tab` / `Enter` 接受、`↑` `↓` 选择、`Esc` 关闭。
+`CodeEditor(enableCompletion = false)` 可整体关闭。
+
+**SPI 形态**：`CodeLanguage.completionCandidates(prefix, limit)`，
+**带默认实现返回空列表** —— 只支持高亮的语言（纯文本模式、第三方语言）不必碰它，
+「新增语言零改动」的扩展承诺不变。词表在语言构造期合并成候选池并排好序，
+每次按键只做一次线性过滤 + 截断。
+
+| 决策 | 取值 | 理由 |
+|---|---|---|
+| 触发前缀长度 | ≥ 2（`MIN_COMPLETION_PREFIX`） | 单字符几乎命中整个语言（`a` → `AND`/`ADD`/`AVG`…），弹层刚开就铺满屏幕反而挡视线 |
+| SQL 匹配 | **忽略大小写**，插入大写 | 与 `tokenize` 的 `word.uppercase()`、`SqlFormatter` 的大写三处口径统一 |
+| Lua 匹配 | **大小写敏感** | Lua 标识符大小写敏感；把 `Pri` 补成 `print` 等于往用户代码里塞一个语义不同的标识符，是制造 bug 而非帮忙 |
+| 排序 | 类别（关键字 → 类型 → 函数）→ 长度 → 字典序 | 先按长度：输入 `CO` 时 `COLUMN` 该赢过 `COLLATE`；全序保证列表在两次按键间不跳位 |
+| 词字符 | **ASCII** `a-zA-Z0-9_` | 用 `Char.isLetterOrDigit()` 的话中文返回 `true`，`-- 查询sel` 的前缀会算成「查询sel」，补全在中文注释下直接失灵 |
+
+**接受候选时替换整个词**（含光标**之后**的部分）：光标落在词中间时（`sel|ect`），
+只替换前半段会得到 `SELECTect`。`wordBoundsAround` 返回半开区间 `start until end`，
+闭区间在「词尾恰好是字符串末尾」时会多出 1，调用方 `last + 1` 取 `substring` 直接越界。
+
+**弹层放在滚动容器内部**，用 `Modifier.atCaret(x, y)` 定位到光标正下方：
+自绘布局向外报告 0×0（不撑大父级，否则编辑器内容高度被凭空拉长、滚动条跟着变），
+再把内容 `place` 到指定坐标。因为在滚动容器内，弹层天然跟着代码一起滚，
+不必手算滚动偏移 ——也就不会出现「代码滚了、弹层没滚」的错位。
+
+**按键用 `onPreviewKeyEvent`**：`Tab` / `Enter` 在 `BasicTextField` 上有默认行为
+（移焦 / 换行），只有 preview 阶段能先截住并 `consume`。
+
+> **一个必须钳位的坑**：`onTextLayout` 拿到的 `TextLayoutResult` 可能比当前文本**旧**
+> （打字时 selection 先于布局更新）。直接把 `selection.start` 喂给 `getBoundingBox`
+> 会因越界抛 `IllegalArgumentException` —— 一次就足以打断整轮 recompose。
+> 代码里用 `getCursorRect(selection.start.coerceIn(0, len - 1))` 兜住。
+> 这个 bug 是被 `DatabaseBrowserUiTest > generate workbench inserts rows…` 抓到的。
 
 ## 3. DataTable 设计
 
@@ -1286,6 +1323,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `SqlDialectProfileTest` | `commonTest/.../editor/SqlDialectProfileTest.kt` | 6 | 方言档位：id / 词表分类不变量 / 标准档位不认方言词 / 注册配对（语言 + formatter）/ 格式化随档位 |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `FormatterSpacingTest` | `commonTest/.../editor/FormatterSpacingTest.kt` | 27 | 格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读（不被换行规则吞、不改内容）、空行折叠、幂等性、无行尾空白 |
+| `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 21 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离 |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |
