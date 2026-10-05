@@ -115,6 +115,17 @@ fun CompletionPopup(
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
+                // 签名（`detail`）—— 光有函数名不够：`random_int` 收什么参数、
+                // 返回什么，只有签名能说明。造数沙箱那批函数尤其需要。
+                if (!item.detail.isNullOrBlank()) {
+                    Text(
+                        text = item.detail,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
             }
         }
     }

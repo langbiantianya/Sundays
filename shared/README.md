@@ -17,6 +17,7 @@ shared/
 │   │   ├── ui/CodeEditor.kt          主 composable（CodeEditor / CodeEditorWithToolbar + 高度策略）
 │   │   ├── EditorContextMenu.kt      EditorContextMenuPayload + rememberEditorContextMenuState
 │   │   ├── Completion.kt             补全数据模型（CompletionItem / CompletionKind）+ 前缀切分 + 接受替换
+│   │   ├── GenerateHelpers.kt        造数沙箱宿主函数清单（上下文专属候选 + 沙箱禁用项记录）
 │   │   ├── ui/CompletionPopup.kt     补全弹层（贴光标，置于滚动容器内，不撑大编辑器高度）
 │   │   ├── CodeLanguage.kt           CodeLanguage SPI（tokenize + completionCandidates 默认空）+ CodeLanguageRegistry
 │   │   ├── SyntaxHighlighter.kt      token → 颜色映射
@@ -67,7 +68,7 @@ shared/
 
 | 组件 | 路径 | 用途 |
 |---|---|---|
-| `CodeEditor` | `commonMain/.../editor/ui/CodeEditor.kt` | 语法高亮代码编辑器；可独立使用；`enableCompletion` 默认开启关键字 / 类型 / 函数补全（§2.10） |
+| `CodeEditor` | `commonMain/.../editor/ui/CodeEditor.kt` | 语法高亮代码编辑器；可独立使用；`enableCompletion` 默认开启关键字 / 类型 / 函数补全（§2.10），`extraCompletions` 可注入**上下文专属**候选（如造数沙箱的 `insert` / `random_*` —— 它们只在那个沙箱里存在，绝不能进 `LuaLanguage`） |
 | `CodeEditorWithToolbar` | 同上 | `CodeEditor` + 工具栏（语言切换 + 格式化 + 自定义 actions） |
 | `CodeEditorState` / `rememberCodeEditorState` | 同上 | 编辑器内部状态（文本 + 光标/选区 + 滚动）；由 `editorState` 参数注入，调用方状态机持有时可在组件离开组合后保持文本、光标与滚动（`setText` 保留光标，受控输入可在文本中间编辑） |
 | `DataTable` | `commonMain/.../table/DataTable.kt` | 虚拟滚动数据表格；主键承载（数据库行标识） |
@@ -240,7 +241,7 @@ ConnectionManagerScreen(
 - `SqlTokenizerTest` — 23 项（SQL tokenize）
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
 - `FormatterSpacingTest` — 27 项（格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读、空行折叠、幂等性、无行尾空白 —— 见 [ARCHITECTURE.md §2.8](./ARCHITECTURE.md#28-格式化契约)）
-- `CompletionTest` — 21 项（补全契约：前缀切分（中文注释不吞词）、接受替换整个词、候选排序与上限、SQL/Lua 大小写策略、方言词表隔离）
+- `CompletionTest` — 27 项（补全契约：前缀切分、接受替换整个词、候选排序与上限、SQL/Lua 大小写策略、方言词表隔离、上下文专属候选、**宿主函数不得进 `LuaLanguage`**）
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）

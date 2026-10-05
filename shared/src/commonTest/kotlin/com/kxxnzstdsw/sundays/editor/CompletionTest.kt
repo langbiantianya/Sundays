@@ -207,4 +207,75 @@ class CompletionTest {
             assertEquals(item.label.uppercase(), item.label, "SQL 候选应为规范大写形式：${item.label}")
         }
     }
+
+    // =========================================================================
+    // 上下文专属候选（extraCompletions）—— 造数沙箱宿主函数
+    // =========================================================================
+
+    private val extras = listOf(
+        CompletionItem("insert", CompletionKind.BUILTIN, "insert(表名, {列=值})"),
+        CompletionItem("lastId", CompletionKind.BUILTIN, "lastId() → 自增ID"),
+        CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
+        CompletionItem("random_enum", CompletionKind.BUILTIN, "random_enum({候选…})"),
+    )
+
+    private fun extrasFor(prefix: String, limit: Int = 10) =
+        selectExtras(prefix, extras, limit).map { it.label }
+
+    @Test
+    fun `extras match by exact case`() {
+        assertEquals(listOf("insert"), extrasFor("ins"))
+        assertEquals(listOf("insert"), extrasFor("insert"))
+        // 大小写敏感：`Insert` 不是 `insert` —— 造数宿主函数是真全局，
+        // 补成别的名字会改变脚本语义，属于制造 bug
+        assertTrue(extrasFor("Ins").isEmpty())
+        assertTrue(extrasFor("INSERT").isEmpty())
+    }
+
+    @Test
+    fun `extras keep the caller order instead of being re-sorted`() {
+        // 清单是人工按「最常用 → 最专用」排的，那个顺序比按字母排更有信息量
+        assertEquals(
+            listOf("random_int", "random_enum"),
+            extrasFor("random_"),
+        )
+    }
+
+    @Test
+    fun `extras honour the limit and the empty guards`() {
+        assertEquals(listOf("random_int"), extrasFor("random_", limit = 1))
+        assertTrue(extrasFor("").isEmpty())
+        assertTrue(extrasFor("random_", limit = 0).isEmpty())
+    }
+
+    @Test
+    fun `the generate sandbox contract exposes exactly the host helpers`() {
+        val names = GenerateHelpers.names
+        assertTrue(names.containsAll(listOf("insert", "lastId")), "核心两个写库函数必须在：$names")
+        assertTrue(names.count { it.startsWith("random_") } == 11, "random_* 应为 11 个，实际=$names")
+        // 清单不得有重名 —— 重名会让同一函数在弹层里出现两次
+        assertEquals(names.size, names.toSet().size, "宿主函数清单有重名：$names")
+        // 每个候选都要有签名：只有函数名的话用户无从判断该传什么参数
+        assertTrue(GenerateHelpers.completions.all { !it.detail.isNullOrBlank() }, "存在缺签名的候选")
+    }
+
+    @Test
+    fun `sandbox disabled entries never overlap the injected helpers`() {
+        val overlap = GenerateHelpers.names.toSet() intersect GenerateHelpers.sandboxDisabled.toSet()
+        assertTrue(overlap.isEmpty(), "同一个名字既注入又置 nil，行为取决于调用顺序：$overlap")
+    }
+
+    @Test
+    fun `host helpers are absent from the plain lua language`() {
+        // 这是整个设计的关键不变量：`insert` / `random_*` **只在造数沙箱里存在**。
+        // 一旦有人把它们塞进 LuaLanguage.BUILTINS，所有普通 Lua 编辑器都会开始
+        // 推荐不存在的函数，调用即报 `attempt to call a nil value`。
+        val lua = LuaLanguage()
+        for (name in GenerateHelpers.names) {
+            assertTrue(
+                lua.completionCandidates(name).isEmpty(),
+                "`$name` 是造数沙箱专属，不该出现在通用 Lua 补全里",
+            )
+        }
+    }
 }

@@ -110,6 +110,7 @@ import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.GenerateHelpers
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
@@ -1972,6 +1973,11 @@ private fun GenerateWorkbenchPane(
                     languageId = "lua",
                     // 本工作台只处理 Lua —— 不暴露语言切换器
                     showLanguageSwitcher = false,
+                    // 补全额外注入造数沙箱的宿主函数（`insert` / `lastId` / `random_*`）。
+                    // 它们**只在这个沙箱里存在**，普通 Lua 编辑器里调用会报
+                    // `attempt to call a nil value` —— 所以绝不能塞进 `LuaLanguage` 的
+                    // BUILTINS，那会让所有 Lua 编辑器都开始推荐不存在的函数。
+                    extraCompletions = GenerateHelpers.completions,
                     actions = {
                         WinButton(
                             onClick = { state.executeGenerate() },

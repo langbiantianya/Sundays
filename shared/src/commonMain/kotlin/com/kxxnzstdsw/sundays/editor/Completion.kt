@@ -102,6 +102,31 @@ fun applyCompletion(text: String, caret: Int, item: CompletionItem): Pair<String
 }
 
 /**
+ * 从调用方传入的额外候选里挑出匹配 [prefix] 的前 [limit] 条。
+ *
+ * **大小写敏感**，与 [LuaLanguage] 的关键字策略一致。造数宿主函数（`insert` / `random_int`）
+ * 是真正的大小写敏感全局 —— 把 `Insert` 补成 `insert` 会改变用户脚本的语义，
+ * 属于制造 bug 而非帮忙。理由与 `selectCompletions` 的 `caseSensitive = true` 同源。
+ *
+ * 传入列表**保持原顺序**（不重排）：清单是按「最常用 → 最专用」人工排的，
+ * 那个顺序比按字母排更有信息量。
+ */
+internal fun selectExtras(
+    prefix: String,
+    extras: List<CompletionItem>,
+    limit: Int,
+): List<CompletionItem> {
+    if (prefix.isEmpty() || limit <= 0) return emptyList()
+    val out = ArrayList<CompletionItem>(minOf(limit, 8))
+    for (item in extras) {
+        if (!item.label.startsWith(prefix)) continue
+        out.add(item)
+        if (out.size >= limit) break
+    }
+    return out
+}
+
+/**
  * 构造候选池并**预先排好序**，使过滤只需一次线性扫描。
  *
  * 排序键：类别（[CompletionKind] 声明序 = 关键字 → 类型 → 函数）→ 标签长度 → 字典序。

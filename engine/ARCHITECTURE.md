@@ -774,6 +774,16 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 
 > **注意**：嵌套 Lua table 通过 `insert()` 传递时会丢失（`readLuaTable` 中 `isTable -> null`），列值必须使用扁平 string / number / boolean / nil / java.time 类型。
 
+> **改动这批函数 = 改两处**：上表（及 `registerHelpers`）与 UI 侧的补全清单
+> `shared` 的 `GenerateHelpers.completions`。后者是**静态复制**的（`:shared` 不能反向依赖
+> `:engine`），供造数工作台的补全弹层使用。`GenerateSandboxContractTest` 读
+> `GenerateHandler.kt` 源码抽取实际注册的全局名并断言**集合相等** ——
+> 只做引擎侧增删而不改 UI 清单，那个测试会立刻变红。
+>
+> 换句话说：`insert` / `random_*` 是**沙箱专属**符号，普通 Lua 编辑器里调用会报
+> `attempt to call a nil value`，因此它们**不能**进入 `shared` 的 `LuaLanguage.BUILTINS`
+> —— 那会让所有 Lua 补全都推荐不存在的函数。`shared` 侧另有一条不变量测试守着这个边界。
+
 ### 5.8 函数与存储过程管理 (Routine Management) — `category: "FUNCTION"`
 
 **支持的 Action**：`LIST` / `INFO` / `GET_DDL` / `CREATE` / `DELETE` / `CALL` / `DEBUG` / `UPDATE`（语法验证）
@@ -966,6 +976,7 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 | `integration/TypedRequestEnvelopeIntegrationTest` | 7 | 端到端 typed Request → dispatcher → typed Response |
 | `integration/UserGrantsIntegrationTest` | 2 | USER.GRANTS 路由，H2 限制场景 |
 | `integration/DataGenerateIntegrationTest` | 2 | DATA.GENERATE 流式进度 + 错误路径 |
+| `handlers/GenerateSandboxContractTest` | 3 | 造数沙箱注入的宿主函数名 / 沙箱禁用名与 UI 补全契约**集合相等**（源码契约，防 UI 侧清单漂移，见 §5.7） |
 | `integration/FunctionGetDdlIntegrationTest` | 2 | FUNCTION.GET_DDL dispatcher 路由 + H2 限制 |
 | `integration/SqlExplainRouteIntegrationTest` | 2 | SQL.EXPLAIN 端到端路由（v2.6 之前未实现） |
 | `integration/EnvelopeOptionsIntegrationTest` | 4 | dryRun / timeoutMs envelope 跨切面 |

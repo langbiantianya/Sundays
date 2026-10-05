@@ -389,6 +389,38 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
 > 代码里用 `getCursorRect(selection.start.coerceIn(0, len - 1))` 兜住。
 > 这个 bug 是被 `DatabaseBrowserUiTest > generate workbench inserts rows…` 抓到的。
 
+#### 2.10.1 上下文专属候选（`extraCompletions`）
+
+有些符号**只在某个运行上下文里存在**，语言本身不认识。造数工作台的宿主函数就是典型：
+引擎的 `GenerateHandler` 在创建 Lua 状态后额外向全局表注入 13 个函数
+（`insert` / `lastId` / `random_int` / `random_float` / `random_string` / `random_name` /
+`random_email` / `random_phone` / `random_date` / `random_datetime` / `random_time` /
+`random_uuid` / `random_enum`），并把 `os` / `io` / `require` 等 15 个入口置 `nil`。
+
+**为什么不塞进 `LuaLanguage.BUILTINS`**：那批函数在普通 Lua 编辑器里调用会直接报
+`attempt to call a nil value`。塞进语言词表意味着**所有** Lua 补全都开始推荐不存在的函数 ——
+那不是提示，是误导。`CompletionTest` 用一条不变量测试守着这个边界：
+宿主函数一旦出现在 `LuaLanguage` 的候选里，测试立刻变红。
+
+因此走 `CodeEditor(extraCompletions = …)`：调用方显式注入，**优先于**语言候选
+（用户在造数工作台敲 `rand` 时最想看到的就是 `random_*`），匹配**大小写敏感**。
+
+**静态清单 + 契约测试**：清单定义在 `shared` 的 `GenerateHelpers`，不会随引擎运行而变。
+对一批本项目自己定义、变更极低频的函数，这比新开一条 `SYSTEM.LIST_HELPERS` 协议路由
+便宜得多，也没有异步时序问题。代价是「引擎加了函数、忘了加这里」，因此
+`GenerateSandboxContractTest` 读 `GenerateHandler.kt` 源码抽取实际注册的全局名，
+断言**集合相等**（不是包含关系 —— 只有相等才能同时挡住「引擎加了 UI 没同步」和
+「引擎删了 UI 还留着」两个方向）。
+
+> **为什么读源码而不是跑 Lua 枚举全局**：`registerHelpers(L, state)` 要求一个持有
+> `Connection` / `DatabaseDialect` 的 `private` 嵌套类 `GenerateState`；为造它而放宽
+> 可见性或上反射，代价远大于读一行源码 —— 而要守的事实只是「注册了哪几个名字」。
+
+**沙箱禁用清单只作文档，不据此抑制补全**（`GenerateHelpers.sandboxDisabled`）：
+用户敲 `req` 却一个候选都看不到，会以为补全坏了；而候选出现了、运行时才报
+`attempt to call a nil value`，用户至少能查到函数名。把错误暴露在能指认的位置，
+好过让它变成沉默。
+
 ## 3. DataTable 设计
 
 ### 3.1 核心能力
@@ -1323,7 +1355,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `SqlDialectProfileTest` | `commonTest/.../editor/SqlDialectProfileTest.kt` | 6 | 方言档位：id / 词表分类不变量 / 标准档位不认方言词 / 注册配对（语言 + formatter）/ 格式化随档位 |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `FormatterSpacingTest` | `commonTest/.../editor/FormatterSpacingTest.kt` | 27 | 格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读（不被换行规则吞、不改内容）、空行折叠、幂等性、无行尾空白 |
-| `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 21 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离 |
+| `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 27 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离、上下文专属候选（大小写敏感 / 保持传入顺序）、**宿主函数不得进入 `LuaLanguage`** |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |

@@ -68,6 +68,7 @@ import com.kxxnzstdsw.sundays.editor.formatter.CodeFormatterRegistry
 import com.kxxnzstdsw.sundays.editor.language.LuaLanguage
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.rememberEditorContextMenuState
+import com.kxxnzstdsw.sundays.editor.selectExtras
 import com.kxxnzstdsw.sundays.editor.wordPrefixBefore
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
@@ -179,6 +180,9 @@ fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
  * @param enableCompletion 是否启用关键字 / 函数补全（「提示」功能，见 §2.10）。默认开启；
  *   `languageId = null`（纯文本）或语言未实现 `completionCandidates` 时自动不生效
  * @param maxCompletionItems 弹层最多同时展示的候选条数
+ * @param extraCompletions 调用方注入的额外候选，**优先于**语言自带候选。用于「当前上下文
+ *   才有、但语言本身不认识」的符号 —— 如造数工作台注入 [GenerateHelpers.completions]
+ *   （那些 `insert` / `random_*` 只在造数沙箱里存在，塞进 `LuaLanguage` 会误导普通 Lua 编辑器）
  */
 @Composable
 fun CodeEditor(
@@ -195,6 +199,7 @@ fun CodeEditor(
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
     enableCompletion: Boolean = true,
     maxCompletionItems: Int = DEFAULT_COMPLETION_LIMIT,
+    extraCompletions: List<CompletionItem> = emptyList(),
 ) {
     val language = remember(languageId) {
         languageId?.let { CodeLanguageRegistry.get(it) }
@@ -235,7 +240,9 @@ fun CodeEditor(
     val textNow = fieldValue.text
     val collapsedSelection = fieldValue.selection.collapsed
 
-    LaunchedEffect(enableCompletion, language, textNow, selectionStart, collapsedSelection) {
+    LaunchedEffect(
+        enableCompletion, language, textNow, selectionStart, collapsedSelection, extraCompletions,
+    ) {
         val lang = language
         if (!enableCompletion || lang == null || !collapsedSelection) {
             completionItems = emptyList()
@@ -245,7 +252,11 @@ fun CodeEditor(
         completionItems = if (prefix.length < MIN_COMPLETION_PREFIX) {
             emptyList()
         } else {
-            lang.completionCandidates(prefix, maxCompletionItems)
+            // **额外候选优先**：它们是当前工作台的核心语义（造数沙箱的 random_* 等），
+            // 用户敲 `rand` 时最想看到的就是它们，语言候选在后兜底。
+            val fromLanguage = lang.completionCandidates(prefix, maxCompletionItems)
+            val fromExtras = selectExtras(prefix, extraCompletions, maxCompletionItems)
+            (fromExtras + fromLanguage).take(maxCompletionItems)
         }
         // 候选集一变就回到第一条：保留旧下标会指向一条不相干的词
         completionIndex = 0
@@ -569,6 +580,7 @@ private fun LineNumberGutter(
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
  *   payload 通过 [EditorContextMenuPayload]（包含当前 text + languageId）传入
  * @param enableCompletion 是否启用关键字 / 函数补全（「提示」功能）；默认开启
+ * @param extraCompletions 注入上下文专属候选（如造数沙箱的宿主函数），优先于语言候选
  */
 @Composable
 fun CodeEditorWithToolbar(
@@ -587,6 +599,7 @@ fun CodeEditorWithToolbar(
     contextMenuState: EditorContextMenuState = rememberEditorContextMenuState(),
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
     enableCompletion: Boolean = true,
+    extraCompletions: List<CompletionItem> = emptyList(),
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         EditorToolbar(
@@ -618,6 +631,7 @@ fun CodeEditorWithToolbar(
             contextMenuState = contextMenuState,
             contextMenuItems = contextMenuItems,
             enableCompletion = enableCompletion,
+            extraCompletions = extraCompletions,
         )
     }
 }
