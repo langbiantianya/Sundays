@@ -7,6 +7,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
@@ -287,6 +289,58 @@ const val TABLE_HEADER_TAG = "sundays.tableHeader"
 const val TABLE_BODY_TAG = "sundays.tableBody"
 
 /**
+ * 分页底栏容器的 UI 测试 tag —— 见 `TablePaginationLayoutTest`。
+ *
+ * 需要它是因为「按钮标签有没有折行」这件事**只能量整体高度**：
+ * 单看某个 `Text` 的语义边界，分行与不分行都可能给出看似正常的宽度。
+ */
+const val TABLE_PAGINATION_TAG = "sundays.tablePagination"
+
+/**
+ * 分页底栏进入「紧凑档」的宽度阈值 —— 低于它就隐藏「首页 / 末页 / 共 N 条」。
+ *
+ * ## 为什么是这个取舍
+ *
+ * 底栏由两组构成：左组（每页选择器 + 共 N 条）是对**当前结果集**的描述，
+ * 右组（首页 / 上一页 / 页码 / 下一页 / 末页）是对**结果集**的操作。
+ * 容器不够宽时该牺牲哪一组，答案很明确 —— 牺牲描述，保留操作。
+ *
+ * ## 这不是假想问题，是当前可达的布局
+ *
+ * 浏览屏的表预览把 **35% 宽度让给详情面板**（`DataTable.detailPanelRatio`），
+ * 而库/表树面板又可以被拖到窗口的 62%（见 `DragHandle` 的宽度上限）。两者叠加：
+ *
+ * ```
+ * 窗口 1024dp（= MIN_WINDOW_SIZE，用户不能再拖窄）
+ *   − 树面板 635dp（1024 × 0.62）
+ *   = 主表区 389dp
+ *   × 0.65（主表 : 详情）
+ *   = 底栏 253dp
+ * ```
+ *
+ * 而底栏在宽档下的需求约 **530dp**。253 远不够，`Row` 于是把子项压到零尺寸 ——
+ * 「下一页」会**整颗消失**（语义边界量到 `Rect(0,0,0,0)`），页码同理。
+ * 这不是排版瑕疵，是功能消失。
+ *
+ * ## 降级的顺序
+ *
+ * 1. **< 560dp 隐藏「首页 / 末页 / 共 N 条」** —— 结果集通常几十页，首末页几乎不用；
+ *    总条数在表头上下文里也能推知。
+ * 2. **左组用 `weight(1f, fill = false)` 承担剩余压缩** —— `Row` 先测量无 weight 的
+ *    子项，所以右组永远拿到自然宽度；即便在 253dp 这种极端情况下被压扁的也只是
+ *    「每页」选择器，**翻页按钮绝不会被压没**。
+ *
+ * 实测三档窗口下的底栏宽度与右组需求（`TablePaginationLayoutTest` 钉住）：
+ *
+ * | 底栏 | 右组需求 | 结果 |
+ * |---|---|---|
+ * | 660dp | 342dp | 宽档，全部显示 |
+ * | 450dp | 215dp | 紧凑档，右组宽裕 |
+ * | 248dp | 215dp | 紧凑档，左组被压扁，右组完好 |
+ */
+private val PAGINATION_COMPACT_WIDTH: Dp = 560.dp
+
+/**
  * 表头 —— 横向滚动由 [hScroll] 与表体**共享**（见 [DataTable] 调用点的说明）。
  *
  * [hScroll] 必须由调用方创建而不是这里自己 `remember`：两处各自持有状态就是「表头能滚、
@@ -496,79 +550,123 @@ private fun TablePagination(
     pageSizeOptions: List<PageSize>,
 ) {
     var pageSizeExpanded by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(theme.paginationBackground)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "每页",
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.headerText.color,
-                modifier = Modifier.padding(end = 8.dp),
-            )
-            Box {
-                AssistChip(
-                    onClick = { pageSizeExpanded = true },
-                    label = { Text(pageSize.label) },
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        // 窄容器下隐藏「首页 / 末页 / 共 N 条」—— 见 [PAGINATION_COMPACT_WIDTH] 的说明。
+        val compact = maxWidth < PAGINATION_COMPACT_WIDTH
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(theme.paginationBackground)
+                .testTag(TABLE_PAGINATION_TAG)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 左组 `weight(1f, fill = false)`：`Row` 先测量无 weight 的子项，右组因此
+            // 永远按自然宽度布局，剩余空间全归左组（`fill = false` 让左组在够宽时也
+            // 只占自身宽度，视觉上仍是「贴左 / 贴右」两端对齐）。
+            // 极端窄容器下被压扁的只有「每页」选择器，翻页按钮不会被压没。
+            Row(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "每页",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = theme.headerText.color,
+                    modifier = Modifier.padding(end = 8.dp),
+                    maxLines = 1,
+                    softWrap = false,
                 )
-                DropdownMenu(
-                    expanded = pageSizeExpanded,
-                    onDismissRequest = { pageSizeExpanded = false },
-                ) {
-                    pageSizeOptions.forEach { size ->
-                        WinMenuItem(
-                            text = { Text(size.label) },
-                            onClick = {
-                                onPageSizeChange(size)
-                                pageSizeExpanded = false
-                            },
-                        )
+                Box {
+                    AssistChip(
+                        onClick = { pageSizeExpanded = true },
+                        label = { Text(pageSize.label, maxLines = 1, softWrap = false) },
+                    )
+                    DropdownMenu(
+                        expanded = pageSizeExpanded,
+                        onDismissRequest = { pageSizeExpanded = false },
+                    ) {
+                        pageSizeOptions.forEach { size ->
+                            WinMenuItem(
+                                text = { Text(size.label) },
+                                onClick = {
+                                    onPageSizeChange(size)
+                                    pageSizeExpanded = false
+                                },
+                            )
+                        }
                     }
                 }
+                if (!compact) {
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "共 $totalCount 条",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = theme.headerText.color,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = "共 $totalCount 条",
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.headerText.color,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!compact) {
+                    NavButton("首页", enabled = currentPage > 1) { onPageChange(1) }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                NavButton("上一页", enabled = currentPage > 1) { onPageChange(currentPage - 1) }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "$currentPage / $totalPages",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = theme.headerText.color,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                NavButton("下一页", enabled = currentPage < totalPages) { onPageChange(currentPage + 1) }
+                if (!compact) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    NavButton("末页", enabled = currentPage < totalPages) { onPageChange(totalPages) }
+                }
+            }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            WinButton(
-                onClick = { onPageChange(1) },
-                enabled = currentPage > 1,
-                shape = SundaysPalette.buttonShape,
-            ) { Text("首页") }
-            Spacer(modifier = Modifier.width(4.dp))
-            WinButton(
-                onClick = { onPageChange(currentPage - 1) },
-                enabled = currentPage > 1,
-                shape = SundaysPalette.buttonShape,
-            ) { Text("上一页") }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "$currentPage / $totalPages",
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.headerText.color,
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            WinButton(
-                onClick = { onPageChange(currentPage + 1) },
-                enabled = currentPage < totalPages,
-                shape = SundaysPalette.buttonShape,
-            ) { Text("下一页") }
-            Spacer(modifier = Modifier.width(4.dp))
-            WinButton(
-                onClick = { onPageChange(totalPages) },
-                enabled = currentPage < totalPages,
-                shape = SundaysPalette.buttonShape,
-            ) { Text("末页") }
-        }
+    }
+}
+
+/**
+ * 分页导航按钮 —— 标签**禁止折行**。
+ *
+ * ## 关于 `maxLines = 1` + `softWrap = false`
+ *
+ * 这是一道**纵深防御，当前没有测试覆盖**（说清楚，免得后人以为它被钉住了）：
+ * 真正把标签从「竖排堆叠」里救出来的是**左组的 `weight`** —— 右组永远拿到自然宽度，
+ * 在最坏可达布局（248dp 底栏）下它也只占 215dp，压根不会被压缩。
+ * 去掉这两行，四个测试照样全绿。
+ *
+ * 仍然保留的理由：它挡的是**曾经真实发生过的回归**（首轮 H2 走查截图里
+ * 「下一页」三个字竖排堆叠、底栏整体长高一倍多）。任何人把 `detailPanelRatio`
+ * 调大、把两个按钮之间的 `Spacer` 拉宽、或去掉左组的 `weight`，右组立刻会被压缩，
+ * 而竖排是最难看的那种失败方式。成本是零。
+ *
+ * ## 已知但**没做**的取舍：按钮内边距偏宽
+ *
+ * M3 出厂 24dp 水平内边距让「上一页」这样的三字按钮要 **87dp**。收紧到 10dp
+ * （约 59dp）显然更配得上 Win 风格，也让底栏余量从 7dp 涨到 48dp。
+ *
+ * **但本轮没有做**：实测 24dp 在所有可达布局下都装得下，没有任何一个测试能证明
+ * 收紧的价值，而实现它要往共享的 `WinButton` 上加一个 `contentPadding` 参数 ——
+ * 为一个尚未发生的溢出扩张全应用的控件 API 不划算。这是审美与余量的优化，
+ * 不是缺陷修复，等它真的成为问题再说。
+ */
+@Composable
+private fun NavButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    WinButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = SundaysPalette.buttonShape,
+    ) {
+        Text(text = label, maxLines = 1, softWrap = false)
     }
 }
 

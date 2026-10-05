@@ -46,7 +46,7 @@ desktopApp/
         └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
 
-desktopApp 现有 **145 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
+desktopApp 现有 **149 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `TablePaginationLayoutTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
 
 **文件清单**：
 
@@ -62,6 +62,7 @@ desktopApp 现有 **145 个测试**（`ConnectionManagerFlowTest` / `DatabaseBro
 | `DatabaseBrowserUiTest.kt` | 真点击测试：展开库 → 双击表 → 预览标签页出现且 `Role=TAB` 数量恒为 1；SQL 工作台执行 + 「＋」新建 sheet / 切 sheet 显示各自文本与结果 / 「✎」重命名（确定提交、取消放弃）/ 「×」关闭 / 滚轮横向滚动 / **标题条方言档位与「格式化」可用性**；造数工作台执行；两个工作台切 pane 后文本 + 光标 + 滚动 + 结果回显 |
 | `MainScreenNavTest.kt` | 顶层导航测试：默认连接管理，点「数据库浏览」切换后第二屏出现 |
 | `EngineClientSelectionTest.kt` | 装配点绑定测试：未设置 / 空白端点属性 → `IdbEngine`；设置端点（含 `unix://`）→ `GrpcEngineClient`；非法端点 → `IllegalArgumentException`（**响亮失败，不静默回落**） |
+| `TablePaginationLayoutTest.kt` | 分页底栏的**布局契约**（三档窗口：1024 / 700 / 390 → 底栏 660 / 450 / 253dp）。⚠️ **必须用 `runDesktopComposeUiTest(width, height)` 开小窗口，不能在默认窗口里套 `Modifier.width(...)`**：`SundaysTheme` 内有 `Surface(Modifier.fillMaxSize())` 把子树约束钉成窗口尺寸，宽度修饰符被**静默吃掉**（量出来仍是 1024）。这个坑最坏的地方在于它让测试**通过而不是失败** —— 窄容器根本没造出来，断言在宽容器上空跑。详见 [`shared/ARCHITECTURE.md` §3.2.2](../shared/ARCHITECTURE.md) |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
@@ -272,6 +273,18 @@ if (appearance.onboardingCompleted) {
 | `MemoryInfoRow` 复制而非复用设置页的 `InfoRow` | 后者是 `private`；为省四行重复把一个纯布局细节抬到 `:shared` 公开面不划算 |
 
 回归测试：`EngineMemoryStatusBarTest`（比例算法含钳位与除零、紧凑格式化、初始「—」、成功后渲染、null / 异常降级、空态仍在、`null` 探针不渲染、面板默认关闭 / 四行与设置页一致 / 首次读数前逐行「—」 / 再点收起 / 状态栏宽度契约 / 面板宽度与定位契约 / 指针移出自动关闭 / 指针在面板内**不**关闭）。
+
+### GUI 走查的三条方法论事实
+
+用真实 H2 内存库把主流程走了一遍（schema 树 → 预览 → 分页 → SQL 补全 → SQL 执行 → 造数 → 面板拖拽），
+截图落在 `build/gui-shots/`。它挖出了 v2.21 修的两个真实缺陷，但**本身不够稳定、没有进主干**
+（见下节）。过程中沉淀的三条事实留给下一个要写 GUI 测试的人：
+
+| 事实 | 细节 |
+|---|---|
+| **真实窗口合成鼠标输入送不进 Skiko** | `SendInput` / `mouse_event` 打到窗口上，光标**能移动**（回读确认落在按钮上），**点击完全无响应**。`SetForegroundWindow` 不是原因（前台窗口本来就是 sundays）。正解是用 `runComposeUiTest` 驱动**同一套渲染与输入分发链路** —— 走的是 Compose 自己的事件处理，不经过 AWT/Skiko 的原生窗口层 |
+| **`captureToImage()` 对走 `SelectionContainer` 的文本层漏绘** | 表头文字画得出来，**数据行单元格文字画不出来**。已用隔离实验确认（单独渲染一个 `DataTable` 同样复现），与浏览屏、与任何业务改动无关；两次捕获间隔 1.5s 像素完全一致，也不是时序问题。**所以断言一律走语义树，不要断言像素**；截图只用于目视布局（宽度、折行、弹层位置） |
+| **测试必须隔离 `user.home`** | `System.setProperty("user.home", tempDir)`。否则会读写真实的 `~/.config/sundays/connection.json` —— 那个文件**明文存口令**。不隔离的后果不是测试挂，是用户的连接记录被测试覆盖 |
 
 ### 标签页去重契约
 
