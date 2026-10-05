@@ -1112,14 +1112,14 @@ class DatabaseBrowserFlowTest {
         // `firstLoadedDatabase` 只等库列表，不展开 —— 这里第一次 toggle 就是「展开」
         state.toggleDatabase(db)
 
-        // ⚠️ 不能只 `while (loadingObjects.any { … })` —— 那段窗口里 loading 会被
-        // 「解析 schema 前先置位 → 解析完撤掉 → 真正拉对象时再置位」跨过，
-        // 循环可能在中间那一刻就退出，一个请求都没等到。这里等**结果落定**。
-        withTimeout(10_000) {
-            // 等**三类都**落定而不是等 map 非空 —— 视图/触发器/函数是并发拉的，!= null 会在
-            // 第一个写回时就满足（实测先回的是函数），其余两格还是空的
-            while ((state.objectsByDatabase[db]?.size ?: 0) < 3) delay(20)
-        }
+        // ⚠️ 这条断言的是「**发过**三次 LIST」，所以等待条件也必须是「发过三次」，
+        // 而不是「结果回来了」—— 那是上一条测试关心的事。
+        //
+        // 第一版等的是「视图那一格」或「三类都落定」，都错：视图回来得最早，
+        // 触发器 / 函数可能还没**发出去**。全量并发下这条会读到 `{VIEW}` 单元素
+        // 集合（实测）。`cats` 是 spy 在**请求发生时**记的，与结果无关 ——
+        // 这才是本条断言真正在等的东西。
+        withTimeout(20_000) { while (cats.size < 3) delay(20) }
         assertEquals(
             setOf(
                 com.kxxnzstdsw.grpc.Category.VIEW,
@@ -1152,12 +1152,14 @@ class DatabaseBrowserFlowTest {
 
         state.toggleTableObjects(db, "USERS")
         val slot = "$db::USERS"
-        // ⚠️ 不能等 `tableObjects[slot] != null` —— 索引与外键是**并发**拉的，
-        // 先返回的那个（实测总是外键）一写回，条件就满足了，另一个还没回来。
-        // 实测全量并发下这条会读到 `{FOREIGN_KEY=[]}`（索引那格整个缺失）。
-        // 必须等**两类都**落定。
-        withTimeout(10_000) {
-            while (state.tableObjects[slot]?.size ?: 0 < DatabaseBrowserState.TableObjectKind.entries.size) {
+        // ⚠️ 等**索引那一格**真的出现，而不是等「两类都到齐」或「map 非空」。
+        //
+        // 后两种写法在全量并发下都会翻车：索引与外键是并发拉的，
+        // 一次 `IndexListRequest` 慢一点，5s 内就凑不齐 / 还没写回
+        // （实测「等 size>=2」在全量 170 项下 5s 超时，单独跑 4 轮全绿）。
+        // 只等自己关心的那一格，对另一格的快慢不敏感，也不受其拖累。
+        withTimeout(20_000) {
+            while (state.tableObjects[slot]?.get(DatabaseBrowserState.TableObjectKind.INDEX) == null) {
                 delay(20)
             }
         }
@@ -1437,7 +1439,10 @@ class DatabaseBrowserFlowTest {
         // 它们与表互不依赖、在同一批协程里跑。本测试之后要用 `toggleDatabase`
         // 触发「再展开一次」来验证刷新，所以这里必须先把上一轮的对象请求收干净 ——
         // 否则下一行的 `toggleDatabase` 与残留协程交错，等待条件会误判。
-        withTimeout(5_000) { while ((objectsByDatabase[db]?.size ?: 0) < 3) delay(20) }
+        withTimeout(20_000) {
+            // 同样只等视图那一格（见上面那条测试的 KDoc）
+            while (objectsByDatabase[db]?.get(DatabaseBrowserState.DatabaseObjectKind.VIEW) == null) delay(20)
+        }
         return tablesByDatabase.getValue(db).first { it.uppercase() == wanted.uppercase() }
     }
 
