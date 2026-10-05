@@ -13,13 +13,16 @@
 ```
 shared/
 ├── commonMain/          所有业务 UI 组件（平台无关）
-│   ├── editor/          CodeEditor + 行号 + 高亮 + 工具栏 + 右键菜单
+│   ├── editor/          CodeEditor + 行号 + 高亮 + 工具栏 + 右键菜单 + 格式化 + 补全
 │   │   ├── ui/CodeEditor.kt          主 composable（CodeEditor / CodeEditorWithToolbar + 高度策略）
 │   │   ├── EditorContextMenu.kt      EditorContextMenuPayload + rememberEditorContextMenuState
-│   │   ├── CodeLanguage.kt           CodeLanguage SPI + CodeLanguageRegistry
+│   │   ├── Completion.kt             补全数据模型（CompletionItem / CompletionKind）+ 前缀切分 + 接受替换
+│   │   ├── ui/CompletionPopup.kt     补全弹层（贴光标，置于滚动容器内，不撑大编辑器高度）
+│   │   ├── CodeLanguage.kt           CodeLanguage SPI（tokenize + completionCandidates 默认空）+ CodeLanguageRegistry
 │   │   ├── SyntaxHighlighter.kt      token → 颜色映射
-│   │   ├── language/SqlLanguage.kt   SQL token + keyword 集合
-│   │   ├── language/LuaLanguage.kt   Lua token + keyword 集合
+│   │   ├── language/SqlLanguage.kt   SQL token + keyword 集合 + 补全候选池（大小写不敏感）
+│   │   ├── language/LuaLanguage.kt   Lua token + keyword 集合 + 补全候选池（大小写敏感）
+│   │   ├── formatter/TokenSpacing.kt 共享的「两向贴合」空格判定（开括号条件贴左，其余按 token 类别）
 │   │   ├── formatter/SqlFormatter.kt / LuaFormatter.kt / CodeFormatterRegistry.kt
 │   │   └── CodeEditorTheme.kt        CodeEditorTheme（Light / Dark / default）
 │   ├── table/           DataTable + 虚拟滚动 + 分页 + 详情面板
@@ -64,7 +67,7 @@ shared/
 
 | 组件 | 路径 | 用途 |
 |---|---|---|
-| `CodeEditor` | `commonMain/.../editor/ui/CodeEditor.kt` | 语法高亮代码编辑器；可独立使用 |
+| `CodeEditor` | `commonMain/.../editor/ui/CodeEditor.kt` | 语法高亮代码编辑器；可独立使用；`enableCompletion` 默认开启关键字 / 类型 / 函数补全（§2.10） |
 | `CodeEditorWithToolbar` | 同上 | `CodeEditor` + 工具栏（语言切换 + 格式化 + 自定义 actions） |
 | `CodeEditorState` / `rememberCodeEditorState` | 同上 | 编辑器内部状态（文本 + 光标/选区 + 滚动）；由 `editorState` 参数注入，调用方状态机持有时可在组件离开组合后保持文本、光标与滚动（`setText` 保留光标，受控输入可在文本中间编辑） |
 | `DataTable` | `commonMain/.../table/DataTable.kt` | 虚拟滚动数据表格；主键承载（数据库行标识） |
@@ -224,7 +227,7 @@ ConnectionManagerScreen(
 # 构建（KMP：当前编译 jvm 目标）
 ./gradlew :shared:build
 
-# 跑测试（97 项）
+# 跑测试（shared 模块当前 ~116 项 —— 含新加的 FormatterSpacingTest 27 项、CompletionTest 21 项）
 ./gradlew :shared:jvmTest
 
 # 跑测试（等价）
@@ -232,9 +235,12 @@ ConnectionManagerScreen(
 ```
 
 测试分布：
+
 - `LuaTokenizerTest` — 30 项（Lua 关键字 / 字符串 / 注释 / 数字 tokenize）
 - `SqlTokenizerTest` — 23 项（SQL tokenize）
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
+- `FormatterSpacingTest` — 27 项（格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读、空行折叠、幂等性、无行尾空白 —— 见 [ARCHITECTURE.md §2.8](./ARCHITECTURE.md#28-格式化契约)）
+- `CompletionTest` — 21 项（补全契约：前缀切分（中文注释不吞词）、接受替换整个词、候选排序与上限、SQL/Lua 大小写策略、方言词表隔离）
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）
@@ -251,7 +257,7 @@ ConnectionManagerScreen(
 | 场景 | 说明 |
 |---|---|
 | **新增语言** | 实现 `CodeLanguage` 接口 + 调用 `CodeLanguageRegistry.register(Language())`。编辑器零修改即支持 |
-| **新增 formatter** | 实现 `CodeFormatter` 接口 + 注册到 `CodeFormatterRegistry`。工具栏"格式化"按钮自动启用 |
+| **新增 formatter** | 实现 `CodeFormatter` 接口 + 注册到 `CodeFormatterRegistry`。工具栏"格式化"按钮自动启用。**空格判定走 [TokenSpacing](./ARCHITECTURE.md#28-格式化契约)** —— 实现者只管产 token 序列与换行 / 大写，空格 / 缩进 / 注释只读这三件事由共享的两端判定统一处理，新语言接入零特殊适配 |
 | **替换编辑器 / 表格主题** | 提供自定义 `CodeEditorTheme` / `DataTableTheme` 即可。**现代档下它们与 `SundaysPalette` 无关**（这是刻意保留的平价契约）；复古档下 `themed()` 会改读 `UiThemeTokens` 的 `syntax` / 选行 / 斑马纹 |
 | **改应用配色** | 改 `SundaysPalette` 里的 `ColorScheme` 常量 |
 | **改形状** | 改 `SundaysPalette.Shapes` / `Win2000Shapes` / `WinXpShapes`。按钮圆角由 `resolveControlShape` 统一解析，**调用点不必再逐个传 `shape`** |

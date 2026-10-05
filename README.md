@@ -50,7 +50,7 @@ sundays/
 │       └── GrpcClientConfig.kt  端点配置（TCP / UDS / 命名管道）+ ChannelBuilder
 ├── shared/               KMP 共享代码（commonMain / jvmMain）
 │   ├── commonMain/       KMP 共享逻辑（与平台无关）—— 含 UI 组件（编辑器 / 表格 / 右键菜单）
-│   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单）
+│   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单 + 格式化 + 补全提示)
 │   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
 │   │   ├── connection/   ConnectionManagerScreen：连接管理（左侧连接列表 + 右侧 4 步向导，JSON 持久化到 ~/.config/sundays/connection.json）
 │   │   ├── navigation/   AppDestination：顶层导航目标枚举（平台无关，v2.14 自 desktopApp 上移）
@@ -301,7 +301,8 @@ java -jar engine/build/libs/idb-engine.jar --mode grpc --ipc tcp --port 50051
 - **行号 gutter**（动态宽度，按行数位数自适应；与编辑区共用 `ScrollState`，滚动完全同步）
 - **工具栏**：`RowScope.() -> Unit` 插槽注入自定义按钮（"执行"、"清空"、"复制"…）
 - **语言切换下拉框**：可隐藏（`showLanguageSwitcher = false`）；语言可在实例化时直接指定
-- **格式化**：`CodeFormatterRegistry` 注册的格式化器自动启用
+- **格式化**：`CodeFormatterRegistry` 注册的格式化器自动启用；空格判定走两向贴合（注释只读、缩进原样搬运、幂等 —— 见 [`shared/ARCHITECTURE.md` §2.8](./shared/ARCHITECTURE.md#28-格式化契约)）
+- **补全提示**（默认 `on`）：输入关键字 / 类型 / 函数前缀弹出候选，`Tab`/`Enter` 接受、`↑↓` 选择、`Esc` 关闭；SQL 忽略大小写、Lua 大小写敏感（见 [`shared/ARCHITECTURE.md` §2.10](./shared/ARCHITECTURE.md#210-补全提示))
 - **右键菜单**：`@Composable (EditorContextMenuPayload?) -> Unit` 插槽注入菜单项
 
 #### 高度策略（v2.9+）
@@ -539,6 +540,7 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 | v2.15 | **调用层抽象（invocation layer）**<br>新增 `engine-protocol/` 模块：proto 源从 `engine/src/main/proto/` 迁出（protobuf gradle 配置同步迁出），新增 `EngineClient` 接口（`handle` / `invoke` / `testConnection` / `disconnect` / `close`）—— 调用方只面向接口编程；该模块零业务逻辑，依赖以 `api` 导出，供服务端与客户端同时依赖而不成环<br>新增 `engine-grpc-client/` 模块：`GrpcEngineClient` 经 gRPC stub 实现同一接口（TCP / UDS / 命名管道），仅依赖 `:engine-protocol`，**不拖入** Hadoop / POI / LuaJIT / 方言插件；`GrpcClientConfig.fromTarget` 解析 `host:port` / `tcp://` / `unix://` / `pipe:` 端点，格式错误在连接前抛出<br>协议新增 `SYSTEM.DISCONNECT`（`Action.DISCONNECT = 19` + `SystemDisconnectResponse{closed}` + `SystemResponse.disconnect = 5`）—— 连接池活在引擎进程内，远程调用方需要线上路由才能释放；已纳入 `writeActions`（`dryRun` 短路，不得真的掐断用户连接）且幂等<br>`desktopApp`：`ConnectionSession` / `DatabaseBrowserState` / `MainScreen` 改持 `EngineClient`；`main.kt` 成为唯一装配点，`-Dsundays.engine.endpoint` 切换实现（默认同进程 `IdbEngine`）<br>修复 `IpcConfig.fromArgs` 把 `--mode` 误判为未知参数 —— 文档中的 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 此前必定退出失败，gRPC 客户端无从连上一个按文档启动的服务端<br>测试：530 项全通过（`engine` 188 / `engine-grpc-client` 21 / `desktopApp` 18 为新增） |
 
 | v2.16 | **引擎能力补齐 —— 关闭与 DBeaver / Navicat / DataGrip 的功能差距**<br>**查询取消**：新增 `SYSTEM.CANCEL`（`Action.CANCEL = 20`）—— 协程取消无法打断阻塞的 JDBC 调用，只有 `Statement.cancel()` 能真正停掉数据库侧工作；新增 `StatementRegistry` 按 request id 登记 `Statement` / canceler，覆盖 `SQL.EXECUTE`、流式 `DATA.LIST`（`pageSize=0`）、`DATA.GENERATE`；被取消请求在原 id 上返回 `success=false, error="cancelled"`<br>**数据导入**：新增 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`，与 EXPORT 对称），**主进程内运行**（不引入 POI / Parquet / Hadoop，故可取消）；新包 `com.kxxnzstdsw.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）支持 CSV / JSON Lines；`ignore_errors=true` 改为逐行 `executeUpdate`（H2 绑定阶段不报错，批处理无法归因到行），代价是吞吐下降<br>**事务会话**：新增 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action.BEGIN=22` / `COMMIT=23` / `ROLLBACK=24` / `SESSION_INFO=25`）+ `Request.session_id`（字段 6，**留空 = 无事务，向后兼容**）；`TransactionManager` 钉住连接并 `autoCommit=false`，连接所有权归会话直到 `COMMIT` / `ROLLBACK`<br>**多语句脚本**：`SqlExecuteRequest.multi_statement` + `SqlScriptSplitter`（只切顶层 `;`，正确处理引号 / 注释 / PostgreSQL 美元引用；注释文本原样保留），按序执行、首个失败即停<br>测试：`:engine:test` 188 → **277**（+89），项目总计 **619**，0 失败 |
+| v2.17 | **shared/editor 编辑器能力补齐**<br>**两向贴合的空格判定**：抽 ormatter/TokenSpacing.kt（两个纯函数 indsLeft / indsRight），规则「两相邻 token 之间要空格 ⟺ 左不贴右 且 右不贴左」。换掉旧版「写前决定下一个」的 pendingSpace 标志；彻底消灭 id , name / id> 1 / :: int / 	. col / ( 1 ) 一类反复出现的畸形，以及「格式化两次才收敛」的伪幂等性。注释只读（块注释里常放代码样例，碰了就是破坏），只清行尾空白，**不被主子句换行规则吞掉**；缩进原样搬运；空行折叠至多一个；幂等性逐样本锁定<br>**编辑器补全（「提示」）**：CodeLanguage SPI 新增 completionCandidates(prefix, limit)，默认实现返回空列表（只支持高亮的语言零改动）。SQL 忽略大小写、Lua 大小写敏感 ——「谁拥有大小写规则谁说了算」，把 Pri 补成 print 是制造 bug。词字符限定 ASCII（Char.isLetterOrDigit() 对中文返回 	rue，会让中文注释吞掉英文词）。接受候选替换**整个词**（光标在词中间时），弹层置于滚动容器内 + Modifier.atCaret 自绘 0×0 报告（不撑大编辑器高度，天然跟着代码滚），按键走 onPreviewKeyEvent 才能 consume Tab/Enter 的默认行为<br>测试：FormatterSpacingTest（27 项：标点 / 操作符 / 缩进 / 注释 / 空行 / 幂等性 / 无行尾空白）+ CompletionTest（21 项：前缀切分、接受替换、排序、SQL/Lua 大小写、方言词表隔离）。变异验证 5 处全部如期变红<br>详细：[shared/ARCHITECTURE.md §2.8 / §2.10](./shared/ARCHITECTURE.md) |
 
 ---
 
