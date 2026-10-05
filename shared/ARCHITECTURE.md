@@ -421,6 +421,42 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
 `attempt to call a nil value`，用户至少能查到函数名。把错误暴露在能指认的位置，
 好过让它变成沉默。
 
+#### 2.10.2 数据库 schema 候选（库 / 表 / 字段）
+
+`CompletionKind` 追加三个值：`DATABASE` / `TABLE` / `COLUMN`。
+**必须追加在枚举末尾** —— `buildCompletionPool` 用 `kind.ordinal` 当类别排序键，
+插在中间会打乱既有语言词表的「关键字 → 类型 → 函数」次序。
+排序优先级由**调用方的传入顺序**决定（`selectExtras` 不重排），不依赖 `ordinal`。
+
+SQL 工作台的候选**全部来自已有状态，零额外请求**（`DatabaseBrowserState.sqlSchemaCompletions`）：
+
+| 类别 | 来源 | 何时有 |
+|---|---|---|
+| 库 | `databases`（`SCHEMA.LIST`） | 连接建立时 |
+| 表 | `tablesByDatabase`（`TABLE.LIST`） | 展开该库时（复用树上的懒加载结果） |
+| 字段 | `tabs[*].columns` | **打开过该表预览**时 |
+
+字段只覆盖「访问过的表」是刻意的：全库全表意味着对每张表发一次 `TABLE.COLUMN_LIST` ——
+一个 200 张表的库就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。
+零等待 + 零额外往返，用得越多越全。
+
+**库/表/字段整体优先于关键字**：`FROM us` 想要的是 `users` 这张表，不是 `USING`。
+关键字那一路由 `languageId`（= `sqlDialectProfile().languageId`）按方言档位自动带来，
+无需重复注入。表名**不去重**（不同库可能同名，标签都是裸表名，靠 `detail` 标出所属库）。
+
+**`extraCompletionsCaseSensitive = false`**：标识符大小写行为因方言而异
+（MySQL 取决于文件系统、PG 会把未加引号的名字小写化），敲 `FROM USERS` 补不出 `users`
+毫无帮助。这里**不存在**造数宿主函数那种「改写语义」的风险 —— 接受候选是用户主动点的
+动作，插入的是数据库里真实存在的名字。策略做成 `selectExtras` 的参数而非全局默认，
+正是因为两类调用方要的正好相反。
+
+> **`remember` 的 key 必须用 `schemaCompletionSignature`，不能用 `tabs`**
+> 也不能用 `rows`：前者 —— 双击打开表只改 `tab.columns`，`tabs` 列表引用不变，
+> `remember` 不会重跑，字段候选永远出不来；后者 —— `rows` 是真正的数据（可能上千行），
+> 一旦被牵进 key，每次翻页都会重建整份候选列表，而候选内容根本没变。
+> Compose 的 `remember` 用 `equals` 比较 key，签名里的 `Pair` / `List` 是结构相等，
+> 所以两边都能正确命中。`DatabaseBrowserFlowTest` 对这两条各有一个方向的断言。
+
 ## 3. DataTable 设计
 
 ### 3.1 核心能力
@@ -1355,7 +1391,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `SqlDialectProfileTest` | `commonTest/.../editor/SqlDialectProfileTest.kt` | 6 | 方言档位：id / 词表分类不变量 / 标准档位不认方言词 / 注册配对（语言 + formatter）/ 格式化随档位 |
 | `EditorIntegrationTest` | `commonTest/.../editor/EditorIntegrationTest.kt` | 12 | `CodeEditor` / `CodeEditorWithToolbar` 集成（tokenize + 工具栏 + 格式化） |
 | `FormatterSpacingTest` | `commonTest/.../editor/FormatterSpacingTest.kt` | 27 | 格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读（不被换行规则吞、不改内容）、空行折叠、幂等性、无行尾空白 |
-| `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 27 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离、上下文专属候选（大小写敏感 / 保持传入顺序）、**宿主函数不得进入 `LuaLanguage`** |
+| `CompletionTest` | `commonTest/.../editor/CompletionTest.kt` | 29 | 补全契约：前缀切分（中文注释不吞词 / 越界光标夹取）、接受候选替换整个词、候选排序与上限、SQL 与 Lua 的大小写策略差异、方言词表隔离、上下文专属候选（大小写由调用方定 / 保持传入顺序）、新类别须追加在枚举末尾、**宿主函数不得进入 `LuaLanguage`** |
 | `TableModelsTest` | `commonTest/.../table/TableModelsTest.kt` | 16 | `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` 模型 + `ContextMenuState` |
 | `JdbcUrlTest` | `commonTest/.../connection/JdbcUrlTest.kt` | 12 | 连接字段 ↔ JDBC URL 折算 / 回解析 / 方言与类型切换 |
 | `SundaysPaletteTest` | `commonTest/.../ui/SundaysPaletteTest.kt` | 4 | 浅 / 深配色的文字对比度达 WCAG AA（含语义色当文字色用的双重断言）/ 明暗亮度方向 / `surfaceTint` 透明 |

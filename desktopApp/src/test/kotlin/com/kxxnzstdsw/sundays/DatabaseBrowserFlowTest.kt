@@ -2,8 +2,11 @@ package com.kxxnzstdsw.sundays
 
 import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.sundays.connection.DialectType
+import com.kxxnzstdsw.sundays.editor.CompletionKind
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.table.PageSize
+import com.kxxnzstdsw.sundays.table.TableColumn
+import com.kxxnzstdsw.sundays.table.TableRow
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.pool.PoolManager
@@ -151,6 +154,127 @@ class DatabaseBrowserFlowTest {
         val alice = usersTab.rows.first { (it.cells["NAME"] as? String) == "Alice" }
         // 引擎 DataHandler.buildRow 对非 LOB 列一律走 rs.getString —— 单元格值是字符串.
         assertEquals("1", alice.id.toString(), "Alice's id should be 1")
+    }
+
+    @Test
+    fun `sql schema completions cover libraries tables and columns of visited tables`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        withTimeout(5_000) { while (state.loadingDatabases) delay(50) }
+
+        val db = state.databases.first()
+
+        // ── 库刚加载、还没展开任何节点时：只有库名，没有表和字段 ──
+        val beforeExpand = state.sqlSchemaCompletions()
+        val dbs = beforeExpand.filter { it.kind == CompletionKind.DATABASE }.map { it.label }
+        assertTrue(dbs.contains(db), "库名应已可补全：$dbs")
+        assertTrue(
+            beforeExpand.none { it.kind == CompletionKind.TABLE },
+            "未展开任何库时不应有表候选（表是懒加载的）：$beforeExpand",
+        )
+
+        // ── 展开后：表进入候选池 ──
+        state.toggleDatabase(db)
+        withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+        val tables = state.tablesByDatabase[db].orEmpty()
+        val tableLabels = state.sqlSchemaCompletions()
+            .filter { it.kind == CompletionKind.TABLE }.map { it.label }
+        assertEquals(tables.toSet(), tableLabels.toSet(), "每个已加载的表都应可补全")
+
+        // ── 表名 detail 标出所属库，否则不同库的同名表看起来一模一样 ──
+        val withDetail = state.sqlSchemaCompletions().first { it.label == tables.first() }
+        assertTrue(
+            withDetail.detail?.contains(db) == true,
+            "表候选 detail 应含所属库：$withDetail",
+        )
+
+        // ── 打开预览后：该表的字段才进入候选池（这是「只补访问过的表」的取舍）──
+        val usersTable = tables.first { it.uppercase() == "USERS" }
+        state.openTab(db, usersTable)
+        val usersTab = state.tabs.single { it.tableName.uppercase() == "USERS" }
+        withTimeout(5_000) { while (usersTab.loading) delay(50) }
+
+        val cols = state.sqlSchemaCompletions()
+            .filter { it.kind == CompletionKind.COLUMN }.map { it.label.uppercase() }
+        assertTrue("ID" in cols && "NAME" in cols, "已访问表的字段应可补全：$cols")
+        // 字段 detail 带「表.列 · 类型」，用户能看出这个字段属于哪张表
+        val colItem = state.sqlSchemaCompletions()
+            .first { it.kind == CompletionKind.COLUMN && it.label.equals("ID", true) }
+        assertTrue(
+            colItem.detail?.contains(usersTable) == true,
+            "字段候选 detail 应含表名：$colItem",
+        )
+
+        // ── 未访问的表不应带来字段 ──
+        val ordersTable = tables.first { it.uppercase() == "ORDERS" }
+        val ordersCols = state.sqlSchemaCompletions()
+            .filter { it.kind == CompletionKind.COLUMN && it.detail?.contains(ordersTable) == true }
+        assertTrue(
+            ordersCols.isEmpty(),
+            "未打开预览的表不应有字段候选（否则就得发 TABLE.COLUMN_LIST）：$ordersCols",
+        )
+    }
+
+    @Test
+    fun `sql schema completions order libraries then tables then columns`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        withTimeout(5_000) { while (state.loadingDatabases) delay(50) }
+        val db = state.databases.first()
+        state.toggleDatabase(db)
+        withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+        val usersTable = state.tablesByDatabase[db].orEmpty()
+            .first { it.uppercase() == "USERS" }
+        state.openTab(db, usersTable)
+        val usersTab = state.tabs.single { it.tableName.uppercase() == "USERS" }
+        withTimeout(5_000) { while (usersTab.loading) delay(50) }
+
+        // 顺序即优先级：`FROM us` 想要的是 users 这张表，不是 USING 这个关键字
+        val kinds = state.sqlSchemaCompletions().map { it.kind }
+        val ranks = kinds.map {
+            when (it) {
+                CompletionKind.DATABASE -> 0
+                CompletionKind.TABLE -> 1
+                CompletionKind.COLUMN -> 2
+                else -> 3
+            }
+        }
+        assertEquals(ranks.sorted(), ranks, "候选必须按 库→表→字段 排好序：$kinds")
+    }
+
+    @Test
+    fun `completion signature tracks columns but ignores rows`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        withTimeout(5_000) { while (state.loadingDatabases) delay(50) }
+        val db = state.databases.first()
+        state.toggleDatabase(db)
+        withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+        val usersTable = state.tablesByDatabase[db].orEmpty()
+            .first { it.uppercase() == "USERS" }
+        state.openTab(db, usersTable)
+        val usersTab = state.tabs.single { it.tableName.uppercase() == "USERS" }
+        withTimeout(5_000) { while (usersTab.loading) delay(50) }
+
+        val loaded = schemaCompletionSignature(state.tabs)
+        assertTrue(loaded.isNotEmpty() && loaded.first().third.isNotEmpty(), "预览加载完应有列签名")
+
+        // 只改 rows（翻页 / 刷新）→ 签名必须**不变**。
+        // rows 是真正的数据（可能上千行），被牵进 remember key 的话每翻一页都会重建
+        // 整份候选列表，而候选内容根本没变。
+        usersTab.rows = usersTab.rows + TableRow(9999, mapOf("ID" to "9999"))
+        assertEquals(
+            loaded, schemaCompletionSignature(state.tabs),
+            "rows 变化不应让补全缓存失效（否则每次翻页都重算候选）",
+        )
+
+        // 改 columns（预览真正变了）→ 签名**必须**变，否则新表 / 新列的候选出不来
+        usersTab.columns = usersTab.columns + TableColumn("EMAIL", "EMAIL")
+        assertNotEqualsCompat(loaded, schemaCompletionSignature(state.tabs))
+    }
+
+    private fun assertNotEqualsCompat(illegal: Any?, actual: Any?) {
+        if (illegal == actual) throw AssertionError("值不应相等：$illegal")
     }
 
     @Test

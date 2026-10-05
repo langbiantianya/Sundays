@@ -110,6 +110,8 @@ import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.editor.CompletionItem
+import com.kxxnzstdsw.sundays.editor.CompletionKind
 import com.kxxnzstdsw.sundays.editor.GenerateHelpers
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
@@ -1434,6 +1436,16 @@ private fun SqlWorkbenchPane(
     dialect: SqlDialectProfile,
     modifier: Modifier = Modifier,
 ) {
+    // 补全候选：库 / 表 / 字段，全部来自已有状态（见 [DatabaseBrowserState.sqlSchemaCompletions]）。
+    // 缓存签名见 [schemaCompletionSignature] —— 它刻意不含 `tab.rows`。
+    val schemaCompletions = remember(
+        state.databases,
+        state.tablesByDatabase,
+        schemaCompletionSignature(state.tabs),
+    ) {
+        state.sqlSchemaCompletions()
+    }
+
     Column(modifier = modifier) {
         // 顶部信息条：当前执行的 catalog —— 说明 SQL 会落到哪个库
         Surface(
@@ -1509,6 +1521,11 @@ private fun SqlWorkbenchPane(
                     languageId = dialect.languageId,
                     // 本工作台只处理 SQL —— 不暴露语言切换器
                     showLanguageSwitcher = false,
+                    // 注入当前连接的库 / 表 / 字段（**零额外请求**，见 sqlSchemaCompletions）。
+                    // 关键字由上面的 `languageId` 按方言档位自动带来，无需重复注入。
+                    // 忽略大小写：标识符大小写行为因方言而异，敲 `FROM USERS` 也该能补出 `users`
+                    extraCompletions = schemaCompletions,
+                    extraCompletionsCaseSensitive = false,
                     actions = {
                         WinButton(
                             onClick = { state.executeSql() },
@@ -2155,6 +2172,26 @@ private fun Int.toPageSize(): PageSize =
         ?: PageSize.S100
 
 /**
+ * SQL 工作台补全候选的**缓存签名** —— 只取会影响候选内容的字段。
+ *
+ * 用途是作为 `remember` 的 key。Compose 的 `remember` 用 `equals`（结构相等，不是引用）
+ * 比较 key，因此：
+ * - [TablePreviewTab.columns] 变化（预览刚加载完）→ 签名变 → 候选重算 ✓
+ * - [TablePreviewTab.rows] 变化（翻页 / 刷新数据）→ 签名**不变** → 不重算 ✓
+ *
+ * 第二条是这里唯一需要小心的点：`rows` 是真正的数据（可能上千行），一旦被牵进 key，
+ * 每翻一页都会重建整份候选列表 —— 而候选内容根本没变。
+ *
+ * 同理**不能**直接用 `tabs` 当 key：双击打开表只改 `tab.columns`，`tabs` 列表引用不变，
+ * `remember` 不会重跑，字段候选就永远出不来。
+ */
+internal fun schemaCompletionSignature(
+    tabs: List<TablePreviewTab>,
+): List<Triple<String, String, List<Pair<String, String>>>> = tabs.map { tab ->
+    Triple(tab.schema, tab.tableName, tab.columns.map { it.key to it.header })
+}
+
+/**
  * 数据库浏览屏幕的状态机 —— 维护数据库/表加载、标签页打开/关闭/选择,
  * 以及当前引擎会话状态(连接 ID 仅由 [DatabaseBrowserScreen] 在外层持有).
  */
@@ -2316,6 +2353,62 @@ class DatabaseBrowserState(
      */
     fun sqlDialectProfile(): SqlDialectProfile =
         currentConnection?.dialect?.toSqlDialectProfile() ?: SqlDialectProfile.STANDARD
+
+    /**
+     * SQL 工作台补全用的 schema 候选 —— 库 → 表 → 字段，全部**来自已有状态，零额外请求**。
+     *
+     * ## 覆盖范围（与「不额外打扰数据库」这个前提绑定）
+     *
+     * | 类别 | 来源 | 何时有 |
+     * |---|---|---|
+     * | 库 | [databases]（`SCHEMA.LIST`） | 连接建立时 |
+     * | 表 | [tablesByDatabase]（`TABLE.LIST`） | 展开该库时（复用树上的懒加载结果） |
+     * | 字段 | [tabs] 里各 tab 的 `columns` | **打开过该表的预览**时 |
+     *
+     * 字段只覆盖「访问过的表」是刻意的：全库全表意味着对每张表发一次
+     * `TABLE.COLUMN_LIST` —— 一个 200 张表的库就是 200 次串行往返，而用户在敲 `sel`
+     * 时根本用不到其中 99%。这里选择零等待、零额外往返，用得越多越全。
+     *
+     * ## 排序：库 → 表 → 字段 → （语言关键字）
+     *
+     * 库/表/字段整体**优先于**关键字，因为 `FROM us` 想要的是 `users` 这张表而不是
+     * `USING` 这个关键字。同类内部保持引擎返回的顺序，不擅自重排 —— 引擎的排序未必
+     * 字典序，改了会让人对不上 `SHOW TABLES` 的结果。
+     *
+     * ## 去重
+     *
+     * 表名**不去重**：不同库可能有同名表，标签都是裸表名（SQL 里 `FROM t` 就是裸名），
+     * 但 [CompletionItem.detail] 标出所属库 —— 两条都留着，用户能分辨。
+     */
+    fun sqlSchemaCompletions(): List<CompletionItem> {
+        val out = ArrayList<CompletionItem>()
+
+        for (db in databases) {
+            if (db.isNotBlank()) out.add(CompletionItem(db, CompletionKind.DATABASE, "库"))
+        }
+        for ((db, tables) in tablesByDatabase) {
+            val tableHint = if (db.isBlank()) "表" else "$db · 表"
+            for (t in tables) {
+                if (t.isNotBlank()) out.add(CompletionItem(t, CompletionKind.TABLE, tableHint))
+            }
+        }
+        for (tab in tabs) {
+            if (tab.columns.isEmpty()) continue
+            val tableLabel = if (tab.schema.isBlank()) tab.tableName else "${tab.schema}.${tab.tableName}"
+            for (col in tab.columns) {
+                val name = col.key
+                if (name.isBlank()) continue
+                out.add(
+                    CompletionItem(
+                        label = name,
+                        kind = CompletionKind.COLUMN,
+                        detail = if (col.header.isBlank()) tableLabel else "$tableLabel · ${col.header}",
+                    ),
+                )
+            }
+        }
+        return out
+    }
 
     /**
      * 执行**当前 SQL sheet** 编辑器中的 SQL —— 走 `Category.SQL` / `Action.EXECUTE` 流式通道：

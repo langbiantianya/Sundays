@@ -183,6 +183,9 @@ fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
  * @param extraCompletions 调用方注入的额外候选，**优先于**语言自带候选。用于「当前上下文
  *   才有、但语言本身不认识」的符号 —— 如造数工作台注入 [GenerateHelpers.completions]
  *   （那些 `insert` / `random_*` 只在造数沙箱里存在，塞进 `LuaLanguage` 会误导普通 Lua 编辑器）
+ * @param extraCompletionsCaseSensitive [extraCompletions] 是否大小写敏感匹配。默认 `true`；
+ *   SQL 工作台注入库 / 表 / 字段时要传 `false`（标识符大小写行为因方言而异，
+ *   用户敲 `FROM USERS` 应当能补出 `users`）
  */
 @Composable
 fun CodeEditor(
@@ -200,6 +203,7 @@ fun CodeEditor(
     enableCompletion: Boolean = true,
     maxCompletionItems: Int = DEFAULT_COMPLETION_LIMIT,
     extraCompletions: List<CompletionItem> = emptyList(),
+    extraCompletionsCaseSensitive: Boolean = true,
 ) {
     val language = remember(languageId) {
         languageId?.let { CodeLanguageRegistry.get(it) }
@@ -241,7 +245,8 @@ fun CodeEditor(
     val collapsedSelection = fieldValue.selection.collapsed
 
     LaunchedEffect(
-        enableCompletion, language, textNow, selectionStart, collapsedSelection, extraCompletions,
+        enableCompletion, language, textNow, selectionStart, collapsedSelection,
+        extraCompletions, extraCompletionsCaseSensitive,
     ) {
         val lang = language
         if (!enableCompletion || lang == null || !collapsedSelection) {
@@ -255,7 +260,12 @@ fun CodeEditor(
             // **额外候选优先**：它们是当前工作台的核心语义（造数沙箱的 random_* 等），
             // 用户敲 `rand` 时最想看到的就是它们，语言候选在后兜底。
             val fromLanguage = lang.completionCandidates(prefix, maxCompletionItems)
-            val fromExtras = selectExtras(prefix, extraCompletions, maxCompletionItems)
+            val fromExtras = selectExtras(
+                prefix = prefix,
+                extras = extraCompletions,
+                limit = maxCompletionItems,
+                caseSensitive = extraCompletionsCaseSensitive,
+            )
             (fromExtras + fromLanguage).take(maxCompletionItems)
         }
         // 候选集一变就回到第一条：保留旧下标会指向一条不相干的词
@@ -580,7 +590,8 @@ private fun LineNumberGutter(
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；
  *   payload 通过 [EditorContextMenuPayload]（包含当前 text + languageId）传入
  * @param enableCompletion 是否启用关键字 / 函数补全（「提示」功能）；默认开启
- * @param extraCompletions 注入上下文专属候选（如造数沙箱的宿主函数），优先于语言候选
+ * @param extraCompletions 注入上下文专属候选（如造数沙箱的宿主函数、SQL 的库/表/字段），优先于语言候选
+ * @param extraCompletionsCaseSensitive [extraCompletions] 是否大小写敏感；SQL 的库/表/字段传 `false`
  */
 @Composable
 fun CodeEditorWithToolbar(
@@ -600,6 +611,7 @@ fun CodeEditorWithToolbar(
     contextMenuItems: @Composable (EditorContextMenuPayload?) -> Unit = {},
     enableCompletion: Boolean = true,
     extraCompletions: List<CompletionItem> = emptyList(),
+    extraCompletionsCaseSensitive: Boolean = true,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         EditorToolbar(
@@ -632,6 +644,7 @@ fun CodeEditorWithToolbar(
             contextMenuItems = contextMenuItems,
             enableCompletion = enableCompletion,
             extraCompletions = extraCompletions,
+            extraCompletionsCaseSensitive = extraCompletionsCaseSensitive,
         )
     }
 }

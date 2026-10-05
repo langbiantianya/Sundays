@@ -249,6 +249,32 @@ class CompletionTest {
     }
 
     @Test
+    fun `extras case sensitivity is the caller's choice`() {
+        // 两类调用方要的正好相反，所以策略是参数而不是全局默认：
+        // - 造数宿主函数：真·大小写敏感全局（Insert ≠ insert）
+        // - 数据库标识符：大小写行为因方言而异，敲 `FROM USERS` 也该补得出 `users`
+        assertTrue(selectExtras("In", extras, 5, caseSensitive = true).isEmpty())
+        assertEquals(listOf("insert"), selectExtras("In", extras, 5, caseSensitive = false).map { it.label })
+        assertEquals(listOf("insert"), selectExtras("in", extras, 5, caseSensitive = false).map { it.label })
+    }
+
+    @Test
+    fun `schema kinds sit after the language kinds so the pool order is preserved`() {
+        // buildCompletionPool 用 kind.ordinal 当类别排序键。新类别若插在中间，
+        // 「关键字 → 类型 → 函数」的既有次序会被打乱 —— 这条锁住「必须追加在末尾」。
+        val pool = buildCompletionPool(
+            CompletionKind.KEYWORD to setOf("SELECT"),
+            CompletionKind.BUILTIN to setOf("COUNT"),
+        )
+        val kinds = pool.map { it.kind }
+        assertTrue(
+            kinds.indexOf(CompletionKind.DATABASE) > kinds.indexOf(CompletionKind.BUILTIN) ||
+                CompletionKind.DATABASE.ordinal > CompletionKind.BUILTIN.ordinal,
+            "库/表/字段必须排在关键字/类型/函数之后：${CompletionKind.entries.map { "$it=${it.ordinal}" }}",
+        )
+    }
+
+    @Test
     fun `the generate sandbox contract exposes exactly the host helpers`() {
         val names = GenerateHelpers.names
         assertTrue(names.containsAll(listOf("insert", "lastId")), "核心两个写库函数必须在：$names")

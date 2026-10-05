@@ -23,6 +23,16 @@ enum class CompletionKind(val displayName: String) {
     KEYWORD("关键字"),
     TYPE("类型"),
     BUILTIN("函数"),
+
+    /**
+     * 数据库（catalog / schema）—— 由调用方从**实际连接**注入，见 [CompletionItem]。
+     *
+     * 下面三个必须**追加在末尾**：[buildCompletionPool] 用 `kind.ordinal` 当类别排序键，
+     * 插在中间会打乱既有语言词表的「关键字 → 类型 → 函数」次序。
+     */
+    DATABASE("库"),
+    TABLE("表"),
+    COLUMN("字段"),
 }
 
 /**
@@ -104,22 +114,29 @@ fun applyCompletion(text: String, caret: Int, item: CompletionItem): Pair<String
 /**
  * 从调用方传入的额外候选里挑出匹配 [prefix] 的前 [limit] 条。
  *
- * **大小写敏感**，与 [LuaLanguage] 的关键字策略一致。造数宿主函数（`insert` / `random_int`）
- * 是真正的大小写敏感全局 —— 把 `Insert` 补成 `insert` 会改变用户脚本的语义，
- * 属于制造 bug 而非帮忙。理由与 `selectCompletions` 的 `caseSensitive = true` 同源。
+ * ## [caseSensitive] 由调用方决定，不是统一策略
  *
- * 传入列表**保持原顺序**（不重排）：清单是按「最常用 → 最专用」人工排的，
- * 那个顺序比按字母排更有信息量。
+ * 两类调用方要的正好相反：
+ *
+ * - **造数沙箱宿主函数**（`insert` / `random_int`）→ `true`。它们是真·大小写敏感全局，
+ *   把 `Insert` 补成 `insert` 会改变脚本语义，属于制造 bug。
+ * - **数据库里的库 / 表 / 字段** → `false`。标识符大小写行为因方言而异（MySQL 取决于
+ *   文件系统、PG 会把未加引号的名字小写化），用户敲 `FROM USERS` 却补不出 `users` 毫无帮助。
+ *   而且这里**不接受「改写语义」的风险** —— 接受候选是用户主动点的动作，插入的是
+ *   数据库里**真实存在**的名字，不是我们替他猜的规范形式。
+ *
+ * 传入列表**保持原顺序**（不重排）：调用方按「最相关 → 最不相关」排好，那个顺序有信息量。
  */
 internal fun selectExtras(
     prefix: String,
     extras: List<CompletionItem>,
     limit: Int,
+    caseSensitive: Boolean = true,
 ): List<CompletionItem> {
     if (prefix.isEmpty() || limit <= 0) return emptyList()
     val out = ArrayList<CompletionItem>(minOf(limit, 8))
     for (item in extras) {
-        if (!item.label.startsWith(prefix)) continue
+        if (!item.label.startsWith(prefix, ignoreCase = !caseSensitive)) continue
         out.add(item)
         if (out.size >= limit) break
     }
