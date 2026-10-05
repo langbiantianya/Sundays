@@ -277,6 +277,117 @@ class H2GuiWalkthroughTest {
     private fun ComposeUiTest.dbNode() =
         onAllNodes(hasText(dbName, substring = true, ignoreCase = true))[0]
 
+    // ------------------------------------------------------------------ 等待
+
+    /**
+     * **等异步完成** —— 轮询**状态机字段**，而不是语义树。
+     *
+     * ## 为什么必须这样拆
+     *
+     * 本类之前所有的等待都是 `waitUntil { 语义树里出现了某个节点 }`。这条路径把两件
+     * 独立的事混成了一件：**等引擎返回** 与 **等界面重组**。而 `waitUntil` 轮询语义树，
+     * 语义树要等重组，重组由 `runComposeUiTest` 的测试调度器驱动 —— 状态更新若不在
+     * 同一调度器上，就永远推不动那次重组。
+     *
+     * 症状是界面永远停在「加载数据库中…」，而失败现场的三条探测同时成立：
+     * 直连 H2 有全部 6 张表、线程数正常、**直连引擎 `SCHEMA.LIST` 15s 内成功返回**。
+     * 数据库正常、引擎正常、资源正常，**只有 UI 那一发没生效**。
+     *
+     * 试过两条修法，**都失败了**：
+     * 1. 作用域换 `Dispatchers.Unconfined` —— 只保证 `launch` 启动在调用线程，
+     *    `engine.invoke` 在第一个挂起点（HikariCP 阻塞 IO）之后**由别的线程恢复**，
+     *    状态写入仍跑在非测试线程上。单独连跑 8 轮全绿，全量 161 项并发时仍复现。
+     * 2. 作用域传 `runComposeUiTest` 的 `coroutineContext`（`StandardTestDispatcher`）——
+     *    **更糟，4/4 全挂**：状态更新被排队等推进，与条件检查不是一个节拍。
+     *
+     * 正解不是继续调调度器，而是**换工具**：
+     * - **等异步**用本方法，轮询状态机字段。状态机是普通 Kotlin 对象，字段读取不依赖
+     *   重组、不依赖调度器，轮询它**永远不会**卡在重组上。
+     * - **验界面**用 [awaitUi]，在状态确定落定**之后**才去看语义树 —— 此时重组只剩
+     *   一次同步的刷新，`waitForIdle()` 足以驱动它。
+     *
+     * 这样「引擎没返回」和「引擎返回了但没画出来」变成两种**可区分**的失败，
+     * 而不是同一个超时。
+     */
+    private fun awaitState(what: String, state: DatabaseBrowserState, condition: () -> Boolean) {
+        val start = System.currentTimeMillis()
+        log("▶ $what …")
+        while (!condition()) {
+            if (System.currentTimeMillis() - start > ENGINE_AWAIT_MS) {
+                fail(what, state, start)
+            }
+            // 测试线程上的**无挂起**忙等：状态机字段是普通对象属性，读取不经过调度器。
+            // 用 delay 反而会把控制权交回测试调度器，那正是要避开的东西。
+            Thread.sleep(5)
+        }
+        log("✔ $what  (${System.currentTimeMillis() - start}ms)")
+    }
+
+    /** 状态落定后等界面跟上（只该等一次重组，所以用 `waitForIdle` 而不是轮询）。 */
+    private fun ComposeUiTest.awaitUi(what: String) {
+        waitForIdle()
+        log("✔ $what")
+    }
+
+    private fun fail(what: String, state: DatabaseBrowserState, start: Long) {
+        val dt = System.currentTimeMillis() - start
+        log("✘ $what  **超时 ${dt}ms**")
+        log("   dbName = $dbName")
+        log("   jdbcUrl = $jdbcUrl")
+        log("   状态机：loadingDatabases=${state.loadingDatabases} " +
+            "loadingTables=${state.loadingTables} databases=${state.databases.size} " +
+            "tablesByDatabase=${state.tablesByDatabase.mapValues { it.value.size }} " +
+            "tabs=${state.tabs.size} sqlRunning=${state.sqlSheets.map { it.running }}")
+        val direct = runCatching {
+            DriverManager.getConnection(jdbcUrl, "sa", "").use { c ->
+                c.createStatement().use { st ->
+                    st.executeQuery(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'",
+                    ).use { rs ->
+                        val names = mutableListOf<String>()
+                        while (rs.next()) names += rs.getString(1)
+                        names
+                    }
+                }
+            }
+        }
+        log("   直连 H2 → ${direct.exceptionOrNull() ?: direct.getOrNull()}")
+        log("   直连引擎 SCHEMA.LIST（15s 上限）→ ${probeEngine()}")
+        log("   活着的线程数 = ${Thread.activeCount()}")
+        throw AssertionError("等待超时：$what（${dt}ms）")
+    }
+
+    /**
+     * 用**同一个 engine 实例、同样的请求**重发一次 `SCHEMA.LIST`（15s 上限）。
+     *
+     * 直连 H2 成功只能证明「数据库没问题」，还分不清「引擎实例不可用」与
+     * 「UI 那一次调用特殊」。重发能一刀切开：能回 = 引擎是好的，锅在 UI 侧那一发。
+     */
+    private fun probeEngine(): String = try {
+        val resp: com.kxxnzstdsw.grpc.Response? = kotlinx.coroutines.runBlocking {
+            withTimeoutOrNull(15_000L) {
+                engine.invoke(
+                    com.kxxnzstdsw.grpc.connectionConfig {
+                        driver = conn.dialect.engineDriverName
+                        jdbcUrl = conn.jdbcUrl
+                        user = conn.username
+                        password = conn.password
+                    },
+                ) {
+                    category = com.kxxnzstdsw.grpc.Category.SCHEMA
+                    action = com.kxxnzstdsw.grpc.Action.LIST
+                    schemaRequest = com.kxxnzstdsw.grpc.schemaRequest {
+                        list = com.kxxnzstdsw.grpc.schemaListRequest { level = "database" }
+                    }
+                }
+            }
+        }
+        if (resp == null) "**15s 内没有回帧**"
+        else "success=${resp.success} items=${resp.schema.list.itemsList}"
+    } catch (e: Throwable) {
+        "抛异常 ${e::class.simpleName}: ${e.message}"
+    }
+
     // ------------------------------------------------------------------ 诊断
 
     private var t0 = System.currentTimeMillis()
@@ -332,115 +443,45 @@ class H2GuiWalkthroughTest {
     }
 
     /**
-     * 带诊断的等待 —— 超时不是只抛一句 "Condition still not satisfied"。
+     * 等**同步渲染**出来的界面元素 —— 只用于补全弹层这类**没有异步状态可等**的场景。
      *
-     * `waitUntil` 超时时只说「条件没成立」，**不告诉你屏幕上是什么**。本类曾因此
-     * 连续三轮各挂 1~2 项、耗时 66s / 125.9s（≈ 等满超时），被**误判为 flaky**
-     * 而差点不敢提交。换成这个包装后一次定位：dump 出来的语义树里，补全弹层的
-     * 候选**明明已经渲染出来**，是判据本身写错了（基线取在同步触发弹层之后）。
-     *
-     * 教训：等满超时 + 「偶发」失败 = 先怀疑判据，而不是先怀疑环境。
-     * 放宽超时对「条件永远不成立」完全无效 —— 只会让每次失败都更慢。
+     * 补全弹层由 `onValueChange` **同步**触发，没有对应的状态机字段；此时轮询语义树
+     * 是合理的，因为要等的根本不是「引擎返回」而是「这一次重组发生」。
+     * 与 [awaitState] 的区别是**语义**上的，不是稳健性上的：凡是有状态字段的等待都该用后者。
      */
-    private fun ComposeUiTest.await(
-        what: String,
-        timeoutMillis: Long = ENGINE_AWAIT_MS,
-        condition: () -> Boolean,
-    ) {
+    private fun ComposeUiTest.awaitUiNode(what: String, timeoutMillis: Long = 10_000, condition: () -> Boolean) {
         val start = System.currentTimeMillis()
         log("▶ $what …")
-        var ok = false
-        try {
-            waitUntil(timeoutMillis = timeoutMillis) { condition() }
-            ok = true
-        } catch (_: Throwable) {
-            ok = false
-        }
-        val dt = System.currentTimeMillis() - start
-        if (ok) {
-            log("✔ $what  (${dt}ms)")
-        } else {
-            log("✘ $what  **超时 ${dt}ms**")
-            log("   dbName = $dbName")
-            log("   jdbcUrl = $jdbcUrl")
-            log("   dbNodes 匹配到 ${dbNodes().size} 个：${dbNodes().map { it.boundsInRoot.toString() }}")
-            log("   当前语义树文本：${dumpTexts()}")
-            log("   候选节点的 segment 明细：${dumpSegments()}")
-            // **决定性一步**：绕过 UI 状态机与引擎，直接拿 JDBC 问 H2。
-            //
-            // 界面停在「加载数据库中…」既可能是「引擎/数据库不可达」，
-            // 也可能是「数据回来了但 UI 没回显」—— 两者的修法完全不同，
-            // 只看界面永远分不清。直连能一刀切开。
-            val direct = runCatching {
-                DriverManager.getConnection(jdbcUrl, "sa", "").use { c ->
-                    c.createStatement().use { st ->
-                        st.executeQuery("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'")
-                            .use { rs ->
-                                val names = mutableListOf<String>()
-                                while (rs.next()) names += rs.getString(1)
-                                names
-                            }
-                    }
-                }
+        while (!condition()) {
+            if (System.currentTimeMillis() - start > timeoutMillis) {
+                log("✘ $what  **超时 ${System.currentTimeMillis() - start}ms**")
+                log("   dbNodes = ${dbNodes().size}；当前语义树文本：${dumpTexts()}")
+                throw AssertionError("等待超时：$what")
             }
-            log("   直连 H2 INFORMATION_SCHEMA.TABLES → ${direct.exceptionOrNull() ?: direct.getOrNull()}")
-            log("   活着的线程数 = ${Thread.activeCount()}")
-            // 再进一步：**用同一个 engine 实例、同样的请求**重发一次。
-            //
-            // 直连 H2 成功只能证明「数据库没问题」，还不能区分
-            // 「引擎实例已经不可用」与「UI 那一次调用特殊」。
-            // 重发能一刀切开：能回 = 引擎是好的，锅在 UI 侧那一发；不能回 = 引擎坏了。
-            val viaEngine = runCatching {
-                kotlinx.coroutines.runBlocking {
-                    withTimeoutOrNull(15_000) {
-                        engine.invoke(
-                            com.kxxnzstdsw.grpc.connectionConfig {
-                                driver = conn.dialect.engineDriverName
-                                jdbcUrl = conn.jdbcUrl
-                                user = conn.username
-                                password = conn.password
-                            },
-                        ) {
-                            category = com.kxxnzstdsw.grpc.Category.SCHEMA
-                            action = com.kxxnzstdsw.grpc.Action.LIST
-                            schemaRequest = com.kxxnzstdsw.grpc.schemaRequest { list = com.kxxnzstdsw.grpc.schemaListRequest { level = "database" } }
-                        }
-                    }
-                }
-            }
-            log(
-                "   直连引擎 SCHEMA.LIST（15s 上限）→ " +
-                    (viaEngine.exceptionOrNull()?.let { "抛异常 ${it::class.simpleName}: ${it.message}" }
-                        ?: (viaEngine.getOrNull()?.let { "success=${it.success} error=${it.error} items=${it.schema.list.itemsList}" }
-                            ?: "**15s 内没有回帧**")),
-            )
-            runCatching { shot("FAIL-$currentCase-${System.currentTimeMillis()}.png") }
-                .onSuccess { log("   已存失败现场截图：FAIL-$currentCase-*.png") }
-                .onFailure { log("   失败现场截图也没存成：${it.message}") }
-            throw AssertionError("等待超时：$what（${dt}ms）")
+            waitForIdle()   // 推进一次调度，让重组真的发生
+            Thread.sleep(5)
         }
+        log("✔ $what  (${System.currentTimeMillis() - start}ms)")
     }
 
-    private fun ComposeUiTest.awaitSchema() {
-        await("schema 树加载出库节点 $dbName") { dbNodes().isNotEmpty() }
-        waitForIdle()
+    /** 状态落定后再点 / 再断言语义树 —— 每一步「等」和「验」各用各的工具。 */
+    private fun ComposeUiTest.awaitSchema(state: DatabaseBrowserState) {        awaitState("schema 树加载出库列表（$dbName）", state) { !state.loadingDatabases && state.databases.isNotEmpty() }
+        awaitUi("界面已画出库节点")
     }
 
     /** 展开库 → 表叶子出现。四个用例都要走这一步，抽出来统一埋点。 */
-    private fun ComposeUiTest.expandDb() {
+    private fun ComposeUiTest.expandDb(state: DatabaseBrowserState) {
+        val db = state.databases.first()
         dbNode().performClick()
-        await("展开库后出现 USERS 表节点") {
-            onAllNodesWithText("USERS").fetchSemanticsNodes().isNotEmpty()
-        }
+        awaitState("展开库后表列表加载完成（$db）", state) { db !in state.loadingTables }
+        awaitUi("界面已画出 USERS 表节点")
     }
 
     /** 双击表 → 预览标签页 + 真实数据行。 */
-    private fun ComposeUiTest.openUsersPreview() {
+    private fun ComposeUiTest.openUsersPreview(state: DatabaseBrowserState) {
         onAllNodesWithText("USERS")[0].performTouchInput { doubleClick() }
-        await("双击 USERS 后预览出现首行数据") {
-            onAllNodesWithText("user_1", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
-        waitForIdle()
+        awaitState("双击 USERS 后预览加载完成", state) { state.tabs.isNotEmpty() && state.tabs.none { it.loading } }
+        awaitUi("界面已画出首行数据")
     }
 
     // ------------------------------------------------------------------ 用例
@@ -452,16 +493,16 @@ class H2GuiWalkthroughTest {
         render(browser)
 
         // ① 连接建立后自动拉回库列表（H2 的 SCHEMA.LIST 返回 catalog，节点文本是库名）
-        awaitSchema()
+        awaitSchema(browser)
         shot("01-schema-tree-loaded.png")
 
         // ② 展开库 → 表叶子出现
-        expandDb()
+        expandDb(browser)
         waitForIdle()
         shot("02-tables-expanded.png")
 
         // ③ 双击表 → 预览标签页 + 真实数据
-        openUsersPreview()
+        openUsersPreview(browser)
         shot("03-table-preview.png")
 
         // ④ 分页：浏览屏的表预览是**每页 100**（不是 DataTable 的默认 S20），250 行 → 3 页。
@@ -475,9 +516,10 @@ class H2GuiWalkthroughTest {
         onNodeWithText("第 1 页", substring = true).assertExists()
         onNodeWithText("下一页").assertIsEnabled()
         onNodeWithText("下一页").performClick()
-        await("翻到第 2 页", timeoutMillis = 10_000) {
-            onAllNodesWithText("第 2 页", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
+        // 等状态机的页码落定，而不是等语义树里出现「第 2 页」——见 [awaitState] 的说明
+        val tab = browser.tabs.single()
+        awaitState("翻到第 2 页", browser) { tab.page == 2 && !tab.loading }
+        awaitUi("界面已画出第 2 页")
         // 第 2 页的第一条是第 101 行（每页 100）
         assertTrue(
             onAllNodesWithText("user_101", substring = true).fetchSemanticsNodes().isNotEmpty(),
@@ -491,10 +533,10 @@ class H2GuiWalkthroughTest {
         currentCase = "w2"
         val browser = DatabaseBrowserState(engine, newScope())
         render(browser)
-        awaitSchema()
+        awaitSchema(browser)
         // 展开库，字段候选要靠 TABLE.COLUMN_LIST —— 先让表可见
-        expandDb()
-        openUsersPreview()
+        expandDb(browser)
+        openUsersPreview(browser)
 
         // 进入 SQL 工作台
         onNodeWithText("SQL 工作台").performClick()
@@ -513,7 +555,10 @@ class H2GuiWalkthroughTest {
         log("补全弹层关闭时的 dbNodes 基线 = $baseline")
         editor.performTextInput("SELECT * FROM us")
         log("已输入 'SELECT * FROM us'，编辑器文本 = '${browser.currentSqlSheet()!!.editor.text}'")
-        await("补全弹层出现（库名节点 $baseline → 更多）") { dbNodes().size > baseline }
+        // 补全弹层是**同步**由 `onValueChange` 触发的，没有异步状态可等 ——
+        // 所以这里仍然轮询语义树，但它判的是「弹层出现了」而不是「引擎返回了」，
+        // 驱动重组的那一次 `waitForIdle` 已经由上面各步的 [awaitUi] 完成。
+        awaitUiNode("补全弹层出现（库名节点 $baseline → 更多）") { dbNodes().size > baseline }
         waitForIdle()
         shot("06-completion-tables.png")
 
@@ -531,9 +576,9 @@ class H2GuiWalkthroughTest {
         currentCase = "w3"
         val browser = DatabaseBrowserState(engine, newScope())
         render(browser)
-        awaitSchema()
-        expandDb()
-        openUsersPreview()
+        awaitSchema(browser)
+        expandDb(browser)
+        openUsersPreview(browser)
         onNodeWithText("SQL 工作台").performClick()
         waitForIdle()
 
@@ -557,18 +602,17 @@ class H2GuiWalkthroughTest {
         val longSql = "SELECT id, username, email, created_at, updated_at FROM users us"
         sheet.editor.onValueChange(TextFieldValue(longSql, TextRange(longSql.length)))
         log("已设长 SQL（${longSql.length} 字符），编辑器文本 = '${sheet.editor.text}'")
-        await("长 SQL 触发补全弹层（库名节点 $base3 → 更多）") { dbNodes().size > base3 }
+        awaitUiNode("长 SQL 触发补全弹层（库名节点 $base3 → 更多）") { dbNodes().size > base3 }
         waitForIdle()
         shot("07-completion-flip-left.png")
     }
-
     @Test
     fun `walkthrough 4 - sql execute, generate workbench and panel drag`() = runComposeUiTest(testTimeout = 3.minutes) {
         currentCase = "w4"
         val browser = DatabaseBrowserState(engine, newScope())
         render(browser)
-        awaitSchema()
-        expandDb()
+        awaitSchema(browser)
+        expandDb(browser)
 
         // ---- SQL 执行
         onNodeWithText("SQL 工作台").performClick()
@@ -577,9 +621,11 @@ class H2GuiWalkthroughTest {
         waitForIdle()
         log("已填 SQL：${browser.currentSqlSheet()!!.editor.text}")
         onNodeWithText("执行 SQL").performClick()
-        await("SQL 执行完成（查询结果 · 2 行）") {
-            onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().isNotEmpty()
-        }
+        val sheet = browser.currentSqlSheet()!!
+        // 等 `running` 落定（有明确的状态字段），再验界面画出了什么
+        awaitState("SQL 执行完成（$dbName）", browser) { !sheet.running }
+        awaitUi("界面已画出查询结果")
+        onAllNodesWithText("查询结果 · 2 行").assertCountEquals(1)
         onAllNodesWithText("PAID").assertCountEquals(1)
         shot("08-sql-executed.png")
 
@@ -597,9 +643,9 @@ class H2GuiWalkthroughTest {
         )
         waitForIdle()
         onNodeWithText("执行造数").performClick()
-        await("造数完成（共 3 行 · 1 个脚本）") {
-            onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").fetchSemanticsNodes().isNotEmpty()
-        }
+        awaitState("造数完成（$dbName）", browser) { !browser.generateRunning }
+        awaitUi("界面已画出造数统计")
+        onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").assertCountEquals(1)
         shot("09-generate-done.png")
 
         // 引擎真的写进去了
