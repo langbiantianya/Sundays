@@ -1012,6 +1012,55 @@ class DatabaseBrowserFlowTest {
         assertEquals(1, state.sqlSheets.size, "SQL 工作台应复位为单个空 sheet")
     }
 
+    /**
+     * 回归：**没有主键的表必须拒绝编辑**。
+     *
+     * `DATA.UPDATE` 的 `where` 若为空 map，引擎会当成「无条件更新」——
+     * 那等于**改写整张表**。而浏览屏拿不到主键（`DATA.LIST` 不回列定义，
+     * `ColumnDef.is_primary_key` 只出现在 `TABLE.CREATE/UPDATE` 请求侧），
+     * 所以 [DatabaseBrowserState.isTableEditable] 只能一律返回 `false`。
+     *
+     * 这条断言的价值在于**它能区分「忘了做主键」和「故意不做」**：如果有人日后
+     * 用「表里有 id 列」这种理由把它改成 `true`（而 id 其实不是主键，可能重复），
+     * 改完这里会绿吗？不会 —— 我们另外钉了「`primaryKeyColumn` 为 null 时不可编辑」，
+     * 两边一起构成「未知主键 ⇒ 一律只读」这条硬边界。
+     */
+    @Test
+    fun `a table without a known primary key refuses editing`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        val table = state.tablesFor(db, "USERS")
+        state.openTab(db, table)
+        state.tabs.single().awaitSettled()
+
+        val tab = state.tabs.single()
+        assertNull(
+            tab.primaryKeyColumn,
+            "当前引擎的 DATA.LIST 不回主键，primaryKeyColumn 必须是 null（未知）",
+        )
+        assertFalse(
+            state.isTableEditable(tab),
+            "主键未知时**必须**拒绝编辑 —— 否则 DATA.UPDATE 的空 where 会改写整张表",
+        )
+
+        // 真去调 updateCell 也必须被拒，而不是发出一个 where 为空的请求
+        val err = state.updateCell(
+            tab,
+            com.kxxnzstdsw.sundays.table.CellEdit(
+                rowId = tab.rows.first().id,
+                columnKey = "username",
+                oldValue = "user_1",
+                newValue = "HACKED",
+            ),
+        )
+        assertNotNull(err, "主键未知时 updateCell 必须返回错误说明，不能发出请求")
+        assertTrue(
+            err.contains("主键"),
+            "错误文案要点明是主键问题：$err",
+        )
+    }
+
     // -------------------------------------------------------------------------
     // 上面几项的公共脚手架
     // -------------------------------------------------------------------------

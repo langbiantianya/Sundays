@@ -149,11 +149,15 @@ class H2GuiWalkthroughTest {
      *    不是一个节拍，条件检查先于执行就判 false，一轮都过不去。
      *
      * 所以这里用 `Unconfined`：**它不保证正确，只保证大多数时候能用** ——
-     * 单独连跑 8 轮全绿（7.9~8.8s），但全量 161 项并发时仍会偶发。
+     * 单独连跑 8 轮全绿（7.9~8.8s），全量 161 项并发时仍会偶发。
      *
-     * ⚠️ **这是一个已知的遗留缺陷，不是本轮引入的**。要真正解决得换思路
-     * （例如让 `await` 显式 `advanceUntilIdle` 后再判条件，或改用真窗口 + 轮询状态机
-     * 而不是语义树）。**在解决之前，这个测试类不应被当作可靠的回归网。**
+     * ⚠️ **这里只解决了「等满超时」那一类**（拆开等/验之后，全量下再没出现过 60s 超时）。
+     * 全量负载下仍有**另一类**残余 flaky：`ComposeTimeoutException: Failed to inject
+     * mouse input`（约 1/3 概率，单独跑 4 项时不复现）—— 那是 UI 测试的手势注入在
+     * 并发下不稳，与本类对等待方式的选择无关，**尚未定位**。
+     * 结论：**在它被解决之前，这个测试类不应被当作可靠的回归网** —— 它的价值是
+     * 「一次性走查 + 挖缺陷」（v2.21 的分页底栏两个缺陷就是它挖出来的），
+     * 不是常驻守门。
      */
     private fun newScope(): CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { browserScope = it }

@@ -64,7 +64,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -120,6 +122,7 @@ import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
 import com.kxxnzstdsw.sundays.settings.formatBytes
+import com.kxxnzstdsw.sundays.table.CellEdit
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TableColumn
@@ -1405,10 +1408,28 @@ private fun PreviewTabArea(
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             val current = state.tabs.getOrNull(state.selectedTabIndex)
             if (current != null) {
+                val scope = rememberCoroutineScope()
                 PreviewTabContent(
                     tab = current,
                     onPageChange = { page -> state.goToTabPage(current, page) },
                     onPageSizeChange = { size -> state.changeTabPageSize(current, size) },
+                    // 编辑回调只在 [DatabaseBrowserState.isTableEditable] 为真时挂上 ——
+                    // 它依赖引擎回传主键列名，而 `DATA.LIST` 目前不回（见该函数 KDoc）。
+                    // 失败文案写回 tab.error：错误条已经在预览顶部，位置现成，
+                    // 不必为此再引入一个弹窗。
+                    onCellEdit = if (state.isTableEditable(current)) {
+                        { edit ->
+                            scope.launch {
+                                val err = state.updateCell(current, edit)
+                                if (err != null) current.error = err
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                    // 与 onCellEdit 同源但**独立**传：行级「选中行」的 clickable 只在
+                    // 真能编辑时才让位，否则只读浏览会整行点不动。
+                    cellEditable = state.isTableEditable(current),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1457,6 +1478,8 @@ private fun PreviewTabContent(
     tab: TablePreviewTab,
     onPageChange: (Int) -> Unit,
     onPageSizeChange: (PageSize) -> Unit,
+    onCellEdit: ((CellEdit) -> Unit)? = null,
+    cellEditable: Boolean = onCellEdit != null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1527,6 +1550,9 @@ private fun PreviewTabContent(
                 // 预览是**引擎侧**分页：rows 已经是当前页，DataTable 再本地切一次就见不到第 2 页了
                 serverSidePaging = true,
                 fillParentHeight = false,
+                // 传 null = 只读。什么时候能传非 null，见 [DatabaseBrowserState.isTableEditable]
+                onCellEdit = onCellEdit,
+                cellEditable = cellEditable,
             )
             !tab.loading && tab.error == null -> EmptyHint(
                 title = "无数据",
@@ -2309,6 +2335,19 @@ class TablePreviewTab(
     var pageSize: Int by mutableStateOf(100)
 
     /**
+     * 本表的主键列名；`null` = **未知** ⇒ 该表不可编辑（见 [DatabaseBrowserState.isTableEditable]）。
+     *
+     * 之所以现在恒为 `null`：`DATA.LIST` 的响应里只有 `rows`，**没有列定义**，
+     * 而 `ColumnDef.is_primary_key` 只在 `TABLE.CREATE` / `TABLE.UPDATE` 的请求侧出现。
+     * 前端拿不到「哪一列是主键」这个信息。
+     *
+     * 填上它不需要改 `DataTable`、也不需要改 `updateCell` —— 只差引擎在
+     * `DataListPagedResponse` 里多回一个 `primary_key` 字段。**宁可先不给编辑，
+     * 也不能用行索引或「猜测的 id 列」去发 `UPDATE`** —— 后者会静默改错行。
+     */
+    var primaryKeyColumn: String? by mutableStateOf(null)
+
+    /**
      * 本 tab 的 in-flight 失效代次 —— 语义与 [SqlSheet.generation] 一致，但作用域是**单个 tab**。
      *
      * 之前预览只有屏级的 [DatabaseBrowserState.generation]（连接级），管不到「同一张表上
@@ -2766,6 +2805,85 @@ class DatabaseBrowserState(
                 sheet.error = "无法停止：${cancelResp.error}"
             }
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // 数据编辑（表预览）
+    // ------------------------------------------------------------------------
+
+    /**
+     * 该表预览是否**可编辑** —— 当前一律 `false`。
+     *
+     * ## 为什么默认关着（这是本轮最重要的一条判断）
+     *
+     * [DataTable] 的编辑需要一个能**唯一定位行**的 `where` 条件。浏览屏拿不到主键：
+     * `DATA.LIST` 的 `DataListPagedResponse` 只回 `rows`、**不回列定义**，而
+     * `ColumnDef.is_primary_key` 只出现在 `TABLE.CREATE` / `TABLE.UPDATE` 里 ——
+     * 前端无从知道哪一列是主键。
+     *
+     * 唯一能立刻拿到的候选是 `id` 列（[TablePreviewTab] 的行 id 就取自它），但
+     * **「有 id 列」不等于「id 是主键」**：一张表的 `id` 完全可能只是个普通可重复列。
+     * 那时发出去的 `WHERE id = ?` 会**同时改掉多行** —— 静默的数据损坏，
+     * 比「不能编辑」严重得多。
+     *
+     * 所以这里**明确关着**，而不是「先能用着」。解锁条件是引擎在 `DATA.LIST` 响应里
+     * 回主键列名（见 [TablePreviewTab.primaryKeyColumn]），届时只需把它接上，
+     * `DataTable` 与本方法都不必改。
+     *
+     * 引擎侧的 `DATA.UPDATE` / `DATA.CREATE` / `DATA.DELETE` **早已实现**且是参数化的
+     * （`map<string, string>`，没有注入面），缺的只是这一个主键信息。
+     */
+    fun isTableEditable(tab: TablePreviewTab): Boolean = tab.primaryKeyColumn != null
+
+    /**
+     * 改一个单元格 —— 发 `DATA.UPDATE`（参数化，无注入面）。
+     *
+     * @return 失败时返回引擎的错误文案（供 UI 显示）；成功返回 `null`。
+     *
+     * **调用方必须先校验** [isTableEditable]：这里 `where` 为空 map 时，引擎会把它当成
+     * 「无条件更新」，等于改写整张表。
+     */
+    suspend fun updateCell(tab: TablePreviewTab, edit: CellEdit): String? {
+        val pk = tab.primaryKeyColumn ?: return "该表没有可用主键，编辑已禁用"
+        val row = tab.rows.firstOrNull { it.id == edit.rowId } ?: return "目标行已不在当前页"
+        val old = row.cells[pk]?.toString() ?: return "主键 $pk 不在行数据里"
+
+        val catalog = tab.schema.ifBlank { currentSchema() }
+        activeDatabases.add(catalog)
+        // 先在**内层 DSL 之外**把 update 请求构造好。
+        //
+        // 为什么不直接内联：`dataUpdateRequest { }` 的 lambda 接收者会被外层
+        // `dataRequest { }` 的同名兄弟字段（`schema` / `where` / `tableName`）遮蔽 ——
+        // 内层写 `schema = ""` 会解析到外层去，编译报「val cannot be reassigned」。
+        // Kotlin 的内联 lambda 没有标签可用来消歧（`this@xxx` 对内联 lambda 不可用），
+        // 所以把构造提到外面是唯一干净的做法。
+        val updateReq = com.kxxnzstdsw.grpc.dataUpdateRequest {
+            tableName = tab.tableName
+            // catalog 走 engineConnFor 的 database 维度，schema 字段留空
+            // —— 写进去会让 H2 执行 `SET SCHEMA "<库名>"` 而报「Schema not found」，
+            // 见 engineConnFor 的 KDoc。
+            //
+            // 局部变量刻意叫 `catalog` 而不是 `schema`：同名的话这里的 `schema = ""`
+            // 会解析到那个 val 上（仍是「val cannot be reassigned」），只是换了张脸。
+            schema = ""
+            // map 字段用 `put(k, v)`（DslMap 的扩展函数），不是 `=` 赋值
+            changes.put(edit.columnKey, edit.newValue)
+            where.put(pk, old)
+        }
+        val result = runCatching {
+            engine.invoke(engineConnFor(currentConnection, catalog)) {
+                category = Category.DATA
+                action = Action.UPDATE
+                dataRequest = dataRequest { update = updateReq }
+            }
+        }
+        val resp = result.getOrNull() ?: return result.exceptionOrNull()?.message ?: "更新失败"
+        if (!resp.success) return resp.error.ifBlank { "更新失败" }
+        // 本地也改一份：否则用户改完看到还是旧值，会以为没生效而再改一次。
+        tab.rows = tab.rows.map { r ->
+            if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
+        }
+        return null
     }
 
     // ------------------------------------------------------------------------

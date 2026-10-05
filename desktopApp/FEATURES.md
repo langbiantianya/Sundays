@@ -127,9 +127,23 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 
 **A. 数据库管理工具的基本盘**
 
+> ⚠️ **「数据编辑」需要展开说明**：整条链路已实现（`DataTable` 的内联编辑器、`CellEdit` 入参、
+> `DatabaseBrowserState.updateCell` 走 `DATA.UPDATE`、成功后回写本地行），**但浏览屏默认仍以
+> 只读方式渲染**。原因只有一个：`DATA.LIST` 的响应**不回列定义**，而
+> `ColumnDef.is_primary_key` 只出现在 `TABLE.CREATE` / `TABLE.UPDATE` 的请求侧 ——
+> 前端无从知道哪一列是主键。
+>
+> **为什么不用「表里有 id 列」来凑**：那不等于「id 是主键」。一张表的 `id` 完全可能只是个
+> 普通可重复列，那时的 `WHERE id = ?` 会**同时改掉多行** —— 静默的数据损坏比「不能编辑」
+> 严重得多。所以 `isTableEditable` 明确返回 `false`。
+>
+> **解锁条件**：引擎在 `DataListPagedResponse` 里多回一个 `primary_key` 字段。之后只需把
+> `TablePreviewTab.primaryKeyColumn` 填上，`DataTable` 与 `updateCell` **都不必改**。
+> 它排在 P0 首位正因为差的是一行协议、不是功能。
+
 | 能力 | DataGrip | Navicat | 说明 |
 |---|---|---|---|
-| **数据编辑**（增 / 删 / 改单元格，批量） | ✅ | ✅ | **现在 `DataTable` 是只读的** —— 最大的功能性缺口 |
+| **数据编辑**（单元格增删改 + 批量） | ✅ | ⚠️ | **基础设施已就绪但默认关闭** —— 见下方说明 |
 | **对象浏览**（视图 / 索引 / 触发器 / 过程 / 函数 / 用户） | ✅ | ✅ | 树只有「库 / 表」两级 |
 | **DDL 编辑**（可视化建表改表） | ✅ | ✅ | 见 §3.2 |
 | **只读模式** | ✅ | — | 防误操作 |

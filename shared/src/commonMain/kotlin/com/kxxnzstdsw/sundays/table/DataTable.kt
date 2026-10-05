@@ -44,7 +44,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setText
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
@@ -133,6 +146,18 @@ import com.kxxnzstdsw.sundays.ui.winShape
  * @param detailPanel 详情面板 Composable 插槽；不传则使用默认 [DefaultDetailPanel]
  * @param detailPanelRatio 详情面板与主表格的宽度比（默认 `0.35f` = 主 65% / 详情 35%）
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；目标行通过 [ContextMenuState.payload] 访问
+ * @param onCellEdit 单元格编辑回调；**传 `null`（默认）= 只读表格**，与改造前行为完全一致。
+ *   非 null 时双击单元格进入内联编辑，`Enter` / 失焦提交、`Esc` 取消。值未变化**不触发**回调。
+ *
+ *   ## 为什么默认关着
+ *
+ *   这是一个通用组件，SQL 工作台的结果表、造数结果表都拿它渲染 —— 那些结果**不是**
+ *   可写的（它们是一次性查询的快照，改了也没有对应的「保存」语义）。所以编辑能力
+ *   做成**调用方显式开启**：浏览屏的表预览传非 null，其余调用点保持 `null`。
+ *
+ *   组件**不执行**任何 SQL —— 它只报告「哪一行哪一列被改成了什么」，由调用方决定
+ *   发什么语句、要不要确认、失败怎么回滚。组件里发 SQL 等于把「这张表能不能改」
+ *   这个业务判断塞进一个渲染层。
  * @param contextMenuState 右键菜单状态；通常用 [rememberContextMenuState] 创建
  */
 @Composable
@@ -155,6 +180,19 @@ fun DataTable(
     detailPanel: @Composable (TableRow?, DataTableTheme) -> Unit = { row, t -> DefaultDetailPanel(row, columns, t) },
     contextMenuState: ContextMenuState = rememberContextMenuState(),
     contextMenuItems: @Composable (TableRow?) -> Unit = {},
+    onCellEdit: ((CellEdit) -> Unit)? = null,
+    /**
+     * 调用方是否确认**这张表真的可写**。
+     *
+     * 与 [onCellEdit] 刻意分开：前者是「收到编辑后做什么」，后者是「这张表能不能改」。
+     * 浏览屏今天传了 `onCellEdit`（接线已就绪）但 [com.kxxnzstdsw.sundays.DatabaseBrowserState.isTableEditable]
+     * 恒为 `false`（引擎的 `DATA.LIST` 不回主键）—— 若用 `onCellEdit != null` 当判据，
+     * 整行的 `clickable`（选中行）会在**只读浏览**时被去掉，
+     * 表现为表预览整行点不动（`H2GuiWalkthroughTest` 实测报 "Failed to inject mouse input"）。
+     *
+     * 默认跟随 [onCellEdit]（`true` 时才可编辑）；调用方拿不准时传 `false` 保持只读。
+     */
+    cellEditable: Boolean = onCellEdit != null,
 ) {
     require(columns.isNotEmpty()) { "DataTable requires at least one column" }
     require(detailPanelRatio in 0f..1f) { "detailPanelRatio must be in [0, 1], got $detailPanelRatio" }
@@ -227,6 +265,8 @@ fun DataTable(
                     onRowClick = { row -> setSelected(if (row.id == effectiveSelectedRowId) null else row) },
                     contextMenuState = contextMenuState,
                     hScroll = hScroll,
+                    editable = cellEditable,
+                    onCellEdit = onCellEdit,
                 )
                 WinDivider(color = theme.borderColor)
                 TablePagination(
@@ -295,6 +335,15 @@ const val TABLE_BODY_TAG = "sundays.tableBody"
  * 单看某个 `Text` 的语义边界，分行与不分行都可能给出看似正常的宽度。
  */
 const val TABLE_PAGINATION_TAG = "sundays.tablePagination"
+
+/**
+ * 单元格 testTag 的前缀 —— 完整 tag 为 `"$TABLE_CELL_TAG_PREFIX<列 key>"`。
+ *
+ * 需要它是因为**手势只能从 `Box` 发**（`Text` 自身不认指针事件），而 `Text` 节点
+ * 本身没有可注入的 pointer 入口 —— 测试点 `Text` 会报 "Failed to inject touch input"。
+ * 挂 tag 后测试能精确点到某个单元格，而不是靠坐标猜。
+ */
+const val TABLE_CELL_TAG_PREFIX = "sundays.cell."
 
 /**
  * 分页底栏进入「紧凑档」的宽度阈值 —— 低于它就隐藏「首页 / 末页 / 共 N 条」。
@@ -387,6 +436,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
     onRowClick: (TableRow) -> Unit,
     contextMenuState: ContextMenuState,
     hScroll: ScrollState,
+    editable: Boolean,
+    onCellEdit: ((CellEdit) -> Unit)?,
 ) {
     if (rows.isEmpty()) {
         Box(
@@ -418,8 +469,39 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
                 isAlternate = index % 2 == 1,
                 onClick = { onRowClick(row) },
                 contextMenuState = contextMenuState,
+                // 行级 `clickable`（选中行）只在**真能编辑**时才去掉。判据不是
+                // 「传了 onCellEdit」而是「调用方确认这张表可写」——
+                // 后者由 [DataTable.cellEditable] 表达，见其 KDoc；这里经 [TableBody] 转手。
+                editable = editable,
+                onCellEdit = onCellEdit,
             )
             WinDivider(color = theme.borderColor)
+        }
+    }
+}
+
+/**
+ * 一次单元格编辑 —— [DataTable.onCellEdit] 的入参。
+ *
+ * 用 `data class` 而不是三个裸参数：调用方要发一条 `UPDATE`，需要**主键**来定位行、
+ * **列 key** 来定位字段、新旧值都要拿到。三个参数散着传迟早在调用点写错顺序，
+ * 而这种错误编译器不拦、运行时表现为「改错了列」。
+ */
+data class CellEdit(
+    /** 目标行的主键（[TableRow.id]）。 */
+    val rowId: Any,
+    /** 目标列的 [TableColumn.key]。 */
+    val columnKey: String,
+    /** 编辑前的原值（调用方可用于生成 `WHERE ... = <旧值>` 或写审计日志）。 */
+    val oldValue: String,
+    /** 用户提交的新值。 */
+    val newValue: String,
+) {
+    init {
+        require(columnKey.isNotBlank()) { "CellEdit.columnKey 不能为空 —— 不知道改哪一列" }
+        require(newValue != oldValue) {
+            "CellEdit 的新旧值相同（'$oldValue'）—— 组件层已拦掉这种情况，" +
+                "走到这里说明有别的调用方绕过了它"
         }
     }
 }
@@ -437,6 +519,8 @@ private fun TableRowView(
     isAlternate: Boolean,
     onClick: () -> Unit,
     contextMenuState: ContextMenuState,
+    editable: Boolean,
+    onCellEdit: ((CellEdit) -> Unit)?,
 ) {
     val background = when {
         isSelected -> theme.rowBackgroundSelected
@@ -445,29 +529,169 @@ private fun TableRowView(
     }
     val cellStyle = if (isSelected && theme.cellTextSelected != null) theme.cellTextSelected else theme.cellText
 
-    // SelectionContainer 让用户在单元格内拖拽选择文本
+    // 正在编辑的单元格列 key —— 提升到**行**这一层而不是各自 remember：
+    // 同一时刻只允许一个单元格处于编辑态，双击另一个格子时旧的那个必须**自动退出**，
+    // 否则界面上会同时出现两个输入框，而 [DataTable.onCellEdit] 只会收到后者的提交。
+    var editingColumn by remember(row.id) { mutableStateOf<String?>(null) }
+
     // Modifier.onTableRightClick 监听右键 → 显示 context menu
-    SelectionContainer {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(background)
-                .clickable(onClick = onClick)
-                .onRightClick { offset -> contextMenuState.show(offset, row) }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TableRowCells(columns = columns, theme = theme) { column, modifier ->
+    //
+    // ⚠️ 可编辑时整行的 `clickable`（选中行）**必须去掉**：它与单元格的
+    // `detectTapGestures` 抢同一个手势，且父节点先拿到 —— 表现是点单元格只切换
+    // 选中、永远进不了编辑。改为在单元格里**单击**就进编辑。
+    //
+    // ⚠️ [SelectionContainer] 与 [Row] 的**嵌套顺序不能动**。原实现是
+    // `SelectionContainer { Row { … } }`；换成 `Row { SelectionContainer { … } }`
+    // 之后实测 `TableColumnAlignmentTest` 两条一起红（表体 `maxValue` 变 0，
+    // 即整表不再横向溢出）—— 12 列 × 140dp 的定宽列宽被压没了。
+    // 「把 SelectionContainer 挪进 Row 里、只包单元格」这个看起来无害的重构，
+    // 改变了受约束节点的测量链。
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .background(background)
+        .then(if (editable) Modifier else Modifier.clickable(onClick = onClick))
+        .onRightClick { offset -> contextMenuState.show(offset, row) }
+        .padding(horizontal = 12.dp, vertical = 8.dp)
+
+    @Composable
+    fun RowScope.rowContent() {
+        TableRowCells(columns = columns, theme = theme) { column, modifier ->
+            val value = row.formatted(column)
+            if (editingColumn == column.key) {
+                CellEditor(
+                    initial = value,
+                    theme = theme,
+                    onCancel = { editingColumn = null },
+                    onCommit = { newValue ->
+                        editingColumn = null
+                        // 值没变就不发回调：否则「点开又按 Esc」就会写一条
+                        // `UPDATE SET x = x`，把表的修改时间白白弄脏。
+                        if (newValue != value) {
+                            onCellEdit?.invoke(CellEdit(row.id, column.key, value, newValue))
+                        }
+                    },
+                    modifier = modifier,
+                )
+            } else {
                 TableCell(
-                    text = row.formatted(column),
+                    text = value,
                     column = column,
                     theme = theme,
                     cellStyle = cellStyle,
                     modifier = modifier,
+                    // 可编辑时**单击**即进编辑。
+                    //
+                    // 为什么不是双击：双击要先等判定间隔、且与「选中行」这个高频动作
+                    // 语义重叠 —— 用户在可编辑表格里点一下就想改值，选中行是**浏览**态才需要的。
+                    cellModifier = if (editable) {
+                        Modifier
+                            .testTag(TABLE_CELL_TAG_PREFIX + column.key)
+                            .pointerInput(row.id, column.key) {
+                                detectTapGestures(
+                                    onTap = { editingColumn = column.key },
+                                    onDoubleTap = { editingColumn = column.key },
+                                )
+                            }
+                    } else {
+                        Modifier
+                    },
                 )
             }
         }
     }
+
+    if (editingColumn == null) {
+        // 只读态：保留 [SelectionContainer] 让用户拖拽选择单元格文本。
+        SelectionContainer {
+            Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
+                rowContent()
+            }
+        }
+    } else {
+        // 编辑态：**必须**去掉 [SelectionContainer] —— 它会消费指针事件来支持拖选，
+        // 双击/单击因此到不了单元格（实测报 "Failed to inject touch input"）。
+        // 这不损失什么：用户此时要做的是「改值」，编辑框自带光标，静态文本本来就不该被选中。
+        Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
+            rowContent()
+        }
+    }
+}
+
+/**
+ * 单元格内联编辑器 —— 一个只占**当前列宽**的 `BasicTextField`。
+ *
+ * ## 为什么不用弹窗
+ *
+ * 弹窗会打断「连续改多格」的节奏：改一格→确认→关→再定位下一格。表格编辑的价值恰恰
+ * 在于连续改，内联编辑才配得上。
+ *
+ * ## 提交时机
+ *
+ * `Enter` 提交、`Esc` 取消、**失焦提交**。失焦提交是必须的：用户点下一个格子时当前格
+ * 要落盘，否则那次编辑会静默丢失 —— 界面看上去「点了没反应」，比报错更难查。
+ */
+@Composable
+private fun CellEditor(
+    initial: String,
+    theme: DataTableTheme,
+    onCancel: () -> Unit,
+    onCommit: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var text by remember { mutableStateOf(initial) }
+    val focusRequester = remember { FocusRequester() }
+    // 焦点状态自己跟，不用 `FocusRequester.focused` —— 后者在当前 Compose 版本上
+    // 不是可用的公开成员，编译不过；而 `onFocusChanged` 稳定得多。
+    var focused by remember { mutableStateOf(false) }
+
+    // 失焦提交。用 `LaunchedEffect(focused)` 而不是在 `onFocusChanged` 里直接提交：
+    // 后者在**提交动作本身**导致的失焦上也会触发，会把刚提交的值又提交一次。
+    LaunchedEffect(focused) {
+        if (!focused) onCommit(text)
+    }
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    // 用 `TextField`（单行样式）而不是 `BasicTextField`：
+    // `BasicTextField` + `decorationBox` 虽然能画占位符，但**不会**把 `SetText` 语义
+    // 挂到外层节点上 —— 读屏软件与 UI 测试都找不到「这个框能输字」。
+    // `TextField` 的 `singleLine` 变体正是为「表格内联编辑」这种窄场景设计的。
+    TextField(
+        value = text,
+        onValueChange = { text = it },
+        singleLine = true,
+        textStyle = theme.cellText,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = theme.cellEditingBackground,
+            unfocusedContainerColor = theme.cellEditingBackground,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        modifier = modifier
+            .focusRequester(focusRequester)
+            .onFocusChanged { focused = it.isFocused }
+            // 显式补 `SetText` 语义。
+            //
+            // `TextField` 内部把输入语义挂在**它自己的**子节点上，而这里的
+            // `modifier`（列宽约束）来自 `TableRowCells`，两者不在同一层 ——
+            // 于是从表格这一侧用 `hasSetTextAction()` 找不到可编辑目标，
+            // 读屏软件同样会认为这格「只是个文字」。
+            .semantics {
+                setText { new ->
+                    // 入参是 AnnotatedString（与 `TextField` 内部同名回调一致），
+                    // 状态里存的是 String，这里取 .text
+                    text = new.text
+                    true
+                }
+            }
+            .onPreviewKeyEvent { e ->
+                when (e.key) {
+                    Key.Enter -> { onCommit(text); true }
+                    Key.Escape -> { onCancel(); true }
+                    else -> false
+                }
+            },
+    )
 }
 
 // ============================================================================
@@ -513,10 +737,20 @@ private fun TableCell(
     modifier: Modifier = Modifier,
     isHeader: Boolean = false,
     cellStyle: TextStyle = theme.cellText,
+    cellModifier: Modifier = Modifier,
 ) {
     val style = if (isHeader) theme.headerText else cellStyle
     Box(
-        modifier = modifier.padding(horizontal = 8.dp),
+        // `cellModifier`（单击进编辑的 `pointerInput` + testTag）挂在 **Box** 上而不是
+        // `Text` 上：`Text` 自身不接收指针事件（它没有 pointerInput），手势得由父级认领。
+        // 代价是 UI 测试必须点 Box（`Modifier` 所在处）而不是 `Text` 节点。
+        //
+        // ⚠️ `modifier`（含 `Modifier.weight(...)`）必须排在这两者**之前**。
+        // 顺序不是随意的：`weight` 依赖 RowScope，插在中间的节点修饰符会截断它，
+        // 表现为所有列宽塌成内容宽、整表不再横向溢出。
+        modifier = modifier
+            .then(cellModifier)
+            .padding(horizontal = 8.dp),
         contentAlignment = when (column.alignment) {
             TextAlign.Start, TextAlign.Left -> Alignment.CenterStart
             TextAlign.End, TextAlign.Right -> Alignment.CenterEnd

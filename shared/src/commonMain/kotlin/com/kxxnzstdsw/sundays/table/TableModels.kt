@@ -171,6 +171,14 @@ data class DataTableTheme(
     val cellTextSelected: TextStyle?,
     val borderColor: Color,
     val paginationBackground: Color,
+    /**
+     * 单元格**编辑态**的背景色。
+     *
+     * 单独一个字段而不是复用 [rowBackground] / [rowBackgroundSelected]：编辑框只有一格宽，
+     * 若与选中行的底色相同，用户会分不清「这一格正在编辑」还是「这一行被选中」—— 而这两件
+     * 事的后果完全不同（一个还没落盘，一个已选中待查看）。
+     */
+    val cellEditingBackground: Color = rowBackground,
 ) {
     companion object {
         /**
