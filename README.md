@@ -302,7 +302,7 @@ java -jar engine/build/libs/idb-engine.jar --mode grpc --ipc tcp --port 50051
 - **工具栏**：`RowScope.() -> Unit` 插槽注入自定义按钮（"执行"、"清空"、"复制"…）
 - **语言切换下拉框**：可隐藏（`showLanguageSwitcher = false`）；语言可在实例化时直接指定
 - **格式化**：`CodeFormatterRegistry` 注册的格式化器自动启用；空格判定走两向贴合（注释只读、缩进原样搬运、幂等 —— 见 [`shared/ARCHITECTURE.md` §2.8](./shared/ARCHITECTURE.md#28-格式化契约)）
-- **补全提示**（默认 `on`）：输入关键字 / 类型 / 函数前缀弹出候选，`Tab`/`Enter` 接受、`↑↓` 选择、`Esc` 关闭；`extraCompletions` 可注入**上下文专属**候选 —— 造数工作台据此补出沙箱宿主函数（`insert` / `lastId` / `random_*`），SQL 工作台据此补出**当前连接的库 / 表 / 字段**（零额外请求，字段覆盖打开过预览的表）。方言关键字由 `languageId` 自动按档位带来（见 [`shared/ARCHITECTURE.md` §2.10](./shared/ARCHITECTURE.md#210-补全提示)）
+- **补全提示**（默认 `on`）：**敲第一个字母就弹**候选，`Tab`/`Enter` 接受、`↑↓` 选择、`Esc` 关闭；`extraCompletions` 可注入**上下文专属**候选 —— 造数工作台据此补出沙箱宿主函数（`insert` / `lastId` / `random_*`），SQL 工作台据此补出**当前连接的库 / 表 / 字段**（零额外请求，字段覆盖打开过预览的表）。方言关键字由 `languageId` 自动按档位带来（见 [`shared/ARCHITECTURE.md` §2.10](./shared/ARCHITECTURE.md#210-补全提示)）
 - **右键菜单**：`@Composable (EditorContextMenuPayload?) -> Unit` 插槽注入菜单项
 
 #### 高度策略（v2.9+）

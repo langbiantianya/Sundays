@@ -209,6 +209,45 @@ class CompletionTest {
     }
 
     // =========================================================================
+    // 触发阈值
+    // =========================================================================
+
+    @Test
+    fun `a single letter is enough to trigger completion`() {
+        // 曾定 2 个字符才弹，理由是「单字符命中太多」。那条理由站不住：条数被
+        // maxCompletionItems 封在 8 条，「命中多」不等于「显示多」。
+        assertEquals(1, MIN_COMPLETION_PREFIX, "敲第一个字母就该弹")
+        assertEquals(1, wordPrefixBefore("u", 1).length)
+        assertTrue(
+            selectCompletions(pool, "s", caseSensitive = false, limit = 8).isNotEmpty(),
+            "单字符前缀应能筛出候选",
+        )
+        assertTrue(
+            selectExtras("r", extras, limit = 8).isNotEmpty(),
+            "上下文候选同样单字符即触发",
+        )
+    }
+
+    @Test
+    fun `no prefix means no popup even with the threshold at one`() {
+        // 阈值降到 1 不代表「光标后没有词字符时也弹」—— 空格 / 逗号 / 换行之后
+        // prefix 为空串，仍然必须安静。
+        assertEquals("", wordPrefixBefore("select ", 7))
+        assertTrue(selectCompletions(pool, "", caseSensitive = false, limit = 8).isEmpty())
+        assertTrue(selectExtras("", extras, limit = 8).isEmpty())
+    }
+
+    @Test
+    fun `a single letter still yields a bounded list not the whole language`() {
+        // 「命中很多」不能变成「弹层很长」—— limit 是硬约束
+        val wide = buildCompletionPool(
+            CompletionKind.KEYWORD to setOf("A", "ADD", "ALL", "ALTER", "AND", "AS", "ASC", "AVG"),
+        )
+        assertEquals(8, selectCompletions(wide, "a", caseSensitive = false, limit = 8).size)
+        assertEquals(3, selectCompletions(wide, "a", caseSensitive = false, limit = 3).size)
+    }
+
+    // =========================================================================
     // 上下文专属候选（extraCompletions）—— 造数沙箱宿主函数
     // =========================================================================
 

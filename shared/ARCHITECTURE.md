@@ -365,7 +365,7 @@ class SqlLanguage(profile: SqlDialectProfile = SqlDialectProfile.STANDARD) : Cod
 
 | 决策 | 取值 | 理由 |
 |---|---|---|
-| 触发前缀长度 | ≥ 2（`MIN_COMPLETION_PREFIX`） | 单字符几乎命中整个语言（`a` → `AND`/`ADD`/`AVG`…），弹层刚开就铺满屏幕反而挡视线 |
+| 触发前缀长度 | **≥ 1**（`MIN_COMPLETION_PREFIX`） | 敲第一个字母就弹。**曾定 2，理由「单字符命中太多会铺满屏幕」是错的** —— 条数被 `maxCompletionItems` 封在 8 条，「命中多」≠「显示多」；少一次按键的收益是每次都有的 |
 | SQL 匹配 | **忽略大小写**，插入大写 | 与 `tokenize` 的 `word.uppercase()`、`SqlFormatter` 的大写三处口径统一 |
 | Lua 匹配 | **大小写敏感** | Lua 标识符大小写敏感；把 `Pri` 补成 `print` 等于往用户代码里塞一个语义不同的标识符，是制造 bug 而非帮忙 |
 | 排序 | 类别（关键字 → 类型 → 函数）→ 长度 → 字典序 | 先按长度：输入 `CO` 时 `COLUMN` 该赢过 `COLLATE`；全序保证列表在两次按键间不跳位 |
