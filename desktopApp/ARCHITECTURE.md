@@ -46,7 +46,7 @@ desktopApp/
         └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
 
-desktopApp 现有 **149 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `TablePaginationLayoutTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
+desktopApp 现有 **153 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `H2GuiWalkthroughTest` / `TablePaginationLayoutTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
 
 **文件清单**：
 
@@ -63,6 +63,7 @@ desktopApp 现有 **149 个测试**（`ConnectionManagerFlowTest` / `DatabaseBro
 | `MainScreenNavTest.kt` | 顶层导航测试：默认连接管理，点「数据库浏览」切换后第二屏出现 |
 | `EngineClientSelectionTest.kt` | 装配点绑定测试：未设置 / 空白端点属性 → `IdbEngine`；设置端点（含 `unix://`）→ `GrpcEngineClient`；非法端点 → `IllegalArgumentException`（**响亮失败，不静默回落**） |
 | `TablePaginationLayoutTest.kt` | 分页底栏的**布局契约**（三档窗口：1024 / 700 / 390 → 底栏 660 / 450 / 253dp）。⚠️ **必须用 `runDesktopComposeUiTest(width, height)` 开小窗口，不能在默认窗口里套 `Modifier.width(...)`**：`SundaysTheme` 内有 `Surface(Modifier.fillMaxSize())` 把子树约束钉成窗口尺寸，宽度修饰符被**静默吃掉**（量出来仍是 1024）。这个坑最坏的地方在于它让测试**通过而不是失败** —— 窄容器根本没造出来，断言在宽容器上空跑。详见 [`shared/ARCHITECTURE.md` §3.2.2](../shared/ARCHITECTURE.md) |
+| `H2GuiWalkthroughTest.kt` | **真实 H2 内存库（6 表 / 250 行）走完整主流程**，截图落 `build/gui-shots/`（已 gitignore）：schema 树自动加载→展开→双击表→预览真实数据→分页→SQL 补全（表候选优先于关键字）→补全靠右翻转→SQL 执行→造数脚本插行并**回到引擎侧复查 `COUNT(*)`**→树面板宽度拖拽。每个等待都走自建的 `await(描述) { 条件 }`：超时时**打印 `dbName` / `jdbcUrl` / `dbNodes` 边界 / 当前语义树全部文本 / 失败现场截图**，而不是只抛一句 "Condition still not satisfied"。见上节「GUI 走查的三条方法论事实」—— 判据要直接断言**目标节点存在**，不要数「匹配到的节点个数变多」 |
 
 **`main.kt` 内符号分解**（自顶向下）：
 
@@ -274,17 +275,28 @@ if (appearance.onboardingCompleted) {
 
 回归测试：`EngineMemoryStatusBarTest`（比例算法含钳位与除零、紧凑格式化、初始「—」、成功后渲染、null / 异常降级、空态仍在、`null` 探针不渲染、面板默认关闭 / 四行与设置页一致 / 首次读数前逐行「—」 / 再点收起 / 状态栏宽度契约 / 面板宽度与定位契约 / 指针移出自动关闭 / 指针在面板内**不**关闭）。
 
-### GUI 走查的三条方法论事实
+### GUI 走查的方法论事实
 
-用真实 H2 内存库把主流程走了一遍（schema 树 → 预览 → 分页 → SQL 补全 → SQL 执行 → 造数 → 面板拖拽），
-截图落在 `build/gui-shots/`。它挖出了 v2.21 修的两个真实缺陷，但**本身不够稳定、没有进主干**
-（见下节）。过程中沉淀的三条事实留给下一个要写 GUI 测试的人：
+用真实 H2 内存库把主流程走了一遍（schema 树 → 预览 → 分页 → SQL 补全 → 补全靠右翻转 → SQL 执行 → 造数 → 面板拖拽），
+截图落在 `build/gui-shots/`。它挖出了 v2.21 修的两个真实缺陷，最初一度被误判为 flaky 而没提交。
+修它花了三轮，**每一轮都推翻了上一轮的结论**：
+
+1. **判据写错** —— 基线取在同步触发补全弹层**之后**，`> 基线` 永远不成立；
+2. **资源没释放** —— `tearDown` 只关连接池，漏了 `engine.close()`（这条必要，但**不是**主因）；
+3. **调度器不同源**（真因）—— `Dispatchers.Default` 上的状态更新不被测试调度器驱动重组。
+
+排查中沉淀的七条事实留给下一个要写 GUI 测试的人：
 
 | 事实 | 细节 |
 |---|---|
 | **真实窗口合成鼠标输入送不进 Skiko** | `SendInput` / `mouse_event` 打到窗口上，光标**能移动**（回读确认落在按钮上），**点击完全无响应**。`SetForegroundWindow` 不是原因（前台窗口本来就是 sundays）。正解是用 `runComposeUiTest` 驱动**同一套渲染与输入分发链路** —— 走的是 Compose 自己的事件处理，不经过 AWT/Skiko 的原生窗口层 |
 | **`captureToImage()` 对走 `SelectionContainer` 的文本层漏绘** | 表头文字画得出来，**数据行单元格文字画不出来**。已用隔离实验确认（单独渲染一个 `DataTable` 同样复现），与浏览屏、与任何业务改动无关；两次捕获间隔 1.5s 像素完全一致，也不是时序问题。**所以断言一律走语义树，不要断言像素**；截图只用于目视布局（宽度、折行、弹层位置） |
 | **测试必须隔离 `user.home`** | `System.setProperty("user.home", tempDir)`。否则会读写真实的 `~/.config/sundays/connection.json` —— 那个文件**明文存口令**。不隔离的后果不是测试挂，是用户的连接记录被测试覆盖 |
+| **注入被测状态机的协程作用域要用 `Dispatchers.Unconfined`，不能用 `Dispatchers.Default`** | 本类最难的一个坑，**症状是「界面永远停在『加载数据库中…』，而引擎其实完全正常」**，且完全随机（有时第 2 个用例就挂、有时第 4 个才挂）。`waitUntil` 轮询的是**语义树**，语义树要等**重组**才有新内容，而重组由 `runComposeUiTest` 的**测试调度器**驱动。作用域若用 `Dispatchers.Default`，状态更新发生在**真实线程池**上，与测试调度器**不同源**：协程确实跑了、状态确实写了，但重组迟迟不被驱动，只能等到超时。随机性来自两个调度器的相对时序，**盯代码看不出来**。改 `Unconfined` 后连跑 8 轮全绿、耗时稳定在 7.9~8.8s（此前 8~128s 波动） |
+| **界面卡住时，用「直连探测」把范围切成两半** | 本例三条探测同时成立，才把范围锁死：`直连 H2 INFORMATION_SCHEMA.TABLES → 6 张表全在` / `活着的线程数 → 13` / `直连引擎 SCHEMA.LIST（同一 engine 实例、同一请求）→ success=true, items=[SHOP_xxx]`。数据库正常、引擎正常、资源正常，**只有 UI 那一发没生效**。只看界面永远分不清「引擎没返回」和「返回了但没回显」—— 而这两者的修法完全不同。直连放在**失败现场**里跑（不单独写复现），成本极低、信息量最大 |
+| **`tearDown` 必须用 `engine.close()`，不能只关连接池** | `IdbEngine.close()` 做三件事：关连接池 + 关 `DriverLoader` + 关 `DialectLoader`（后两个会关掉各自的 ClassLoader）。`main.kt` 的正常路径走的也是它。只调 `PoolManager.closeAll()` 会让 `setUp` 里的 `DialectLoader.registerForTesting(...)` **跨用例累积**：第 1~3 个用例正常，第 4 个的 `SCHEMA.LIST` 永远不返回、界面卡在「加载数据库中…」。**症状极像 flaky** —— JUnit4 的方法执行顺序不保证，「谁排第 4」每轮都不同，于是失败在用例之间轮换；实际是**位置决定，排最后的必挂**。同理要收口的还有 `DatabaseBrowserState` 的 `CoroutineScope`（原本谁都不取消）与 `DB_CLOSE_DELAY=-1` 的 H2 内存库（最后一个连接关了也**不消失**，同一 JVM 连跑 4 个用例就是 4 份常驻，得显式 `SHUTDOWN`） |
+| **`waitUntil` 超时只说「条件没成立」，不说「屏幕上是什么」** | 这是最贵的一条。`H2GuiWalkthroughTest` 曾连续三轮各挂 1~2 项、耗时 66s / 125.9s（≈ 2×60s 等满），一度被误判为 flaky 而不敢提交。换成带诊断的等待后一次定位：超时时 dump 语义树文本，**补全弹层的候选明明已经渲染出来**（`USERS表SHOP_xxx · 表` / `USER关键字` …），是判据本身写错了 —— 判据与**同步触发**的弹层赛跑：基线在 `onValueChange` **之后**取，而那次调用同步就弹了层，基线里已含候选，于是 `> 基线` 永远不成立。教训：**放宽超时对「条件永远不成立」完全无效**，只会让每次失败都更慢；等满超时 + 「偶发」失败 = 先怀疑判据，别先怀疑环境 |
+| **`hasText(substring = true)` 不跨 `AnnotatedString` segment 拼接** | 补全候选的语义节点是 `["USERS", "表", "SHOP_xxx · 表"]` **三段**。把三段拼起来看是 `USERS表SHOP_xxx · 表`（`contains(dbName)` 成立），但 `hasText("USERS表")` 匹配不到 —— 它在**每个 segment 内**单独找子串。修判据时先撞了这个坑（改成直接断言 `USERS表` 后 w2/w3 双双等满 60s）。**改判据前先 dump 一次真实 segment 结构**，别靠读渲染结果猜 |
 
 ### 标签页去重契约
 
