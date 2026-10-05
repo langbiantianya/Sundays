@@ -106,6 +106,7 @@ import com.kxxnzstdsw.grpc.schemaListRequest
 import com.kxxnzstdsw.grpc.schemaRequest
 import com.kxxnzstdsw.grpc.sqlExecuteRequest
 import com.kxxnzstdsw.grpc.sqlRequest
+import com.kxxnzstdsw.grpc.systemRequest
 import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -397,6 +398,28 @@ internal const val SCHEMA_PANEL_TAG = "schemaTreePanel"
 
 /** 分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
 internal const val SCHEMA_DRAG_HANDLE_TAG = "schemaDragHandle"
+
+/**
+ * SQL 结果集在内存里最多攒多少行 —— 超出即停止累积并标 `rowsTruncated`。
+ *
+ * ## 为什么必须有上限
+ *
+ * `SQL.EXECUTE` 是**流式**的，引擎会一直推 `sql_row_frame`。此前前端无条件
+ * `frames += resp.sqlRowFrame`，于是 `SELECT * FROM big_table` 会把整个结果集
+ * 搬进堆里 —— 一张千万行的表就能把桌面进程拖垮，而用户能做的只有看着进度条
+ * 慢慢爬。**引擎侧有 `Statement.cancel()` 可用，但前端当时连 request id 都没留下**，
+ * 既不能停也不能少收。
+ *
+ * ## 为什么是 5000
+ *
+ * 桌面工具的默认结果窗口通常是几百到几千行。5000 行按每行 5 列估算约几 MB，
+ * 远低于让 JVM 频繁 GC 的量级；再往上（比如 10 万）用户在表格里翻不到底，
+ * 留着也只是在占内存 —— 真要全量数据，用户该用导出而不是结果面板。
+ *
+ * 截断时**必须**显式告知（`SqlResultArea` 的提示条）：静默截断等于骗人 ——
+ * 用户会以为这张表就这么大。
+ */
+internal const val SQL_RESULT_MAX_ROWS = 5000
 
 // ============================================================================
 // Sheet 标签条 / 数据列表：并 ＋ 入口
@@ -969,6 +992,16 @@ private fun ActiveSheetContent(
             connected = sheet.status.state == ConnectionState.CONNECTED,
             onSelectPane = sheet.browser::selectPane,
         )
+        // 连接失败原因此前**只在连接管理页**能看到，浏览屏上只有一个红点 ——
+        // 用户在浏览屏看到红点，却不知道是密码错了、网络断了还是驱动没装，
+        // 只能切回去猜。失败原因就在手边的 [ConnectionStatus.message] 里，
+        // 这里直接摆出来，不用他来回切屏。
+        if (sheet.status.state == ConnectionState.FAILED) {
+            ConnectionFailureBanner(
+                message = sheet.status.message,
+                onRetry = { onConnect(sheet.connection) },
+            )
+        }
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         // 宽度上限按容器比例给，而不是固定 dp：窗口窄时若还允许拉到 600dp，
@@ -1038,6 +1071,60 @@ internal fun ConnectionStatusDot(state: ConnectionState, dotSize: androidx.compo
     }
     Canvas(modifier = Modifier.size(dotSize)) {
         drawCircle(color = color)
+    }
+}
+
+/**
+ * 连接失败横幅 —— 浏览屏上的**唯一**失败原因出口。
+ *
+ * ## 为什么不是 tooltip
+ *
+ * tooltip 只在指针悬停时出现，而「为什么连不上」是用户**必须**看到才能继续处理的信息：
+ * 他可能根本没往色点上放鼠标，或者只瞥了一眼就走了。tooltip 适合补充信息，不适合承载
+ * 唯一的诊断入口。横幅是常驻的、切屏也带得走。
+ *
+ * ## 为什么可滚动
+ *
+ * 引擎回的失败原因常是一整段带 `Caused by` 的堆栈（几百字符），与 `EmptyHint` 同一个理由：
+ * 关键信息常常在**末尾**，横向或纵向一刀切掉的话用户看到的等于没有。
+ * 固定高度 + 纵向滚动是这里唯一诚实的选择（详见 `EmptyHint` 的 KDoc）。
+ */
+@Composable
+private fun ConnectionFailureBanner(message: String, onRetry: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.errorContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 标签「连接失败」不省略号截断 —— 它是这句横幅在语义上的主语
+            Text(
+                text = "连接失败",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = message.ifBlank { "引擎未给出原因" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            // 失败原因多半是「网络断了」这类瞬时问题，就地重试比让他切去连接管理页再切回来顺手。
+            // 密码错了也一样 —— 重试一次只是再失败一次，不会有副作用。
+            //
+            // 不刻意收窄内边距：`WinButton` 没有 contentPadding 参数（v2.21 评估后认定
+            // 「为省 30dp 给共享控件加参数」不划算），而 `Modifier.padding` 是**外**缩 —
+            // 按钮宽度由 MinWidth 与内容决定，外层 padding 不会让它变窄。按默认尺寸即可，
+            // 顺带满足 48dp 的点击区。
+            WinButton(onClick = onRetry, shape = SundaysPalette.buttonShape) {
+                Text("重试", maxLines = 1, softWrap = false)
+            }
+        }
     }
 }
 
@@ -1571,14 +1658,34 @@ private fun SqlWorkbenchPane(
                     extraCompletions = schemaCompletions,
                     extraCompletionsCaseSensitive = false,
                     actions = {
-                        WinButton(
-                            onClick = { state.executeSql() },
-                            enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
-                            shape = SundaysPalette.buttonShape,
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (sheet.running) "执行中…" else "执行 SQL")
+                        // 执行中：主按钮让位给「停止」。
+                        //
+                        // 两个按钮**互斥**而不是并存 —— 执行期间 `enabled` 已是 false，
+                        // 摆在一起只会让用户去点一个按不动的按钮。「停止」单独占位还顺带
+                        // 避免了「点错了以为是执行」的重灾区。
+                        if (sheet.running && sheet.runningRequestId != null) {
+                            WinButton(
+                                onClick = { state.cancelSql() },
+                                shape = SundaysPalette.buttonShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("停止")
+                            }
+                        } else {
+                            WinButton(
+                                onClick = { state.executeSql() },
+                                enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
+                                shape = SundaysPalette.buttonShape,
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (sheet.running) "执行中…" else "执行 SQL")
+                            }
                         }
                     },
                     modifier = Modifier
@@ -1883,6 +1990,17 @@ private fun SqlResultArea(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 截断必须**显式**说出来。静默截断等于骗人：用户会以为这张表就这么大，
+                    // 而导出去的数据却是全的。措辞说清「收到多少」而不是「一共多少」——
+                    // 后者我们并不知道，引擎没有回总行数。
+                    if (sheet.rowsTruncated) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "已截断：只保留前 $SQL_RESULT_MAX_ROWS 行",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
                 WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 DataTable(
@@ -2332,6 +2450,27 @@ class DatabaseBrowserState(
         /** 非 SELECT（DML/DDL）执行成功时记录受影响行数；为 null 表示 SELECT 或未执行。 */
         var affectedRows: Int? by mutableStateOf(null)
 
+        /**
+         * 本轮执行的引擎 **request id** —— 「停止」按钮的凭据。
+         *
+         * 引擎侧 `SYSTEM.CANCEL` 按 `target_request_id` 找正在跑的 `Statement` 并调
+         * `Statement.cancel()`（协程取消打断不了阻塞中的 JDBC 调用，只有它能）。
+         * id 由 [DatabaseBrowserState.executeSql] 在构造请求时生成 —— 此前它生成完就被丢弃，
+         * 前端**根本没法取消**一条跑了十分钟的查询。
+         *
+         * 生命周期：请求发出前写入，任何结束路径（成功 / 失败 / 异常 / 代次作废）都清空。
+         * 非 null 是「可停止」的唯一判据，不另开一个 `cancellable` 标志 —— 两个字段必然漂移。
+         */
+        var runningRequestId: String? by mutableStateOf(null)
+
+        /**
+         * 结果集是否被 [SQL_RESULT_MAX_ROWS] 截断。
+         *
+         * 与 `rowCount` 分开存：截断时 `rowCount` 只是**已收到**的行数，
+         * 把它当成总数会让分页栏显示「第 1 / 60 页」而点不出后面的页 —— 用户以为数据丢了。
+         */
+        var rowsTruncated: Boolean by mutableStateOf(false)
+
         /** 最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
         var error: String? by mutableStateOf(null)
 
@@ -2483,9 +2622,18 @@ class DatabaseBrowserState(
         sheet.columns = emptyList()
         sheet.rows = emptyList()
         sheet.rowCount = 0
+        sheet.rowsTruncated = false
         // 新一轮结果 → 视图归位（页码 / 选中行都是上一批数据的，指过去没有意义）
         sheet.resultPage = 1
         sheet.selectedRowId = null
+        // request id **必须在 launch 之前**生成并落到 sheet 上，而不是在协程体内。
+        //
+        // 两个原因：① 「停止」按钮的可用性判据就是它，协程体内的赋值意味着
+        // `executeSql()` 返回的那一刻它还是 null —— 用户点得再快也赶不上，表现为
+        // 「刚点执行、停止按钮要等一会儿才冒出来」；② 引擎侧 `SYSTEM.CANCEL` 靠它找
+        // 正在跑的 `Statement`，id 晚一步就可能晚于请求真正开始的那一步。
+        val requestId = UUID.randomUUID().toString()
+        sheet.runningRequestId = requestId
         scope.launch {
             val schema = currentSchema()
             // 本请求在 catalog = schema 维度上建池（schema 字段本身留空，见下方注释），
@@ -2495,7 +2643,7 @@ class DatabaseBrowserState(
             val result = runCatching {
                 engine.handle(
                     request {
-                        id = UUID.randomUUID().toString()
+                        id = requestId
                         this.connection = engineConn(database = schema)
                         category = Category.SQL
                         action = Action.EXECUTE
@@ -2518,9 +2666,11 @@ class DatabaseBrowserState(
             if (flow == null) {
                 sheet.error = result.exceptionOrNull()?.message ?: "执行失败"
                 sheet.running = false
+                sheet.runningRequestId = null
                 return@launch
             }
             val frames = mutableListOf<com.kxxnzstdsw.grpc.SqlSelectRowFrame>()
+            var truncated = false
             try {
                 // `collect` + 取消标记：`collectWhile` 是 kotlinx.coroutines 内部 API 不可用。
                 // 过期时置 cancelled 并停止累积 —— 流本身仍会被消费到结束（引擎侧已在推帧，
@@ -2535,6 +2685,13 @@ class DatabaseBrowserState(
                     if (!resp.success) {
                         sheet.error = resp.error.ifBlank { "SQL 执行失败" }
                     } else if (resp.hasSqlRowFrame()) {
+                        // 攒够上限就停：**继续收只会在堆里再压一份同样的数据**，
+                        // 引擎侧仍会推完（已发的帧收不回来），但我们不再留。
+                        if (frames.size >= SQL_RESULT_MAX_ROWS) {
+                            truncated = true
+                            cancelled = true
+                            return@collect
+                        }
                         frames += resp.sqlRowFrame
                     } else if (resp.hasSql() && resp.sql.hasExecute()) {
                         sheet.affectedRows = resp.sql.execute.affectedRows
@@ -2548,6 +2705,7 @@ class DatabaseBrowserState(
                 if (gen == sheet.generation) {
                     sheet.error = e.message ?: e.javaClass.simpleName
                     sheet.running = false
+                    sheet.runningRequestId = null
                 }
                 return@launch
             }
@@ -2565,10 +2723,48 @@ class DatabaseBrowserState(
                     )
                 }
                 sheet.rowCount = frames.size
+                sheet.rowsTruncated = truncated
             } else if (sheet.affectedRows == null && sheet.error == null) {
                 sheet.error = "无返回结果"
             }
             sheet.running = false
+            sheet.runningRequestId = null
+        }
+    }
+
+    /**
+     * 停止当前 sheet 正在跑的 SQL —— 发 `SYSTEM.CANCEL`（v2.16 已有，此前前端从未接上）。
+     *
+     * ## 为什么「停止」必须走引擎而不能只取消协程
+     *
+     * 跑在 `Dispatchers.IO` 上的 `rs.next()` 即使协程被取消也**继续阻塞** ——
+     * 真正能停掉数据库侧工作的只有 `Statement.cancel()`，那正是 `StatementRegistry`
+     * 在引擎侧做的事。前端取消协程的结果是：转圈没了，数据库还在满负荷跑。
+     *
+     * 取消成功后，引擎会在**原 request id** 上回一帧 `success=false, error="cancelled"`，
+     * 由 [executeSql] 的 collect 落进 [SqlSheet.error] —— 因此这里**不**自己写状态，
+     * 避免两条路径各写一次、出现「显示已停止但引擎还在跑」或反之。
+     */
+    fun cancelSql() {
+        val sheet = currentSqlSheet() ?: return
+        val requestId = sheet.runningRequestId ?: return
+        val schema = currentSchema()
+        scope.launch {
+            val resp = runCatching {
+                engine.invoke(engineConn(database = schema)) {
+                    category = Category.SYSTEM
+                    action = Action.CANCEL
+                    systemRequest = systemRequest { targetRequestId = requestId }
+                }
+            }
+            // 只在**没找到目标**时补一句提示：请求已经自己结束时引擎会回 cancelled=false，
+            // 那不是错误，那正是「已经跑完了」。真正失败（gRPC 断了等）才写 error。
+            val cancelResp = resp.getOrNull()?.system?.cancel
+            if (resp.isFailure) {
+                sheet.error = "无法停止：${resp.exceptionOrNull()?.message ?: "未知错误"}"
+            } else if (cancelResp != null && !cancelResp.cancelled && cancelResp.error.isNotBlank()) {
+                sheet.error = "无法停止：${cancelResp.error}"
+            }
         }
     }
 
@@ -2851,6 +3047,9 @@ class DatabaseBrowserState(
         sqlSheets.forEach { sheet ->
             sheet.generation++
             sheet.running = false
+            // 断开后请求已经作废，留着 id 会让「停止」按钮继续挂在界面上 ——
+            // 而那个 id 对应的引擎侧执行早已不存在，点了只会回一句「找不到目标」。
+            sheet.runningRequestId = null
         }
         generateGeneration++
         generateRunning = false

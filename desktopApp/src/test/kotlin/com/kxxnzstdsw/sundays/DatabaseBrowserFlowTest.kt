@@ -439,6 +439,91 @@ class DatabaseBrowserFlowTest {
         assertNull(sheet.affectedRows, "SELECT 不应填 affected_rows")
     }
 
+    /**
+     * 回归：**执行期间必须留下可取消的 request id，且结束路径全部清空**。
+     *
+     * 引擎侧 `SYSTEM.CANCEL`（v2.16）按 `target_request_id` 找正在跑的 `Statement` 并调
+     * `Statement.cancel()` —— 协程取消打断不了阻塞中的 `rs.next()`，只有它能停。
+     * 而此前 `executeSql` 把 `UUID.randomUUID()` 赋给 `req.id` 之后**就丢了**，
+     * 前端连「能不能停」这个问题都无从回答。
+     *
+     * 断言分两半，缺一不可：
+     * - **执行期间**非 null —— 否则「停止」按钮永远不出现，功能等于没接
+     * - **结束后**为 null —— 留着会让按钮挂在界面上，而那个 id 对应的执行早已结束，
+     *   点了只会回一句「找不到目标」
+     */
+    @Test
+    fun `executeSql exposes a cancellable request id and clears it when finished`() = runBlocking {
+        val state = newBrowser()
+        val sheet = state.currentSqlSheet()!!
+        assertNull(sheet.runningRequestId, "尚未执行时不应有 request id")
+
+        sheet.editor.setText("SELECT id, name FROM users ORDER BY id")
+        state.executeSql()
+        // executeSql 同步写入 id 后才 launch 收集协程，这一刻必然可读
+        assertNotNull(
+            sheet.runningRequestId,
+            "执行期间必须留下 request id，否则「停止」无从发起 SYSTEM.CANCEL",
+        )
+
+        withTimeout(5_000) { while (sheet.running) delay(20) }
+        assertNull(
+            sheet.runningRequestId,
+            "执行结束后必须清空 —— 残留会让「停止」按钮一直挂着，点下去只会「找不到目标」",
+        )
+    }
+
+    /**
+     * 回归：**结果集必须有上限，且截断要显式标记**。
+     *
+     * `SQL.EXECUTE` 是流式的，引擎会一直推行帧。此前无条件 `frames += frame`，
+     * `SELECT * FROM big_table` 会把整个结果集搬进堆里，而用户什么都做不了。
+     *
+     * 截断标志单列（`rowsTruncated`）而不复用 `rowCount`：截断时 `rowCount` 只是**已收到**
+     * 的行数，让分页栏拿它当总数会显示「第 1 / 100 页」却点不出后面的页 —— 用户以为数据丢了。
+     */
+    @Test
+    fun `sql results are capped and the truncation is reported`() = runBlocking {
+        val state = newBrowser()
+        val sheet = state.currentSqlSheet()!!
+        // 用 `SYSTEM_RANGE` 造出超过上限的行数。数字写死在这儿**不引用生产常量** ——
+        // 上限一旦被改宽，这条断言要跟着一起漂移，就再也发现不了「上限没了」。
+        val overCap = SQL_RESULT_MAX_ROWS + 200
+        sheet.editor.setText("SELECT X FROM SYSTEM_RANGE(1, $overCap)")
+        state.executeSql()
+
+        withTimeout(60_000) { while (sheet.running) delay(20) }
+
+        assertNull(sheet.error, "不该报错: ${sheet.error}")
+        assertEquals(
+            SQL_RESULT_MAX_ROWS, sheet.rows.size,
+            "结果集必须停在上限 —— 无上限攒行能让一张大表把桌面进程拖垮",
+        )
+        assertTrue(
+            sheet.rowsTruncated,
+            "截断必须显式标记 —— 静默截断等于骗用户「这张表就这么大」",
+        )
+    }
+
+    /**
+     * 回归：小于上限的结果**不得**被标成截断。
+     *
+     * 上一条只钉住了「超限时截断」；若上限判断写反（`>` 写成 `>=` 之类），
+     恰好等于上限的那一批会被白标一次「已截断」，用户以为数据不全。
+     */
+    @Test
+    fun `sql results below the cap are not marked as truncated`() = runBlocking {
+        val state = newBrowser()
+        val sheet = state.currentSqlSheet()!!
+        sheet.editor.setText("SELECT id, name FROM users ORDER BY id")
+        state.executeSql()
+
+        withTimeout(5_000) { while (sheet.running) delay(20) }
+
+        assertEquals(2, sheet.rows.size)
+        assertFalse(sheet.rowsTruncated, "没到上限就不该出现截断提示")
+    }
+
     @Test
     fun `executeSql empty text sets error without calling engine`() = runBlocking {
         val state = newBrowser()

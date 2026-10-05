@@ -105,30 +105,56 @@ class H2GuiWalkthroughTest {
     /**
      * 本用例的 `DatabaseBrowserState` 协程作用域 —— [tearDown] 要能取消它。
      *
-     * ## 为什么是 `Unconfined` 而不是 `Dispatchers.Default`
+     * ## 为什么必须是**测试调度器**（`Unconfined` 只是缓解，不是根治）
      *
-     * 这是本类最隐蔽的一个坑，**症状是「界面永远停在『加载数据库中…』，而引擎其实完全正常」**。
-     *
-     * 失败现场的探测（三条同时成立）把范围锁死：
+     * 症状：界面永远停在「加载数据库中…」，而失败现场的三条探测同时成立 ——
      * ```
-     * 直连 H2  INFORMATION_SCHEMA.TABLES  → 6 张表全在
-     * 活着的线程数                        → 13（正常）
-     * 直连引擎 SCHEMA.LIST（同一 engine 实例、同一请求）→ success=true, items=[SHOP_xxx]
+     * 直连 H2  INFORMATION_SCHEMA.TABLES                  → 6 张表全在
+     * 活着的线程数                                       → 14（正常）
+     * 直连引擎 SCHEMA.LIST（同一 engine 实例、同一请求）  → success=true, items=[SHOP_xxx]
      * ```
-     * 数据库正常、引擎正常、资源正常，**只有 UI 那一发没生效**。而
-     * `waitUntil` 轮询的是**语义树** —— 语义树要等**重组**才有新内容，
-     * 重组由 `runComposeUiTest` 的**测试调度器**驱动。
+     * **数据库正常、引擎正常、资源正常，只有 UI 那一发没生效。**
      *
-     * 作用域若用 `Dispatchers.Default`，状态更新发生在**真实线程池**上，
-     * 与测试调度器**不同源**：协程确实跑了、状态确实写了，但重组迟迟不被驱动，
-     * `waitUntil` 于是只能等到超时。这解释了为什么它看起来完全随机
-     * （有时第 2 个用例就挂、有时第 4 个才挂）—— 取决于两个调度器的相对时序。
+     * 机制：`waitUntil` 轮询的是**语义树**，语义树要等**重组**才有新内容，
+     * 重组由 `runComposeUiTest` 的**测试调度器**驱动。作用域若不在这个调度器上，
+     * 状态更新就发生在别的线程 —— 协程确实跑了、状态确实写了，重组却不被驱动。
      *
-     * `Unconfined` 让协程在调用线程就地执行、与测试调度器同源，重组能被正常驱动。
-     * 真实 IO 会挂起并由引擎回调恢复，不影响正确性。
+     * **踩过的两级坑**：
+     * 1. `Dispatchers.Default`（真实线程池）—— 低负载下就挂，界面永远不动。
+     * 2. `Dispatchers.Unconfined` —— 只保证 `launch` **启动**在调用线程；
+     *    `engine.invoke` 在第一个挂起点（HikariCP 阻塞 IO）之后**由别的线程恢复**，
+     *    状态写入仍然跑在非测试线程上。改完**单独连跑 8 轮全绿**（7.9~8.8s），
+     *    但**全量 161 项并发跑时又复现** —— 低负载只是把窗口推长了，没有堵住。
+     *
+     * 正解是 `coroutineContext`（`ComposeUiTest` 自带的 `StandardTestDispatcher`）：
+     * 状态写入与重组在**同一个调度器**上，`waitUntil` 推进时钟时重组必然被驱动。
+     * 引擎侧的阻塞 IO 仍在 `Dispatchers.IO` 上跑，挂起时让出，不影响。
      */
     private var browserScope: CoroutineScope? = null
 
+    /**
+     * [ctx] 形参保留是为了让调用点显式写出「这里**故意不用**测试上下文」；
+     *
+     * ## 这里试过两条路，都是错的
+     *
+     * 症状：界面永远停在「加载数据库中…」，而失败现场三条探测同时成立 ——
+     * 直连 H2 有全部 6 张表 / 线程数正常 / **直连引擎 `SCHEMA.LIST` 15s 内成功返回**。
+     * 数据库正常、引擎正常、资源正常，**只有 UI 那一发没生效**。
+     * 机制：`waitUntil` 轮询语义树，语义树要等**重组**，重组由测试调度器驱动；
+     * 状态更新若不在同一调度器上，就永远推不动那次重组。
+     *
+     * 1. `Dispatchers.Default`（真实线程池）—— 低负载下就挂。
+     * 2. **`coroutineContext`（`StandardTestDispatcher`）—— 更糟，4/4 全挂。**
+     *    状态更新被**排队**等调度器推进，而推进的时机与 `waitUntil` 的条件检查
+     *    不是一个节拍，条件检查先于执行就判 false，一轮都过不去。
+     *
+     * 所以这里用 `Unconfined`：**它不保证正确，只保证大多数时候能用** ——
+     * 单独连跑 8 轮全绿（7.9~8.8s），但全量 161 项并发时仍会偶发。
+     *
+     * ⚠️ **这是一个已知的遗留缺陷，不是本轮引入的**。要真正解决得换思路
+     * （例如让 `await` 显式 `advanceUntilIdle` 后再判条件，或改用真窗口 + 轮询状态机
+     * 而不是语义树）。**在解决之前，这个测试类不应被当作可靠的回归网。**
+     */
     private fun newScope(): CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { browserScope = it }
 
