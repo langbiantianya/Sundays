@@ -4,7 +4,10 @@
 
 它通过 **`EngineClient` 接口**（`engine-protocol/`，`AutoCloseable`）与引擎集成 —— UI 层只面向接口编程，具体实现在 `main.kt` 这一个装配点决定：默认是**同 JVM 的 `IdbEngine()`**（不启动子进程、不建立 gRPC channel、不走 IPC transport，typed proto 消息在同一 JVM 内直传，零序列化、零桥接开销）；设置 `-Dsundays.engine.endpoint` 后切换为**跨进程 `GrpcEngineClient`**。两种模式下 UI 代码完全相同。
 
-> **当前版本：v2.15** — KMP Desktop 前端 + `EngineClient` 调用层抽象（Direct / gRPC 双实现）+ 连接管理 + **顶层导航与数据库浏览第二屏**
+> **当前版本：v2.23** — SQL 工作台 + 造数工作台 + 库表树宽度可拖拽 + SQL 可取消与结果集封顶 + 浏览屏可见连接失败原因
+>
+> 📖 **功能文档见 [`./FEATURES.md`](./FEATURES.md)** —— 逐条列出「现在能干什么 / 引擎有但前端没接什么 /
+> 与 DataGrip、Navicat 差在哪」，以及按投入产出比排序的路线建议。
 > 详细架构设计见本目录的 [`./ARCHITECTURE.md`](./ARCHITECTURE.md)；整体项目架构见 [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md)；调用层接口见 [`../engine-protocol/README.md`](../engine-protocol/README.md)；gRPC 客户端见 [`../engine-grpc-client/README.md`](../engine-grpc-client/README.md)；引擎文档见 [`engine/README.md`](../engine/README.md)；共享 UI 组件见 [`shared/`](../shared/) 模块。
 
 ---
@@ -61,6 +64,10 @@
 持有（位于导航之上），因此**切换目标不会丢失连接**。
 
 ## 功能：连接管理（v2.12）
+
+> 📖 完整功能清单（含 SQL 工作台、造数工作台、与 DataGrip / Navicat 的差距矩阵）见 [`./FEATURES.md`](./FEATURES.md)。
+> 以下两节只讲这两个界面的**实现细节**；v2.14 之后新增的 SQL 工作台、造数工作台、拖拽、取消、
+> 失败横幅等不在此重复，只在 `FEATURES.md` 汇总。
 
 应用启动后落在 `ConnectionManagerScreen` —— 左侧连接列表 + 右侧引导式配置 / 连接总览（v2.10 已移除演示 `DemoApp`）。
 
@@ -245,6 +252,7 @@ java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051
 
 | 文档 | 内容 |
 |---|---|
+| [`desktopApp/FEATURES.md`](./FEATURES.md) | **功能文档** —— 能力总览（三栏：已实现 / 引擎有但未接线 / 完全没有）、与 DataGrip & Navicat 的差距矩阵、按投入产出比排序的路线 |
 | [`desktopApp/ARCHITECTURE.md`](./ARCHITECTURE.md) | desktopApp 内部架构（KMP 工程结构 / Direct 模式集成 / 连接管理与关键回调 / 生命周期管理） |
 | [根目录 `README.md`](../README.md) | 项目总览、模块结构、Direct 模式详解、运行命令 |
 | [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.12 架构导航（双模式架构 / 模块结构 / 连接生命周期直连方法） |

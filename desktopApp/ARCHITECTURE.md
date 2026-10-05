@@ -717,6 +717,7 @@ Window(
 
 | 文档 | 内容 |
 |---|---|
+| **[`desktopApp/FEATURES.md`](./FEATURES.md)** | **功能文档** —— 能力总览（已实现 / 引擎有但前端未接线 / 完全没有）、与 DataGrip & Navicat 的差距矩阵、路线建议 |
 | [`desktopApp/README.md`](./README.md) | desktopApp 用户级 README（运行命令 / 演示功能 / 端点属性与两种绑定） |
 | [根目录 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | V2.9 完整架构设计文档（gRPC 协议 / handler 矩阵 / 方言特性 / 双模式架构） |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎内部架构（`IdbEngine` facade 详解 / `RequestDispatcher` / `PoolManager` / `Loader`） |
@@ -727,9 +728,22 @@ Window(
 
 ---
 
-## 后续迭代方向（v2.15+）
+## 后续迭代方向
 
-- **真正的数据库管理 UI**：Schema 导航（基于连接池后的 `SCHEMA.LIST`）/ SQL 编辑器面板（嵌入 `CodeEditor`）/ 查询结果表（嵌入 `DataTable`）✅ 已落地（`SqlWorkbenchPane`）；连接表单可进一步改为按 `SYSTEM.LIST_DRIVERS` 的 `DialectInfo` 动态渲染
+> 📌 **完整路线与优先级见 [`FEATURES.md` §5](./FEATURES.md)** —— 那份是按「引擎已实现但前端未接线
+> / 完全没做 / 对标 DataGrip 与 Navicat 的差距」**逐条从代码盘点**出来的，比这里的粗颗粒列表可靠。
+> 下面只保留本文件视角（前端架构）特有的几条。
+
+- **数据编辑**：`DataTable` 目前**只读**。这是「能看」与「能用」的分界线，也是 P0。
+  引擎侧可复用 `SQL.EXECUTE` 发 `UPDATE` / `DELETE`，不需要新路由
+- **对象浏览**：树现在只有「库 / 表」两级。引擎的 `VIEW` / `INDEX` / `TRIGGER` /
+  `FOREIGN_KEY` / `FUNCTION` 五个 Category 都已通路由，只差树节点分组
+- **导入 / 导出 UI**：`IMPORT.RUN_IMPORT` 与 `EXPORT.RUN_EXPORT` 引擎侧完整（多格式、可取消、
+  可容错），只差向导与对话框 —— 性价比最高的一项
+- **DDL 编辑**：`TABLE.CREATE` / `UPDATE` / `DELETE` / `GET_DDL` 已通；可视化编辑器是
+  DataGrip / Navicat 的标配，值得做但工作量不小
+- **连接表单动态渲染**：按 `SYSTEM.LIST_DRIVERS` 的 `DialectInfo` 生成字段，
+  而不是现在按枚举枚举字段
 - **连接重连与会话信息**：总览面板展示 `SYSTEM.SERVER_INFO`（版本 / 模式）；断线自动重连
 - **多 Window 支持**：当前 `main()` 仅创建单个 `Window`；后续按需支持多 Window（每个连接一个 Window）
 - **KMP 平台扩展**：新增 `androidMain` / `iosMain` / `wasmJsMain` source set（共享 `commonMain` 业务层）

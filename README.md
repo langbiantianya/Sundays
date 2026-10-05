@@ -11,9 +11,13 @@
 
 引擎支持 **5 个** 可插拔方言：**MySQL** / **PostgreSQL** / **H2** / **DuckDB**（本地嵌入式 OLAP，v2.7） / **SQLite**（本地嵌入式关系型，v2.8）。
 
-> **当前版本：v2.16** — 引擎能力补齐（查询取消 / 数据导入 / 事务会话 / 多语句脚本）
+> **当前版本：v2.23**
 >
-> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)（V2.16），调用层契约见 [`engine-protocol/README.md`](./engine-protocol/README.md)，引擎 README 见 [`engine/README.md`](./engine/README.md)。
+> 📖 **功能文档：[`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md)** —— 这个工具现在能干什么、
+> 引擎已实现但前端尚未接线的部分、以及与 **DataGrip / Navicat** 的逐项差距矩阵（含按投入产出比
+> 排序的路线建议）。想快速了解「sundays 和主流数据库工具有什么区别」，从那篇开始。
+>
+> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，调用层契约见 [`engine-protocol/README.md`](./engine-protocol/README.md)，引擎 README 见 [`engine/README.md`](./engine/README.md)。
 
 ---
 
@@ -146,6 +150,11 @@ java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051     # 引擎进程
 ## 引擎新能力（v2.16）
 
 v2.16 补齐了与 DBeaver / Navicat / DataGrip 等同类工具相比缺失的四项引擎能力。以下从**使用者视角**说明各自解锁了什么。
+
+> ⚠️ **这四项里，到 v2.23 为止只有「查询取消」接到了界面**（SQL 工作台的「停止」按钮）。
+> 数据导入 / 事务会话 / 多语句脚本的**引擎侧都已完成，前端尚未接线** ——
+> 多语句只差把 `DatabaseBrowserState.executeSql` 里硬编码的 `multiStatement = false` 改成 true。
+> 完整的前后端能力对照见 [`desktopApp/FEATURES.md` §3.2](./desktopApp/FEATURES.md)。
 
 ### 查询取消（`SYSTEM.CANCEL`）
 
@@ -492,6 +501,8 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 | 文档 | 内容 |
 |---|---|
+| **[`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md)** | **功能文档** —— 能力总览（已实现 / 引擎有但前端未接线 / 完全没有）、与 DataGrip & Navicat 的逐项差距矩阵、按投入产出比排序的路线建议 |
+| [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | 前端架构 —— 浏览屏 / 连接管理的状态机与契约 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | **架构导航（V2.16）** —— 调用层架构、模块依赖、方言特性、迁移历史 |
 | [`engine-protocol/README.md`](./engine-protocol/README.md) | **调用层契约** —— `EngineClient` 接口、proto 协议、`SYSTEM.DISCONNECT` 路由 |
 | [`engine-grpc-client/README.md`](./engine-grpc-client/README.md) | **gRPC 调用模块** —— `GrpcEngineClient` 跨进程实现、端点格式、端到端测试 |
