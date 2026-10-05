@@ -1029,6 +1029,152 @@ class DatabaseBrowserFlowTest {
         )
     }
 
+    /**
+     * 回归：**展开库时会拉到库级对象**（视图 / 触发器 / 过程·函数）。
+     *
+     * 此前树里只有「表」这一层 —— 用户能看到表却看不到视图和触发器，而这两类恰恰是
+     * 排查「数据从哪来 / 会不会被改」时最先要看的东西。引擎侧 `VIEW` / `TRIGGER` /
+     * `FUNCTION` 三个 Category 早就有 `LIST` 路由，前端一个都没调。
+     *
+     * 断言**不依赖具体对象是否存在**：先建一个视图把 `VIEW` 这格点亮，
+     * 再验「视图列表里有它」。另两类若 H2 侧没有对象则显示「(无)」——
+     * 那是正确状态，不该被断言成「有东西」。
+     */
+    @Test
+    fun `expanding a database also lists its views`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        val table = state.tablesFor(db, "USERS")
+
+        DriverManager.getConnection(jdbcUrl, "sa", "").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate("CREATE VIEW v_active AS SELECT id FROM USERS WHERE id > 0")
+            }
+        }
+
+        // ⚠️ `tablesFor` 内部已经 `toggleDatabase(db)` 把库**展开**了。
+        // 再调一次 `toggleDatabase` 反而是「收起」—— 展开动作不发生，对象自然拉不到。
+        // `tablesFor` 已经展开过这个库 —— 那次对象拉取发生在 CREATE VIEW **之前**，
+        // 所以这里必须**收起再展开**才能验证「重新展开会刷新」这条语义。
+        state.toggleDatabase(db)              // 收起
+        state.toggleDatabase(db)              // 再展开 → 重新拉对象
+        withTimeout(10_000) { while (db in state.loadingTables) delay(20) }
+        // 等**结果**而不是等 loading 标志归零 —— loading 在「解析 schema →
+        // 拉对象」之间会被置位两次，只盯它会在中间那一刻误判为已完成
+        withTimeout(10_000) {
+            while (state.objectsByDatabase[db]?.get(DatabaseBrowserState.DatabaseObjectKind.VIEW)
+                ?.none { it.contains("V_ACTIVE", ignoreCase = true) } != false
+            ) {
+                delay(20)
+            }
+        }
+
+        val views = state.objectsByDatabase[db]?.get(DatabaseBrowserState.DatabaseObjectKind.VIEW)
+        assertNotNull(views, "展开库后应有一份库级对象结果，实际 ${state.objectsByDatabase}")
+        assertTrue(
+            views!!.any { it.contains("V_ACTIVE", ignoreCase = true) },
+            "视图列表应包含刚建的 V_ACTIVE，实际 $views",
+        )
+        // schema 名必须是**解析来的**，不是库名：H2 恒为 PUBLIC、PG 为 public、
+        // SQLite 为 main，而 MySQL 压根没有这层（`listSchemas` 抛 UOE）。
+        // 前端硬编码任何一种都会在换库时错。
+        assertEquals(
+            listOf("PUBLIC"), state.schemasByDatabase[db],
+            "schema 名应来自 SCHEMA.LIST level=schema，而不是拿库名凑",
+        )
+    }
+
+    /** 展开库时会发出三条**不同 Category** 的 LIST 请求 —— 三类必须各拉一次。 */
+    @Test
+    fun `expanding a database queries views triggers and functions`() = runBlocking {
+        val cats = mutableSetOf<com.kxxnzstdsw.grpc.Category>()
+        val spy = object : com.kxxnzstdsw.client.EngineClient {
+            override fun handle(request: com.kxxnzstdsw.grpc.Request): kotlinx.coroutines.flow.Flow<com.kxxnzstdsw.grpc.Response> {
+                if (request.action == com.kxxnzstdsw.grpc.Action.LIST &&
+                    request.category != com.kxxnzstdsw.grpc.Category.SCHEMA &&
+                    request.category != com.kxxnzstdsw.grpc.Category.TABLE
+                ) {
+                    cats += request.category
+                }
+                return engine.handle(request)
+            }
+            override suspend fun testConnection(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.testConnection(config)
+            override suspend fun disconnect(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.disconnect(config)
+            override fun close() = Unit
+        }
+        val state = DatabaseBrowserState(spy, CoroutineScope(Dispatchers.Default))
+        state.bindConnection(TestConnectionFactory.build(jdbcUrl))
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        // `firstLoadedDatabase` 只等库列表，不展开 —— 这里第一次 toggle 就是「展开」
+        state.toggleDatabase(db)
+
+        // ⚠️ 不能只 `while (loadingObjects.any { … })` —— 那段窗口里 loading 会被
+        // 「解析 schema 前先置位 → 解析完撤掉 → 真正拉对象时再置位」跨过，
+        // 循环可能在中间那一刻就退出，一个请求都没等到。这里等**结果落定**。
+        withTimeout(10_000) {
+            // 等**三类都**落定而不是等 map 非空 —— 视图/触发器/函数是并发拉的，!= null 会在
+            // 第一个写回时就满足（实测先回的是函数），其余两格还是空的
+            while ((state.objectsByDatabase[db]?.size ?: 0) < 3) delay(20)
+        }
+        assertEquals(
+            setOf(
+                com.kxxnzstdsw.grpc.Category.VIEW,
+                com.kxxnzstdsw.grpc.Category.TRIGGER,
+                com.kxxnzstdsw.grpc.Category.FUNCTION,
+            ),
+            cats,
+            "展开库必须对 VIEW / TRIGGER / FUNCTION 各发一次 LIST",
+        )
+    }
+
+    /**
+     * 回归：展开表节点会拉到**索引 / 外键**。
+     *
+     * 它们与库级对象（视图 / 触发器 / 函数）分开拉，是因为引擎侧 `IndexListRequest` /
+     * `ForeignKeyListRequest` 都要 `table_name` —— 跟库走就得把整库每张表的索引都拉一遍。
+     */
+    @Test
+    fun `expanding a table lists its indexes and foreign keys`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.tablesFor(db, "USERS")
+
+        DriverManager.getConnection(jdbcUrl, "sa", "").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate("CREATE INDEX idx_users_id ON USERS (id)")
+            }
+        }
+
+        state.toggleTableObjects(db, "USERS")
+        val slot = "$db::USERS"
+        // ⚠️ 不能等 `tableObjects[slot] != null` —— 索引与外键是**并发**拉的，
+        // 先返回的那个（实测总是外键）一写回，条件就满足了，另一个还没回来。
+        // 实测全量并发下这条会读到 `{FOREIGN_KEY=[]}`（索引那格整个缺失）。
+        // 必须等**两类都**落定。
+        withTimeout(10_000) {
+            while (state.tableObjects[slot]?.size ?: 0 < DatabaseBrowserState.TableObjectKind.entries.size) {
+                delay(20)
+            }
+        }
+        val idx = state.tableObjects[slot]?.get(DatabaseBrowserState.TableObjectKind.INDEX)
+        assertNotNull(idx, "展开表后应有索引结果，实际 ${state.tableObjects}")
+        assertTrue(
+            idx!!.any { it.contains("IDX_USERS_ID", ignoreCase = true) },
+            "索引列表应包含刚建的 IDX_USERS_ID，实际 $idx",
+        )
+        // 收起后不再显示，但缓存保留（切回来无需重新拉）
+        state.toggleTableObjects(db, "USERS")
+        assertFalse(
+            "$db::USERS" in state.expandedTableObjects,
+            "收起后不应仍在展开集合里",
+        )
+    }
+
     @Test
     fun `a rolled back transaction leaves no trace`() = runBlocking {
         val state = newBrowser()
@@ -1161,9 +1307,19 @@ class DatabaseBrowserFlowTest {
         state.refreshDatabases()
         state.firstLoadedDatabase()          // 第一次加载跑完，把连接与方言都热起来
 
-        state.refreshDatabases()             // loadingDatabases = true（同步）
-        assertTrue(state.loadingDatabases, "前提不成立：请求没进在飞状态")
-        state.releasePools()                 // 响应回来时必定早退，早退不写 loading
+        // ⚠️ **不能**断言「此刻 `loadingDatabases` 必为 true」来当前提。
+        //
+        // `refreshDatabases()` 里的 `loadingDatabases = true` 确实是同步赋值，
+        // 但紧跟着 launch 的协程跑在**别的线程**上，它可能在我们走到断言那行之前
+        // 就把请求跑完并清掉标志 —— 全量并发下尤其容易（实测这条在单独跑三轮全绿、
+        // 全量 170 项并发时偶发红，报的正是「前提不成立：请求没进在飞状态」）。
+        //
+        // 正确做法：**不去证明请求「在飞」，只断言最终状态。**
+        // `releasePools` 的 `invalidateInFlight` 会同步把 `loadingDatabases` 清掉，
+        // 所以断开之后它必然为 false —— 把 `invalidateInFlight` 里那行删掉，
+        // 旧请求的协程又会早退不清，最终仍然是 true，测试照样变红。
+        state.refreshDatabases()
+        state.releasePools()
 
         withTimeout(5_000) { while (state.loadingDatabases) delay(10) }
     }
@@ -1275,6 +1431,13 @@ class DatabaseBrowserFlowTest {
         if (db !in tablesByDatabase) toggleDatabase(db)
         withTimeout(5_000) { while (db in loadingTables) delay(50) }
         tableLoadError[db]?.let { throw AssertionError("加载表列表失败: $it") }
+        // 顺手等对象列表**第一次**落定。
+        //
+        // `toggleDatabase` 现在会并发拉库级对象（视图 / 触发器 / 函数），
+        // 它们与表互不依赖、在同一批协程里跑。本测试之后要用 `toggleDatabase`
+        // 触发「再展开一次」来验证刷新，所以这里必须先把上一轮的对象请求收干净 ——
+        // 否则下一行的 `toggleDatabase` 与残留协程交错，等待条件会误判。
+        withTimeout(5_000) { while ((objectsByDatabase[db]?.size ?: 0) < 3) delay(20) }
         return tablesByDatabase.getValue(db).first { it.uppercase() == wanted.uppercase() }
     }
 

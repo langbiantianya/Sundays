@@ -111,6 +111,16 @@ import com.kxxnzstdsw.grpc.schemaListRequest
 import com.kxxnzstdsw.grpc.schemaRequest
 import com.kxxnzstdsw.grpc.sqlExecuteRequest
 import com.kxxnzstdsw.grpc.sqlRequest
+import com.kxxnzstdsw.grpc.foreignKeyListRequest
+import com.kxxnzstdsw.grpc.foreignKeyRequest
+import com.kxxnzstdsw.grpc.functionListRequest
+import com.kxxnzstdsw.grpc.functionRequest
+import com.kxxnzstdsw.grpc.indexListRequest
+import com.kxxnzstdsw.grpc.indexRequest
+import com.kxxnzstdsw.grpc.triggerListRequest
+import com.kxxnzstdsw.grpc.triggerRequest
+import com.kxxnzstdsw.grpc.viewListRequest
+import com.kxxnzstdsw.grpc.viewRequest
 import com.kxxnzstdsw.grpc.systemRequest
 import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
@@ -1273,14 +1283,80 @@ private fun DatabaseNode(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
                 )
-                else -> tables.forEach { tbl ->
-                    TableLeaf(
-                        tableName = tbl,
-                        onOpen = { onOpenTable(name, tbl) },
-                    )
+                else -> {
+                    tables.forEach { tbl ->
+                        val slot = "$name::$tbl"
+                        TableLeaf(
+                            tableName = tbl,
+                            onOpen = { onOpenTable(name, tbl) },
+                            expanded = slot in state.expandedTableObjects,
+                            onToggleObjects = { state.toggleTableObjects(name, tbl) },
+                            indexNames = state.tableObjects[slot]
+                                ?.get(DatabaseBrowserState.TableObjectKind.INDEX).orEmpty(),
+                            foreignKeyNames = state.tableObjects[slot]
+                                ?.get(DatabaseBrowserState.TableObjectKind.FOREIGN_KEY).orEmpty(),
+                        )
+                    }
+                    // 库级对象（视图 / 触发器 / 过程·函数）排在表之后。
+                    // 顺序有讲究：用户 90% 的时间在找表，把表放前面、对象放后面，
+                    // 免得每展开一个库都先滚过一屏用不上的东西。
+                    val objErr = state.objectLoadError.entries
+                        .firstOrNull { it.key.startsWith("$name::") }?.value
+                    val objBusy = state.loadingObjects.any { it.first == name }
+                    val objs = state.objectsByDatabase[name]
+                    when {
+                        objErr != null -> Text(
+                            text = "  对象加载失败: $objErr",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
+                        )
+                        objs == null && objBusy -> Text(
+                            text = "  对象 加载中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
+                        )
+                        else -> Column(modifier = Modifier.padding(start = 24.dp)) {
+                            Text(
+                                text = "对象",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            DatabaseBrowserState.DatabaseObjectKind.entries.forEach { kind ->
+                                ObjectGroupRow(
+                                    label = kind.label,
+                                    items = objs?.get(kind).orEmpty(),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/** 对象分组下的一行：`标签: 名字1, 名字2 …`。空列表显示「(无)」。 */
+@Composable
+private fun ObjectGroupRow(label: String, items: List<String>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = "$label：",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = if (items.isEmpty()) "(无)" else items.joinToString(", "),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1302,30 +1378,58 @@ private fun DatabaseNode(
 private fun TableLeaf(
     tableName: String,
     onOpen: () -> Unit,
+    expanded: Boolean = false,
+    onToggleObjects: (() -> Unit)? = null,
+    indexNames: List<String> = emptyList(),
+    foreignKeyNames: List<String> = emptyList(),
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                onClickLabel = "打开表 $tableName",
-                role = Role.Button,
-                onClick = onOpen,
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    onClickLabel = "打开表 $tableName",
+                    role = Role.Button,
+                    onClick = onOpen,
+                )
+                .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onToggleObjects != null) {
+                // 展开箭头：与库节点的 chevron 同一套视觉语言。
+                // 单独一个小按钮而不是让整行双击 —— 整行单击已经占用在「打开预览」上，
+                // 同一个手势不能既开预览又展开对象。
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
+                    contentDescription = if (expanded) "收起 $tableName 的索引与外键" else "展开 $tableName 的索引与外键",
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { onToggleObjects() },
+                )
+                Spacer(Modifier.width(2.dp))
+            } else {
+                Spacer(Modifier.width(18.dp))
+            }
+            Icon(
+                imageVector = Icons.Filled.TableChart,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(14.dp),
             )
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Spacer(Modifier.width(20.dp))
-        Icon(
-            imageVector = Icons.Filled.TableChart,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = tableName,
-            style = MaterialTheme.typography.bodySmall,
-        )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = tableName,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (expanded) {
+            // 索引 / 外键放在**表节点下**而不是库节点下：引擎侧这两条路由要
+            // `table_name`，跟着表走才对得上；放库下就得把整库每张表的索引都拉一遍。
+            Column(modifier = Modifier.padding(start = 44.dp)) {
+                ObjectGroupRow("索引", indexNames)
+                ObjectGroupRow("外键", foreignKeyNames)
+            }
+        }
     }
 }
 
@@ -2504,6 +2608,88 @@ class DatabaseBrowserState(
 
     /** database → table 加载错误 */
     private val _tableLoadError = mutableStateMapOf<String, String>()
+
+    // ------------------------------------------------------------------
+    // 对象浏览：视图 / 触发器 / 函数（schema 级）与 索引 / 外键（表级）
+    // ------------------------------------------------------------------
+
+    /**
+     * 库级对象的三种：**视图 / 触发器 / 过程·函数**。
+     *
+     * 引擎侧它们是**库级**的（`ViewListRequest.schema` / `TriggerListRequest.schema` /
+     * `FunctionListRequest.schema` 都只要一个 schema，不像索引/外键还要 `table_name`），
+     * 所以归在库节点下、跟表平级。
+     *
+     * 之前只列出「表」，是 DataGrip / Navicat 意义上的**对象浏览器缺失一半**：
+     * 用户能看表却看不到视图和触发器，而这两类恰恰是排查「数据从哪来 / 会不会被改」时
+     * 最先要看的东西。
+     */
+    enum class DatabaseObjectKind(val label: String) {
+        VIEW("视图"),
+        TRIGGER("触发器"),
+        FUNCTION("过程 / 函数"),
+    }
+
+    /** database → 该类对象名列表（来自各自的 `*ListRequest`）。 */
+    private val _objectsByDatabase = mutableStateMapOf<String, Map<DatabaseObjectKind, List<String>>>()
+
+    val objectsByDatabase: Map<String, Map<DatabaseObjectKind, List<String>>>
+        get() = _objectsByDatabase
+
+    /** 正在加载库级对象的 `(库, 类型)` 组合 —— 控制那一行的小 spinner。 */
+    val loadingObjects: SnapshotStateSet<Pair<String, DatabaseObjectKind>> = mutableStateSetOf()
+
+    /** 库级对象加载错误：`"库::类型" -> 文案`。 */
+    private val _objectLoadError = mutableStateMapOf<String, String>()
+    val objectLoadError: Map<String, String> get() = _objectLoadError
+
+    /** 表级对象的两种：**索引 / 外键**（引擎侧要 `table_name`，所以挂表节点下）。 */
+    enum class TableObjectKind(val label: String) {
+        INDEX("索引"),
+        FOREIGN_KEY("外键"),
+    }
+
+    /** `"库::表" -> 该类对象名列表。 */
+    private val _tableObjects = mutableStateMapOf<String, Map<TableObjectKind, List<String>>>()
+
+    val tableObjects: Map<String, Map<TableObjectKind, List<String>>> get() = _tableObjects
+
+    val loadingTableObjects: SnapshotStateSet<Pair<String, TableObjectKind>> = mutableStateSetOf()
+
+    /** 已展开表对象列表的表：`"库::表"`。 */
+    val expandedTableObjects: SnapshotStateSet<String> = mutableStateSetOf()
+
+    /**
+     * 展开 / 收起某张表的**索引 / 外键**。
+     *
+     * 与库级对象不同，这里**不缓存**：每张表的对象是「这张表的」，不存在跨表复用，
+     * 而缓存会让「别处新建的索引看不到」。
+     */
+    fun toggleTableObjects(database: String, table: String) {
+        val slot = "$database::$table"
+        if (slot in expandedTableObjects) {
+            expandedTableObjects.remove(slot)
+        } else {
+            expandedTableObjects.add(slot)
+            loadTableObjects(database, table)
+        }
+    }
+
+    /**
+     * `库 -> 该库的 schema 名列表`（`SCHEMA.LIST level=schema` 的结果）。
+     *
+     * 单独存一份是为了**表级对象**（索引 / 外键）能直接取用：那两条路由同样要
+     * schema 名，而它们是「每张表一次往返」，绝不能每张表都重新解析一遍 schema。
+     */
+    private val _schemasByDatabase = mutableStateMapOf<String, List<String>>()
+    val schemasByDatabase: Map<String, List<String>> get() = _schemasByDatabase
+
+    /**
+     * 表级对象要用的 schema 名。空列表（还没解析 / 该库不支持 schema 层）时留空 ——
+     * 多数方言把空串当作「默认 schema」，而 H2 方言的 `listViews` 明确要求 `PUBLIC`。
+     */
+    private val tableSchemaOrDefault: String
+        get() = expandedDatabases.firstNotNullOfOrNull { _schemasByDatabase[it]?.firstOrNull() } ?: ""
     val tableLoadError: Map<String, String> get() = _tableLoadError
 
     /** 打开的标签页 */
@@ -3397,6 +3583,13 @@ class DatabaseBrowserState(
             if (_tablesByDatabase[name] == null && !loadingTables.contains(name)) {
                 loadTables(name)
             }
+            // 库级对象与表**并发**拉：它们互不依赖，串行会让展开一棵库慢一倍。
+            //
+            // 每次展开都重新拉，不做「拉过就跳过」：用户在**别处**（SQL 工作台、造数）
+            // 建的视图 / 触发器，这里若不重拉就永远看不到 —— 而「树里看不到刚建的
+            // 对象」正是用户最不能接受的一种「列表不更新」。展开是低频动作，
+            // 多三次往返换来正确性，划算。
+            loadDatabaseObjects(name)
         }
     }
 
@@ -3433,6 +3626,178 @@ class DatabaseBrowserState(
                 },
             )
             loadingTables.remove(database)
+        }
+    }
+
+    /**
+     * 拉某个库的**库级对象**（视图 / 触发器 / 过程·函数）。
+     *
+     * ## 先解析 schema 名，再拉对象 —— 不能拿库名凑
+     *
+     * `VIEW.LIST` / `TRIGGER.LIST` / `FUNCTION.LIST` 的 `schema` 参数要的是
+     * **schema 名**（H2 恒为 `PUBLIC`、PG 为 `public`、SQLite 为 `main`），
+     * 而我们手上只有**库名**（catalog）—— 两者不是一回事，这正是 [engineConnFor]
+     * 的 KDoc 反复警告的那条：把库名塞进 `schema` 会让 H2 执行
+     * `SET SCHEMA "<库名>"` → `Schema not found`。
+     *
+     * 所以先走一次 `SCHEMA.LIST level=schema` 拿到**真实的 schema 列表**，再对每个
+     * schema 拉三类对象。多数库只有一个默认 schema，代价是多一次往返；
+     * 换来的是「不靠猜」—— 前端没有任何地方硬编码 `PUBLIC` 之类。
+     *
+     * @param resolvedSchemas 由 [loadSchemasOf] 解析出的 schema 名；为空表示还没解析完
+     */
+    private suspend fun loadDatabaseObjectsFor(
+        database: String,
+        resolvedSchemas: List<String>,
+    ) {
+        for (kind in DatabaseObjectKind.entries) {
+            loadingObjects += database to kind
+            scope.launch {
+                val names = mutableListOf<String>()
+                var failure: String? = null
+                // 一个 schema 失败不该让其他 schema 的同类对象也消失
+                for (s in resolvedSchemas) {
+                    val resp = runCatching {
+                        engine.invoke(engineConn(database = database)) {
+                            category = when (kind) {
+                                DatabaseObjectKind.VIEW -> Category.VIEW
+                                DatabaseObjectKind.TRIGGER -> Category.TRIGGER
+                                DatabaseObjectKind.FUNCTION -> Category.FUNCTION
+                            }
+                            action = Action.LIST
+                            when (kind) {
+                                DatabaseObjectKind.VIEW ->
+                                    viewRequest = viewRequest { list = viewListRequest { schema = s } }
+                                DatabaseObjectKind.TRIGGER ->
+                                    triggerRequest = triggerRequest { list = triggerListRequest { schema = s } }
+                                DatabaseObjectKind.FUNCTION ->
+                                    functionRequest = functionRequest {
+                                        list = functionListRequest { schema = s }
+                                    }
+                            }
+                        }
+                    }.getOrNull()
+                    when {
+                        resp == null -> failure = failure ?: "引擎无响应"
+                        !resp.success ->
+                            failure = failure ?: resp.error.ifBlank { "加载失败" }
+                        else -> {
+                            // 五类的 list 元素都是消息（视图带 definition、触发器带
+                            // timing/event 等），树里只显示 `.name`；其余字段留给
+                            // 将来的对象详情面板。
+                            names += when (kind) {
+                                DatabaseObjectKind.VIEW -> resp.view.list.itemsList.map { it.name }
+                                DatabaseObjectKind.TRIGGER -> resp.trigger.list.itemsList.map { it.name }
+                                DatabaseObjectKind.FUNCTION -> resp.function.list.itemsList.map { it.name }
+                            }
+                        }
+                    }
+                }
+                // 先写数据、最后清 loading —— 与 refreshDatabases 同一个顺序约定
+                if (failure != null) {
+                    _objectLoadError["$database::${kind.name}"] = failure
+                } else {
+                    _objectsByDatabase[database] =
+                        (_objectsByDatabase[database] ?: emptyMap())
+                            .plus(kind to names.filter { it.isNotBlank() }.distinct())
+                }
+                loadingObjects.remove(database to kind)
+            }
+        }
+    }
+
+    /**
+     * 解析某个库下的 schema 名，然后拉它的库级对象。
+     *
+     * `SCHEMA.LIST level=schema` 在 **MySQL 上抛 `UnsupportedOperationException`**
+     * （MySQL 的 database 与 schema 合一，没有这层概念）。那种情况下对象列表
+     * **本来就无从谈起**，于是走 `emptyList()` 跳过并把 loading 清掉 ——
+     * 界面显示「(无)」而不是永远转圈。
+     */
+    fun loadDatabaseObjects(database: String) {
+        for (kind in DatabaseObjectKind.entries) {
+            loadingObjects += database to kind
+        }
+        scope.launch {
+            val schemas = runCatching {
+                engine.invoke(engineConn(database = database)) {
+                    category = Category.SCHEMA
+                    action = Action.LIST
+                    schemaRequest = schemaRequest {
+                        list = schemaListRequest {
+                            level = "schema"
+                            this.database = database
+                        }
+                    }
+                }
+            }.getOrNull()?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty()
+            // 存下来给表级对象（索引 / 外键）复用 —— 那是「每张表一次往返」，
+            // 不能每张表都重新解析一遍 schema
+            _schemasByDatabase[database] = schemas
+
+            // 先撤掉占位：真正的 loading 由 loadDatabaseObjectsFor 重新置上，
+            // 否则「解析 schema 期间」和「拉对象期间」之间会有一段假转圈
+            DatabaseObjectKind.entries.forEach { loadingObjects.remove(database to it) }
+            if (schemas.isEmpty()) {
+                // 写一份空结果：界面显示「(无)」，不再反复重试
+                DatabaseObjectKind.entries.forEach { k ->
+                    _objectsByDatabase[database] =
+                        (_objectsByDatabase[database] ?: emptyMap()).plus(k to emptyList<String>())
+                }
+                return@launch
+            }
+            loadDatabaseObjectsFor(database, schemas)
+        }
+    }
+
+    /**
+     * 拉某张表的**表级对象**（索引 / 外键）。
+     *
+     * 引擎侧这两类要 `table_name`（`IndexListRequest` / `ForeignKeyListRequest`），
+     * 所以不能跟库级对象一起拉 —— 那是「每张表一次往返」，一张几十列的库直接爆炸。
+     * 代价是它们只在**单独展开表节点时**才可见，这也是 DataGrip 的做法。
+     */
+    fun loadTableObjects(database: String, table: String) {
+        val slot = "$database::$table"
+        // schema 还没解析（用户没展开过这个库，或直接点了表）时先解析一次
+        if (_schemasByDatabase[database] == null) loadDatabaseObjects(database)
+        for (kind in TableObjectKind.entries) {
+            loadingTableObjects += slot to kind
+            scope.launch {
+                val resp = runCatching {
+                    engine.invoke(engineConn(database = database)) {
+                        category = when (kind) {
+                            TableObjectKind.INDEX -> Category.INDEX
+                            TableObjectKind.FOREIGN_KEY -> Category.FOREIGN_KEY
+                        }
+                        action = Action.LIST
+                        when (kind) {
+                            TableObjectKind.INDEX -> indexRequest = indexRequest {
+                                list = indexListRequest {
+                                    tableName = table
+                                    schema = tableSchemaOrDefault
+                                }
+                            }
+                            TableObjectKind.FOREIGN_KEY -> foreignKeyRequest = foreignKeyRequest {
+                                list = foreignKeyListRequest {
+                                    tableName = table
+                                    schema = tableSchemaOrDefault
+                                }
+                            }
+                        }
+                    }
+                }.getOrNull()
+                if (resp != null && resp.success) {
+                    val names = when (kind) {
+                        // 索引 / 外键的 list 元素是消息（带 columns / ref_table 等），
+                        // 树里只显示名字 —— 其余字段留给将来的对象详情面板。
+                        TableObjectKind.INDEX -> resp.index.list.itemsList.map { it.name }
+                        TableObjectKind.FOREIGN_KEY -> resp.foreignKey.list.itemsList.map { it.name }
+                    }
+                    _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap()).plus(kind to names)
+                }
+                loadingTableObjects.remove(slot to kind)
+            }
         }
     }
 
