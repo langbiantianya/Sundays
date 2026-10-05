@@ -2877,7 +2877,14 @@ class DatabaseBrowserState(
                     }
                 }
             }
-            if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
+            // 连接已切换 —— 丢弃过期响应。
+            //
+            // ⚠️ **这里不补 `loadingDatabases = false` 是有意的，不要「顺手修好」**：
+            // `generation` 只由 [invalidateInFlight] 递增，而它**正在**清 `loadingDatabases`；
+            // 断开后新连接会立刻重新调用 [refreshDatabases] 并自己清。
+            // 在这里清会把**新**连接刚开始的转圈一并抹掉 —— 用户看到的是
+            // 「库列表空着、又不转圈」，比转圈更让人以为已经加载完。
+            if (requestGeneration != generation) return@launch
             // 先写数据、最后清 loading —— 顺序反了会让「轮询 loading」的调用方
             // （DatabaseBrowserFlowTest / 未来任何等待逻辑）读到 loading=false 却拿到旧数据。
             result.fold(
@@ -2922,7 +2929,9 @@ class DatabaseBrowserState(
                     }
                 }
             }
-            if (requestGeneration != generation) return@launch  // 连接已切换 —— 丢弃过期响应
+            // 同 [refreshDatabases]：早退**不**清 `loadingTables`（理由见那里的注释），
+            // 清理点同样只有 [invalidateInFlight] 的 `loadingTables.clear()`
+            if (requestGeneration != generation) return@launch
             // 同 refreshDatabases：先写数据再清 loading
             result.fold(
                 onSuccess = { resp ->

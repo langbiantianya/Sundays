@@ -46,7 +46,7 @@ desktopApp/
         └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
 
-desktopApp 现有 **153 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `H2GuiWalkthroughTest` / `TablePaginationLayoutTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
+desktopApp 现有 **155 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `SchemaPanelWidthTest` / `H2GuiWalkthroughTest` / `TablePaginationLayoutTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
 
 **文件清单**：
 
@@ -362,6 +362,31 @@ tab.loading = false                                  // ← 必须在 fold 之�
 同理，`bindConnection` 必须复位 `loadingDatabases`：切换连接时若有 in-flight 刷新，
 它的响应会被代次检查丢弃、协程直接 `return`，若不复位则 `loading` 永远为 `true`，
 顶部刷新指示器会一直转。
+
+#### 但**不要**去改 `refreshDatabases` / `loadTables` 的早退分支
+
+上面说的是「连接级代次递增的那个函数（现为 `releasePools` → `invalidateInFlight`）必须复位
+loading」，**不是**「每条早退的协程都要自己复位」。这两件事极易混淆，混淆的后果比原缺陷更糟：
+
+| 守卫的语义 | 早退时该不该清 loading | 例子 |
+|---|---|---|
+| **同一目标的新一轮请求已经开始** | **不该**清 —— 清了会把新一轮的转圈一并抹掉 | `loadTabPreview` / `executeSql` / `executeGenerate` |
+| **连接已切换**（`requestGeneration != generation`） | **不该**清 —— `invalidateInFlight` 正在清，且新连接会重新发起 | `refreshDatabases` / `loadTables` |
+
+判据是**「代次为什么变了」**，不是「早退发生在哪个函数里」。
+
+> 本轮真的差点犯这个错：看到 `refreshDatabases` 的 `return@launch` 不清 `loadingDatabases`，
+> 认定是缺陷并准备补一行。变异验证直接打脸 —— 补上之后 `disconnecting during an in flight
+> library load clears the loading flag` 变红（断开瞬间 loading 被过早清掉，界面变成
+> 「库列表空着、又不转圈」）。真正该补的是**测试**：那个不变量此前没有任何断言覆盖。
+
+回归测试：`DatabaseBrowserFlowTest` 的 `releasing pools clears every in flight running flag`
+（`sheet.running` / `generateRunning` / `tab.loading`）+ 本轮新增的
+`disconnecting during an in flight library load clears the loading flag` /
+`… table load …`（`loadingDatabases` / `loadingTables`）。
+后两条刻意走**真实在飞请求**而非手工摆标志（`loadingDatabases` 是 `private set`，外部写不了；
+更重要的是手工摆会**绕过整条因果链**，删掉 `invalidateInFlight` 里的清理它照样绿），
+断言写成 `withTimeout { while (loading) delay(10) }` —— 只有这种写法才能在清理被删时**真的挂住**。
 
 ### 连接池生命周期（浏览场景）
 

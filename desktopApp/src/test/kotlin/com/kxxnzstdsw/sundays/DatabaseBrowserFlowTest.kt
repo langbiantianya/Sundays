@@ -807,6 +807,26 @@ class DatabaseBrowserFlowTest {
      *
      * 注意走的是 `releasePools`（断开路径），不是 `bindConnection`：后者因连接 id 未变会早退，
      * 正是原先漏作废的那条路径。
+     *
+     * ## 为什么这里要覆盖 `loadingDatabases` / `loadingTables`
+     *
+     * 它们和 `sheet.running` 走的是**同一个陷阱**，但形态相反，值得写清楚：
+     *
+     * - `loadTabPreview` / `executeSql` / `executeGenerate` 的守卫是**同一目标的新一轮请求**已经
+     *   开始，早退时**故意不清** loading —— 清了会把新一轮的转圈一并抹掉。
+     * - `refreshDatabases` / `loadTables` 的守卫是 `requestGeneration != generation`（**连接级**代次）。
+     *   该代次只在 `invalidateInFlight()` 里递增，而那个函数**正在**清 `loadingDatabases` /
+     *   `loadingTables`。所以这两处早退不清 loading 同样是**对的** ——
+     *   断开的连接会立刻换成新连接并重新发起请求，那时由新请求自己清。
+     *
+     * **因此不要为了「保险」去给这两处早退补 `loadingDatabases = false`** ——
+     * 那会让断开瞬间把**新**连接刚开始的转圈抹掉，用户看到的是「库列表空着又不转圈」。
+     * 真正该被钉住的是 `invalidateInFlight` 这个**唯一**的清理点：它一旦漏掉某一项，
+     * 界面就会永远卡在「加载数据库中…」，而下面这两条断言能立刻抓住。
+     *
+     * 测法刻意用**真实在飞的请求**而不是手工摆标志 —— `loadingDatabases` 是 `private set`，
+     * 外部写不了；更重要的是，手工摆出来的状态**绕过了整条因果链**，
+     * 「删掉 `invalidateInFlight` 里的清理后测试会不会变红」正是这条测试要回答的问题。
      */
     @Test
     fun `releasing pools clears every in flight running flag`() = runBlocking {
@@ -817,7 +837,7 @@ class DatabaseBrowserFlowTest {
         val tab = state.tabs.single()
         tab.awaitSettled()
 
-        // 摆出「三处都正在跑」的现场
+        // 摆出「三处都正在跑」的现场（这三个标志可写）
         val sheet = state.sqlSheets.first()
         sheet.running = true
         state.generateRunning = true
@@ -828,6 +848,59 @@ class DatabaseBrowserFlowTest {
         assertFalse(sheet.running, "SQL 工作台会永远卡在「执行中…」")
         assertFalse(state.generateRunning, "造数工作台会永远卡在「造数中…」")
         assertFalse(tab.loading, "预览会永远卡在转圈（loadTabPreview 早退时不清 loading）")
+    }
+
+    /**
+     * 回归：**在飞的库列表请求不能因为断开而永远转圈**。
+     *
+     * 与 [releasing pools clears every in flight running flag] 同源，但走**真实因果链**：
+     * `refreshDatabases` 的响应回来时代次已变，会走 `return@launch` **早退** ——
+     * 早退不写 loading，于是「谁把 loading 清掉」只剩 `invalidateInFlight` 一个答案。
+     * 它漏掉这一项，界面就永远停在「加载数据库中…」，不报错、不转完、也没有重试入口。
+     *
+     * ## 测法上踩过的两个坑
+     *
+     * 1. **不能在开头 `refreshDatabases()` 一次就断开** —— `firstLoadedDatabase()` 内部会等
+     *    loading 结束，那时请求早已完成，断开碰不到「早退」这条路径，测试**空跑**：
+     *    把 `invalidateInFlight` 里的清理整行删掉它照样绿。所以要先正常加载完拿到库名，
+     *    再**重新**发起一次。
+     * 2. **不能把两个标志塞进同一个测试** —— 两次触发之间有真实协程在跑，
+     *    `loadingDatabases` 可能在断言前就完成，于是那个「前提断言」自己变成 flaky
+     *    （实测会在红/绿之间摇摆）。所以拆成两条，各自只依赖**一个同步写入**的标志。
+     *
+     * `refreshDatabases()` 里 `loadingDatabases = true` 是**同步赋值**（协程在它之后才 launch），
+     * 因此「调用返回 → 立刻 releasePools」这一瞬间标志必然为 true，不依赖任何时序假设。
+     */
+    @Test
+    fun `disconnecting during an in flight library load clears the loading flag`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        state.firstLoadedDatabase()          // 第一次加载跑完，把连接与方言都热起来
+
+        state.refreshDatabases()             // loadingDatabases = true（同步）
+        assertTrue(state.loadingDatabases, "前提不成立：请求没进在飞状态")
+        state.releasePools()                 // 响应回来时必定早退，早退不写 loading
+
+        withTimeout(5_000) { while (state.loadingDatabases) delay(10) }
+    }
+
+    /**
+     * 回归：同上一条，但针对**表列表**。
+     *
+     * `loadTables` 的 `loadingTables.add(database)` 同样在 `launch` 之前同步执行，
+     * 所以这里不需要任何等待就能确定「正在加载」。
+     */
+    @Test
+    fun `disconnecting during an in flight table load clears the loading flag`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+
+        state.toggleDatabase(db)             // loadingTables.add(db)（同步）
+        assertTrue(db in state.loadingTables, "前提不成立：表列表没进在飞状态")
+        state.releasePools()                 // 响应回来时必定早退，早退不写 loading
+
+        withTimeout(5_000) { while (state.loadingTables.isNotEmpty()) delay(10) }
     }
 
     /**
