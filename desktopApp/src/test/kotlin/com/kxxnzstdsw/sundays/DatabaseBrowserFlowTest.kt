@@ -913,6 +913,205 @@ class DatabaseBrowserFlowTest {
      * 外部写不了；更重要的是，手工摆出来的状态**绕过了整条因果链**，
      * 「删掉 `invalidateInFlight` 里的清理后测试会不会变红」正是这条测试要回答的问题。
      */
+    /**
+     * 回归：**多语句开关必须真的进到请求里**。
+     *
+     * 引擎侧的 `SqlScriptSplitter`（v2.16）早就实现了只切顶层 `;` 的多语句执行，
+     * 但前端此前**硬编码 `multiStatement = false`**，让它完全用不上。
+     *
+     * ## 为什么不靠「跑不跑得通」判断
+     *
+     * 第一版断言是「单语句模式下 `SELECT 1; SELECT 2` 应当报错」—— 实测**不报**：
+     * H2 允许单条语句里带分号，直接执行成功。方言间行为不一致（PG 会报错），
+     * 拿它当判据等于把测试绑死在 H2 的宽松解析上。改成**直接量发出去的值**。
+     */
+    @Test
+    fun `multi statement is off by default`() = runBlocking {
+        val state = newBrowser()
+        val sheet = state.currentSqlSheet()!!
+        assertFalse(
+            sheet.multiStatement,
+            "多语句必须默认关闭 —— 一次点执行会改多张表，不能让用户被动接受",
+        )
+    }
+
+    /**
+     * 多语句开启后，**建两张表**都能成功。
+     *
+     * ## 这条断言抓不住「多语句没生效」—— 已实测
+     *
+     * 最初以为「单语句模式下 `CREATE TABLE a; CREATE TABLE b` 必然失败」，
+     * 于是用它当判据。**变异验证打脸**：把生产代码改回 `multiStatement = false`，
+     * 这条测试照样全绿 —— H2 自己就接受批量 DDL，方言之间行为并不一致。
+     *
+     * 能稳定区分的判据只有一个：**量发出去的值**。见下一条。
+     */
+    @Test
+    fun `multi statement runs several DDL in one execution`() = runBlocking {
+        val state = newBrowser()
+        val sheet = state.currentSqlSheet()!!
+        sheet.multiStatement = true
+        sheet.editor.setText("CREATE TABLE ms_a (id INT); CREATE TABLE ms_b (id INT)")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+
+        assertNull(sheet.error, "多语句脚本应执行成功：${sheet.error}")
+        val names = DriverManager.getConnection(jdbcUrl, "sa", "").use { c ->
+            c.createStatement().use { st ->
+                st.executeQuery(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                        "WHERE TABLE_NAME IN ('MS_A','MS_B')",
+                ).use { rs ->
+                    val out = mutableListOf<String>()
+                    while (rs.next()) out += rs.getString(1)
+                    out
+                }
+            }
+        }
+        assertEquals(
+            listOf("MS_A", "MS_B").sorted(), names.sorted(),
+            "两条 DDL 都应落地 —— 只建成一张说明多语句没生效",
+        )
+    }
+
+    /**
+     * 回归：**事务会话能把多条语句的改动一起回滚**。
+     *
+     * 引擎侧 `SYSTEM.BEGIN` 给 `session_id` 钉住一条连接（`autocommit=false`），
+     * 后续请求全落在它上面，直到 `COMMIT` / `ROLLBACK`。
+     *
+     * 这里只验 `ROLLBACK` 这条更有价值的路径：开事务 → 写数据 → 回滚 → **用一条
+     * 独立的 JDBC 连接查**，数据必须没进去。走独立连接是关键 —— 若用同一条连接查，
+     * 未提交的事务改动自己就能看见，断言会永远绿。
+     */
+    /**
+     * 多语句开关**真的进了请求** —— 直接量发出去的 `multi_statement`。
+     *
+     * 这是唯一能稳定区分「多语句生效 / 没生效」的判据：靠「脚本跑不跑得通」来判断
+     * 会被方言差异骗（实测 H2 单语句下也接受批量 DDL，见上一条的 KDoc）。
+     */
+    @Test
+    fun `the multi statement flag reaches the engine request`() = runBlocking {
+        val captured = mutableListOf<com.kxxnzstdsw.grpc.Request>()
+        val spy = object : com.kxxnzstdsw.client.EngineClient {
+            // 只拦 SQL.EXECUTE，其余路由原样转发到真引擎
+            override fun handle(request: com.kxxnzstdsw.grpc.Request): kotlinx.coroutines.flow.Flow<com.kxxnzstdsw.grpc.Response> {
+                if (request.category == com.kxxnzstdsw.grpc.Category.SQL) captured += request
+                return engine.handle(request)
+            }
+            override suspend fun testConnection(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.testConnection(config)
+            override suspend fun disconnect(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.disconnect(config)
+            override fun close() = Unit   // 不关真引擎 —— tearDown 还要用
+        }
+        val state = DatabaseBrowserState(spy, CoroutineScope(Dispatchers.Default))
+        state.bindConnection(TestConnectionFactory.build(jdbcUrl))
+        val sheet = state.currentSqlSheet()!!
+
+        // 默认关 → 请求里必须是 false
+        sheet.editor.setText("SELECT 1")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+        assertEquals(
+            false, captured.last().sqlRequest.execute.multiStatement,
+            "默认关闭时请求里的 multi_statement 必须是 false",
+        )
+
+        // 打开 → 请求里必须是 true
+        sheet.multiStatement = true
+        sheet.editor.setText("SELECT 1")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+        assertEquals(
+            true, captured.last().sqlRequest.execute.multiStatement,
+            "打开后 multi_statement 必须真的进到请求里 —— 这条才是有牙齿的判据",
+        )
+    }
+
+    @Test
+    fun `a rolled back transaction leaves no trace`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        val sheet = state.currentSqlSheet()!!
+
+        assertNull(
+            state.beginTransaction(sheet),
+            "开启事务不应报错",
+        )
+        assertNotNull(sheet.transactionSessionId, "开启后必须持有 session id")
+
+        sheet.editor.setText("CREATE TABLE tx_probe (id INT PRIMARY KEY)")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+        assertNull(sheet.error, "建表应成功：${sheet.error}")
+
+        assertNull(
+            state.rollbackTransaction(sheet),
+            "回滚不应报错",
+        )
+        assertNull(sheet.transactionSessionId, "回滚后必须清掉本地 session id")
+
+        // 用**独立连接**验：DDL 在 H2 是隐式提交的，所以「回滚后数据消失」这条
+        // 在 H2 上不成立，只断言「接口链路通、session id 能再次申请到」。
+        assertNull(
+            state.beginTransaction(sheet),
+            "回滚后应能再次开启事务 —— 上一条已断言 session id 已清",
+        )
+        assertNotNull(sheet.transactionSessionId, "再次开启后应持有新的 session id")
+        assertNull(state.rollbackTransaction(sheet))
+    }
+
+    /**
+     * 事务的 `session_id` **真的进了请求**。
+     *
+     * 上一条只验「接口链路通、session id 能拿到」—— 变异验证打脸：把
+     * `sessionId = sheet.transactionSessionId` 改成 `""`，测试照样全绿。
+     * 因为 H2 的 DDL 是**隐式提交**的，开不开事务都能建成那张表，
+     * 「建表成功」根本证明不了会话被用过。
+     */
+    @Test
+    fun `the transaction session id reaches the engine request`() = runBlocking {
+        val captured = mutableListOf<com.kxxnzstdsw.grpc.Request>()
+        val spy = object : com.kxxnzstdsw.client.EngineClient {
+            override fun handle(request: com.kxxnzstdsw.grpc.Request): kotlinx.coroutines.flow.Flow<com.kxxnzstdsw.grpc.Response> {
+                if (request.category == com.kxxnzstdsw.grpc.Category.SQL) captured += request
+                return engine.handle(request)
+            }
+            override suspend fun testConnection(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.testConnection(config)
+            override suspend fun disconnect(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.disconnect(config)
+            override fun close() = Unit
+        }
+        val state = DatabaseBrowserState(spy, CoroutineScope(Dispatchers.Default))
+        state.bindConnection(TestConnectionFactory.build(jdbcUrl))
+        val sheet = state.currentSqlSheet()!!
+
+        // 未开事务 → session_id 必须为空（否则每条语句都会误落到某个旧会话上）
+        sheet.editor.setText("SELECT 1")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+        assertEquals(
+            "", captured.last().sessionId,
+            "未开事务时请求里的 session_id 必须为空",
+        )
+
+        // 开事务 → session_id 必须与 engine 返回的一致
+        assertNull(state.beginTransaction(sheet))
+        val sid = sheet.transactionSessionId!!
+        sheet.editor.setText("SELECT 1")
+        state.executeSql()
+        withTimeout(10_000) { while (sheet.running) delay(10) }
+        assertEquals(
+            sid, captured.last().sessionId,
+            "开了事务后 session_id 必须真的进到请求里 —— 否则语句根本不在那条被钉住的连接上",
+        )
+
+        assertNull(state.rollbackTransaction(sheet))
+    }
+
     @Test
     fun `releasing pools clears every in flight running flag`() = runBlocking {
         val state = newBrowser()

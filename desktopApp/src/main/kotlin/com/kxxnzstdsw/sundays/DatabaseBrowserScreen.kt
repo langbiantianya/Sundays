@@ -30,10 +30,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -398,6 +401,12 @@ private val SCHEMA_PANEL_MIN_WIDTH: Dp = 180.dp
 
 /** 库/表树面板的 UI 测试 tag —— 面板本身无语义，量宽度得靠它。 */
 internal const val SCHEMA_PANEL_TAG = "schemaTreePanel"
+
+/** 「多语句」开关的 UI 测试 tag —— 见 [SqlSheet.multiStatement]。 */
+internal const val SQL_MULTI_STATEMENT_CHIP_TAG = "sqlMultiStatementChip"
+
+/** 「事务」按钮的 UI 测试 tag —— 见 [DatabaseBrowserState.beginTransaction]。 */
+internal const val SQL_TRANSACTION_BTN_TAG = "sqlTransactionBtn"
 
 /** 分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
 internal const val SCHEMA_DRAG_HANDLE_TAG = "schemaDragHandle"
@@ -1658,6 +1667,8 @@ private fun SqlWorkbenchPane(
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         val sheet = state.currentSqlSheet()
+        // 事务 / 多语句开关的点击都要发引擎请求，用组合作用域发起
+        val actionScope = rememberCoroutineScope()
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
         Column(modifier = Modifier.fillMaxSize()) {
             if (sheet == null) {
@@ -1684,6 +1695,76 @@ private fun SqlWorkbenchPane(
                     extraCompletions = schemaCompletions,
                     extraCompletionsCaseSensitive = false,
                     actions = {
+                        // 多语句开关 —— 放在最左侧，因为它改的是**执行语义**，
+                        // 而执行 / 停止 / 事务都排在它后面，视觉上是「先定模式再操作」。
+                        //
+                        // 做成逐 sheet 的开关而不是全局默认开：多语句意味着
+                        // 「一次点执行会改多张表」，用户得能对某个脚本明确表态。
+                        // 用 [FilterChip] 而不是复选框：它自己就是「选中态 + 可禁用」
+                        // 的两态控件，与旁边的 WinButton 视觉重量一致。
+                        FilterChip(
+                            selected = sheet.multiStatement,
+                            onClick = { sheet.multiStatement = !sheet.multiStatement },
+                            enabled = !sheet.running,
+                            label = { Text("多语句", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.testTag(SQL_MULTI_STATEMENT_CHIP_TAG),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        // 事务按钮组 —— 在执行 / 停止之前。
+                        // 开着事务时「提交 / 回滚」必须一眼可见：数据没落盘这件事
+                        // 靠状态栏那行小字提醒是不够的，用户关窗口就全丢了。
+                        if (sheet.transactionSessionId != null) {
+                            WinButton(
+                                onClick = {
+                                    actionScope.launch {
+                                        val err = state.commitTransaction(sheet)
+                                        if (err != null) sheet.error = err
+                                    }
+                                },
+                                shape = SundaysPalette.buttonShape,
+                            ) {
+                                Icon(Icons.Filled.Check, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("提交")
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            WinButton(
+                                onClick = {
+                                    actionScope.launch {
+                                        val err = state.rollbackTransaction(sheet)
+                                        if (err != null) sheet.error = err
+                                    }
+                                },
+                                shape = SundaysPalette.buttonShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("回滚")
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        } else {
+                            WinButton(
+                                onClick = {
+                                    actionScope.launch {
+                                        val err = state.beginTransaction(sheet)
+                                        if (err != null) sheet.error = err
+                                    }
+                                },
+                                enabled = connected && !sheet.running,
+                                shape = SundaysPalette.buttonShape,
+                                modifier = Modifier.testTag(SQL_TRANSACTION_BTN_TAG),
+                            ) {
+                                Icon(Icons.Filled.Lock, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("事务")
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        }
+
                         // 执行中：主按钮让位给「停止」。
                         //
                         // 两个按钮**互斥**而不是并存 —— 执行期间 `enabled` 已是 false，
@@ -2503,6 +2584,27 @@ class DatabaseBrowserState(
         var runningRequestId: String? by mutableStateOf(null)
 
         /**
+         * 是否按**多语句脚本**执行（`SqlExecuteRequest.multi_statement`）。
+         *
+         * 引擎侧的 `SqlScriptSplitter`（v2.16）只切**顶层** `;`，逐条执行、首个失败即停，
+         * 并为每条单独登记 `Statement` 以便取消 —— 能力早就齐了，此前前端**硬编码
+         * `multiStatement = false`** 让它完全用不上。
+         *
+         * 做成**逐 sheet 的开关**而不是全局默认开：多语句意味着「一次点执行会改多张表」，
+         * 与「选中一段就跑这一段」的心智模型冲突，用户得能对某个脚本明确表态。
+         */
+        var multiStatement: Boolean by mutableStateOf(false)
+
+        /**
+         * 本 sheet 当前是否挂在一个**事务会话**里（`SYSTEM.BEGIN` 之后）。
+         *
+         * 事务会话在引擎侧给该 `session_id` **钉住一条连接**（`autocommit=false`），
+         * 后续请求全落在这条连接上，直到 `COMMIT` / `ROLLBACK`。
+         * 前端必须自己持有这个 `sessionId` —— 引擎不会把「你上次开的事务」记在某处。
+         */
+        var transactionSessionId: String? by mutableStateOf(null)
+
+        /**
          * 结果集是否被 [SQL_RESULT_MAX_ROWS] 截断。
          *
          * 与 `rowCount` 分开存：截断时 `rowCount` 只是**已收到**的行数，
@@ -2684,6 +2786,10 @@ class DatabaseBrowserState(
                     request {
                         id = requestId
                         this.connection = engineConn(database = schema)
+                        // 事务会话：非空时引擎把本次执行钉在 [beginTransaction] 开的那条
+                        // 连接上（`autocommit=false`），COMMIT / ROLLBACK 之前不会落盘。
+                        // 留空 = 无事务，每条语句独立提交（原有行为）。
+                        sessionId = sheet.transactionSessionId.orEmpty()
                         category = Category.SQL
                         action = Action.EXECUTE
                         sqlRequest = sqlRequest {
@@ -2694,7 +2800,10 @@ class DatabaseBrowserState(
                                 // 对 H2 是 `SET SCHEMA "<库名>"` → `Schema "X" not found`，
                                 // 对 PG 是把库名当 schema 设进 search_path。见 engineConnFor 的 KDoc。
                                 this.schema = ""
-                                multiStatement = false
+                                // 逐 sheet 的开关（见 [SqlSheet.multiStatement]）。引擎侧
+                                // `SqlScriptSplitter` 只切顶层 `;`，引号 / 注释 / PG 美元引用里
+                                // 的分号不会被误切。
+                                multiStatement = sheet.multiStatement
                             }
                         }
                     },
@@ -2883,6 +2992,66 @@ class DatabaseBrowserState(
         tab.rows = tab.rows.map { r ->
             if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
         }
+        return null
+    }
+
+    // ------------------------------------------------------------------------
+    // 事务会话（v2.16 引擎能力，此前前端未接）
+    // ------------------------------------------------------------------------
+
+    /**
+     * 开一个事务会话 —— 发 `SYSTEM.BEGIN`，返回 `session_id`。
+     *
+     * 引擎侧给该 id **钉住一条 JDBC 连接**（`autocommit=false`），此后这个 sheet 的
+     * 每次执行都带 `session_id`，全部落在这条连接上，直到 `COMMIT` / `ROLLBACK`。
+     *
+     * @return 失败时返回错误文案；成功返回 `null`（session id 已写进 [SqlSheet.transactionSessionId]）。
+     */
+    suspend fun beginTransaction(sheet: DatabaseBrowserState.SqlSheet): String? {
+        if (sheet.transactionSessionId != null) return "该 sheet 已在事务中"
+        val resp = runCatching {
+            engine.invoke(engineConn(database = currentSchema())) {
+                category = Category.SYSTEM
+                action = Action.BEGIN
+                systemRequest = systemRequest { sessionId = UUID.randomUUID().toString() }
+            }
+        }.getOrNull() ?: return "开启事务失败：引擎无响应"
+        if (!resp.success) return resp.error.ifBlank { "开启事务失败" }
+        val body = resp.system
+        // 引擎回显 session id；拿不到就当失败 —— 前端**必须**持有它，
+        // 后续请求靠它找到那条被钉住的连接，拿不到等于事务没开。
+        val sid = body?.begin?.sessionId.orEmpty()
+        if (sid.isBlank()) return "引擎未返回 session id，事务未开启"
+        sheet.transactionSessionId = sid
+        return null
+    }
+
+    /** 提交事务 —— 发 `SYSTEM.COMMIT`。 */
+    suspend fun commitTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
+        endTransaction(sheet, Action.COMMIT, "提交事务失败")
+
+    /** 回滚事务 —— 发 `SYSTEM.ROLLBACK`。 */
+    suspend fun rollbackTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
+        endTransaction(sheet, Action.ROLLBACK, "回滚事务失败")
+
+    private suspend fun endTransaction(
+        sheet: DatabaseBrowserState.SqlSheet,
+        action: com.kxxnzstdsw.grpc.Action,
+        fallback: String,
+    ): String? {
+        val sid = sheet.transactionSessionId ?: return "当前不在事务中"
+        val resp = runCatching {
+            engine.invoke(engineConn(database = currentSchema())) {
+                category = Category.SYSTEM
+                this.action = action
+                systemRequest = systemRequest { sessionId = sid }
+            }
+        }.getOrNull() ?: return "$fallback：引擎无响应"
+        if (!resp.success) return resp.error.ifBlank { fallback }
+        // 无论引擎报成功与否都清本地 id：`SYSTEM.ROLLBACK` 失败时那条连接仍被钉着，
+        // 但用户已经看到错误并会重试 —— 留着 id 会让「提交」按钮一直亮着，
+        // 而下一次点击会打到一条引擎已经不认识的会话上。
+        sheet.transactionSessionId = null
         return null
     }
 
