@@ -228,7 +228,7 @@ ConnectionManagerScreen(
 # 构建（KMP：当前编译 jvm 目标）
 ./gradlew :shared:build
 
-# 跑测试（shared 模块当前 ~116 项 —— 含新加的 FormatterSpacingTest 27 项、CompletionTest 21 项）
+# 跑测试（shared 模块当前 217 项 —— 含 FormatterSpacingTest 27 项、CompletionTest 32 项）
 ./gradlew :shared:jvmTest
 
 # 跑测试（等价）
@@ -241,7 +241,7 @@ ConnectionManagerScreen(
 - `SqlTokenizerTest` — 23 项（SQL tokenize）
 - `EditorIntegrationTest` — 12 项（`CodeEditor` / `CodeEditorWithToolbar` 集成）
 - `FormatterSpacingTest` — 27 项（格式化契约：标点 / 操作符两侧对称、缩进原样搬运、注释只读、空行折叠、幂等性、无行尾空白 —— 见 [ARCHITECTURE.md §2.8](./ARCHITECTURE.md#28-格式化契约)）
-- `CompletionTest` — 27 项（补全契约：前缀切分、接受替换整个词、候选排序与上限、SQL/Lua 大小写策略、方言词表隔离、上下文专属候选、**宿主函数不得进 `LuaLanguage`**）
+- `CompletionTest` — 32 项（补全契约：前缀切分、接受替换整个词、候选排序与上限、SQL/Lua 大小写策略、方言词表隔离、上下文专属候选、**触发阈值 1 字符**与空前缀仍安静、**limit 是硬约束**、**宿主函数不得进 `LuaLanguage`**）
 - `TableModelsTest` — 16 项（`TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` + `ContextMenuState` 行为）
 - `JdbcUrlTest` — 12 项（连接字段 ↔ JDBC URL 折算：5 个方言 × 连接类型、参数保留、往返解析、方言/类型切换）
 - `SundaysPaletteTest` — 4 项（浅 / 深两套配色的文字对比度达 WCAG AA、明暗亮度方向、`surfaceTint` 透明保证不叠 tonal 色）

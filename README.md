@@ -456,34 +456,35 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 ## 运行测试
 
 ```bash
-# 全部 619 测试
+# 全部 873 测试
 ./gradlew test
 
 # 单个方言模块
-./gradlew :dialect-h2:test          # 63 测试
+./gradlew :dialect-h2:test          # 65 测试
 ./gradlew :dialect-duckdb:test      # 81 测试（v2.7）
 ./gradlew :dialect-sqlite:test      # 62 测试（v2.8）
 
 # 引擎模块
-./gradlew :engine:test              # 277 测试（v2.16：+89，含 Direct 模式契约 + SYSTEM.DISCONNECT + 新引擎能力）
+./gradlew :engine:test              # 288 测试（v2.16：+89，含 Direct 模式契约 + SYSTEM.DISCONNECT + 新引擎能力）
 
 # gRPC 调用模块（v2.15）
 ./gradlew :engine-grpc-client:test  # 21 测试（真实 gRPC server + 真实 H2 端到端）
 
 # Desktop App（含引擎实现装配测试）
-./gradlew :desktopApp:test          # 18 测试
+./gradlew :desktopApp:test          # 139 项
 
 # Desktop App 共享代码测试
-./gradlew :shared:jvmTest           # 共享 UI / 逻辑测试（编辑器 + 表格 + 右键菜单，97 项）
+./gradlew :shared:jvmTest           # 共享 UI / 逻辑测试（编辑器 + 表格 + 右键菜单，217 项）
 ```
 
 测试覆盖率：
-- **engine:test**（277 项，v2.16 起）：IPC config + transport round-trip + HikariCP pool + DialectLoader + handler 集成（typed proto builders）+ envelope options + DuckDB / SQLite 端到端 + LIST_DRIVERS + **Direct 模式契约** + **SYSTEM.DISCONNECT 路由与 dryRun（v2.15）** + **v2.16 新引擎能力**：`SqlScriptSplitterTest`（多语句切分）、`importer/CsvReaderTest` / `JsonLinesReaderTest` / `ImportFormatTest` / `ImportSourceFactoryTest`（导入阅读器）、`integration/CancelIntegrationTest`（4 项查询取消）、`integration/MultiStatementIntegrationTest`（6 项多语句）、`integration/TransactionIntegrationTest`（7 项事务）、`integration/ImportIntegrationTest`（9 项导入）
+- **engine:test**（288 项，v2.16 起）：IPC config + transport round-trip + HikariCP pool + DialectLoader + handler 集成（typed proto builders）+ envelope options + DuckDB / SQLite 端到端 + LIST_DRIVERS + **Direct 模式契约** + **SYSTEM.DISCONNECT 路由与 dryRun（v2.15）** + **v2.16 新引擎能力**：`SqlScriptSplitterTest`（多语句切分）、`importer/CsvReaderTest` / `JsonLinesReaderTest` / `ImportFormatTest` / `ImportSourceFactoryTest`（导入阅读器）、`integration/CancelIntegrationTest`（4 项查询取消）、`integration/MultiStatementIntegrationTest`（6 项多语句）、`integration/TransactionIntegrationTest`（7 项事务）、`integration/ImportIntegrationTest`（9 项导入）、`handlers/GenerateSandboxContractTest`（3 项造数沙箱契约，防 UI 补全清单漂移）
 - **engine-grpc-client:test**（21 项，v2.15）：**真实 gRPC 服务端**（`NettyServerBuilder.forPort(0)` + `IdbEngineImpl`）+ **真实 H2** —— 远程连接初始化 / **与同进程实现的响应平价** / 流式分帧 / 远程连接释放 / 传输层故障 / 端点解析边界
-- **desktopApp:test**（18 项）：连接流程 / 数据库浏览 / 顶层导航 / 方言名契约 + **引擎实现装配（v2.15）**
-- **dialect-h2 / -duckdb / -sqlite:test**：方言 SPI 方法全量覆盖（206 项）
-- **shared:jvmTest**：Kotlin Multiplatform 共享代码（编辑器 / 表格 / 右键菜单，97 项）
-- **总计：619 测试，0 失败 / 0 错误（1 个 Windows-only IpcConfigTest 用例 skip）**
+- **desktopApp:test**（139 项）：连接流程 / 数据库浏览 / 顶层导航 / 方言名契约 + 引擎实现装配（v2.15）+ 造数工作台 + **补全 schema 候选与缓存签名**
+- **dialect-h2 / -duckdb / -sqlite:test**：方言 SPI 方法全量覆盖（208 项；`dialect-mysql` / `dialect-postgresql` 暂无测试）
+- **shared:jvmTest**（217 项）：Kotlin Multiplatform 共享代码 —— 编辑器（`FormatterSpacingTest` 27 / `CompletionTest` 32 / tokenizer / 方言档位）/ 表格 / 右键菜单 / 连接管理 / 主题
+
+> **Windows 环境下有 11 项基线失败**（`ConnectionStorage` 系列的 POSIX 0600 权限断言 3 项、`ConnectionManagerFlowTest` 3 项、`DatabaseBrowserSheetsTest` 4 项、`ThemeToggleVisibilityTest` 1 项）。它们是既有环境问题，与功能改动无关。
 
 ---
 
@@ -540,8 +541,9 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 | v2.15 | **调用层抽象（invocation layer）**<br>新增 `engine-protocol/` 模块：proto 源从 `engine/src/main/proto/` 迁出（protobuf gradle 配置同步迁出），新增 `EngineClient` 接口（`handle` / `invoke` / `testConnection` / `disconnect` / `close`）—— 调用方只面向接口编程；该模块零业务逻辑，依赖以 `api` 导出，供服务端与客户端同时依赖而不成环<br>新增 `engine-grpc-client/` 模块：`GrpcEngineClient` 经 gRPC stub 实现同一接口（TCP / UDS / 命名管道），仅依赖 `:engine-protocol`，**不拖入** Hadoop / POI / LuaJIT / 方言插件；`GrpcClientConfig.fromTarget` 解析 `host:port` / `tcp://` / `unix://` / `pipe:` 端点，格式错误在连接前抛出<br>协议新增 `SYSTEM.DISCONNECT`（`Action.DISCONNECT = 19` + `SystemDisconnectResponse{closed}` + `SystemResponse.disconnect = 5`）—— 连接池活在引擎进程内，远程调用方需要线上路由才能释放；已纳入 `writeActions`（`dryRun` 短路，不得真的掐断用户连接）且幂等<br>`desktopApp`：`ConnectionSession` / `DatabaseBrowserState` / `MainScreen` 改持 `EngineClient`；`main.kt` 成为唯一装配点，`-Dsundays.engine.endpoint` 切换实现（默认同进程 `IdbEngine`）<br>修复 `IpcConfig.fromArgs` 把 `--mode` 误判为未知参数 —— 文档中的 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 此前必定退出失败，gRPC 客户端无从连上一个按文档启动的服务端<br>测试：530 项全通过（`engine` 188 / `engine-grpc-client` 21 / `desktopApp` 18 为新增） |
 
 | v2.16 | **引擎能力补齐 —— 关闭与 DBeaver / Navicat / DataGrip 的功能差距**<br>**查询取消**：新增 `SYSTEM.CANCEL`（`Action.CANCEL = 20`）—— 协程取消无法打断阻塞的 JDBC 调用，只有 `Statement.cancel()` 能真正停掉数据库侧工作；新增 `StatementRegistry` 按 request id 登记 `Statement` / canceler，覆盖 `SQL.EXECUTE`、流式 `DATA.LIST`（`pageSize=0`）、`DATA.GENERATE`；被取消请求在原 id 上返回 `success=false, error="cancelled"`<br>**数据导入**：新增 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`，与 EXPORT 对称），**主进程内运行**（不引入 POI / Parquet / Hadoop，故可取消）；新包 `com.kxxnzstdsw.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）支持 CSV / JSON Lines；`ignore_errors=true` 改为逐行 `executeUpdate`（H2 绑定阶段不报错，批处理无法归因到行），代价是吞吐下降<br>**事务会话**：新增 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action.BEGIN=22` / `COMMIT=23` / `ROLLBACK=24` / `SESSION_INFO=25`）+ `Request.session_id`（字段 6，**留空 = 无事务，向后兼容**）；`TransactionManager` 钉住连接并 `autoCommit=false`，连接所有权归会话直到 `COMMIT` / `ROLLBACK`<br>**多语句脚本**：`SqlExecuteRequest.multi_statement` + `SqlScriptSplitter`（只切顶层 `;`，正确处理引号 / 注释 / PostgreSQL 美元引用；注释文本原样保留），按序执行、首个失败即停<br>测试：`:engine:test` 188 → **277**（+89），项目总计 **619**，0 失败 |
-| v2.17 | **`shared/editor` 编辑器能力补齐**<br>**两向贴合的空格判定**：抽 `formatter/TokenSpacing.kt`（两个纯函数 `bindsLeft` / `bindsRight`），规则「两相邻 token 之间要空格 ⟺ 左不贴右 且 右不贴左」。换掉旧版「写前决定下一个」的 `pendingSpace` 标志；彻底消灭 `id , name` / `id> 1` / `a:: int` / `t. col` / `( 1 )` 一类反复出现的畸形，以及「格式化两次才收敛」的伪幂等性。注释只读（块注释里常放代码样例，碰了就是破坏），只清行尾空白，**不被主子句换行规则吞掉**；缩进原样搬运；空行折叠至多一个；幂等性逐样本锁定<br>**编辑器补全（「提示」）**：`CodeLanguage` SPI 新增 `completionCandidates(prefix, limit)`，默认实现返回空列表（只支持高亮的语言零改动）。SQL 忽略大小写、Lua 大小写敏感 ——「谁拥有大小写规则谁说了算」，把 `Pri` 补成 `print` 是制造 bug。词字符限定 ASCII（`Char.isLetterOrDigit()` 对中文返回 `true`，会让中文注释吞掉英文词）。接受候选替换**整个词**（光标在词中间时），弹层置于滚动容器内 + `Modifier.atCaret` 自绘 0×0 报告（不撑大编辑器高度，天然跟着代码滚），按键走 `onPreviewKeyEvent` 才能 `consume` `Tab`/`Enter` 的默认行为<br>**造数沙箱宿主函数进入补全**：`CodeEditor(extraCompletions = …)` 注入**上下文专属**候选 —— 造数工作台据此补出引擎注入的 13 个全局（`insert` / `lastId` / `random_*`）并显示签名。它们**绝不进** `LuaLanguage.BUILTINS`：那批函数只在造数沙箱里存在，普通 Lua 编辑器中调用会报 `attempt to call a nil value`，塞进语言词表等于让所有 Lua 补全都推荐不存在的函数。清单是静态复制（`:shared` 不能反向依赖 `:engine`），由 `GenerateSandboxContractTest` 读引擎源码抽取实际注册的全局名并断言**集合相等**来防漂移<br>测试：`FormatterSpacingTest`（27 项）+ `CompletionTest`（27 项，含「宿主函数不得进 `LuaLanguage`」不变量）+ `GenerateSandboxContractTest`（3 项）。变异验证 7 处全部如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.8 / §2.10](./shared/ARCHITECTURE.md) |
+| v2.17 | **`shared/editor` 编辑器能力补齐**<br>**两向贴合的空格判定**：抽 `formatter/TokenSpacing.kt`（两个纯函数 `bindsLeft` / `bindsRight`），规则「两相邻 token 之间要空格 ⟺ 左不贴右 且 右不贴左」。换掉旧版「写前决定下一个」的 `pendingSpace` 标志；彻底消灭 `id , name` / `id> 1` / `a:: int` / `t. col` / `( 1 )` 一类反复出现的畸形，以及「格式化两次才收敛」的伪幂等性。注释只读（块注释里常放代码样例，碰了就是破坏），只清行尾空白，**不被主子句换行规则吞掉**；缩进原样搬运；空行折叠至多一个；幂等性逐样本锁定<br>**编辑器补全（「提示」）**：`CodeLanguage` SPI 新增 `completionCandidates(prefix, limit)`，默认实现返回空列表（只支持高亮的语言零改动）。SQL 忽略大小写、Lua 大小写敏感 ——「谁拥有大小写规则谁说了算」，把 `Pri` 补成 `print` 是制造 bug。词字符限定 ASCII（`Char.isLetterOrDigit()` 对中文返回 `true`，会让中文注释吞掉英文词）。接受候选替换**整个词**（光标在词中间时），弹层置于滚动容器内 + `Modifier.atCaret` 自绘 0×0 报告（不撑大编辑器高度，天然跟着代码滚），按键走 `onPreviewKeyEvent` 才能 `consume` `Tab`/`Enter` 的默认行为<br>**造数沙箱宿主函数进入补全**：`CodeEditor(extraCompletions = …)` 注入**上下文专属**候选 —— 造数工作台据此补出引擎注入的 13 个全局（`insert` / `lastId` / `random_*`）并显示签名。它们**绝不进** `LuaLanguage.BUILTINS`：那批函数只在造数沙箱里存在，普通 Lua 编辑器中调用会报 `attempt to call a nil value`，塞进语言词表等于让所有 Lua 补全都推荐不存在的函数。清单是静态复制（`:shared` 不能反向依赖 `:engine`），由 `GenerateSandboxContractTest` 读引擎源码抽取实际注册的全局名并断言**集合相等**来防漂移<br>测试：`FormatterSpacingTest`（27 项）+ `CompletionTest`（32 项，含「宿主函数不得进 `LuaLanguage`」不变量）+ `GenerateSandboxContractTest`（3 项）。变异验证 7 处全部如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.8 / §2.10](./shared/ARCHITECTURE.md) |
 | v2.18 | **SQL 工作台补全接入真实 schema**<br>`CompletionKind` 追加 `DATABASE` / `TABLE` / `COLUMN`（**必须追加在枚举末尾** —— `buildCompletionPool` 用 `kind.ordinal` 当类别排序键，插中间会打乱既有词表次序）。候选**全部来自已有状态、零额外请求**：库 ← 连接时的 `SCHEMA.LIST`；表 ← 展开该库时的 `TABLE.LIST`（复用树上的懒加载结果）；字段 ← **打开过预览的表**的 `columns`<br>字段只覆盖「访问过的表」是刻意的：全库全表 = 每张表一次 `TABLE.COLUMN_LIST`，200 张表就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。零等待、零额外往返，用得越多越全<br>库/表/字段整体**优先于**关键字（`FROM us` 想要 `users` 这张表，不是 `USING`）。关键字那一路本就由 `languageId` = 方言档位自动带来，无需重复注入。`extraCompletionsCaseSensitive = false`：标识符大小写因方言而异，敲 `FROM USERS` 该能补出 `users`；这里不存在造数宿主函数那种「改写语义」风险 —— 接受是用户主动点的动作，插入的是数据库里真实存在的名字<br>缓存签名 `schemaCompletionSignature` 刻意**不含 `tab.rows`**：那是真正的数据（可能上千行），牵进 `remember` 的 key 会让每次翻页都重建整份候选；而直接用 `tabs` 当 key 更糟 —— 双击打开表只改 `tab.columns`，`tabs` 引用不变，字段候选永远出不来<br>测试：`DatabaseBrowserFlowTest` +3（候选覆盖与 detail、库→表→字段 排序、签名只跟 columns 不跟 rows）、`CompletionTest` +2（大小写策略是调用方的选择、新类别须追加在末尾）。变异验证 2 处如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.10.2](./shared/ARCHITECTURE.md) |
+| v2.19 | **补全触发阈值 2 → 1**<br>敲第一个字母就弹候选。**推翻 v2.17 的一条决策并记录推翻过程**：当时定 2 的理由是「单字符前缀几乎命中整个语言（`a` → `AND`/`ADD`/`AVG`…），弹层刚开就铺满屏幕，反而挡视线」—— 该理由**站不住**：弹层条数被 `maxCompletionItems` 封在 8 条，无论前缀多短都只显示 8 条，我把「**命中**数量多」误当成了「**显示**数量多」；且权衡方向也算错了，少按一次键的收益每次都发生，而「显得吵」是主观且能按 `Esc` 关掉的<br>「命中太多导致排序变差」的顾虑由两条规则兜住：上下文候选（库/表/字段/沙箱宿主函数）**整体优先**于关键字 —— 输入 `u` 时当前库里的 `users` 排在 `USING` 前面；语言候选按 类别→长度→字典序 排 —— 输入 `a` 时 `ADD`/`ALL` 靠前<br>阈值降到 1 **不等于**「没词字符时也弹」：空格/逗号/换行后 `wordPrefixBefore` 返回空串，仍然安静（单独断言）<br>测试：`CompletionTest` +3（阈值必须是 1、空前缀仍安静、limit 是硬约束）。变异验证：改回 2 → 第一条如期变红<br>**文档数字一并订正**（此前长期与实际脱节）：shared 97 → **217**、desktopApp 18 → **139**、engine 277 → **288**、`CompletionTest` 21 → **32**；并把「总计 619 失败」改成如实标注 Windows 下 11 项基线失败及其清单 |
 
 ---
 

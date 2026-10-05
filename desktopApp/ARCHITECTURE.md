@@ -46,7 +46,7 @@ desktopApp/
         └── EngineClientSelectionTest.kt  # createEngineClient() 绑定逻辑（默认 / 配置端点 / 非法端点）
 ```
 
-desktopApp 现有 **49 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` 等）。
+desktopApp 现有 **139 个测试**（`ConnectionManagerFlowTest` / `DatabaseBrowserFlowTest` / `DatabaseBrowserUiTest` / `MainScreenNavTest` / `DialectNameContractTest` / `EngineClientSelectionTest` / `OnboardingScreenTest` / `EngineMemoryStatusBarTest` 等）。
 
 **文件清单**：
 
