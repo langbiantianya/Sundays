@@ -59,10 +59,22 @@ import kotlin.time.Duration.Companion.minutes
  *
  * ## 为什么是 `runComposeUiTest` 而不是手点真窗口
  *
- * 本机合成鼠标输入（`SendInput` / `mouse_event`）送不进 Compose Desktop 的 Skiko 窗口 ——
- * 光标能移动、点击无响应。而 `runComposeUiTest` 走的是**同一套**渲染与输入分发链路：
- * 真实布局、真实绘制、真实 `detectDragGestures` / `performTextInput` 事件，
- * 所以截图是货真价实的界面渲染结果，不是模拟拼图。
+ * 本机合成**鼠标**输入送不进 Compose Desktop 的 Skiko 窗口 —— 光标能移动、点击无响应。
+ * 已实测两种投递都不通：`SendInput`（`mouse_event`）与直接 `PostMessage(WM_LBUTTON*)`。
+ * 而 `runComposeUiTest` 走的是**同一套**渲染与输入分发链路：真实布局、真实绘制、真实
+ * `detectDragGestures` / `performTextInput` 事件，所以截图是货真价实的界面渲染结果，
+ * 不是模拟拼图。
+ *
+ * ## ⚠️ 但**键盘是通的**（这条以前被笼统写成「合成输入都不行」，不准确）
+ *
+ * 对着**真窗口**实测：`keybd_event` / `SendInput` + `KEYEVENTF_UNICODE` 都能送达应用 ——
+ * `Tab` / `Shift+Tab` / `Enter` 能改配色选择、开关紧凑模式、翻页，Unicode 文本注入正常
+ * （含中文）。复现脚本见 [`tools/gui-probe.ps1`](../../../../tools/gui-probe.ps1)。
+ *
+ * 所以「点不动」是**鼠标**的问题，不是「这个环境操作不了真窗口」。要把走查搬到真窗口上，
+ * 走**键盘**导航是可行的；只是单选组在 Tab 序里只占一站（组内用方向键），盲按计数很容易
+ * 数错 —— 这也是本类最终仍留在 `runComposeUiTest` 的原因之一：
+ * 判据写在测试里能一眼看懂，而真窗口探针要靠截图一轮轮反推焦点在哪。
  *
  * ## 截图落在哪
  *

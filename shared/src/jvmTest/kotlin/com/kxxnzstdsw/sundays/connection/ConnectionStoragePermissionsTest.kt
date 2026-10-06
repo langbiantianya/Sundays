@@ -1,8 +1,11 @@
 package com.kxxnzstdsw.sundays.connection
 
+import org.junit.After
 import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Test
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.assertEquals
@@ -13,8 +16,37 @@ import kotlin.test.assertTrue
  *
  * `connection.json` 里存的是**明文数据库口令**。默认 umask 下 `createDirectories` /
  * `writeString` 产出 755 / 644，也就是同机任何用户都能读到口令。
+ *
+ * ## ⚠️ 为什么必须隔离 `user.home`
+ *
+ * 本类**直接调 `ConnectionStorage.save(...)`**，而它写的是 `~/.config/sundays/connection.json`
+ * ——**真实用户的那一份**。原版没隔离，于是：
+ *
+ * - 跑一次全量测试，用户的 `connection.json` 里就多出 `perm-test-1` / `perm-test-2`
+ *   两条指向 `db.example.com` / `pg.example.com` 的假连接；
+ * - 更糟的是 `save` 是**整体覆盖**语义 —— 一条只含测试数据的写入，就把用户真实的
+ *   连接列表**清空了**。
+ *
+ * 这不是假设：跑完一轮全量后，真实 `connection.json` 里就只剩 `perm-test-2`。
+ * 断言里读路径用的也是同一个 `user.home`，所以只要**写**之前先改掉它，两边自然一致。
  */
 class ConnectionStoragePermissionsTest {
+
+    private lateinit var tempHome: Path
+    private lateinit var originalHome: String
+
+    @Before
+    fun redirectHome() {
+        tempHome = Files.createTempDirectory("sundays-storage-perm-test")
+        originalHome = System.getProperty("user.home")
+        System.setProperty("user.home", tempHome.toString())
+    }
+
+    @After
+    fun restoreHome() {
+        System.setProperty("user.home", originalHome)
+        runCatching { tempHome.toFile().deleteRecursively() }
+    }
 
     @Test
     fun `saved credential file is owner only`() {

@@ -84,3 +84,24 @@ compose.desktop {
         }
     }
 }
+
+/**
+ * 可选的 `user.home` 覆盖，供**手动启动应用**时隔离配置目录：
+ *
+ * ```
+ * .\gradlew.bat :desktopApp:run -PsundaysUserHome=C:\Temp\sundays-probe
+ * ```
+ *
+ * ## 为什么需要它
+ *
+ * `ConnectionStorage` 写的是 `~/.config/sundays/connection.json`（含**明文口令**），
+ * `OnboardingState` 也会写 `~/.config/sundays/settings.json`。手动跑一次应用就会碰到
+ * 真实用户的连接配置 —— 自动化测试里那是要靠 `System.setProperty` 隔离的。
+ *
+ * 用 Gradle **属性**而不是写死路径：不传就完全不生效，CI 与开发机的默认行为不变。
+ */
+tasks.withType<JavaExec>().configureEach {
+    providers.gradleProperty("sundaysUserHome").orNull?.let {
+        systemProperty("user.home", it)
+    }
+}
