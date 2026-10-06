@@ -64,6 +64,12 @@ dependencies {
     // 源码里要能 new 出这四个方言来注册。
     testImplementation(project(":dialect-mysql"))
     testImplementation(project(":dialect-postgresql"))
+    // DuckDbFileSourceTest 要用 DuckDB 方言 + POI（造 .xlsx）与 duckdb_jdbc 驱动。
+    // 方言模块把 POI 声明成 implementation —— 运行时在（随 runtimeOnly 传递进来），
+    // 但测试**源码**要 import 它来造文件，故这里显式补一条 testImplementation。
+    testImplementation(project(":dialect-duckdb"))
+    testImplementation(libs.poi)
+    testImplementation(libs.poi.ooxml)
     testImplementation(project(":api"))
 }
 

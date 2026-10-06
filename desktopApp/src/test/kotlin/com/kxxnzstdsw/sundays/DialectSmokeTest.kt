@@ -280,16 +280,17 @@ class DialectSmokeTest(private val target: SmokeTarget) {
         assertTrue(fks.success, "[${target.label}] FOREIGN_KEY.LIST 失败：${fks.error}")
         val fkNames = fks.foreignKey.list.itemsList.map { it.name }
         println("[${target.label}] 外键 = $fkNames")
-        if (target.exposesForeignKeyName()) {
+        if (target.keepsUserGivenForeignKeyName()) {
             assertTrue(
                 fkNames.any { it.contains("smoke_fk_child", ignoreCase = true) },
                 "[${target.label}] 外键列表应含 smoke_fk_child，实际 $fkNames",
             )
         } else {
-            // SQLite 的 PRAGMA 不给约束名，只能断言「列出来了」——
-            // 拿名字去断它，在 SQLite 上会永远红，而红的原因与被测代码无关。
+            // SQLite 拿不到约束名（PRAGMA 不给），DuckDB 会把子句里的名字改写成
+            // `<表>_<列>_fkey`。两种成因不同但对断言的影响一样：只能断言「列出来了」——
+            // 断言用户给的名字会在这些方言上永远红，而红的原因与被测代码无关。
             assertTrue(fkNames.isNotEmpty(), "[${target.label}] 外键列表不该为空，实际 $fkNames")
-            println("  · ${target.label} 的外键名是方言拼出来的（PRAGMA 不给真名）：$fkNames")
+            println("  · ${target.label} 不保留用户给的外键名（实际 $fkNames）")
         }
     }
 

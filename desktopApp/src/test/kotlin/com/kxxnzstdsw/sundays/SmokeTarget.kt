@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays
 
+import com.kxxnzstdsw.dialect.DuckDBDialect
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.dialect.MySQLDialect
 import com.kxxnzstdsw.dialect.PostgreSQLDialect
@@ -51,13 +52,16 @@ interface SmokeTarget {
     fun direct(workspace: String): Connection
 
     /**
-     * 引擎能不能回**真实的**外键约束名。
+     * 引擎能不能回**真实的**外键约束名 —— 且是不是**用户给的那个**名字。
      *
-     * `SQLiteDialect.listForeignKeys` 走 `PRAGMA foreign_key_list`，而该 PRAGMA
-     * **不暴露约束名**，方言只能拼一个 `fk_<表>_<序号>`（实测 `fk_smoke_child_0`）。
-     * 要真名得解析 `sqlite_master` 的建表 SQL。其余方言走 `INFORMATION_SCHEMA`，名字是真的。
+     * - SQLite：`PRAGMA foreign_key_list` **不暴露约束名**，方言只能拼 `fk_<表>_<序号>`
+     * - DuckDB：外键子句里的名字被**忽略**，实际写入的是 `<表>_<列>_fkey`
+     * - H2 / MySQL / PostgreSQL：走 `INFORMATION_SCHEMA`，名字是真的
+     *
+     * 两种「不是真名」的形态成因不同（一个拿不到、一个被改写），但对断言的影响一样：
+     * 只能断言「列出来了」，断言用户给的名字会在这些方言上永远红，而红因与被测代码无关。
      */
-    fun exposesForeignKeyName(): Boolean = true
+    fun keepsUserGivenForeignKeyName(): Boolean = true
 }
 
 /**
@@ -118,8 +122,75 @@ object SQLiteSmoke : LocalSmokeTarget() {
 
     override fun direct(workspace: String): Connection = DriverManager.getConnection(url)
 
-    /** 见 [LocalSmokeTarget.exposesForeignKeyName]：SQLite 拿不到真名。 */
-    override fun exposesForeignKeyName(): Boolean = false
+    /** 见 [SmokeTarget.keepsUserGivenForeignKeyName]：SQLite 的 PRAGMA 不给约束名。 */
+    override fun keepsUserGivenForeignKeyName(): Boolean = false
+}
+
+/**
+ * DuckDB —— **必须用文件，不能用 `:memory:`**。
+ *
+ * DuckDB 的内存模式**每个连接都是独立的数据库实例**，于是引擎连接里建的表，
+ * 独立直连一条也看不到 → 「写读闭环」与「事务可见性」两条判据会**全部假通过**。
+ * 与 SQLite 是同一个坑，但 DuckDB 更容易踩 —— 内存模式是它的默认用法。
+ */
+object DuckDbSmoke : SmokeTarget {
+    override val label = "DuckDB"
+    override val dialectType = DialectType.DUCKDB
+    private var file: File? = null
+
+    override fun registerDialect() = DialectLoader.registerForTesting("Duckdb", DuckDBDialect())
+
+    override fun reachable(): Boolean = true
+
+    override fun provision(scope: File): String {
+        val f = File(scope, "smoke.duckdb")
+        file = f
+        return f.absolutePath
+    }
+
+    override fun teardown(workspace: String) {
+        file?.delete()
+        file = null
+    }
+
+    override fun config(workspace: String) = ConnectionConfig(
+        id = "smoke-duckdb", name = "SmokeDuckDB", dialect = DialectType.DUCKDB,
+        username = "", password = "", database = workspace, jdbcUrl = urlFor(workspace),
+    )
+
+    /**
+     * ⚠️ **必须显式传空用户名/密码**，不能只给 URL。
+     *
+     * 实测：同一个 `.duckdb` 文件，一条连接**不传** user、另一条传 `user=""`，
+     * DuckDB 报 `Can't open a connection to same database file with a different
+     * configuration than existing connections` —— 在它眼里「没传用户」与「用户是空串」
+     * 是**两种不同的配置**。
+     *
+     * 而引擎那边 `PoolManager` 永远 `username = config.user`，DuckDB 的 config 里那是空串，
+     * 所以**池里的连接全是「空用户」连接**。测试的直连若不跟着传空串，第一次开就冲突 ——
+     * 于是「写读闭环」「事务可见性」全部报同一个看不懂的连接错误。
+     *
+     * （`SET schema` 不算配置，已单独验证过 —— 所以不必去对齐 search_path。）
+     */
+    override fun direct(workspace: String): Connection =
+        DriverManager.getConnection(urlFor(workspace), "", "")
+
+    /** 见 [SmokeTarget.keepsUserGivenForeignKeyName]：DuckDB 忽略外键子句里的名字。 */
+    override fun keepsUserGivenForeignKeyName(): Boolean = false
+
+    /** 让参数化测试的名字读起来是 `[DuckDB]` 而不是 `[DuckDbSmoke@1a4927d6]`。 */
+    override fun toString(): String = label
+
+    /**
+     * 走方言自己的 `buildJdbcUrl` 而不是手拼 —— 那是 `ExcelToDuckDbCache` 这类
+     * **预处理**唯一会发生的入口。
+     *
+     * ⚠️ `PoolManager.createDataSource` 的取值顺序是「`config.jdbcUrl` 非空就用它，
+     * 否则才调 `dialect.buildJdbcUrl(...)`」。所以**任何预先算好 URL 的调用方都会绕过
+     * 方言的预处理** —— 把 `.xlsx` 路径直接塞进 `jdbcUrl`，Excel 转换就不会发生。
+     * 文件型数据源测试对四种格式统一走这个入口。
+     */
+    fun urlFor(workspace: String): String = DuckDBDialect().buildJdbcUrl("", 0, workspace)
 }
 
 /**
@@ -220,5 +291,12 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5432, "postgres", "66666
     }
 }
 
-/** 冒烟覆盖的四个方言：两个本地（必定可跑）+ 两个远程（不可达则 skip）。 */
-fun smokeTargets(): List<SmokeTarget> = listOf(H2Smoke, SQLiteSmoke, MySqlSmoke, PostgresSmoke)
+/**
+ * 冒烟覆盖的五个方言：三个本地（必定可跑）+ 两个远程（不可达则 skip）。
+ *
+ * 远程两个走**真服务器**（192.168.1.5）—— 它们有一批只在客户端-服务器方言上
+ * 才会暴露的东西（`CAST` 目标类型、DDL 隐式提交、标识符折叠、连接池 autoCommit 约定），
+ * 本地嵌入式库一条都照不出来。
+ */
+fun smokeTargets(): List<SmokeTarget> =
+    listOf(H2Smoke, SQLiteSmoke, DuckDbSmoke, MySqlSmoke, PostgresSmoke)
