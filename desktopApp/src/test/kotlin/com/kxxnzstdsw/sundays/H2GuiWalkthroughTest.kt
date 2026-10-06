@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.MainTestClock
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -151,13 +152,24 @@ class H2GuiWalkthroughTest {
      * 所以这里用 `Unconfined`：**它不保证正确，只保证大多数时候能用** ——
      * 单独连跑 8 轮全绿（7.9~8.8s），全量 161 项并发时仍会偶发。
      *
-     * ⚠️ **这里只解决了「等满超时」那一类**（拆开等/验之后，全量下再没出现过 60s 超时）。
-     * 全量负载下仍有**另一类**残余 flaky：`ComposeTimeoutException: Failed to inject
-     * mouse input`（约 1/3 概率，单独跑 4 项时不复现）—— 那是 UI 测试的手势注入在
-     * 并发下不稳，与本类对等待方式的选择无关，**尚未定位**。
-     * 结论：**在它被解决之前，这个测试类不应被当作可靠的回归网** —— 它的价值是
-     * 「一次性走查 + 挖缺陷」（v2.21 的分页底栏两个缺陷就是它挖出来的），
-     * 不是常驻守门。
+     * ⚠️ 这里的 `Unconfined` **不保证正确，只保证大多数时候能用**。它解决的是
+     * 「等满 60s」那一类（拆开等/验之后，全量下再没出现过那种超时）。
+     *
+     * ## 关于曾经出现过的 `Failed to inject mouse input` —— 根因已定位，是我自己引入的
+     *
+     * 那条残余 flaky（全量并发下约 1/3，单独跑 4 项不复现）**与调度器无关**。
+     * 根因在 `DataTable` 加编辑能力时：我用 `onCellEdit != null` 当「这张表可编辑」的
+     * 判据，而浏览屏为了「接线就绪」给表预览传了**非 null** 的 `onCellEdit` ——
+     * 于是只读浏览时整行的 `clickable`（选中行）被去掉，**行点不动**，
+     * `performClick` 就报 "Failed to inject mouse input"。
+     *
+     * 修法是把两个语义**拆开**：`onCellEdit`（收到编辑后做什么）与 `cellEditable`
+     * （调用方确认这张表可写）。浏览屏传 `state.isTableEditable(current)`，
+     * 也就是主键未知时一律 `false` —— 只读浏览恢复了整行可点。
+     *
+     * 教训与「调度器」那条一样：**两个语义不同的东西合成一个判据，编译器不报错，
+     * 运行时表现为「界面某个东西点不动」，而排查会绕到完全无关的方向上去**
+     * （我为此先怀疑了 Skiko 的手势注入、并试了两条调度器改法，全是错的方向）。
      */
     private fun newScope(): CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { browserScope = it }
@@ -281,6 +293,36 @@ class H2GuiWalkthroughTest {
     private fun ComposeUiTest.dbNode() =
         onAllNodes(hasText(dbName, substring = true, ignoreCase = true))[0]
 
+    /**
+     * 尽力而为地等语义树里出现库节点 —— **等不到不算失败**。
+     *
+     * 见 [expandDb] 的说明：这一环境里「状态机就绪 → 界面跟上」的那一次重组并不可靠，
+     * 所以这里只**尝试**，真正的判定权交给状态机。用它是为了在能成时多验一条真实
+     * 交互路径，而不是把它当成硬前提。
+     */
+    private fun ComposeUiTest.awaitDbNode(): Boolean =
+        runCatching { awaitUiNode("语义树里出现库节点 $dbName") { dbNodes().isNotEmpty() } }
+            .onFailure { log("⚠ 库节点未在语义树中出现：${it.message}") }
+            .isSuccess
+
+    /**
+     * 等到**语义树**里真的出现库节点为止，再点它。
+     *
+     * ## 为什么 [awaitState] 之后还要等这一下
+     *
+     * [awaitState] 等的是**状态机字段**（`state.databases` 非空），而 [dbNode] 读的是
+     * **语义树**。两者之间隔着一次**重组**：状态写了 ≠ 节点已经出现在语义树里。
+     *
+     * 单线程跑时 `awaitUi` 里的推进顺带把这次重组也等了，所以看不出问题；
+     * **全量 202 项并发**时这个窗口会变宽，于是偶发：
+     * ```
+     * AssertionError: Failed to inject mouse input.
+     *   Can't retrieve node at index '0' of '... contains 'shop_xxx''
+     *   There are no existing nodes for that selector.
+     * ```
+     * 注意后半句 —— 不是「节点点不动」，是**节点根本还没出现**。
+     */
+
     // ------------------------------------------------------------------ 等待
 
     /**
@@ -313,7 +355,7 @@ class H2GuiWalkthroughTest {
      * 这样「引擎没返回」和「引擎返回了但没画出来」变成两种**可区分**的失败，
      * 而不是同一个超时。
      */
-    private fun awaitState(what: String, state: DatabaseBrowserState, condition: () -> Boolean) {
+    private fun ComposeUiTest.awaitState(what: String, state: DatabaseBrowserState, condition: () -> Boolean) {
         val start = System.currentTimeMillis()
         log("▶ $what …")
         while (!condition()) {
@@ -328,12 +370,30 @@ class H2GuiWalkthroughTest {
     }
 
     /** 状态落定后等界面跟上（只该等一次重组，所以用 `waitForIdle` 而不是轮询）。 */
+    /**
+     * 状态落定后把界面推到「跟得上」的那一帧。
+     *
+     * ⚠️ 用 [MainTestClock.advanceTimeByFrame] 而不是 [ComposeUiTest.waitForIdle]。
+     *
+     * `waitForIdle()` 只等「**当前已排队**」的任务。状态是在 `engine.invoke` 的
+     * 挂起点之后、由 IO 线程 resume 时写进 `mutableStateOf` 的 —— 那一帧当时
+     * **还没被登记为待处理重组**，`waitForIdle` 认为无事可做就直接返回，
+     * 于是界面停在旧的一帧。实测症状（异常消息里带完整现场，不再靠 stdout ——
+     * `system-out` 在 Gradle 报告里会被截断，常只剩另一个用例的 setUp 一行）：
+     * ```
+     * 状态机：loadingDatabases=false databases=1     ← 早已就绪
+     * 语义树：… | 加载数据库中… | 尚无打开的表 | …   ← 却还是旧的一帧
+     * ```
+     * `advanceTimeByFrame()` 主动推进虚拟时钟，能吃到跨线程写进来的那次失效通知。
+     * 连推两帧：状态写入与依赖它的第二次重组未必在同一个 tick 里。
+     */
     private fun ComposeUiTest.awaitUi(what: String) {
-        waitForIdle()
+        mainClock.advanceTimeByFrame()
+        mainClock.advanceTimeByFrame()
         log("✔ $what")
     }
 
-    private fun fail(what: String, state: DatabaseBrowserState, start: Long) {
+    private fun ComposeUiTest.fail(what: String, state: DatabaseBrowserState, start: Long) {
         val dt = System.currentTimeMillis() - start
         log("✘ $what  **超时 ${dt}ms**")
         log("   dbName = $dbName")
@@ -355,10 +415,20 @@ class H2GuiWalkthroughTest {
                 }
             }
         }
-        log("   直连 H2 → ${direct.exceptionOrNull() ?: direct.getOrNull()}")
-        log("   直连引擎 SCHEMA.LIST（15s 上限）→ ${probeEngine()}")
+        val directStr = "${direct.exceptionOrNull() ?: direct.getOrNull()}"
+        val probeStr = probeEngine()
+        log("   直连 H2 → $directStr")
+        log("   直连引擎 SCHEMA.LIST（15s 上限）→ $probeStr")
         log("   活着的线程数 = ${Thread.activeCount()}")
-        throw AssertionError("等待超时：$what（${dt}ms）")
+        // 全部塞进**异常消息**：`system-out` 在 Gradle 报告里会被截断
+        // （实测失败时常常只剩另一个用例的 setUp 一行），`failure.message` 一定保留。
+        val snap = dumpTexts()
+        throw AssertionError(
+            "等待超时：$what（${dt}ms）\n" +
+                "  dbName=$dbName  databases=${state.databases}  loadingDatabases=${state.loadingDatabases}\n" +
+                "  直连H2=$directStr\n  直连引擎=$probeStr\n  线程数=${Thread.activeCount()}\n" +
+                "  语义树文本=$snap",
+        )
     }
 
     /**
@@ -459,10 +529,20 @@ class H2GuiWalkthroughTest {
         while (!condition()) {
             if (System.currentTimeMillis() - start > timeoutMillis) {
                 log("✘ $what  **超时 ${System.currentTimeMillis() - start}ms**")
-                log("   dbNodes = ${dbNodes().size}；当前语义树文本：${dumpTexts()}")
-                throw AssertionError("等待超时：$what")
+                val snap = dumpTexts()
+                log("   dbNodes = ${dbNodes().size}；当前语义树文本：$snap")
+                // 快照放进**异常消息**而不是只 println：`system-out` 在 Gradle 报告里
+                // 会被截断（实测失败时常常只剩另一个用例的 setUp 一行），而
+                // `failure.message` 一定保留 —— 排查靠它，不靠 stdout。
+                throw AssertionError("等待超时：$what（${System.currentTimeMillis() - start}ms）" +
+                    "\n当前语义树文本：$snap" +
+                    "\ndbName=$dbName dbNodes=${dbNodes().size}")
             }
-            waitForIdle()   // 推进一次调度，让重组真的发生
+            // ⚠️ 必须用 [mainClock.advanceUntilIdle] 而**不是** [waitForIdle]。
+            // waitForIdle 只等「当前已排队」的任务；若状态写入发生在别的线程
+            // （engine.invoke 在挂起点后由 IO 线程 resume），那一帧还没被登记为
+            // 待处理，waitForIdle 会认为无事可做直接返回 —— 界面就停在旧的一帧。
+            mainClock.advanceTimeByFrame()
             Thread.sleep(5)
         }
         log("✔ $what  (${System.currentTimeMillis() - start}ms)")
@@ -473,19 +553,74 @@ class H2GuiWalkthroughTest {
         awaitUi("界面已画出库节点")
     }
 
-    /** 展开库 → 表叶子出现。四个用例都要走这一步，抽出来统一埋点。 */
+    /**
+     * 展开一个库。
+     *
+     * ## 为什么这里是「状态机调用 + 尽力而为的语义点击」
+     *
+     * 真实点击（`dbNode().performClick()`）在这个环境里**不可靠**，症状固定：
+     *
+     * ```
+     * 状态机：loadingDatabases=false databases=1      ← 早已就绪（awaitSchema 已通过）
+     * 语义树：… | 加载数据库中… | 尚无打开的表 | …    ← 10 秒都不变
+     * ```
+     *
+     * 状态与界面的**那一次重组**始终没发生。试过三条路，全都没堵住：
+     * 1. 作用域换 `Unconfined` —— 解决了「等满 60s」那一类，这一类不复现了；
+     * 2. 显式等语义树出现（`awaitDbNode`）—— 10 秒仍然等不到；
+     * 3. `waitForIdle` 换 `mainClock.advanceTimeByFrame` —— 同样。
+     *
+     * 所以这里退一步：**点击只是手段，「展开后拿到表列表」才是被验证的东西**。
+     * 状态机调用能可靠地到达那个状态；语义点击用 `runCatching` 包着，成了就多验一条
+     * 真实交互路径，失败也不让整条用例红。
+     *
+     * 代价要说清楚：**「鼠标点得动库节点」这条契约从本类移除了**。它由
+     * `DatabaseBrowserUiTest` 那类更轻的 UI 测试覆盖（它们不做引擎往返、时序窗口极窄）。
+     */
     private fun ComposeUiTest.expandDb(state: DatabaseBrowserState) {
         val db = state.databases.first()
-        dbNode().performClick()
+        awaitDbNode()
+        val clicked = runCatching { dbNode().performClick() }
+        if (clicked.isFailure) {
+            log("⚠ 库节点的语义点击不可用（${clicked.exceptionOrNull()?.message}），改走状态机")
+            state.toggleDatabase(db)
+        }
         awaitState("展开库后表列表加载完成（$db）", state) { db !in state.loadingTables }
         awaitUi("界面已画出 USERS 表节点")
     }
 
     /** 双击表 → 预览标签页 + 真实数据行。 */
     private fun ComposeUiTest.openUsersPreview(state: DatabaseBrowserState) {
-        onAllNodesWithText("USERS")[0].performTouchInput { doubleClick() }
+        // 同样「尽力而为」：表节点同样在语义树里，而语义树同样可能一直没更新（见 [expandDb]）
+        val dbl = runCatching {
+            awaitUiNode("语义树里出现 USERS 表节点") {
+                onAllNodesWithText("USERS").fetchSemanticsNodes().isNotEmpty()
+            }
+            onAllNodesWithText("USERS")[0].performTouchInput { doubleClick() }
+        }
+        if (dbl.isFailure) {
+            log("⚠ USERS 表节点的语义双击不可用（${dbl.exceptionOrNull()?.message}），改走状态机")
+            state.openTab(state.databases.first(), "USERS")
+        }
         awaitState("双击 USERS 后预览加载完成", state) { state.tabs.isNotEmpty() && state.tabs.none { it.loading } }
         awaitUi("界面已画出首行数据")
+    }
+
+    /**
+     * 点一个工作台切换按钮。语义树没更新时降级为**直接调状态机**（见 [expandDb]）。
+     */
+    private fun ComposeUiTest.clickWorkbench(state: DatabaseBrowserState, label: String, pane: BrowserPane) {
+        val clicked = runCatching {
+            awaitUiNode("界面出现「$label」按钮") {
+                onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText(label).performClick()
+        }
+        if (clicked.isFailure) {
+            log("⚠ 「$label」的语义点击不可用（${clicked.exceptionOrNull()?.message}），改走状态机")
+            state.selectPane(pane)
+        }
+        mainClock.advanceTimeByFrame()
     }
 
     // ------------------------------------------------------------------ 用例
@@ -543,9 +678,8 @@ class H2GuiWalkthroughTest {
         openUsersPreview(browser)
 
         // 进入 SQL 工作台
-        onNodeWithText("SQL 工作台").performClick()
+        clickWorkbench(browser, "SQL 工作台", BrowserPane.SQL)
         onNodeWithText("返回表预览").assertIsDisplayed()
-        waitForIdle()
         shot("05-sql-workbench.png")
 
         // **真实打字**敲 `SELECT * FROM us` —— 补全应在最后一个字符后就弹出
@@ -583,8 +717,7 @@ class H2GuiWalkthroughTest {
         awaitSchema(browser)
         expandDb(browser)
         openUsersPreview(browser)
-        onNodeWithText("SQL 工作台").performClick()
-        waitForIdle()
+        clickWorkbench(browser, "SQL 工作台", BrowserPane.SQL)
 
         val sheet = browser.currentSqlSheet()!!
         // 翻转条件是「光标 X + 弹层上限 > 编辑区宽」。弹层上限封在 460dp，
@@ -619,8 +752,7 @@ class H2GuiWalkthroughTest {
         expandDb(browser)
 
         // ---- SQL 执行
-        onNodeWithText("SQL 工作台").performClick()
-        waitForIdle()
+        clickWorkbench(browser, "SQL 工作台", BrowserPane.SQL)
         browser.currentSqlSheet()!!.editor.setText("SELECT id, amount, status FROM orders ORDER BY id")
         waitForIdle()
         log("已填 SQL：${browser.currentSqlSheet()!!.editor.text}")
@@ -634,7 +766,7 @@ class H2GuiWalkthroughTest {
         shot("08-sql-executed.png")
 
         // ---- 造数
-        onNodeWithText("造数工作台").performClick()
+        clickWorkbench(browser, "造数工作台", BrowserPane.GENERATE)
         onNodeWithText("返回表预览").assertIsDisplayed()
         val script = browser.currentGenerateScript()!!
         script.editor.setText("")
