@@ -1251,6 +1251,57 @@ class DatabaseBrowserFlowTest {
         assertEquals(1, tab.page, "改过滤条件后必须回到第 1 页，否则会停在越界的空页上")
     }
 
+    /**
+     * 回归：**只读模式拦在发出去之前**。
+     *
+     * 拦在 UI 层而不是引擎层，是为了让用户看到一句人话而不是引擎异常；
+     * 拦在**发出去之前**，是为了用户看到提示时数据库还什么都没发生。
+     */
+    @Test
+    fun `read only mode blocks writes before they reach the engine`() = runBlocking {
+        val sent = mutableListOf<String>()
+        val spy = object : com.kxxnzstdsw.client.EngineClient {
+            override fun handle(request: com.kxxnzstdsw.grpc.Request): kotlinx.coroutines.flow.Flow<com.kxxnzstdsw.grpc.Response> {
+                if (request.category == com.kxxnzstdsw.grpc.Category.SQL) {
+                    sent += request.sqlRequest.execute.sql
+                }
+                return engine.handle(request)
+            }
+            override suspend fun testConnection(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.testConnection(config)
+            override suspend fun disconnect(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.disconnect(config)
+            override fun close() = Unit
+        }
+        val state = DatabaseBrowserState(spy, CoroutineScope(Dispatchers.Default))
+        state.bindConnection(TestConnectionFactory.build(jdbcUrl))
+        val sheet = state.currentSqlSheet()!!
+
+        // 默认不拦
+        assertFalse(state.readOnly, "只读模式默认应关闭")
+
+        // 打开后：读操作照常
+        state.readOnly = true
+        sheet.editor.setText("SELECT 1")
+        assertNull(state.rejectIfReadOnly("SELECT 1"), "只读模式下读操作应放行")
+        state.executeSql()
+        withTimeout(5_000) { while (sheet.running) delay(10) }
+        assertEquals(listOf("SELECT 1"), sent, "只读模式下的查询应正常发出去")
+
+        // 写操作在 UI 层就被挡
+        val before = sent.size
+        sheet.editor.setText("DELETE FROM users")
+        val err = state.rejectIfReadOnly(sheet.editor.text)
+        assertNotNull(err, "只读模式必须拦下写操作")
+        assertTrue(err.contains("只读"), "错误文案要点明是只读模式：$err")
+        state.executeSql()
+        assertEquals(before, sent.size, "只读模式下**不能**把写操作发出去")
+        assertTrue(
+            sheet.error.orEmpty().contains("只读"),
+            "错误应写在 sheet 上让用户看见：${sheet.error}",
+        )
+    }
+
     @Test
     fun `a rolled back transaction leaves no trace`() = runBlocking {
         val state = newBrowser()
@@ -1505,18 +1556,13 @@ class DatabaseBrowserFlowTest {
     /** 展开某个库、取出指定表名（H2 归一为大写，故大小写不敏感比对）。 */
     private suspend fun DatabaseBrowserState.tablesFor(db: String, wanted: String): String {
         if (db !in tablesByDatabase) toggleDatabase(db)
-        withTimeout(5_000) { while (db in loadingTables) delay(50) }
+        withTimeout(10_000) { while (db in loadingTables) delay(50) }
         tableLoadError[db]?.let { throw AssertionError("加载表列表失败: $it") }
-        // 顺手等对象列表**第一次**落定。
-        //
-        // `toggleDatabase` 现在会并发拉库级对象（视图 / 触发器 / 函数），
-        // 它们与表互不依赖、在同一批协程里跑。本测试之后要用 `toggleDatabase`
-        // 触发「再展开一次」来验证刷新，所以这里必须先把上一轮的对象请求收干净 ——
-        // 否则下一行的 `toggleDatabase` 与残留协程交错，等待条件会误判。
-        withTimeout(20_000) {
-            // 同样只等视图那一格（见上面那条测试的 KDoc）
-            while (objectsByDatabase[db]?.get(DatabaseBrowserState.DatabaseObjectKind.VIEW) == null) delay(20)
-        }
+        // ⚠️ 这里**只**等表列表，不等 `objectsByDatabase`。
+        // 展开库会顺带并发拉视图 / 触发器 / 函数（本类的 `bindConnection` 等用例也会
+        // 展开库），等它等于让每条用到 `tablesFor` 的测试都被对象链路拖住 ——
+        // 实测全量并发下把两条无关用例拖到 20s 超时。对象相关的等待由
+        // 测对象的那几条各自负责（见 `expanding a database lists its views`）。
         return tablesByDatabase.getValue(db).first { it.uppercase() == wanted.uppercase() }
     }
 

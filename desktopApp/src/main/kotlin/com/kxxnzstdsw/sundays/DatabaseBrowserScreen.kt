@@ -47,6 +47,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import com.kxxnzstdsw.sundays.ui.WinMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -1734,6 +1735,66 @@ private val ORDER_PRESETS: List<Pair<String, String>> = listOf(
     "第一列降序" to "1 DESC",
 )
 
+/**
+ * 危险写操作的确认框。
+ *
+ * ## 为什么把**每一条**都列出来
+ *
+ * 一条脚本里可能有好几条危险语句。只报第一条的话，用户点完确认会以为
+ * 「确认了这一条就没别的事了」，而第二条照样执行 —— 那比不拦更危险。
+ */
+@Composable
+private fun DangerousSqlConfirmDialog(
+    findings: List<DangerousSql.Finding>,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("确认执行危险操作") },
+        text = {
+            Column {
+                Text(
+                    text = "接下来的执行包含 ${findings.size} 条不可撤销的写操作：" +
+                        "一旦执行，数据库里没有撤销点。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                findings.forEach { f ->
+                    Text(
+                        text = "· ${f.kind.label}：${f.statement}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+        },
+        confirmButton = {
+            WinButton(
+                onClick = onConfirm,
+                shape = SundaysPalette.buttonShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+                modifier = Modifier.testTag(DANGEROUS_CONFIRM_BTN_TAG),
+            ) { Text("仍然执行") }
+        },
+        dismissButton = {
+            WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
+        },
+    )
+}
+
+/** 危险操作确认框「仍然执行」按钮的 UI 测试 tag。 */
+internal const val DANGEROUS_CONFIRM_BTN_TAG = "dangerousConfirmBtn"
+
+/** SQL 工作台「只读」开关的 UI 测试 tag。 */
+internal const val SQL_READONLY_CHIP_TAG = "sqlReadonlyChip"
+
 /** 表预览过滤行的 UI 测试 tag。 */
 internal const val TABLE_SEARCH_FIELD_TAG = "tableSearchField"
 internal const val TABLE_SEARCH_BTN_TAG = "tableSearchBtn"
@@ -1937,6 +1998,19 @@ private fun SqlWorkbenchPane(
         val sheet = state.currentSqlSheet()
         // 事务 / 多语句开关的点击都要发引擎请求，用组合作用域发起
         val actionScope = rememberCoroutineScope()
+        // 待确认的危险操作。**非 null 时弹确认框，不执行**——
+        // 判据在 [DangerousSql]，与只读模式（[DatabaseBrowserState.readOnly]）是两道独立的防线
+        var pendingDangerous by remember { mutableStateOf<List<DangerousSql.Finding>?>(null) }
+        if (pendingDangerous != null && sheet != null) {
+            DangerousSqlConfirmDialog(
+                findings = pendingDangerous!!,
+                onConfirm = {
+                    pendingDangerous = null
+                    state.executeSql()
+                },
+                onDismiss = { pendingDangerous = null },
+            )
+        }
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
         Column(modifier = Modifier.fillMaxSize()) {
             if (sheet == null) {
@@ -1963,6 +2037,15 @@ private fun SqlWorkbenchPane(
                     extraCompletions = schemaCompletions,
                     extraCompletionsCaseSensitive = false,
                     actions = {
+                        // 只读模式开关 —— 摆最左，因为它决定后面所有按钮按下去会发生什么
+                        FilterChip(
+                            selected = state.readOnly,
+                            onClick = { state.readOnly = !state.readOnly },
+                            enabled = !sheet.running,
+                            label = { Text("只读", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.testTag(SQL_READONLY_CHIP_TAG),
+                        )
+                        Spacer(Modifier.width(4.dp))
                         // 多语句开关 —— 放在最左侧，因为它改的是**执行语义**，
                         // 而执行 / 停止 / 事务都排在它后面，视觉上是「先定模式再操作」。
                         //
@@ -2053,7 +2136,16 @@ private fun SqlWorkbenchPane(
                             }
                         } else {
                             WinButton(
-                                onClick = { state.executeSql() },
+                                onClick = {
+                                    // 危险操作要**先确认再发**：判据是 [DangerousSql]，
+                                    // 拦在引擎之前 —— 用户看到确认框时，数据库还什么都没发生。
+                                    val findings = DangerousSql.scan(sheet.editor.text)
+                                    if (findings.isEmpty()) {
+                                        state.executeSql()
+                                    } else {
+                                        pendingDangerous = findings
+                                    }
+                                },
                                 enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
                                 shape = SundaysPalette.buttonShape,
                             ) {
@@ -3135,6 +3227,12 @@ class DatabaseBrowserState(
         val sheet = currentSqlSheet() ?: return
         currentConnection ?: return
         val sql = sheet.editor.text.trim()
+        // 只读模式先拦：拦在**发出去之前**，引擎那边什么都没发生，
+        // 用户看到的是一句人话而不是引擎异常
+        rejectIfReadOnly(sql)?.let {
+            sheet.error = it
+            return
+        }
         if (sql.isEmpty()) {
             sheet.error = "SQL 为空"
             sheet.columns = emptyList()
@@ -3381,6 +3479,29 @@ class DatabaseBrowserState(
             if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
         }
         return null
+    }
+
+    /**
+     * **只读模式** —— 开着时本屏发往引擎的一切写请求一律拒绝。
+     *
+     * 只在 UI 层拦、不动引擎：这是**用户自己**的开关，出错时立刻能看见「只读模式下
+     * 写操作被拒绝」而不是一个引擎异常。真正需要强制只读（防止别的客户端写）时
+     * 应该在连接串上用只读账号。
+     *
+     * 挡的是「已经发出去之前」，所以代价为零 —— 引擎那边什么都没发生。
+     */
+    var readOnly: Boolean by mutableStateOf(false)
+
+    /**
+     * 检查一次 SQL 在当前只读模式下能不能发 —— 不能时返回该给用户看的文案。
+     *
+     * @return `null` = 可以发。
+     */
+    fun rejectIfReadOnly(sql: String): String? {
+        if (!readOnly) return null
+        val writes = DangerousSql.scan(sql)
+        if (writes.isEmpty()) return null
+        return "只读模式下不允许写操作，已拦下：${writes.joinToString("；") { it.statement }}"
     }
 
     // ------------------------------------------------------------------------
