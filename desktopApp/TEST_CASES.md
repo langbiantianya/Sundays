@@ -447,3 +447,147 @@
 
 这条在本仓反复出现过（`H2GuiWalkthroughTest` / `DialectSmokeTest` / `ConnectedSourceEndToEndTest`
 的注释里都写着「库名必须唯一」），我又犯了一次。**固定库名 + `DB_CLOSE_DELAY=-1` = 必然串库。**
+
+## 9. 真窗口 + 真 MySQL 的功能走查（本轮）
+
+> 这一节全是**真跑起来的窗口 + 192.168.1.5 上的真 MySQL 8.4.9**，截图逐屏核对。
+> 前八节的断言都在 `runComposeUiTest` 的合成环境里，而合成环境**看不见像素**——
+> 本轮证明了几件事只有真窗口才照得出来。
+
+### 9.1 准备：真数据
+
+在 MySQL 上建了 `sundays_probe`（`sundays_probe` 与 `sundays_smoke` 是两回事，
+后者是 §0 冒烟用的固定库）：
+
+| 对象 | 内容 |
+|---|---|
+| `customers` | 3 行，含中文、NULL、负数余额、文本里带逗号与引号 |
+| `orders` | 25 行，外键 `fk_orders_customer` → `customers.id`，索引 `idx_orders_status` / `idx_orders_amount` |
+| `order_items` | 40 行 |
+| `bad_ref` | 列名是 `` `select` `` 与 `` `中文列` `` —— 故意照标识符转义那条路径 |
+| `v_paid` | 视图（JOIN 两表 + WHERE） |
+
+隔离 home：`%TEMP%\sundays-gui-probe`，含 `settings.json`（`onboardingCompleted: true`，
+跳过引导页）与 `connection.json`（两条预置连接）。
+
+### 9.2 缺陷一：触发器 / 过程列表在真 MySQL 上整片报错（已修）
+
+**截图里看到的**（展开 `sundays_probe` 后，对象区）：
+
+```
+bad_ref / customers / order_items / orders
+对象
+  视图: v_paid
+  触发器: Unknown column 'REMARKS' in 'field list'
+  过程 / 函数: Unknown column 'REMARKS' in 'field list'
+```
+
+表和视图都正常，只有触发器与过程两节变红 —— 很像「这个库没有触发器」。
+
+**根因**：`MySQLDialect` 的三处 `INFORMATION_SCHEMA` 查询从 H2 抄了 **`REMARKS`** 列。
+`REMARKS` 是 **H2 / Oracle** 才有的一列。向 MySQL 8.4.9 逐列核对
+`INFORMATION_SCHEMA.COLUMNS` 的结果：
+
+| 表 | 注释列 |
+|---|---|
+| `INFORMATION_SCHEMA.ROUTINES` | **`ROUTINE_COMMENT`** |
+| `INFORMATION_SCHEMA.TRIGGERS` | **没有注释列**（`ACTION_STATEMENT` 是语句正文，不是注释） |
+
+**三处**都错，且是三个副本：
+
+| 位置 | 原 SQL | 改后 |
+|---|---|---|
+| `listRoutines` 的 ROUTINES 段 | `..., REMARKS, ...` | `..., ROUTINE_COMMENT, ...` |
+| `listRoutines` 的 TRIGGERS 段 | `..., REMARKS, ...` | 不取注释列，`description` 为空串 |
+| `getRoutineInfo` 的 ROUTINES 段 | `..., REMARKS, ...` | `..., ROUTINE_COMMENT, ...` |
+| `getRoutineInfo` 的 TRIGGERS 段 | `..., REMARKS, ...` | 不取注释列 |
+| `listTriggers` | `..., REMARKS` | 不取注释列 |
+
+三处都改而不是只改列表：列表与详情是两条独立 SQL，只修列表的话点开详情又报同一句红字。
+
+**为什么所有既有测试都没照出来**：H2 / SQLite / DuckDB / PG 上 `REMARKS` 要么存在要么根本没走到这条路径，
+只有真 MySQL 会炸 —— 而炸出来的样子（整节变红）太像「本来就空」。
+
+**回归测试** `MySQLRoutineTriggerQueryTest`（3 项，真 MySQL，跑在 `sundays_smoke`）：
+
+- 在库里真建一个 `BEFORE INSERT` 触发器 + 一个带 `COMMENT` 的存储过程；
+- `listTriggers` 必须列出那个触发器（`Unknown column` 是**语句解析期**错误，与有没有行无关，
+  所以这条断言本身就足以守住列名）；
+- `listRoutines` 必须列出过程**与**触发器，且过程的 `description` **原样等于**我们写的 COMMENT
+  —— 这一条是为了防「有人把注释列删掉而不是改对」：那样查询照样成功，用例照样绿，
+  而「过程注释读不出来」仍是真缺陷；
+- `getRoutineInfo` 对过程与触发器各跑一遍。
+
+**变异验证**：把三处改回 `REMARKS` → 3/3 变红，报错正是界面上那句
+`Unknown column 'REMARKS' in 'field list'`；改回后恢复 3/3 绿。
+
+### 9.3 缺陷二：删除连接没有二次确认，一次 Enter 就永久删（已修）
+
+真窗口里用键盘走查时：`Tab ×4` 选中连接 → 再 `Tab ×4` 焦点落在「删除」→ 按 `Enter`，
+**连接直接从列表消失，并且从 `connection.json` 里被抹掉**（含明文口令），界面上没有任何提示、没有撤销。
+
+这个界面**可以纯键盘走完**，而焦点停在按钮上时 Enter 的语义就是「点它」——
+所以这不是「手滑才会遇到」，是键盘用户必经的路径。
+
+**修法**：在 `ConnectionManagerScreen` 内部收一道 `pendingDelete`，
+`requestDelete(id)` 统一转成「记下待办 + 弹框」，确认后才调 `onDeleteConnection`。
+
+- 收在组件内部而不是两个入口各改一遍：删除有**两个**入口（列表项 ⋮ 菜单、总览面板按钮），
+  收口才能保证以后新增的第三个入口自动也被拦住；
+- 文案点名连接名，并写清边界：「将删除的是本地连接配置（含保存的口令），无法撤销。
+  **不会断开数据库，也不会删除库中的任何数据**」—— 用户真正怕的往往是「会不会把库删了」；
+- `dismissButton` 先渲染，Tab 序是「取消 → 删除」，第一个停靠点是撤销方向；
+  删除按钮用 `error` 配色。
+
+**回归测试** `DeleteConnectionConfirmTest`（3 项）：点「删除」只弹框不删（两个入口各一项）、
+取消后连接仍在、确认后才删且只删这一个。
+**变异验证**：把 `requestDelete` 退回「直接调 `onDeleteConnection`」→ 3/3 变红。
+
+**真窗口复验**：重启应用重走一遍 → 弹出确认框、连接保住、删除按钮为红色（截图核对）。
+
+### 9.4 缺陷三：连接总览面板的操作按钮被画到窗口外（**未修，根因未隔离**）
+
+**现象**：选中连接后，右栏总览面板的信息卡正常渲染，但下面的
+`删除 / 编辑 / 连接` 三个按钮**落在可见区域之外**：
+
+- 应用**默认窗口尺寸**（1152×720，见截图）：「删除」勉强完整、「编辑」被切掉一半、
+  **「连接」完全看不到**；同一处的 JDBC URL 也被右边缘截断；
+- 窗口最大化（1550×838）后：三个按钮整体右移，只剩最左边一条 13px 露在窗口右缘；
+- 向导页（第 1/4 步）症状同类：4 根步骤条按像素测得各 **383px**、间隙 6px，
+  **总宽 1550px，起始 x=351** —— 也就是右栏内容排到了 x≈1901，比窗口宽出 351px；
+  方言卡同样没有右边界。
+
+**已排除的猜测**：
+
+- 不是「按钮没渲染」：语义树里三个按钮都在，`runComposeUiTest` 在 1024×654 下
+  量到的坐标也完全正常（`删除` `Rect(708,397,766,437)`，右对齐在内容右缘）。
+- 不是「密度算错」导致我读错：像素扫描实测左栏 `Modifier.width(250.dp)` 渲染为 **313px**，
+  密度确为 **1.25**（显示缩放 125%），窗口客户区约 1112px。
+
+**下一步该做的实验**（本轮没做完）：在应用内打印 `LocalDensity.current.density`
+与 `WindowState.size`，和窗口实际像素宽对一遍 —— 现在这两者是「布局按 1152dp、
+窗口只有 1152px」的量级关系（1112px 窗口排 1440px 内容），
+但**究竟是 Compose Desktop 把 `DpSize` 当像素开窗、还是 Skiko 的密度没跟上，
+我没有证据，不猜**。
+
+**为什么这条不能就这么放过**：它让「连接」这个首屏主入口在默认窗口下**不可见**。
+目前可用键盘绕过（`Tab` 能聚焦、`Enter` 能触发，功能本身是好的），
+但用户看不见就等于没有 —— 这也是本节开头那句「合成环境看不见像素」的直接例证。
+
+### 9.5 顺带确认的三件小事
+
+| 现象 | 结论 |
+|---|---|
+| 连接卡片 `clickable` **可聚焦但不画焦点指示** | Tab 能到、回车能选，只是截图上看不出焦点在哪 —— 这正是 §7 里「盲按导航」难做的原因之一 |
+| 左侧 `⋮` 菜单在 Tab 序里排在连接卡片**之后** | Tab 序：⚡ → ➕ → ⚙ → 卡片 → ⋮ |
+| 库节点**只能用回车展开**，方向键无效 | `DatabaseNode` 只挂了 `clickable`，没有 `onKeyEvent` 处理 `→` |
+
+### 9.6 本轮用到的探针
+
+在 `build/tmp/` 下（不入库）另有两个一次性脚本，因为 `gui-probe.ps1` 每次开头都
+`SW_MAXIMIZE`，而本轮要观察的恰恰是「窗口按默认尺寸打开」的状态：
+
+- `resize-shot.ps1` —— `SW_RESTORE` + `MoveWindow` 到指定尺寸再截图；
+- `shot-as-is.ps1` / `keys-shot-as-is.ps1` —— **不动窗口尺寸**，只发按键 + 截图。
+
+后者是 9.4 那个结论的关键：**一最大化就看不到缺陷本身**。
