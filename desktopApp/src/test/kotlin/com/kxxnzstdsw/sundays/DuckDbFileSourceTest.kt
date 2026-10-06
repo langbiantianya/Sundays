@@ -117,25 +117,25 @@ class DuckDbFileSourceTest {
         assertFileSource(makeParquet(), STEM, dbName = STEM, typed = true)
 
     /**
-     * Excel 走的是**方言预转换**那条路（POI → 临时 `.duckdb`），与前三个机制不同。
+     * Excel 走的是**方言预转换**那条路（POI → 临时 `.duckdb`），与前三个「直开文件」不同。
      *
-     * ⚠️ 实测出两处**产品上的简化**（不是缺陷，但该记下来，用户会撞上）：
+     * 这条**曾经红过**，两处都已修：
+     * 1. 临时库写死成 `converted.duckdb` → 界面上「库」的名字是 `converted` 而不是文件名。
+     * 2. **表头行被当成数据**、列名一律 `col1/col2` → 20 行的表读回 21 行。
+     * 修好后库名与行数都与其余三种格式一致，所以这两点照常断言（回退修复就会红）。
      *
-     * 1. 转换产物是 `ExcelToDuckDbCache` 里写死的 `converted.duckdb`，于是界面上
-     *    「库」的名字是 **`converted`**，而不是用户的文件名。
-     * 2. **表头行被当成数据写进去了**，且列名是 `col1 / col2 …` 而不是表头文字
-     *    （`ExcelToDuckDbCache` 的注释自己就自相矛盾：「首行视为 header」紧跟着
-     *    「为了简单起见，全部按数据行写入」）。所以 20 行数据的表读回来是 **21 行**。
-     *
-     * 因为转换后全是 VARCHAR + `colN` 列名，过滤/排序/搜索那一整套矩阵在这里测的
-     * 是 DuckDB 的**字符串比较**而不是产品，故 `typed = false` 跳过，只验「打得开、读得出」。
+     * 但 `typed = false`：转换后**列一律 VARCHAR**（POI 读出的是字符串，猜类型反而会毁掉
+     * 前导零的订单号 / 18 位身份证）。于是 `id > 15` 在 DuckDB 上会报
+     * `Cannot compare values of type VARCHAR and type INTEGER_LITERAL` —— 那是**正确行为**，
+     * 不是缺陷。所以数值过滤 / 排序 / 表内搜索那一整套矩阵对 Excel 跳过：它们测的是
+     * DuckDB 的类型系统，不是产品。
      *
      * sheet 名刻意不等于 [STEM]：否则「查到的到底是 sheet 还是文件」分不清，
      * 两种机制混在一起看不出问题。
      */
     @Test
     fun `excel can be opened as a data source`() =
-        assertFileSource(makeExcel(), EXCEL_SHEET, dbName = null, typed = false)
+        assertFileSource(makeExcel(), EXCEL_SHEET, dbName = STEM, typed = false)
 
     // ==================================================================
     // 公共判据
@@ -149,9 +149,11 @@ class DuckDbFileSourceTest {
      *
      * @param dbName 期望出现在库列表里的名字；`null` = **不断言库名**（Excel 走转换产物，
      *   库名是实现细节，断它只会把「实现改名」误报成「功能坏了」）。
-     * @param typed 列名与类型是否保真。为 `false`（Excel 转换产物：列名是 `colN`、
-     *   全 VARCHAR、且表头行被算作数据）时只验「打得开、读得出」，
-     *   跳过过滤/排序/搜索 —— 那三项在这里测的是 DuckDB 的字符串比较，不是产品。
+     * @param typed 转换后列**类型**是否保真。Excel 走 POI 转换，列一律 VARCHAR
+     *   （POI 读出的是字符串，猜类型会毁掉前导零的订单号 / 身份证号），
+     *   于是 `id > 15` 会被 DuckDB 判为「VARCHAR 与 INTEGER_LITERAL 不可比」—— 那是**正确行为**。
+     *   为 `false` 时跳过过滤 / 排序 / 搜索矩阵：那三项测的是 DuckDB 的类型系统，不是产品。
+     *   注意这只影响**类型**；库名、表名、列名、行数四种格式一律照常断言。
      */
     private fun assertFileSource(file: File, viewName: String, dbName: String?, typed: Boolean) {
         val fmt = file.extension
@@ -194,17 +196,11 @@ class DuckDbFileSourceTest {
             "[$fmt] 表列表应含 $viewName，实际 $tableNames",
         )
 
-        // ④ 查得出全部行
-        //    Excel 走 POI 转换，**表头行被当成数据**（`ExcelToDuckDbCache` 的已知简化），
-        //    所以实际读回的是 ROWS + 1 行。这里按实际行为断言并在注释里写明，
-        //    而不是把行数写死成 ROWS —— 后者只会把「表头被当数据」这个事实藏起来。
-        val expectedRows = if (typed) ROWS else ROWS + 1
+        // ④ 查得出全部行，且**表头不算数据行**
+        //    这一条曾是 Excel 的失败点：转换器把表头当数据写进去了，20 行的表读回 21 行。
+        //    四种格式现在都应是数据行数 —— 不再按格式分叉。
         val all = dataList(cfg, viewName, where = "", orderBy = "")
-        assertEquals(
-            expectedRows, all.first,
-            "[$fmt] 应读回 $expectedRows 行（第二段=${all.second}）" +
-                if (typed) "" else "　← Excel 转换把表头行也算成了数据，故比数据行多 1",
-        )
+        assertEquals(ROWS, all.first, "[$fmt] 应读回 $ROWS 行（第二段=${all.second}）")
         println("[$fmt] 首行 = ${all.third}")
 
         if (!typed) return

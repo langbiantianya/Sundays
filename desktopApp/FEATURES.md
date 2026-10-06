@@ -66,6 +66,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 |---|---|---|
 | **连接** | 5 个方言：MySQL / PostgreSQL / H2 / DuckDB / SQLite | `dialect-*` SPI 插件 |
 | | 4 步引导 + 快速连接 | `ConnectionManagerScreen` |
+| | **文件当数据源**（DuckDB）：CSV / JSONL / Parquet 直开文件，Excel 经 POI 预转换；库名沿用文件名，表名取自 sheet 名 | `dialect-duckdb` |
 | | 测试连接 / 连接 / 断开（`SYSTEM.TEST_CONNECTION` / `SYSTEM.DISCONNECT`） | `ConnectionSession` |
 | | 保存 / 编辑 / 删除连接 | `ConnectionSession` |
 | | 连接总览（名称 / 方言 / 主机 / 端口 / 用户 / 状态） | `ConnectionManagerScreen` |
@@ -74,6 +75,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | **浏览** | 库列表（`SCHEMA.LIST`） | `SchemaTreePanel` |
 | | 表列表懒加载（展开时才 `TABLE.LIST`） | `loadTables` |
 | | **对象浏览**：库级「视图 / 触发器 / 过程·函数」+ 表级「索引 / 外键」 | `loadDatabaseObjects` / `loadTableObjects` |
+| | **文件型数据源**（DuckDB）：CSV / JSON Lines / Parquet 直开，Excel 预转换 | `dialect-duckdb` 的 `buildJdbcUrl` |
 | | 双击 / 单击打开预览标签页，同表去重 | `openTab` |
 | | 引擎侧真分页（每页 10/20/50/100/200/300/500） | `DATA.LIST` + `DataTable` |
 | | **过滤 / 排序 / 表内搜索**（全部下推给引擎，零本地筛） | `setTabFilter` / `setTabOrderBy` / `setTabSearch` |
@@ -219,6 +221,12 @@ Navicat 9。sundays 目前 **5** 个。引擎侧是插件化 SPI（`DialectLoade
 ### 4.1 连接管理
 
 - **两种入口**：4 步引导（基础信息 → 连接类型 → 凭据 → 确认）与快速连接（选方言直达凭据）。
+- **文件型数据源（DuckDB）**：`database` 字段填一个 `.csv` / `.jsonl` / `.parquet` / `.xlsx`
+  路径即可当数据源打开。CSV / JSONL / Parquet 由 DuckDB 直接开文件，暴露的视图名是
+  **去扩展名的文件名**（`people.csv` → 视图 `people`）；`.xlsx` 由 POI 预转换成临时
+  `.duckdb`，**表名取自 sheet 名**、库名沿用文件名、首行若是表头则用作列名。
+  ⚠️ 预转换**只发生在 `dialect.buildJdbcUrl(...)` 里** —— 任何预先算好 `jdbcUrl` 的调用方
+  都会绕过它（`PoolManager` 的取值顺序是「`jdbcUrl` 非空就用它」）。
 - **凭据可随时测**：向导内「测试连接」与总览面板的「连接」都走 `SYSTEM.TEST_CONNECTION`，
   建 HikariCP 池 + JDBC `isValid(5)` 校验，失败时把引擎原文（常含 `Caused by`）回显。
 - **落盘安全**：`connection.json` 文件权限 0600、目录 0700；v1 → v2 自动迁移。
@@ -292,7 +300,7 @@ end
 
 | 文档 | 内容 |
 |---|---|
-| [`TEST_CASES.md`](./TEST_CASES.md) | **功能测试用例**（H2 / SQLite 双方言真机走查，含实际结果与首轮发现的缺陷） |
+| [`TEST_CASES.md`](./TEST_CASES.md) | **功能测试用例**（H2 / SQLite 双方言 GUI 走查，含实际结果与首轮发现的缺陷） |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | 前端架构：状态机、布局、契约、为什么这么写 |
 | [`../engine/README.md`](../engine/README.md) | 引擎能力全集（含尚未被 UI 使用的部分） |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎架构：路由、方言 SPI、连接池、事务 |

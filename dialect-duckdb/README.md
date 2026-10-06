@@ -41,10 +41,15 @@ dialect-duckdb/
 └── src/
     ├── main/kotlin/com/kxxnzstdsw/dialect/
     │   ├── DuckDBDialect.kt      # 主实现（1249 行）
-    │   └── ExcelToDuckDbCache.kt # Excel → 临时 DuckDB 转换缓存（134 行）
+    │   └── ExcelToDuckDbCache.kt # Excel → 临时 DuckDB 转换缓存（v2.26 起含表头判定）
     └── test/kotlin/com/kxxnzstdsw/dialect/
-        └── DuckDBDialectTest.kt  # 81 个方言测试
+        ├── DuckDBDialectTest.kt      # 81 个方言测试
+        └── ExcelToDuckDbCacheTest.kt # 6 项：转换产物的**行为**（库名 / 列名 / 行数 / 缓存 / 退化）
 ```
+
+> ⚠️ `ExcelToDuckDbCacheTest` 是后加的，**不可省**：原先这里只验 `buildJdbcUrl` 的
+> 字符串拼接，于是「临时库叫 `converted`」「表头混进数据」两处缺陷一路存活到真库冒烟
+> 才被照出来。**「拼出来的 URL 对不对」与「拼出来的东西用不用得了」是两件事。**
 
 ---
 
@@ -65,7 +70,7 @@ dialect-duckdb/
 
 ---
 
-## Excel 预转换机制（v2.7 关键设计）
+## Excel 预转换机制（v2.7 关键设计，v2.26 补两处）
 
 DuckDB JDBC 不直接支持 `.xlsx`。`ExcelToDuckDbCache` 解决：
 
@@ -74,6 +79,35 @@ DuckDB JDBC 不直接支持 `.xlsx`。`ExcelToDuckDbCache` 解决：
 3. 创建临时 DuckDB 文件，写入数据
 4. **缓存 key = Excel 文件 path + size + lastModified** —— 重复访问同一 Excel 不重复转换
 5. 业务层继续走 `jdbc:duckdb:<temp_file>` 标准路径
+
+**转换后用户看到什么**：
+
+| | 库名 | 表名 | 列名 | 数据行数 |
+|---|---|---|---|---|
+| 首行是表头 | **源文件名去扩展名** | sheet 名 | **表头文字** | 数据行数（表头不算） |
+| 首行不是表头 | 同上 | sheet 名 | `col1, col2, …` | 全部行 |
+
+> **v2.26 补上的两处**（原先都是错的，由真库冒烟照出来）：
+>
+> 1. **库名沿用源文件名**。原先临时库写死成 `converted.duckdb` —— 而库名会**直接显示在
+>    应用的库树上**，用户打开 `销售明细.xlsx` 看到的是一棵叫 `converted` 的库，
+>    既认不出自己的文件，也分不清同时开了几个 Excel。
+> 2. **表头行被当成数据写进去了**，列名一律 `col1/col2`。20 行数据的表读回来是 **21 行**。
+>    现在会判定首行是不是表头（判据：首行没有任何一格像数字、而下面的行有），
+>    是则用它当列名并从数据里去掉。
+>
+> 这两处能一路漏到今天，是因为方言自带的测试**只验 `buildJdbcUrl` 的字符串拼接**
+> （「`.xlsx` → URL 以 `.duckdb` 结尾」），**从没打开过转换产物**。
+> 「拼出来的 URL 对不对」与「拼出来的东西用不用得了」是两件事，后者才要断 ——
+> 现由 `ExcelToDuckDbCacheTest`（6 项）+ `DuckDbFileSourceTest`（真库端到端）守住。
+
+**列一律 VARCHAR**，不猜类型：POI 读出的是字符串，猜成数字会毁掉前导零的订单号 / 18 位身份证。
+代价是 `WHERE id > 15` 这类**数值比较**在 Excel 数据源上会被 DuckDB 判为
+「VARCHAR 与 INTEGER_LITERAL 不可比」—— 那是**正确行为**，不是缺陷。
+
+**标识符一律不加引号**：加了引号 DuckDB 就大小写敏感，而应用侧拼 SQL 时从不加引号
+（`WHERE col LIKE …` 里的 `col` 是折成小写的），一改就会对不上。代价是 ASCII 列名会被
+折成小写（`userName` → `username`）。
 
 ---
 
