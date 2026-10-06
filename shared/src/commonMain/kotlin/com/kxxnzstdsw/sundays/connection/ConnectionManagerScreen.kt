@@ -133,6 +133,32 @@ fun ConnectionManagerScreen(
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    /**
+     * 待确认删除的连接 —— **非 null 时只弹框，不删**。
+     *
+     * ## 为什么必须有这一步
+     *
+     * 删除连接**立刻**从 `connection.json` 落盘移除，而没有撤销、没有回收站：
+     * 一次误按就是配置连口令一起没了，用户只能重新把主机 / 端口 / 用户 / 密码打一遍。
+     * 更糟的是这个界面**可以纯键盘操作**（Tab 到连接项 → Tab 到「删除」→ Enter），
+     * 而焦点停在按钮上时 Enter 的语义就是「点它」—— 我在真窗口走查时正是这样
+     * 一路 Tab 过去、按了一下回车，连接就没了，界面上没有任何提示。
+     *
+     * ## 为什么收在**这里**而不是两个入口各改一遍
+     *
+     * 删除有两个入口：列表项的 ⋮ 菜单与总览面板的「删除」按钮。收在组件内部
+     * （`requestDelete` 统一转成 `pendingDelete`）才能保证**新增入口自动也被拦住**；
+     * 分别改的话，下一个人加第三个入口时又会漏。
+     *
+     * 模式与 [com.kxxnzstdsw.sundays.ui.DangerousSql] 的危险 SQL 确认框同源：
+     * 「先记下待办，弹框让用户明确点头，再真执行」。
+     */
+    var pendingDelete by remember { mutableStateOf<ConnectionConfig?>(null) }
+    val requestDelete: (String) -> Unit = { id ->
+        // 列表已经变了（被别处删掉）就静默放弃 —— 弹一个空框只会让人莫名其妙
+        connections.firstOrNull { it.id == id }?.let { pendingDelete = it }
+    }
+
     Row(modifier = modifier.fillMaxHeight()) {
         // 左侧: 连接列表
         ConnectionListPanel(
@@ -143,7 +169,7 @@ fun ConnectionManagerScreen(
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
             onEditConnection = onEditConnection,
-            onDeleteConnection = onDeleteConnection,
+            onDeleteConnection = requestDelete,
             isEmbeddedInDialog = isEmbeddedInDialog,
             onOpenSettings = onOpenSettings,
             modifier = Modifier
@@ -177,12 +203,78 @@ fun ConnectionManagerScreen(
             onConnect = onConnect,
             onDisconnect = onDisconnect,
             onEditConnection = onEditConnection,
-            onDeleteConnection = onDeleteConnection,
+            onDeleteConnection = requestDelete,
             modifier = Modifier
                 .widthIn(min = 350.dp)
                 .fillMaxHeight(),
         )
     }
+
+    // 确认框渲染在 Row **之外**：它是模态浮层，与左右两栏的布局无关。
+    pendingDelete?.let { target ->
+        DeleteConnectionConfirmDialog(
+            connection = target,
+            onConfirm = {
+                pendingDelete = null
+                onDeleteConnection(target.id)
+            },
+            onDismiss = { pendingDelete = null },
+        )
+    }
+}
+
+/**
+ * 删除连接的二次确认框。
+ *
+ * ## 文案要点
+ *
+ * - **点名道姓**：只说「确定要删除吗」太轻 —— 列表里有好几个连接时用户分不清删的是哪个，
+ *   所以把连接名直接写进正文。
+ * - **说清不可逆**：明确写出「不会断开数据库、也不会删库里的数据，但连接配置（含口令）
+ *   会从本地删掉且无法撤销」。用户真正怕的往往是「会不会把库删了」，这句话把边界划清楚，
+ *   免得他为了保险反而不敢删。
+ *
+ * ## 按钮顺序与默认焦点
+ *
+ * M3 `AlertDialog` 的 `confirmButton` 在 `dismissButton` **之后**渲染，因此 Tab 序是
+ * 「取消 → 删除」—— 第一个停靠点是撤销方向。删除按钮用 `error` 配色，让它即便在 Tab 序末尾
+ * 也一眼可辨。
+ */
+@Composable
+private fun DeleteConnectionConfirmDialog(
+    connection: ConnectionConfig,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除连接") },
+        text = {
+            Column {
+                Text("确定要删除连接「${connection.name}」吗？")
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "将删除的是本地连接配置（含保存的口令），无法撤销。\n" +
+                        "不会断开数据库，也不会删除库中的任何数据。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        dismissButton = {
+            WinTextButton(onClick = onDismiss) { Text("取消") }
+        },
+        confirmButton = {
+            WinButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+                shape = SundaysPalette.buttonShape,
+            ) { Text("删除") }
+        },
+    )
 }
 
 /** 引擎侧连接会话状态 */
