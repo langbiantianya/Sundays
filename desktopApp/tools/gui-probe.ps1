@@ -61,6 +61,8 @@ public class Probe {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, IntPtr e);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public KEYBDINPUT ki; }
@@ -198,6 +200,19 @@ foreach ($raw in ($Actions -split ';')) {
         'TYPE'      { Write-Text $arg; "  [TYPE] $arg" }
         'WAIT'      { Start-Sleep -Milliseconds $count; "  [WAIT ${count}ms]" }
         'SHOT'      { Save-Shot $arg }
+        # 把鼠标挪到窗口右下角（通常是空白）**再截图**。
+        #
+        # ⚠️ 这一条不是可有可无的整洁癖，而是**判读的前提**：Compose 会给「鼠标悬停」
+        # 的元素画高亮，而 `SetCursorPos` 挪过的指针会一直停在那儿。于是截图里
+        # 「哪个元素亮着」= **鼠标在哪**，而不是「焦点在哪」—— 两者会分叉，
+        # 于是把「焦点在名称框」读成「焦点在 POSTGRESQL 卡片」，
+        # 整条 Tab 计数全部错位。踩过之后每张截图前都应该先 PARK。
+        'PARK'      {
+            $r = $script:Rect
+            [void][Probe]::SetCursorPos($r.Right - 12, $r.Bottom - 12)
+            Start-Sleep -Milliseconds 350
+            "  [PARK] 鼠标移到 ($($r.Right - 12),$($r.Bottom - 12))"
+        }
         default     { "  [未知动作] $raw" }
     }
     Start-Sleep -Milliseconds 250
