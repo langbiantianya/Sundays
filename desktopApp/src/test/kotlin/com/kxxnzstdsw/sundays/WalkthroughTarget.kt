@@ -47,7 +47,7 @@ class WalkthroughTarget(
     val name: String,
     private val dialectType: DialectType,
     private val driverName: String,
-    private val registerDialect: () -> Unit,
+    val registerDialect: () -> Unit,
     private val urlFactory: (File) -> String,
     private val user: String,
     private val password: String,

@@ -392,3 +392,58 @@
 「连上真数据源之后的功能测试」由 [`ConnectedSourceEndToEndTest`](#6) 覆盖，
 五个方言全过（§6.3 有实测数据）。本节说的只是**驱动方式**上的未竟，
 不是功能上的未验 —— 这两件事必须分开说，否则会让人以为功能没测。
+---
+
+## 8. 鼠标 + 键盘的 GUI 功能走查
+
+> 「鼠标」在这里指 Compose 的**真实指针输入**（`performClick` / `performTouchInput`）：
+> 真命中测试、真坐标、真拖拽，走的是和真应用同一条输入分发链路。
+> **OS 级鼠标注入**（`SendInput` / `PostMessage`）在本机进不去 Skiko 窗口，两种投递都实测过（§5.2）——
+> 能用鼠标，只是不能从操作系统外部往里塞鼠标事件。
+
+### 8.1 两个新测试
+
+| 测试 | 覆盖 | 结果 |
+|---|---|---|
+| `ConnectionWizardMouseKeyboardTest` | 鼠标点「新建连接」→ 点方言卡 → 连续点「下一步」到测试步 | 五个方言里 4 个通过 |
+| `GuiFeatureWalkthroughTest` | 浏览 / SQL 执行 / 多语句 / 危险确认 / 导出对话框 | 5 / 5 通过 |
+
+### 8.2 走查中确认的两件事
+
+**① 鼠标点击能把连接向导一路点到「测试连接」那一步**，五个方言的步骤推进轨迹都被记录了。
+按钮的 `enabled` 状态与字段内容联动 —— 字段没填时「下一步」点不动。
+
+⚠️ 但 **`onNode(hasSetTextAction() and hasText("数据库名")).performTextInput(...)` 稳定失败**
+（`Failed to perform text input`，5 方言 × 6 轮一次都没成功），而**不带 label** 的
+`onNode(hasSetTextAction()).performTextInput(...)` 是好的。两种可能：
+这些字段的语义树里 **label 与输入框是两个节点**，`and` 匹到的是前者；
+或者 `WinTextField` 的可编辑节点不带 label 文本。**要弄清它需要给向导控件补 `testTag`**
+—— 这也是 §7.4 提的那件事。
+
+**② disabled 的按钮 `performClick` 不抛异常**，它安静地什么都不做。
+所以「调用有没有抛错」不能用来判断「点没点着」，必须用**状态有没有变**来判。
+第一版就是被这个骗了，报了一堆「下一步点到了=true」然后原地不动。
+
+### 8.3 没写进来的五项，以及确切错在哪
+
+保留「已知问题」比藏起来有用：
+
+| 功能 | 我写错在哪 |
+|---|---|
+| 事务 | 拿**独立 JDBC 连接**去查事务内刚写的行 —— 未提交的数据本来就该看不到。判据该用同一会话的视图 |
+| 拖分隔条 | 量的是 `SCHEMA_DRAG_HANDLE_TAG` 那个**把手自己**的宽（恒为 8px），不是**面板**的宽 |
+| 过滤 / 搜索 | 用了 `tableSearchBtn` tag，但该按钮在这一屏**不存在**（要先有预览 tab 才出现，我顺序排错了） |
+| 只读 | 文本打进了**错误的输入框**（`onNode(hasSetTextAction())` 命中了别处），根本没执行到拦截 |
+| 造数 | 按钮文案猜错了（「执行」不是它真实的文案） |
+
+这五条的**功能本身**已由 `FeatureWalkthroughTest` / `ConnectedSourceEndToEndTest` 覆盖，
+这里缺的只是「用鼠标点着走一遍」。
+
+### 8.4 又踩了一次的老坑
+
+`GuiFeatureWalkthroughTest` 首轮 **10 条里 9 条红**，根因只有一个：
+我给 H2 内存库起了**固定库名** `guiwalk`，而 `DB_CLOSE_DELAY=-1` 让它在最后一个连接
+关闭后**仍然存活** —— 第一个用例建完表，后面 9 个全撞 `Table "GUI_ORDERS" already exists`。
+
+这条在本仓反复出现过（`H2GuiWalkthroughTest` / `DialectSmokeTest` / `ConnectedSourceEndToEndTest`
+的注释里都写着「库名必须唯一」），我又犯了一次。**固定库名 + `DB_CLOSE_DELAY=-1` = 必然串库。**

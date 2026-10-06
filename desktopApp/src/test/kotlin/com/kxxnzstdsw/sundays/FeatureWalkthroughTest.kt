@@ -109,6 +109,12 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
         System.setProperty("user.home", tempHome.absolutePath)
 
         engine = IdbEngine(driversDir = File("/nonexistent"), dialectsDir = File("/nonexistent"))
+        // ⚠️ 必须在**每个用例**都注册方言：`engine.close()` 会连带清空 `DialectLoader`
+        // 的注册表，而 SPI bootstrap 是全局幂等的（只扫一次）—— 于是别的测试类跑过之后
+        // 这里就再也解析不到方言，症状是「等库列表等满 60s」或「等连接成功等满 10s」，
+        // 完全指不到「方言没注册」。本类原来靠 `target.open()` 注册（只有本地目标会注册），
+        // 加上 `ConnectionWizardMouseKeyboardTest` 之后就稳定红了。
+        target.registerDialect()
         target.open(tempHome)
         registerBuiltinEditors()
 
