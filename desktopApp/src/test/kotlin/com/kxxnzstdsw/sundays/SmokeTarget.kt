@@ -45,6 +45,25 @@ interface SmokeTarget {
     /** 归还工作区。**必须**在 tearDown 里无条件调用 —— 远程库上留下的库是别人的负担。 */
     fun teardown(workspace: String)
 
+    /**
+     * 把工作区清成「一张表都没有」。
+     *
+     * ## 为什么远程库需要这一步
+     *
+     * 客户端-服务器方言复用**固定库名**（见 [ServerSmokeTarget]）——
+     * 每次换一个库就得 `DROP DATABASE`，而 `DROP DATABASE` 会在元数据锁上挂死
+     * （引擎连接池还握着那个库），历史上正是它把服务端连接数打满过。
+     *
+     * 代价就是上一轮留下的表还在，于是下一轮 `CREATE TABLE smoke_items` 直接撞
+     * `Table 'smoke_items' already exists`（实测：`DialectSmokeTest` 三条红）。
+     *
+     * **表级 DDL 不碰库级元数据锁**，所以「建库 + 清表」能在不泄漏连接的前提下
+     * 重新给出与「全新库」等价的起点。
+     *
+     * 本地库每次都是全新的内存库 / 临时文件，默认空实现即可。
+     */
+    fun resetTables(workspace: String) = Unit
+
     /** 应用侧的连接描述 —— 走查全程用它构造引擎请求。 */
     fun config(workspace: String): ConnectionConfig
 
@@ -222,17 +241,42 @@ object DuckDbSmoke : SmokeTarget {
 }
 
 /**
- * 客户端-服务器库的统一形态：**建一个临时 database，用完 DROP**。
+ * 客户端-服务器库：**固定一个库名，复用；建库 + 清表，但绝不 DROP 库**。
  *
- * 选 database 而不是 schema，是因为 MySQL 上 `schema == database`，而 PG 侧建 database
- * 同样能做到「删掉即彻底回收」—— 两者对称，且都不碰别人的默认库。
+ * ## ⚠️ 这里原本是「每次建临时库、跑完 DROP」—— 那是个会打爆服务端的设计
+ *
+ * 原实现每次 `provision` 建一个 `sundays_smoke_<nanos>`、`teardown` 里
+ * `DROP DATABASE IF EXISTS`。实测连跑几轮全量之后，**MySQL 直接不再收新连接**
+ * （端口通、协议层不应答 = `max_connections` 打满），而同一时刻 PostgreSQL 一切正常。
+ *
+ * 机制是「**先 DROP、再关引擎**」这个顺序的必然结果：
+ * 引擎的连接池还握着那个库时，`DROP DATABASE` 会**等元数据锁**；等不到也不放，
+ * `boot()` 里的 `.use {}` 于是**永远走不到 close** —— 每次泄漏一个服务端连接。
+ * 跑 N 轮泄漏 N 个，够几次就把别人的服务端打满。
+ *
+ * 改成：**固定库名 + 只重建表**。
+ * - `provision`：`CREATE DATABASE`（按方言）+ [resetTables] 清空
+ * - `teardown`：**什么都不做** —— 不开连接，就没有连接可泄漏
+ *
+ * 代价是服务端会**留下一个**库（`sundays_smoke`），且是空的。这是刻意的取舍：
+ * 留一个空库远比打爆别人的服务端好。
+ *
+ * ## ⚠️ 固定库名要求「建库失败必须当场炸」，不能吞
+ *
+ * 第一版把建库包在 `runCatching { }.onFailure { println(...) }` 里，于是
+ * 建库失败只打印一行、**`provision` 照样返回库名**，测试在十几行之后才以
+ * `FATAL: database "sundays_smoke" does not exist` 失败 —— 报错指向完全错误的地方。
+ * 现在建库失败直接抛出：错在哪就在哪炸。
+ *
+ * ⚠️ 共用固定库名的前提是同一时刻只有一个 JVM 在跑测试。CI 并行跑时要把库名
+ * 加上运行标识（`System.nanoTime()` 或 CI 的 build id），否则两个任务会互相清表。
  */
 abstract class ServerSmokeTarget(
     private val host: String,
     private val port: Int,
     private val user: String,
     private val password: String,
-    /** 建 / 删 database 时用的引导库。 */
+    /** 建库 / 连库时的引导库。 */
     private val bootstrapDb: String,
 ) : SmokeTarget {
     override fun reachable(): Boolean = runCatching {
@@ -242,27 +286,61 @@ abstract class ServerSmokeTarget(
 
     protected abstract fun urlFor(database: String): String
 
+    /** 该方言的标识符引用（MySQL 反引号 / PG 双引号）。 */
+    protected abstract fun quoteIdent(name: String): String
+
+    /** 建库。**必须幂等**，且失败必须抛出（见类注释）。 */
+    protected abstract fun ensureDatabase(name: String)
+
+    /**
+     * 列出库里的**视图**与**基表**（不含其它对象）。
+     *
+     * ⚠️ **视图必须一并清**：第一版只清基表，视图 `smoke_v_items` 留在库里，
+     * 下一轮 `CREATE VIEW smoke_v_items` 直接撞 `already exists`
+     * （实测：`DialectSmokeTest` S3 一条红）。
+     * 而视图恰恰是 S3 这条用例自己建的 —— 只清表就必然漏。
+     */
+    protected abstract fun listViews(conn: Connection, workspace: String): List<String>
+
+    protected abstract fun listBaseTables(conn: Connection, workspace: String): List<String>
+
+    /**
+     * 把上面那批对象一次性 DROP 掉。**必须视图在前、表在后** —— 视图依赖底下的表，
+     * 反过来会被依赖挡住。多表单语句是有意为之：外键与视图的顺序问题一次解决。
+     */
+    protected abstract fun dropStatements(views: List<String>, tables: List<String>): List<String>
+
     /** 见 [LocalSmokeTarget.toString]：让参数化测试的名字读起来是 `[MySQL]`。 */
     override fun toString(): String = label
 
-    private fun boot(): Connection = DriverManager.getConnection(urlFor(bootstrapDb), user, password)
+    /**
+     * 连**引导库**的直连 —— 建库要在那里发（`CREATE DATABASE` 不能在目标库里建自己）。
+     *
+     * `protected` 而非 `private`：两个方言子类的 [ensureDatabase] 都要用。
+     */
+    protected fun boot(): Connection = DriverManager.getConnection(urlFor(bootstrapDb), user, password)
 
     override fun provision(scope: File): String {
-        val name = "sundays_smoke_${System.nanoTime()}"
-        boot().use { c ->
-            c.createStatement().use { it.execute("CREATE DATABASE $name") }
-        }
+        val name = "sundays_smoke"
+        ensureDatabase(name)
+        resetTables(name)
         return name
     }
 
-    override fun teardown(workspace: String) {
+    override fun resetTables(workspace: String) {
         if (workspace.isBlank()) return
-        runCatching {
-            boot().use { c ->
-                c.createStatement().use { it.execute("DROP DATABASE IF EXISTS $workspace") }
+        direct(workspace).use { c ->
+            val views = listViews(c, workspace)
+            val tables = listBaseTables(c, workspace)
+            if (views.isEmpty() && tables.isEmpty()) return@use
+            dropStatements(views, tables).forEach { sql ->
+                c.createStatement().use { it.execute(sql) }
             }
         }
     }
+
+    /** **刻意不 DROP 库** —— 见类注释。开连接就有泄漏的风险，而收益只是「不留个空库」。 */
+    override fun teardown(workspace: String) = Unit
 
     protected fun creds(): Pair<String, String> = user to password
 }
@@ -277,6 +355,56 @@ object MySqlSmoke : ServerSmokeTarget("192.168.1.5", 3306, "root", "666666", "my
     override fun urlFor(database: String) =
         "jdbc:mysql://192.168.1.5:3306/$database" +
             "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+
+    override fun quoteIdent(name: String) = "`$name`"
+
+    /**
+     * MySQL 的 `CREATE DATABASE` **支持** `IF NOT EXISTS`，所以这一句天然幂等。
+     *
+     * ⚠️ 它**不支持** `IF NOT EXISTS` 之外的可选子句在别家数据库上的等价物 ——
+     * `CHARACTER SET utf8mb4` 是 MySQL 专有的，写在这里没问题，但**绝不能**让
+     * PostgreSQL 复用同一句（见 [PostgresSmoke.ensureDatabase] —— 那边直接语法错，
+     * 而错会被吞掉、最终以「库不存在」的形式在别处炸出来）。
+     */
+    override fun ensureDatabase(name: String) {
+        boot().use { c ->
+            c.createStatement().use { s ->
+                s.execute("CREATE DATABASE IF NOT EXISTS ${quoteIdent(name)} CHARACTER SET utf8mb4")
+            }
+        }
+    }
+
+    override fun listViews(conn: Connection, workspace: String): List<String> =
+        conn.prepareStatement(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'VIEW'"
+        ).use { st ->
+            st.setString(1, workspace)
+            st.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
+        }
+
+    override fun listBaseTables(conn: Connection, workspace: String): List<String> =
+        conn.prepareStatement(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'"
+        ).use { st ->
+            st.setString(1, workspace)
+            st.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(rs.getString(1)) }
+            }
+        }
+
+    /**
+     * 先关外键检查再一把 DROP 完 —— `smoke_child` 引用 `smoke_items`，
+     * 不关的话单独 DROP 父表会被外键挡住，而「按依赖顺序排」在测试里维护不起。
+     * 视图先删、基表后删（MySQL 里 `DROP VIEW` 与 `DROP TABLE` 不能混在一个语句里）。
+     */
+    override fun dropStatements(views: List<String>, tables: List<String>): List<String> = buildList {
+        add("SET FOREIGN_KEY_CHECKS = 0")
+        if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) })
+        if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) })
+        add("SET FOREIGN_KEY_CHECKS = 1")
+    }
 
     override fun config(workspace: String): ConnectionConfig {
         val (u, p) = creds()
@@ -302,6 +430,52 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5432, "postgres", "66666
     override fun registerDialect() = DialectLoader.registerForTesting("Postgresql", PostgreSQLDialect())
 
     override fun urlFor(database: String) = "jdbc:postgresql://192.168.1.5:5432/$database"
+
+    override fun quoteIdent(name: String) = "\"$name\""
+
+    /**
+     * PostgreSQL 的 `CREATE DATABASE` **既不支持 `IF NOT EXISTS`，也不支持
+     * `CHARACTER SET`** —— 直接写 MySQL 那一句会语法错。
+     *
+     * 正确的幂等写法是「先查 `pg_database`，不存在再建」。
+     * ⚠️ `CREATE DATABASE` 不能跑在事务块里，这里用的是自动提交的直连，没问题。
+     */
+    override fun ensureDatabase(name: String) {
+        boot().use { c ->
+            val exists = c.prepareStatement("SELECT 1 FROM pg_database WHERE datname = ?").use { st ->
+                st.setString(1, name)
+                st.executeQuery().use { it.next() }
+            }
+            if (!exists) {
+                c.createStatement().use { it.execute("CREATE DATABASE ${quoteIdent(name)}") }
+            }
+        }
+    }
+
+    override fun listViews(conn: Connection, workspace: String): List<String> =
+        conn.createStatement().use { s ->
+            s.executeQuery("SELECT viewname FROM pg_views WHERE schemaname = 'public'").use { rs ->
+                buildList { while (rs.next()) add(rs.getString(1)) }
+            }
+        }
+
+    override fun listBaseTables(conn: Connection, workspace: String): List<String> =
+        conn.createStatement().use { s ->
+            // PG 里 database ≈ schema，用户表都在 public 下；`tablename` 只含基表
+            s.executeQuery("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").use { rs ->
+                buildList { while (rs.next()) add(rs.getString(1)) }
+            }
+        }
+
+    /**
+     * 视图先、表后，多表单语句 + `CASCADE`：一次解决外键与视图的依赖顺序，
+     * 不用在测试里维护拓扑。PG 里 `DROP TABLE ... CASCADE` 会连带把依赖它的视图一起带走，
+     * 但视图先删更直白，也让「视图确实被显式删掉了」这件事看得见。
+     */
+    override fun dropStatements(views: List<String>, tables: List<String>): List<String> = buildList {
+        if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) } + " CASCADE")
+        if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) } + " CASCADE")
+    }
 
     override fun config(workspace: String): ConnectionConfig {
         val (u, p) = creds()
