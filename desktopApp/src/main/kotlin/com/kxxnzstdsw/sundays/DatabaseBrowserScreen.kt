@@ -56,6 +56,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.RadioButton
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
@@ -1528,6 +1530,25 @@ private fun PreviewTabArea(
             val current = state.tabs.getOrNull(state.selectedTabIndex)
             if (current != null) {
                 val scope = rememberCoroutineScope()
+                // 导出对话框：挂在 `PreviewTabArea` 这一层而不是 `DataTable` 的右键菜单里 ——
+                // 引擎的导出是**子进程**跑一段 SQL，右键菜单塞不下一整套格式/路径/文件名
+                var exportSql by remember { mutableStateOf<String?>(null) }
+                if (exportSql != null) {
+                    ExportDialog(
+                        presetSql = exportSql!!,
+                        presetTableName = current.tableName,
+                        onDismiss = { exportSql = null },
+                        onConfirm = { fmt, dir, name, tbl ->
+                            val sql = exportSql!!
+                            exportSql = null
+                            scope.launch {
+                                state.exportQuery(sql, fmt, dir, name, tbl)
+                                    .onSuccess { current.error = "已导出 ${it.rowsWritten} 行 → ${it.file}" }
+                                    .onFailure { current.error = "导出失败：${it.message}" }
+                            }
+                        },
+                    )
+                }
                 PreviewTabContent(
                     tab = current,
                     onPageChange = { page -> state.goToTabPage(current, page) },
@@ -1552,6 +1573,7 @@ private fun PreviewTabArea(
                     onFilterChange = { state.setTabFilter(current, it) },
                     onOrderByChange = { state.setTabOrderBy(current, it) },
                     onSearchChange = { state.setTabSearch(current, it) },
+                    onExport = { sql -> exportSql = sql },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1615,6 +1637,7 @@ private fun TableFilterBar(
     onFilterChange: (String) -> Unit,
     onOrderByChange: (String) -> Unit,
     onSearchChange: (String) -> Unit,
+    onExport: ((String) -> Unit)? = null,
 ) {
     // 本地草稿：受控输入框每敲一个字符都触发一次引擎往返会打爆数据库，
     // 所以文本先落在这里，回车或失焦才提交。
@@ -1691,6 +1714,21 @@ private fun TableFilterBar(
             shape = SundaysPalette.buttonShape,
             modifier = Modifier.testTag(TABLE_FILTER_BTN_TAG),
         ) { Text(if (filterOpen) "隐藏过滤" else "过滤") }
+        if (onExport != null) {
+            Spacer(Modifier.width(8.dp))
+            WinButton(
+                // 导出**整张表**（与当前页无关）。SQL 在这里拼而不是交给调用方 ——
+                // 一来「导出整表」是这条按钮的固有语义，不该由调用方每次重写；
+                // 二来少一层 lambda 就少一处同名遮蔽。
+                onClick = { onExport.invoke("SELECT * FROM ${tab.tableName}") },
+                shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(TABLE_EXPORT_BTN_TAG),
+            ) {
+                Icon(Icons.Filled.SaveAlt, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("导出")
+            }
+        }
     }
     if (filterOpen) {
         var whereDraft by remember(tab) { mutableStateOf(tab.whereClause) }
@@ -1795,6 +1833,115 @@ internal const val DANGEROUS_CONFIRM_BTN_TAG = "dangerousConfirmBtn"
 /** SQL 工作台「只读」开关的 UI 测试 tag。 */
 internal const val SQL_READONLY_CHIP_TAG = "sqlReadonlyChip"
 
+/** 表预览「导出」按钮的 UI 测试 tag。 */
+internal const val TABLE_EXPORT_BTN_TAG = "tableExportBtn"
+
+/** 导出对话框里「开始导出」按钮的 UI 测试 tag。 */
+internal const val EXPORT_CONFIRM_BTN_TAG = "exportConfirmBtn"
+
+/**
+ * 导出对话框 —— 选格式、输出目录、文件名。
+ *
+ * ## 为什么输出目录是个自由文本框
+ *
+ * 引擎侧 `ExportRunRequest.output_dir` 收的是**绝对路径**，且导出在**引擎进程**里执行
+ * （Direct 模式下就是本进程）。桌面应用没有可靠的「系统目录选择器」可用（Compose
+ * Desktop 至今没有原生 file picker），所以给一个带默认值的文本框，让用户粘贴路径 ——
+ * 默认填当前工作目录，用户不填也能跑。
+ */
+@Composable
+private fun ExportDialog(
+    presetSql: String,
+    presetTableName: String,
+    onConfirm: (DatabaseBrowserState.ExportFormat, String, String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var format by remember { mutableStateOf(DatabaseBrowserState.ExportFormat.CSV) }
+    var dir by remember { mutableStateOf(System.getProperty("user.dir") ?: "") }
+    // 文件名给一个**合法**的默认：中文 + 空格 + 斜杠在文件系统与 SQL 里都有特殊含义，
+    // 让用户在一个已经能跑的值上去改，比让他从一个空框开始猜格式稳妥
+    var name by remember { mutableStateOf("export.${DatabaseBrowserState.ExportFormat.CSV.extension}") }
+    var tableName by remember { mutableStateOf(presetTableName) }
+    // 换格式时同步扩展名 —— 否则用户选「Excel」却导出成 export.csv，
+    // 打开时才发现格式不对，那比多一个下拉糟糕得多
+    var lastFormat by remember { mutableStateOf(format) }
+    if (format != lastFormat) {
+        lastFormat = format
+        name = "export.${format.extension}"
+    }
+    // 只有选 SQL INSERT 才问目标表；其余格式的「目标表」是参数校验里的硬要求
+    val needsTable = format == DatabaseBrowserState.ExportFormat.SQL_INSERT
+    val canSubmit = dir.isNotBlank() && name.isNotBlank() && (!needsTable || tableName.isNotBlank())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导出结果") },
+        text = {
+            Column {
+                Text(
+                    "将执行：${presetSql.take(60).replace('\n', ' ')}" +
+                        if (presetSql.length > 60) "…" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("格式", style = MaterialTheme.typography.labelMedium)
+                DatabaseBrowserState.ExportFormat.entries.forEach { f ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = format == f, onClick = { format = f })
+                        Text(
+                            f.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("exportFormat_${f.name}"),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = dir,
+                    onValueChange = { dir = it },
+                    label = { Text("输出目录（绝对路径）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag(EXPORT_DIR_FIELD_TAG),
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("文件名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag(EXPORT_NAME_FIELD_TAG),
+                )
+                if (needsTable) {
+                    OutlinedTextField(
+                        value = tableName,
+                        onValueChange = { tableName = it },
+                        label = { Text("目标表名（INSERT INTO …）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag(EXPORT_TABLE_FIELD_TAG),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            WinButton(
+                onClick = { onConfirm(format, dir, name, tableName) },
+                enabled = canSubmit,
+                shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(EXPORT_CONFIRM_BTN_TAG),
+            ) { Text("开始导出") }
+        },
+        dismissButton = {
+            WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
+        },
+    )
+}
+
+internal const val EXPORT_DIR_FIELD_TAG = "exportDirField"
+internal const val EXPORT_NAME_FIELD_TAG = "exportNameField"
+internal const val EXPORT_TABLE_FIELD_TAG = "exportTableField"
+
 /** 表预览过滤行的 UI 测试 tag。 */
 internal const val TABLE_SEARCH_FIELD_TAG = "tableSearchField"
 internal const val TABLE_SEARCH_BTN_TAG = "tableSearchBtn"
@@ -1812,6 +1959,8 @@ private fun PreviewTabContent(
     onFilterChange: (String) -> Unit = {},
     onOrderByChange: (String) -> Unit = {},
     onSearchChange: (String) -> Unit = {},
+    /** 导出回调，入参是要导出的 SQL（由 [TableFilterBar] 按整表拼好）。 */
+    onExport: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1861,6 +2010,7 @@ private fun PreviewTabContent(
             onFilterChange = onFilterChange,
             onOrderByChange = onOrderByChange,
             onSearchChange = onSearchChange,
+            onExport = onExport,
         )
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
@@ -3429,6 +3579,84 @@ class DatabaseBrowserState(
      * （`map<string, string>`，没有注入面），缺的只是这一个主键信息。
      */
     fun isTableEditable(tab: TablePreviewTab): Boolean = tab.primaryKeyColumn != null
+
+    // ------------------------------------------------------------------------
+    // 导出（引擎 v2.16 已实现，此前前端未接线）
+    // ------------------------------------------------------------------------
+
+    /** 导出格式 —— 与 `ExportRunRequest.format` 一一对应。 */
+    enum class ExportFormat(val label: String, val protoValue: String, val extension: String) {
+        CSV("CSV", "CSV", "csv"),
+        JSON_LINES("JSON Lines", "JSON_LINES", "jsonl"),
+        SQL_INSERT("SQL INSERT 语句", "SQL_INSERT", "sql"),
+        EXCEL("Excel 工作簿", "EXCEL", "xlsx"),
+        PARQUET("Parquet 列存", "PARQUET", "parquet"),
+    }
+
+    /** 导出结果 —— 引擎终止帧回的实际文件路径。 */
+    data class ExportResult(val file: String, val rowsWritten: Long)
+
+    /**
+     * 导出一段 SQL 的结果 —— 发 `EXPORT.RUN_EXPORT`。
+     *
+     * ## 为什么要用 [EngineClient.handle] 而不是 [EngineClient.invoke]
+     *
+     * 导出是**流式**的：每导出一批推一帧 `ExportProgressFrame`，终止帧带 `completed=true`
+     * 与最终 `file_path`。`invoke` 只 collect 到**第一条**终止帧就返回，中间进度与最终
+     * 文件路径都会丢。
+     *
+     * @param format `SQL_INSERT` 时 [tableName] 必填 —— 引擎要拼出 `INSERT INTO <表>`。
+     * @return 失败时 `Result.failure`；成功时 [ExportResult]。
+     */
+    suspend fun exportQuery(
+        sql: String,
+        format: ExportFormat,
+        outputDir: String,
+        fileName: String,
+        tableName: String = "",
+    ): Result<ExportResult> {
+        // 参数先在**前端**校验：让引擎那边才报错的话，用户看到的是一句 JDBC 异常，
+        // 还要在对话框里猜是自己哪里填错了
+        if (sql.isBlank()) return Result.failure(IllegalArgumentException("SQL 为空"))
+        if (outputDir.isBlank()) return Result.failure(IllegalArgumentException("未选择输出目录"))
+        if (fileName.isBlank()) return Result.failure(IllegalArgumentException("请填写文件名"))
+        if (format == ExportFormat.SQL_INSERT && tableName.isBlank()) {
+            return Result.failure(IllegalArgumentException("导出 SQL INSERT 必须给出目标表名"))
+        }
+        val schema = currentSchema()
+        activeDatabases.add(schema)
+        // 在 DSL 之外构造：`sql` / `outputDir` 等字段名会与外层 `dataRequest` 的兄弟消息
+        // 撞名，内联赋值会被解析到外层去（见 updateCell 的 KDoc）
+        val runReq = com.kxxnzstdsw.grpc.exportRunRequest {
+            this.sql = sql
+            this.outputDir = outputDir
+            this.fileName = fileName
+            this.format = format.protoValue
+            this.tableName = tableName
+        }
+        return runCatching {
+            val req = request {
+                id = java.util.UUID.randomUUID().toString()
+                this.connection = engineConn(database = schema)
+                category = Category.EXPORT
+                action = Action.RUN_EXPORT
+                exportRequest = com.kxxnzstdsw.grpc.exportRequest { runExport = runReq }
+            }
+            var file = ""
+            var rows = 0L
+            engine.handle(req).collect { resp ->
+                if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "导出失败" })
+                val p = resp.export.progress
+                rows = p.exportedRows
+                if (p.completed) {
+                    file = p.filePath
+                    if (p.error.isNotBlank()) throw IllegalStateException(p.error)
+                }
+            }
+            if (file.isBlank()) throw IllegalStateException("导出已结束但引擎没有回报文件路径")
+            ExportResult(file = file, rowsWritten = rows)
+        }
+    }
 
     /**
      * 改一个单元格 —— 发 `DATA.UPDATE`（参数化，无注入面）。
