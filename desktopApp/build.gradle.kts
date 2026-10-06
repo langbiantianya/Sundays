@@ -60,6 +60,10 @@ dependencies {
     // 对象浏览的能力差异只有跨方言才暴露得出来（SQLite 无触发器 / 无函数，
     // 而 H2 三样都有）。driver 侧由 runtimeOnly(libs.sqlite) 在运行时提供。
     testImplementation(project(":dialect-sqlite"))
+    // DialectSmokeTest 要在 **四个方言**上跑同一套冒烟（H2 / SQLite / MySQL / PostgreSQL），
+    // 源码里要能 new 出这四个方言来注册。
+    testImplementation(project(":dialect-mysql"))
+    testImplementation(project(":dialect-postgresql"))
     testImplementation(project(":api"))
 }
 

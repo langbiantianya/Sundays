@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays
 
+import com.kxxnzstdsw.sundays.connection.DialectType
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -81,6 +82,37 @@ class SqlLiteralsTest {
      *
      * 判据必须落在**发出去的那条语句**上，而不是它的某个片段上。
      */
+    /**
+     * ⚠️ **CAST 的目标类型逐方言不同，没有公共解** —— 这条就是四方言冒烟逼出来的。
+     *
+     * `CAST(… AS VARCHAR)` 在 **MySQL 上是语法错误**（它的 `CAST` 只认 `CHAR` 等）；
+     * 而换成 `CHAR` 在 **PostgreSQL 上是静默截断**（`CHAR` = `CHARACTER(1)`）。
+     * 两种失败都很难靠单测发现 —— 前者要真 MySQL，后者不报错、只是搜不出东西。
+     */
+    @Test
+    fun `the cast target type is dialect specific`() {
+        assertEquals("VARCHAR", SqlLiterals.castTypeFor(DialectType.H2))
+        assertEquals("VARCHAR", SqlLiterals.castTypeFor(DialectType.POSTGRESQL))
+        assertEquals("VARCHAR", SqlLiterals.castTypeFor(DialectType.SQLITE))
+        assertEquals("VARCHAR", SqlLiterals.castTypeFor(DialectType.DUCKDB))
+        // MySQL 的 CAST **不接受 VARCHAR**，必须用 CHAR
+        assertEquals("CHAR", SqlLiterals.castTypeFor(DialectType.MYSQL))
+    }
+
+    @Test
+    fun `the predicate uses the cast type it is given`() {
+        assertEquals(
+            "CAST(username AS CHAR) LIKE '%bob%'",
+            SqlLiterals.likeContains("username", "bob", "CHAR"),
+            "MySQL 必须用 CHAR",
+        )
+        assertEquals(
+            "CAST(username AS VARCHAR) LIKE '%bob%'",
+            SqlLiterals.likeContains("username", "bob", "VARCHAR"),
+            "其余方言用 VARCHAR（默认值）",
+        )
+    }
+
     @Test
     fun `the predicate always has a left operand`() {
         val p = assertNotNull(SqlLiterals.likeContains("username", "bob"))

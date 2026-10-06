@@ -2969,6 +2969,18 @@ class TablePreviewTab(
     var searchTerm: String by mutableStateOf("")
 
     /**
+     * 本 tab 所属连接的**方言**，用来决定 `CAST` 的目标类型（见 [SqlLiterals.castTypeFor]）。
+     *
+     * 为什么不从 `DatabaseBrowserState.currentConnection` 现取：切连接会清空全部状态，
+     * 而 `whereClause` / `searchTerm` 是**跟着 tab 走**的；tab 在构造那一刻就知道自己属于谁。
+     * 存成字段也让 `effectiveWhere()` 保持纯函数（不读全局状态），可测。
+     *
+     * 默认 `null` = 不知道方言，用 `VARCHAR`（H2 / PG / SQLite / DuckDB 都是它）。
+     * 只有 MySQL 需要换成 `CHAR` —— 它的 `CAST` 不接受 `VARCHAR`，那是**语法错误**。
+     */
+    var dialect: com.kxxnzstdsw.sundays.connection.DialectType? = null
+
+    /**
      * 把本 tab 的**生效过滤条件**算出来 —— 手工 `WHERE` 与表内搜索的合并。
      *
      * 两者都是 AND 关系：用户手填 `status = 'paid'` 又搜 `bob`，结果就是
@@ -2999,7 +3011,8 @@ class TablePreviewTab(
     private fun likeOverAllColumns(): String? {
         val term = searchTerm.trim()
         if (term.isEmpty()) return null
-        val predicates = columns.mapNotNull { SqlLiterals.likeContains(it.key, term) }
+        val castType = SqlLiterals.castTypeFor(dialect ?: com.kxxnzstdsw.sundays.connection.DialectType.H2)
+        val predicates = columns.mapNotNull { SqlLiterals.likeContains(it.key, term, castType) }
         if (predicates.isEmpty()) return null
         return predicates.joinToString(" OR ", prefix = "(", postfix = ")")
     }
@@ -4424,6 +4437,9 @@ class DatabaseBrowserState(
             return
         }
         val tab = TablePreviewTab(schema = schema, tableName = tableName)
+        // 记下方言：表内搜索的 `CAST` 目标类型逐方言不同（MySQL 只认 CHAR），
+        // 而 tab 是跟着连接走的，构造这一刻就知道自己属于谁
+        tab.dialect = currentConnection?.dialect
         tabs = tabs + tab
         selectedTabIndex = tabs.size - 1
         loadTabPreview(tab)

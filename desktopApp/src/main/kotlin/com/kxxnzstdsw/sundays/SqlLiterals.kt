@@ -37,7 +37,34 @@ internal object SqlLiterals {
     fun quote(value: String): String = "'" + value.replace("'", "''") + "'"
 
     /**
-     * 表内搜索词 → `CAST(列 AS VARCHAR) LIKE '%词%'` 的完整谓词；空词返回 `null`（不过滤）。
+     * 拼 `WHERE` 时该用的 CAST 目标类型 —— **逐方言**，没有公共解。
+     *
+     * ## 三个方言，三种答案
+     *
+     * - H2 / PostgreSQL / SQLite / DuckDB → `VARCHAR`
+     * - **MySQL → `CHAR`**
+     *
+     * `CAST(… AS VARCHAR)` 在 MySQL 上是**语法错误**（`You have an error in your SQL syntax`）——
+     * 它的 `CAST` 只接受 `CHAR` / `SIGNED` / `DECIMAL` / `DATE` 等，**没有 `VARCHAR`**。
+     *
+     * 而换成 `CHAR` 在 PostgreSQL 上又是个陷阱：`CHAR` 是 `CHARACTER(1)` 的别名，
+     * `CAST(x AS CHAR)` 会**截断成 1 个字符**，于是 `LIKE '%关键词%'` 永远匹配不上任何多字词 ——
+     * 比报错更难发现，因为它**不报错**，只是静默搜不出东西。
+     *
+     * SQLite 对未知类型名按 affinity 规则走（名字里含 `CHAR` → TEXT），所以 `CHAR` 在它那儿也对。
+     *
+     * ⚠️ 这条是**四方言冒烟**逼出来的：上一轮加 CAST 时在 H2 / SQLite / PG 上都验过，
+     * 唯独漏了 MySQL，而当时那句「`CAST(… AS VARCHAR)` 是这几个方言的公共子集」是**错的**。
+     * 写「在几个方言上都成立」之前，先让它们**真的都跑一遍**。
+     */
+    fun castTypeFor(dialect: com.kxxnzstdsw.sundays.connection.DialectType): String =
+        when (dialect) {
+            com.kxxnzstdsw.sundays.connection.DialectType.MYSQL -> "CHAR"
+            else -> "VARCHAR"
+        }
+
+    /**
+     * 表内搜索词 → `CAST(列 AS <castType>) LIKE '%词%'` 的完整谓词；空词返回 `null`（不过滤）。
      *
      * ## 为什么必须带**列名**、且必须 CAST
      *
@@ -54,17 +81,18 @@ internal object SqlLiterals {
      *
      * **CAST 不是可选的**：不带 CAST 时 `id LIKE '%2%'` 在 H2 直接类型错误，
      * 在 PostgreSQL 是 `operator does not exist: integer ~~ text`。
-     * `CAST(… AS VARCHAR)` 在 H2 / SQLite / PostgreSQL / MySQL 上都成立，是这几个方言的公共子集。
+     * 而 CAST 的**目标类型**逐方言不同，见 [castTypeFor]。
      *
      * 放在 `TablePreviewTab.effectiveWhere()` 里调用，**不在 UI 层拼** ——
      * 拼 SQL 的地方越少，能出错的地方就越少。
      *
      * @param column 结果集里的列名（与 `TableColumn.key` 同源）
+     * @param castType 目标类型，见 [castTypeFor]；传错会得到语法错误（MySQL）或静默截断（PG）
      */
-    fun likeContains(column: String, term: String): String? {
+    fun likeContains(column: String, term: String, castType: String = "VARCHAR"): String? {
         val col = column.trim()
         val t = term.trim()
         if (t.isEmpty() || col.isEmpty()) return null
-        return "CAST($col AS VARCHAR) LIKE ${quote("%$t%")}"
+        return "CAST($col AS $castType) LIKE ${quote("%$t%")}"
     }
 }

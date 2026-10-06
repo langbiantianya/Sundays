@@ -1235,7 +1235,11 @@ class DatabaseBrowserFlowTest {
         val colsAtSearchTime = tab.columns.map { it.key }
         state.setTabSearch(tab, "O'Brien")
         tab.awaitSettled()
-        val searchPredicates = colsAtSearchTime.map { "CAST($it AS VARCHAR) LIKE '%O''Brien%'" }
+        val searchPredicates = colsAtSearchTime.map {
+            // ⚠️ CAST 目标类型**逐方言不同**（MySQL 只认 CHAR；PG 上 CHAR 会截断成 1 字符），
+            // 期望值必须跟着 tab 记录的方言走，不能写死 VARCHAR —— 见 SqlLiterals.castTypeFor
+            "CAST($it AS ${SqlLiterals.castTypeFor(tab.dialect ?: DialectType.H2)}) LIKE '%O''Brien%'"
+        }
         assertEquals(
             "id > 1 AND (${searchPredicates.joinToString(" OR ")})", reqs.last().where,
             "搜索应与手写条件 AND、铺到每一列、且单引号被翻倍转义",
