@@ -4,12 +4,18 @@
 
 .DESCRIPTION
     回答一个具体问题：在这个环境里，能不能**操作真的跑起来的应用**？
-    结论（实测，见仓库 TEST_CASES.md）：
+    结论（实测，见 desktopApp/TEST_CASES.md §5）：
       - 鼠标（SendInput `mouse_event` 与 `PostMessage` 两种投递）**都进不去**；
-      - **键盘（`keybd_event` / `SendInput` + `KEYEVENTF_UNICODE`）进得去**。
+      - **键盘（`keybd_event`）进得去** —— Tab / Shift+Tab / Enter / Space 能改配色、
+        开关紧凑模式、翻页、打开对话框。
 
-    所以这个脚本只做键盘。鼠标那半边留着是有意的 —— 它证明「不能靠鼠标」，
-    而不是「没试过鼠标」。
+    所以这个脚本只做键盘。鼠标那半边没留在代码里，但它的结论是有意的 ——
+    它证明的是「不能靠鼠标」，而不是「没试过鼠标」。
+
+    ⚠️ **SendInput 的文字通道实测是坏的**：无论成功与否它都可能**静默失败**
+    （结构体大小不对 / 权限不够时返回 0），而「界面毫无反应」和「应用收不到输入」
+    长得一模一样，最容易误判成后者。所以 Write-Text **检查返回值**，失败就退回
+    `keybd_event` 逐字符（只支持 ASCII / 符号 —— 文件路径够用，中文打不了）。
 
 .PARAMETER TargetProcessId
     目标 java 进程的 PID。用 `Get-Process java | ? MainWindowTitle -eq 'sundays'` 找；
@@ -99,18 +105,60 @@ function Press-ShiftKey { param([int]$vk, [int]$times)
 }
 
 function Write-Text { param([string]$text)
+    # 首选 SendInput + KEYEVENTF_UNICODE（能打任意字符，含中文）
     $buf = New-Object 'Probe+INPUT[]' ($text.Length * 2)
     for ($i = 0; $i -lt $text.Length; $i++) {
-        $code = [int][char]$text[$i]
+        $code = [uint16][int][char]$text[$i]
         $buf[$i * 2].type = $script:INPUT_KEYBOARD
-        $buf[$i * 2].u.ki.wScan = [ushort]$code
+        $buf[$i * 2].u.ki.wScan = $code
         $buf[$i * 2].u.ki.dwFlags = $script:KEYEVENTF_UNICODE
         $buf[$i * 2 + 1].type = $script:INPUT_KEYBOARD
-        $buf[$i * 2 + 1].u.ki.wScan = [ushort]$code
+        $buf[$i * 2 + 1].u.ki.wScan = $code
         $buf[$i * 2 + 1].u.ki.dwFlags = $script:KEYEVENTF_UNICODE -bor $script:KEYEVENTF_KEYUP
     }
-    [void][Probe]::SendInput([uint32]$buf.Length, $buf, $script:InputSize)
+    $sent = [Probe]::SendInput([uint32]$buf.Length, $buf, $script:InputSize)
     Start-Sleep -Milliseconds 320
+
+    if ($sent -ne $buf.Length) {
+        # ⚠️ SendInput 会**静默失败**：结构体大小不对 / 权限不够时返回 0，界面毫无反应 ——
+        #   而「界面毫无反应」和「应用收不到输入」长得一模一样，极易误判成后者。
+        #   所以这里检查返回值，并退回 keybd_event 逐字符（只支持 ASCII / 符号）。
+        "  [TYPE 降级] SendInput 只送进 $sent/$($buf.Length) 个事件，改用 keybd_event"
+        foreach ($ch in $text.ToCharArray()) { Send-AsciiChar $ch }
+        Start-Sleep -Milliseconds 320
+    }
+}
+
+# ASCII 字符 → 虚拟键码（带 Shift 的记第二个元素）。
+# 只覆盖**路径**会用到的那批：字母数字、\ / : . - _ 与空格。中文打不了（需要 UNICODE 通道）。
+function Send-AsciiChar { param([char]$ch)
+    $shift = $false
+    if ($ch -ge 'a' -and $ch -le 'z') { $vk = [int][char]([char]::ToUpperInvariant($ch)) }
+    else {
+        switch ($ch) {
+            '0' { $vk = 0x30 } '1' { $vk = 0x31 } '2' { $vk = 0x32 } '3' { $vk = 0x33 } '4' { $vk = 0x34 }
+            '5' { $vk = 0x35 } '6' { $vk = 0x36 } '7' { $vk = 0x37 } '8' { $vk = 0x38 } '9' { $vk = 0x39 }
+            'A' { $vk = 0x41 } 'B' { $vk = 0x42 } 'C' { $vk = 0x43 } 'D' { $vk = 0x44 } 'E' { $vk = 0x45 }
+            'F' { $vk = 0x46 } 'G' { $vk = 0x47 } 'H' { $vk = 0x48 } 'I' { $vk = 0x49 } 'J' { $vk = 0x4A }
+            'K' { $vk = 0x4B } 'L' { $vk = 0x4C } 'M' { $vk = 0x4D } 'N' { $vk = 0x4E } 'O' { $vk = 0x4F }
+            'P' { $vk = 0x50 } 'Q' { $vk = 0x51 } 'R' { $vk = 0x52 } 'S' { $vk = 0x53 } 'T' { $vk = 0x54 }
+            'U' { $vk = 0x55 } 'V' { $vk = 0x56 } 'W' { $vk = 0x57 } 'X' { $vk = 0x58 } 'Y' { $vk = 0x59 }
+            'Z' { $vk = 0x5A }
+            ' ' { $vk = 0x20 }
+            '/' { $vk = 0xBF }
+            '\' { $vk = 0xDC }
+            '.' { $vk = 0xBE }
+            ',' { $vk = 0xBC }
+            '-' { $vk = 0xBD }
+            '_' { $vk = 0xBD; $shift = $true }
+            ':' { $vk = 0xBA; $shift = $true }
+            default { return }   # 打不了就跳过，别把整条文本丢掉
+        }
+    }
+    if ($shift) { [Probe]::keybd_event(0x10, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 15 }
+    [Probe]::keybd_event([byte]$vk, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 15
+    [Probe]::keybd_event([byte]$vk, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 15
+    if ($shift) { [Probe]::keybd_event(0x10, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 15 }
 }
 
 function Save-Shot { param([string]$name)
