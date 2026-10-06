@@ -1,6 +1,5 @@
 package com.kxxnzstdsw.sundays.editor.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
@@ -11,6 +10,7 @@ import androidx.compose.ui.unit.sp
 import com.kxxnzstdsw.sundays.editor.SyntaxHighlighter
 import com.kxxnzstdsw.sundays.editor.TokenType
 import com.kxxnzstdsw.sundays.ui.asTokenColors
+import com.kxxnzstdsw.sundays.ui.isDarkMode
 
 /**
  * 代码编辑器视觉主题 — 颜色 + 字体 + 字号。
@@ -79,7 +79,7 @@ data class CodeEditorTheme(
          *
          * ## 为什么要从写死常量改成跟随配色
          *
-         * 原先 `default()` 只按 [isSystemInDarkTheme] 在 [Light] / [Dark] 间二选一，由此
+         * 原先 `default()` 只按**系统**明暗在 [Light] / [Dark] 间二选一，由此
          * 有两个问题（与 `DataTableTheme` 同源）：
          *
          * 1. **无视用户选的明暗档**。`AppearanceState` 允许强制「始终浅色 / 始终深色」，
@@ -103,9 +103,11 @@ data class CodeEditorTheme(
             // 结果现代三套主题的编辑器底色与行号槽全部变色 —— 工作台工具栏（执行 SQL /
             // 执行造数按钮所在的那一行）跟着一起「看着不对」，而根因离按钮有两层之远。
             //
-            // 代价：现代档下编辑器仍按**系统**明暗而非应用的明暗档切换（与改造前一致）。
-            // 这是已知的历史行为，不在本次复古改造的范围内。
-            if (!tokens.isClassic) return if (isSystemInDarkTheme()) Dark else Light
+            // ⚠️「原样返回常量」约束的是**颜色**，不是「谁决定选哪一套」。选档位必须读
+            // [isDarkMode]（应用生效档位），不能读 `isSystemInDarkTheme()`（**系统设置**）——
+            // 后者与用户选的「始终浅色 / 始终深色」无关。用户强制浅色而系统是深色时，
+            // 整页是浅的、唯独编辑器是深的一块：那不是风格问题，是会让人以为区域坏掉的反差。
+            if (!tokens.isClassic) return if (isDarkMode) Dark else Light
 
             val scheme = androidx.compose.material3.MaterialTheme.colorScheme
             return CodeEditorTheme(

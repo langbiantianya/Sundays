@@ -239,6 +239,41 @@ val isClassicChrome: Boolean
 /** 当前生效的配色主题 —— 供不在 `MaterialTheme` 体系内的取值点使用（见 `ThemePalette`）。 */
 val LocalPalette = staticCompositionLocalOf { ThemePalette.BLUE_GRAY }
 
+/**
+ * 当前生效的**明暗档** —— 由 [SundaysTheme] 按 `darkTheme` 参数注入。
+ *
+ * ## 为什么 `colorScheme` 里明明已经有了，还要再注入一个
+ *
+ * `SundaysTheme` 的 `darkTheme` 参数确实已经决定了 `colorScheme`，所以「现在是深色还是浅色」
+ * 从 `MaterialTheme.colorScheme` 反推**理论上**是可行的（比亮度阈值）—— 但只有反推，没有真相：
+ *
+ * 1. **反推必然带一个阈值。** 赛博朋克深色的底是带饱和的深蓝、紫调，`luminance()` 未必比某些
+ *    浅色主题的深色区域低。阈值写死成 `0.5f` 的那一刻，它就成了一句「只要背景别太亮就算浅色」
+ *    的隐含约定，将来加一套高对比主题就会静默判反 —— 而且判反的表现是「界面看着正常，
+ *    编辑器却是另一档」，极难归因。
+ * 2. **`colorScheme` 的职责是取色，不是表态。** 同文件的注释已经踩过这个坑：编辑器
+ *    `themed()` 曾试图用 `scheme.surface` 覆盖编辑器底色，结果现代三套主题整体变色。
+ *    「用 `colorScheme` 取底色」与「用 `colorScheme` 判断明暗」是两件事，但混用时没人分得清
+ *    哪次是故意的 —— 所以这里宁可多注入一个显式真相，也不留需要靠反推解释的暗道。
+ *
+ * 缺了它的直接后果：`CodeEditorTheme.themed()` / `DataTableTheme.themed()` 读不到应用档位，
+ * 只能退回 `isSystemInDarkTheme()`（**系统设置**）。于是用户强制「始终浅色」而系统是深色时，
+ * 整个界面是浅的，唯独工作台的编辑器与结果表格是深的一块 —— 用户会以为那块区域坏了。
+ *
+ * 默认值 `false`（浅色）与 M3 自己的 `lightColorScheme()` 默认一致：**没有套 [SundaysTheme]**
+ * 时渲染的内容按浅色算。生产路径上不存在这种渲染（`main.kt` 把所有界面都包在主题里），
+ * 它只服务于 Preview / 测试。
+ */
+val LocalDarkMode = staticCompositionLocalOf { false }
+
+/**
+ * 当前是否深色档。
+ *
+ * 读它而不是读 `MaterialTheme.colorScheme` 的理由见 [LocalDarkMode]。
+ */
+val isDarkMode: Boolean
+    @Composable @ReadOnlyComposable get() = LocalDarkMode.current
+
 // ============================================================================
 // 3D 斜面
 // ============================================================================

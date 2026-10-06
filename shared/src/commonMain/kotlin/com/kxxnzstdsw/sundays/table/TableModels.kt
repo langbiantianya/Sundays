@@ -1,6 +1,5 @@
 package com.kxxnzstdsw.sundays.table
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -13,6 +12,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.kxxnzstdsw.sundays.ui.LocalUiTokens
 import com.kxxnzstdsw.sundays.ui.SelectionMode
+import com.kxxnzstdsw.sundays.ui.isDarkMode
 
 // ============================================================================
 // 列定义 (TableColumn)
@@ -186,7 +186,7 @@ data class DataTableTheme(
          *
          * ## 为什么要从硬编码常量改成跟随配色
          *
-         * 原先 `default()` 只按 [isSystemInDarkTheme] 在 [Light] / [Dark] 两个**写死色值**的
+         * 原先 `default()` 只按**系统**明暗在 [Light] / [Dark] 两个**写死色值**的
          * 常量间二选一，由此产生两个问题：
          *
          * 1. **无视用户选的明暗档**。`AppearanceState` 允许强制「始终浅色 / 始终深色」，
@@ -207,8 +207,10 @@ data class DataTableTheme(
             // ⚠️ 现代档**必须原样返回** Dark / Light —— 这两套的行底 / 表头 / 选行色是
             // 独立调过的（表头比正文更亮形成凹槽感、选行 `#E3F2FD` 是淡蓝而非主色染）。
             // 曾一度在这里统一改成从 `ColorScheme` 取色，结果现代三套主题的表格整体变色。
-            // 代价：现代档下表格仍按**系统**明暗而非应用的明暗档切换（与改造前一致）。
-            if (!tokens.isClassic) return if (isSystemInDarkTheme()) Dark else Light
+            // ⚠️「原样返回常量」约束的是**颜色**，不是「谁决定选哪一套」。选档位读 [isDarkMode]
+            //（应用生效档位）而不是 `isSystemInDarkTheme()`（系统设置）—— 后者与用户选的
+            // 「始终浅色 / 始终深色」无关，一页浅色界面里嵌一块深色表格，会被当成区域损坏。
+            if (!tokens.isClassic) return if (isDarkMode) Dark else Light
 
             return DataTableTheme(
                 headerBackground = scheme.surfaceVariant,

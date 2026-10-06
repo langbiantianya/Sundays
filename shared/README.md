@@ -82,7 +82,8 @@ shared/
 | `DialectType.engineDriverName` | `commonMain/.../connection/ConnectionConfig.kt` | 方言枚举 → 引擎 `DatabaseDialect.driverName`（`MYSQL` → `Mysql`；proto `ConnectionConfig.driver` 必须填这个，**不能用 `Enum.name`**） |
 | `TopNavBar` | **不存在** | ⚠️ 该组件已无实现（`navigation/` 下只有 `AppDestination.kt`），说明见 [`ARCHITECTURE.md` §5.2](./ARCHITECTURE.md) |
 | `AppDestination` | `commonMain/.../navigation/AppDestination.kt` | 顶层导航目标枚举（`label` 供导航条渲染） |
-| `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`isSystemInDarkTheme()` → `SundaysPalette` 的深 / 浅配色）；各平台入口只需创建平台容器 |
+| `SundaysTheme` | `commonMain/.../ui/Theme.kt` | 应用主题（`darkTheme` → `SundaysPalette` 的深 / 浅配色，`= isSystemInDarkTheme()` 兜底）；各平台入口只需创建平台容器 |
+| `LocalDarkMode` / `isDarkMode` | `commonMain/.../ui/UiChrome.kt` | **生效的明暗档**，由 `SundaysTheme(darkTheme = …)` 注入。给不在 `MaterialTheme` 体系内的取值点用 —— 编辑器 / 结果表格的 `themed()` 要在两套写死配色间二选一，少了它就只能读系统设置，用户强制档位时这两块会与界面相反，见 [`ARCHITECTURE.md` §5.5](./ARCHITECTURE.md) |
 | `SundaysPalette` | `commonMain/.../ui/SundaysPalette.kt` | 视觉规范单例：5 套配色（蓝灰 `LightColorScheme`/`DarkColorScheme`、赛博朋克 `Cyberpunk*`、哔哩粉 `BiliPink*`、Win2000 `Win2000*`、WinXP `WinXp*`，各带浅深两版）+ `Shapes` + `Typography` + `buttonShape`；设计约束与对比度见 [`ARCHITECTURE.md` §5.4](./ARCHITECTURE.md) |
 | `ThemeMode` / `ThemePalette` / `AppearanceState` | `commonMain/.../ui/ThemeMode.kt`、`ThemePalette.kt` | 双轴外观：明暗三档 × 配色主题（蓝灰 / 赛博朋克 / 哔哩粉 / Win2000 / WinXP）+ 状态容器；**状态须提升到 `SundaysTheme` 之外**，见 [`ARCHITECTURE.md` §5.6](./ARCHITECTURE.md) |
 | `UiThemeTokens` / `LocalUiTokens` | `commonMain/.../ui/UiChrome.kt` | 界面外观的**唯一真相来源**：3D 斜面 / 按钮填充 / 输入框底色 / 选中态画法 / 分割线画法 / 容器描边 / 斑马纹 / 禁用文字色。**新增主题只需在 `ThemePalette.uiTokens` 加一个分支**，组件侧不含任何主题名判断，见 [`ARCHITECTURE.md` §5.6.1](./ARCHITECTURE.md) |

@@ -27,6 +27,9 @@ import androidx.compose.ui.platform.LocalDensity
  *   必须显式传参；[SundaysPalette.buttonShape] 靠它拿到当前主题的圆角。
  * - [LocalBevelStyle] —— Win2000 / WinXP 的 3D 斜面配色。[Modifier.winBevel] 读它决定
  *   画不画、画什么色；现代三套拿到 `BevelStyle.NONE`，于是斜面彻底是空操作。
+ * - [LocalDarkMode] —— 生效的明暗档。[ColorScheme] 本身已随 `darkTheme` 变，但
+ *   [com.kxxnzstdsw.sundays.editor.ui.CodeEditorTheme] / [DataTableTheme] 这类**不在
+ *   MaterialTheme 体系内**的取值点需要在两套写死配色间二选一，只有显式发布才有真相可读。
  * - [LocalCompactMode] + [LocalDensity] —— 紧凑档。**与主题无关**（任何配色 / 明暗都适用），
  *   靠缩放 density 把整棵树的 dp 尺度等比缩小，于是 M3 出厂的触屏尺寸自动收到桌面尺度，
  *   组件侧一行都不用改 —— 详见 [CompactMode.kt]。
@@ -51,6 +54,10 @@ fun SundaysTheme(
         LocalUiTokens provides palette.uiTokens(darkTheme),
         LocalBevelStyle provides palette.bevelStyle(darkTheme),
         LocalCompactMode provides compact,
+        // 明暗档本身。必须显式发布：编辑器 / 表格的 `themed()` 需要**按应用档位**在两套写死
+        // 配色间二选一，而它们不在 MaterialTheme 体系内，拿不到 `darkTheme` 参数 ——
+        // 少了这一行它们只能去读系统设置，用户强制档位时就会与整个界面相反。
+        LocalDarkMode provides darkTheme,
         // 紧凑档的全部实现就在这一次注入 —— 组件侧无需任何紧凑判断
         LocalDensity provides density,
     ) {

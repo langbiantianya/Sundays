@@ -6,10 +6,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.LocalSystemTheme
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.sundays.editor.ui.CodeEditorTheme
+import com.kxxnzstdsw.sundays.table.DataTableTheme
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 import com.kxxnzstdsw.sundays.ui.ThemePalette
 import com.kxxnzstdsw.sundays.ui.WinButton
@@ -47,7 +53,7 @@ import kotlin.test.assertNotEquals
  *
  * 换言之：**包装层只在经典主题下改变形状**。
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, InternalComposeUiApi::class)
 class ModernThemeParityTest {
 
     @Test
@@ -147,42 +153,85 @@ class ModernThemeParityTest {
     }
 
     /**
-     * 编辑器 / 表格的现代档必须**原样**取回两套写死常量。
+     * 编辑器 / 表格的现代档必须**原样**取回两套写死常量，且**选哪一套由应用档位决定**。
      *
      * 曾一度把 `themed()` 的现代分支也改成从 `ColorScheme` 取色（表头、行底、选行、边框
      * 全换），结果现代三套主题的表格与编辑器整体变色 —— SQL / 造数工作台的工具栏
      * （执行按钮所在那一行）跟着一起「看着不对」。
      *
-     * 代价：现代档下这两者仍按**系统**明暗而非应用的明暗档切换（与改造前一致，属已知历史
-     * 行为）。复古改造不该顺手改它。
+     * 这条要同时守住两件事，缺一不可：
+     *
+     * 1. **颜色**不来自 `ColorScheme` —— `themed()` 必须**原样**返回 `Light` / `Dark` 常量。
+     * 2. **档位**不来自系统设置 —— 早期实现读 `isSystemInDarkTheme()`，于是强制深色档 +
+     *    浅色系统时拿到**浅色**编辑器，浅色页面里嵌一块深色底（或反之）。
+     *
+     * 第 2 条靠**把系统设置钉成应用档位的反面**来保证有牙齿：若放任系统值参与，判据的成败
+     * 就取决于跑测试的机器当时是深色还是浅色系统 —— 两个方向里永远有一个会安静地假通过。
+     * 详见 `CodeEditorThemeFollowTest` 的类注释。
      */
     @Test
-    fun `modern theme keeps the original editor and table palettes`() = runComposeUiTest {
-        var editor: Any? = null
-        var table: Any? = null
-        var lightEditor: Any? = null
-        var darkEditor: Any? = null
-        var lightTable: Any? = null
-        var darkTable: Any? = null
+    fun `modern theme keeps the original editor and table palettes`() {
+        for (dark in listOf(false, true)) {
+            val editor = resolvedEditorTheme(dark)
+            val table = resolvedTableTheme(dark)
+            val expectEditor =
+                if (dark) CodeEditorTheme.Dark else CodeEditorTheme.Light
+            val expectTable =
+                if (dark) DataTableTheme.Dark else DataTableTheme.Light
 
-        var systemDark = false
-        setContent {
-            SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
-                systemDark = androidx.compose.foundation.isSystemInDarkTheme()
-                editor = com.kxxnzstdsw.sundays.editor.ui.CodeEditorTheme.themed()
-                table = com.kxxnzstdsw.sundays.table.DataTableTheme.themed()
-                lightEditor = com.kxxnzstdsw.sundays.editor.ui.CodeEditorTheme.Light
-                darkEditor = com.kxxnzstdsw.sundays.editor.ui.CodeEditorTheme.Dark
-                lightTable = com.kxxnzstdsw.sundays.table.DataTableTheme.Light
-                darkTable = com.kxxnzstdsw.sundays.table.DataTableTheme.Dark
-            }
+            assertEquals(
+                expectEditor,
+                editor,
+                "现代主题（应用档位 dark=$dark / 系统设置深色=${!dark}）的编辑器主题必须原样等于 Light / Dark 常量",
+            )
+            assertEquals(
+                expectTable,
+                table,
+                "现代主题（应用档位 dark=$dark / 系统设置深色=${!dark}）的表格主题必须原样等于 Light / Dark 常量",
+            )
         }
-        waitForIdle()
+    }
 
-        val expectedEditor = if (systemDark) darkEditor else lightEditor
-        val expectedTable = if (systemDark) darkTable else lightTable
-        assertEquals(expectedEditor, editor, "现代主题的编辑器主题必须原样等于 Light / Dark 常量")
-        assertEquals(expectedTable, table, "现代主题的表格主题必须原样等于 Light / Dark 常量")
+    /**
+     * 在指定应用明暗档下取 `CodeEditorTheme.themed()`，并把系统设置钉成**反面**。
+     *
+     * 独立成 `runComposeUiTest` 是必要的：同一个 scope 里 `setContent` 只能调一次，
+     * 而本测试要跑浅 / 深两档。各档独立成块后也不必再靠 `systemDark` 去反推期望值 ——
+     * 那正是 bug 的藏身处。
+     */
+    private fun resolvedEditorTheme(dark: Boolean): Any {
+        var result: Any? = null
+        runComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalSystemTheme provides if (dark) SystemTheme.Light else SystemTheme.Dark,
+                ) {
+                    SundaysTheme(darkTheme = dark, palette = ThemePalette.BLUE_GRAY) {
+                        result = CodeEditorTheme.themed()
+                    }
+                }
+            }
+            waitForIdle()
+        }
+        return requireNotNull(result) { "SundaysTheme(darkTheme=$dark) 下 CodeEditorTheme.themed() 没有返回值" }
+    }
+
+    /** [resolvedEditorTheme] 的表格版。 */
+    private fun resolvedTableTheme(dark: Boolean): Any {
+        var result: Any? = null
+        runComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalSystemTheme provides if (dark) SystemTheme.Light else SystemTheme.Dark,
+                ) {
+                    SundaysTheme(darkTheme = dark, palette = ThemePalette.BLUE_GRAY) {
+                        result = DataTableTheme.themed()
+                    }
+                }
+            }
+            waitForIdle()
+        }
+        return requireNotNull(result) { "SundaysTheme(darkTheme=$dark) 下 DataTableTheme.themed() 没有返回值" }
     }
 
     /**

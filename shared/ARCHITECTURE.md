@@ -962,6 +962,7 @@ fun SundaysTheme(
         LocalUiTokens provides palette.uiTokens(darkTheme),
         LocalBevelStyle provides palette.bevelStyle(darkTheme),
         LocalCompactMode provides compact,
+        LocalDarkMode provides darkTheme,
         LocalDensity provides compactDensity(LocalDensity.current, compact),
     ) {
         MaterialTheme(
@@ -977,7 +978,12 @@ fun SundaysTheme(
 
 `isSystemInDarkTheme()` 本身即 `commonMain` API（`androidx.compose.foundation`），各平台入口
 （desktop `Window` / 未来的 Android / iOS）只需创建平台容器并套上本主题，
-明暗策略无需在每个平台重复。
+明暗策略无需在每个平台重复。它同时是 `darkTheme` 的**默认值** —— 应用不选档位时跟随系统，
+用户选了则由 `main.kt` 传 `appearance.resolvedDark()` 覆盖。
+
+⚠️ `LocalDarkMode` 不可省：编辑器与结果表格的 `themed()` 不在 `MaterialTheme` 体系内，
+拿不到 `darkTheme` 参数；少了它就只剩 `isSystemInDarkTheme()` 可读，于是用户强制档位时
+这两块与界面相反。理由与代价见 §5.5「明暗档曾经不跟随应用」。
 
 `compact` 是第三根轴（尺度），与配色 / 明暗正交；它的实现只有 `LocalDensity` 覆盖那
 一行，细节见 §5.6。⚠️ `compactDensity(LocalDensity.current, …)` 必须在 provider **之外**求值 ——
@@ -1673,10 +1679,10 @@ Win2000 浅色档的 `surface` 是纯白 `#FFFFFF`，而经典凹陷边有一侧
 `UiTokensTest.classic_bevel_contrasts_against_every_face_it_lands_on` 同时验两种面
 （按钮面 `background` + 输入框面 `surfaceVariant`），这个隐形问题正是它先报出来的。
 
-#### 编辑器 / 表格：现代档**原样保留**，只有经典档走 token
+#### 编辑器 / 表格：现代档**原样保留**色值，档位跟随应用明暗档
 
-`CodeEditorTheme` 与 `DataTableTheme` 都是独立的写死色值，`default()` 按
-`isSystemInDarkTheme()` 在 `Light` / `Dark` 两个常量间二选一。
+`CodeEditorTheme` 与 `DataTableTheme` 的现代档仍是两套独立的写死色值，但**选哪一套**
+由 `LocalDarkMode`（`SundaysTheme` 的 `darkTheme` 参数注入）决定。
 
 | | 现代三套 | Win2000 / WinXP |
 |---|---|---|
@@ -1694,9 +1700,31 @@ Win2000 浅色档的 `surface` 是纯白 `#FFFFFF`，而经典凹陷边有一侧
 其 KDoc 写着「编辑器是嵌在应用界面里的一块*区域*，不是独立窗口…换成同色底色后工作台与
 主界面糊成一团」。这不是随手取的色，不该在复古改造里被顺手改掉。
 
-⚠️ **已知历史行为（非本次引入，未修）**：编辑器与表格按**系统**明暗切换，而非
-`AppearanceState` 的明暗档。用户在设置页强制「始终浅色」而系统是深色时，这两块区域会与
-界面相反。修它属于独立课题 —— 一旦动，就会再次改变现代主题的观感，需要单独评估。
+##### 明暗档曾经不跟随应用（已修）
+
+`themed()` 早期按 `isSystemInDarkTheme()`（**系统设置**）二选一，而 `AppearanceState`
+允许强制「始终浅色 / 始终深色」。两者不一致时的表现不是风格问题而是**反差**：
+用户强制浅色、系统深色时，浅色界面里嵌着一块深色编辑器，用户会以为那块区域坏了。
+`DataTableTheme` 同源同病。
+
+修复方式是给 `SundaysTheme` 补一个 `LocalDarkMode`（`staticCompositionLocalOf { false }`），
+而不是让两个 `themed()` 去反推 `colorScheme`：
+
+- `colorScheme` 的职责是**取色**，不是**表态**。用亮度阈值反推明暗等于写下「只要背景别太亮
+  就算浅色」这句隐含约定，将来加一套高对比主题就会静默判反，而表现是「界面看着正常、
+  编辑器却是另一档」，几乎无法归因。
+- 同文件的注释已经踩过「用 `colorScheme` 取编辑器底色」的坑，再在同一个函数里用它**判断**
+  档位，下次改动分不清哪次是故意的。
+
+「原样返回常量」约束的是**颜色**，不是「谁决定选哪一套」—— 这两件事过去被混为一谈，
+才让「换了主题编辑器没跟着」这个报法把问题指错了地方（配色主题那部分一直是好的）。
+
+**测试**：`CodeEditorThemeFollowTest` 用 `LocalSystemTheme provides SystemTheme.Light/Dark`
+把系统设置钉死，与应用档位**故意相反**。这是必要的：判据若放任系统值参与，成败就取决于
+跑测试的机器当时是深色还是浅色系统 —— 两个方向里永远有一个会安静地假通过（实测如此：
+初版 5 项主题测试里只有 1 项能抓到 bug）。像素级测试还必须用 `testTag` 命中 `CodeEditor`
+的根节点：早前取根节点中心，量到的其实是外层 `Surface` 的底色，它当然跟着应用档位变，
+于是 bug 在场时照样绿。
 
 #### 形状解析：包装层只在经典档改形状
 
