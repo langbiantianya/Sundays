@@ -1546,12 +1546,36 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | `OnboardingStateTest` | `commonTest/.../ui/OnboardingStateTest.kt` | 9 | 首次启动判据（无文件=引导 / 已有文件=不打扰老用户 / 已完成=不引导）/ `exists()` 只看文件不解析内容 / 完成引导落盘 / **外观变更不得抹掉已完成标记** / 重复完成幂等 / 默认状态不拦截应用 |
 | `ConnectionStorageTest` | `jvmTest/.../connection/ConnectionStorageTest.kt` | 4 | 持久化往返重建派生字段 / upsert-delete / v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | `jvmTest/.../connection/ConnectionStoragePermissionsTest.kt` | 2 | 凭据文件权限（0600）与目录权限 |
-| **合计** | | **240** | **237 通过 / 3 失败** |
+| **合计** | | **243** | **242 通过 / 0 失败 / 1 跳过** |
 
-> **3 项失败是 Windows 环境的既有基线**，与本仓代码无关：
-> `ConnectionStoragePermissionsTest` 1 + `ConnectionStorageTest` 2。
-> 它们断言的是 POSIX 文件权限位（0600）与凭据文件内容，在 Windows 上无法成立。
-> **不要**为了让构建变绿去改这两个测试。
+> ⚠️ **本节此前写着一段错误的结论，现予更正。** 原文是：
+> 「3 项失败是 Windows 环境的既有基线，与本仓代码无关……断言的是 POSIX 文件权限位（0600）
+> 与凭据文件内容，在 Windows 上无法成立。**不要**为了让构建变绿去改这两个测试。」
+>
+> **这个判断是错的，3 条里只有 1 条真的与平台无关。**
+>
+> `savePersisted` 用 `Files.createDirectories(dir, posix:permissions)` 建目录，而 Windows 的
+> 文件系统提供者在该属性上**直接抛**
+> （`'posix:permissions' not supported as initial attribute`）。异常被外层
+> `catch (e: Exception)` 吞掉、`save` 返回 `false` —— 于是
+> **Windows 上连接配置一个都存不下**，而界面上没有任何提示。
+> `ConnectionStorageTest` 那 2 条（`expected:<1> but was:<0>`、
+> `Key c1 is missing in the map`）测的根本不是权限位，而是**往返与 upsert/delete**，
+> 它们红是因为**存的东西压根没写进去**。
+>
+> 真正的教训有两条：
+>
+> 1. **「平台不支持」是最容易被用来解释失败的借口。** 断言消息只说「实际是 0」，
+>    不看 `system-err` 里的 `UnsupportedOperationException` 栈，很容易认定成
+>    「Windows 环境问题」。**必须翻到栈底**。
+> 2. **「一堆不相干的用例同时红」几乎总有同一个根因。** 当时 11 条失败
+>    （GUI 8 + 逻辑 3）症状天差南：预置的连接在界面上找不到、JSON 读不出来、
+>    往返缺 key、upsert 后为空 —— 但根子是同一行。逐条去改断言会把根因留在原地。
+>
+> 剩下那 1 条（`ConnectionStoragePermissionsTest.saved credential file is owner only`）
+> 才是真正的平台差异，已改为 `assumeTrue` **skip**：POSIX 权限位在 Windows 上不存在，
+> 访问控制走 ACL。skip 而不是断言失败 —— 否则等于要求 Windows 做不到的事，
+> 那条「凭据要收紧」的契约会被永远标红，红久了就没人再看，**真正该守的 POSIX 平台反而没人守**。
 
 运行命令：
 

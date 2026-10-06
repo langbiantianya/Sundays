@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays.connection
 
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -31,6 +32,20 @@ class ConnectionStoragePermissionsTest {
 
         val file = Paths.get(System.getProperty("user.home"), ".config", "sundays", "connection.json")
         assertTrue(Files.exists(file), "凭据文件应存在")
+
+        // ⚠️ POSIX 权限是**文件系统**的属性，Windows 上压根没有这个概念（访问控制走 ACL）。
+        // 这里必须 **skip** 而不是断言失败：否则等于要求 Windows 实现它做不到的事，
+        // 于是这条与平台无关的「凭据要收紧」契约会被永远标红 —— 而红久了就没人再看它，
+        // 真正该守的 POSIX 平台反而没人守。
+        //
+        // 顺带说明：把「保存本身成功」和「权限收紧」拆成两件事之后，本条红的原因
+        // 就从「Windows 存不下连接」（真缺陷，已修）变成了「Windows 没有 POSIX 权限」
+        // （平台事实，跳过即可）—— **同一处红，根因完全不同**，这正是不看栈底
+        // 只看断言消息时最容易搞混的地方。
+        assumeTrue(
+            "当前文件系统不支持 POSIX 权限（Windows 上访问控制走 ACL），跳过权限断言",
+            runCatching { Files.getPosixFilePermissions(file) }.isSuccess,
+        )
 
         val perms = Files.getPosixFilePermissions(file)
         val mode = PosixFilePermissions.toString(perms)

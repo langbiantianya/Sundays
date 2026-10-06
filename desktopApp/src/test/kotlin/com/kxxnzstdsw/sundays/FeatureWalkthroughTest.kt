@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asSkiaBitmap
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -245,19 +244,30 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
         // **恰好**命中一个；而且**按序号取会漂** —— 库里有多少东西、行高多少，都会改变
         // 「树排在第几个」（SQLite 的库名是一整条文件路径，行数与 H2 不同）。
         //
-        // 认树的可靠特征是 **LazyColumn 专有**的 `ScrollToIndex` 动作 + 靠左 + 纵向轴。
-        // 只按 `left < 400` 会挑中顶部导航条（横向）或详情面板里的小滚动区。
-        val treeIndex = onAllNodes(hasScrollAction()).fetchSemanticsNodes()
-            .indexOfFirst { node ->
-                node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null &&
-                    node.config.getOrNull(SemanticsActions.ScrollToIndex) != null &&
+        // 只按 `left < 400` 会挑中顶部导航条（横向）或详情面板里的小滚动区，所以先筛出
+        // 「**纵向**且靠左」的一组候选。
+        //
+        // ⚠️ **不能只认一个**：更严格的判据（额外要求 LazyColumn 专有的 `ScrollToIndex`）
+        // 在并发下**偶发**失配 —— 该动作是否出现在语义里取决于那一帧 lazy 布局有没有
+        // 铺开 item，实测 SQLite + 高负载时整棵树都匹配不上。
+        // 判据随环境抖动的解法不是加更多条件，而是**把候选逐个试一遍**。
+        val candidates = onAllNodes(hasScrollAction()).fetchSemanticsNodes()
+            .mapIndexedNotNull { i, node ->
+                if (node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null &&
                     node.boundsInRoot.left < 400f
+                ) i else null
             }
-        assertTrue(treeIndex >= 0, "应能在左侧找到树的 LazyColumn")
-        onAllNodes(hasScrollAction())[treeIndex]
-            // ⚠️ `substring = true` 不能省：分组行的文本是 `"视图："`（带全角冒号），
-            // 而 `hasText` 默认要求**完全相等**，写成 "视图" 就永远匹配不上。
-            .performScrollToNode(hasText("视图", substring = true))
+        assertTrue(candidates.isNotEmpty(), "左侧应至少有一个纵向可滚动节点")
+
+        val scrolled = candidates.any { idx ->
+            runCatching {
+                onAllNodes(hasScrollAction())[idx]
+                    // ⚠️ `substring = true` 不能省：分组行的文本是 `"视图："`（带全角冒号），
+                    // 而 `hasText` 默认要求**完全相等**，写成 "视图" 就永远匹配不上。
+                    .performScrollToNode(hasText("视图", substring = true))
+            }.isSuccess
+        }
+        assertTrue(scrolled, "应在左侧某个纵向滚动节点里找到「视图」分组（试了 ${candidates.size} 个）")
         onAllNodesWithText("视图", substring = true).fetchSemanticsNodes().let {
             assertTrue(it.isNotEmpty(), "树上应出现「视图」分组")
         }

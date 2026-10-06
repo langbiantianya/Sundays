@@ -178,19 +178,17 @@
 - **事务用例在 SQLite 上要容忍 `SQLITE_BUSY`**。文件库在他人持写事务时会直接锁住，
   「被锁」与「读到旧值」一样都证明未提交的数据对他人不可见，语义等价。
 
-### 4.3 全量回归与两个遗留的并发抖动
+### 4.3 全量回归
 
-全量：`shared 243 / 3 失败` + `desktopApp 227 / 8 失败`，**8 条与既有基线逐条一致**
-（`ConnectionManagerFlowTest` 3 + `DatabaseBrowserSheetsTest` 4 + `ThemeToggleVisibilityTest` 1），
-**无新增失败**。测试总数从 213 涨到 227（走查 10 条 + `SqlLiteralsTest` 2 条 + 参数化展开）。
+全量：`shared 243 / 0 失败 / 1 跳过` + `desktopApp 227 / 0 失败`。
 
-走查过程中观察到**两条偶发**的全量并发超时，**单独跑均通过**：
+此前 desktopApp 长期有 **8 条**红测（`ConnectionManagerFlowTest` 3 + `DatabaseBrowserSheetsTest` 4 +
+`ThemeToggleVisibilityTest` 1），shared 有 **3 条**。**11 条全部归零，根因只有一个** ——
+`ConnectionStorage.savePersisted` 在建目录时传 `posix:permissions`，而 Windows 直接抛
+`UnsupportedOperationException`，异常被 `catch` 吞掉、`save` 返回 `false`，
+于是 **Windows 上连接配置一个都存不下**。详见根仓 README v2.25。
 
-| 用例 | 症状 |
-|---|---|
-| `DatabaseBrowserFlowTest.expanding a database queries views triggers and functions` | 20s 超时（spy 没凑齐 3 个 Category） |
-| `DatabaseBrowserUiTest.double clicking a table opens exactly one preview tab` | 未展开出预览标签页 |
-
-两者的共同点是**依赖真实线程池 + 语义树时序**。走查类（`FeatureWalkthroughTest`）
-用「轮询状态机字段 + `advanceTimeByFrame` 推进帧」，不依赖真实线程池，因此本轮 10 条
-在多轮全量并发下**一次都没抖**。这两条是既有问题，测试负载变大后更容易撞上，**本轮未修**。
+「11 条红测」这件事本身也记在此处，因为它是最容易走偏的一次排查：**五条用例给出了五种
+毫不相干的症状**（界面上找不到连接名 / JSON 读不出来 / `expected:<1> but was:<0>` /
+`Key … is missing in the map` / `UnsupportedOperationException`），逐条看断言消息会得到
+五个互不相干的结论。共同点只有一个 —— 它们全都经过 `ConnectionStorage.save`。

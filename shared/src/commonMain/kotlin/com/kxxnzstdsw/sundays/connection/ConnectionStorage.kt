@@ -183,17 +183,52 @@ object ConnectionStorage {
      * 收紧 socket 的，这里是同一类问题的补齐。
      *
      * 写完**再**收紧：文件已存在时 `createDirectories` 不会改权限，写入过程中也存在
-     * 一小段「宽权限」窗口，收敛放在最后一步。非 POSIX 文件系统（Windows）不支持该属性，
-     * 捕获后按平台默认权限继续 —— 那里 ACL 才是访问控制手段。
+     * 一小段「宽权限」窗口，收敛放在最后一步。
+     *
+     * ## ⚠️ 建目录与收权限**两处都要**兜底（这里曾漏掉一处，整个 Windows 上存不下来）
+     *
+     * 非 POSIX 文件系统（Windows）不支持 `posix:permissions`。原先只给
+     * `Files.setPosixFilePermissions` 加了 `runCatching`，**建目录那一步漏了** ——
+     * 而 Windows 的文件系统提供者在 `createDirectories` 传该属性时是直接抛的：
+     *
+     * ```
+     * java.lang.UnsupportedOperationException: 'posix:permissions' not supported as initial attribute
+     *     at WindowsSecurityDescriptor.fromAttribute
+     *     at WindowsFileSystemProvider.createDirectory
+     *     at Files.createDirectories
+     *     at ConnectionStorage.savePersisted
+     * ```
+     *
+     * 异常被下面的 `catch (e: Exception)` 吞掉、`save` 返回 `false`，于是
+     * **Windows 用户永远存不下任何连接配置**，重启后列表永远是空的 ——
+     * 而界面上没有任何提示，因为「存失败」这件事被完全吞掉了。
+     *
+     * 连带后果是 **11 条测试**全红（desktopApp 8 条 GUI + shared 3 条逻辑），
+     * 症状五花八门：预置的连接在界面上找不到、JSON 文件读不出来。
+     * **一个根因、十一处报错** —— 这也是为什么看到「一批不相干的用例同时红」时，
+     * 该先去找那个共同的底层原因，而不是逐条去改断言。
      */
     private fun savePersisted(persisted: PersistedConnectionList): Boolean {
         return try {
             val dir = configDir()
             if (!Files.exists(dir)) {
-                Files.createDirectories(
-                    dir,
-                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString(OWNER_ONLY_DIR)),
-                )
+                // ⚠️ 见文件头说明：带 POSIX 属性的建目录在 Windows 上会抛
+                // UnsupportedOperationException，必须回退到不带属性的版本 ——
+                // 否则**保存整个失效且静默失败**。
+                runCatching {
+                    Files.createDirectories(
+                        dir,
+                        PosixFilePermissions.asFileAttribute(
+                            PosixFilePermissions.fromString(OWNER_ONLY_DIR),
+                        ),
+                    )
+                }.onFailure { err ->
+                    Files.createDirectories(dir)
+                    println(
+                        "无法为 ${dir.toAbsolutePath()} 设置 POSIX 权限（当前平台不支持），" +
+                            "已按平台默认权限创建: ${err.message}",
+                    )
+                }
             }
             val file = configFile()
             val content = json.encodeToString(persisted)
