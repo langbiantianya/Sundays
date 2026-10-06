@@ -387,6 +387,23 @@ class MySQLDialect : DatabaseDialect {
      *
      * MySQL schema == database：从 INFORMATION_SCHEMA.ROUTINES 读函数/过程，
      * 从 INFORMATION_SCHEMA.TRIGGERS 读触发器，最后按名称合并。
+     *
+     * ## ⚠️ 注释列**不能**照抄 H2 的 `REMARKS`
+     *
+     * 本实现最初直接抄了 H2 的 `SELECT ..., REMARKS`，而 `REMARKS` 是 **H2 / Oracle**
+     * 才有的一列。MySQL 8.4 实测（`information_schema.columns` 逐列核对）：
+     *
+     * | 表 | 注释列 |
+     * |---|---|
+     * | `INFORMATION_SCHEMA.ROUTINES` | `ROUTINE_COMMENT` |
+     * | `INFORMATION_SCHEMA.TRIGGERS` | **没有**（`ACTION_STATEMENT` 是语句本身，不是注释） |
+     *
+     * 于是真 MySQL 上这两条查询一律报
+     * `Unknown column 'REMARKS' in 'field list'` —— 而 `listRoutines` /
+     * `listTriggers` 正是对象树「过程 / 函数」「触发器」两节的数据源，
+     * 用户在界面上看到的就是两行红字。**嵌入式库上永远照不出来，只有真 MySQL 会炸。**
+     *
+     * 详见 [getRoutineInfo] 的同名说明 —— 那里的两条查询是同一处错误的副本。
      */
     override suspend fun listRoutines(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
         val routines = mutableListOf<Map<String, String>>()
@@ -394,7 +411,7 @@ class MySQLDialect : DatabaseDialect {
 
         // 1. 函数 / 存储过程
         conn.prepareStatement("""
-            SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS,
+            SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, ROUTINE_COMMENT,
                    SQL_DATA_ACCESS, IS_DETERMINISTIC, SECURITY_TYPE
             FROM INFORMATION_SCHEMA.ROUTINES
             WHERE ROUTINE_SCHEMA = ?
@@ -417,7 +434,7 @@ class MySQLDialect : DatabaseDialect {
                         "arg_count" to countParameters(conn, safeDb, rs.getString("ROUTINE_NAME") ?: ""),
                         "arg_names" to listParameterNames(conn, safeDb, rs.getString("ROUTINE_NAME") ?: ""),
                         "schema" to safeDb,
-                        "description" to (rs.getString("REMARKS") ?: ""),
+                        "description" to (rs.getString("ROUTINE_COMMENT") ?: ""),
                         "trigger_table" to ""
                     ))
                 }
@@ -425,8 +442,12 @@ class MySQLDialect : DatabaseDialect {
         }
 
         // 2. 触发器
+        //    ⚠️ 不取任何「注释」列：MySQL 的 INFORMATION_SCHEMA.TRIGGERS **没有**注释列
+        //    （见类注释的实测对照表），硬取一个 H2 风格的 REMARKS 会让整条查询报
+        //    Unknown column。这里保持 `description` 为空串，而不是拿 ACTION_STATEMENT
+        //    顶替 —— 那是语句正文不是注释，混进同一个字段会让调用方读出两种含义。
         conn.prepareStatement("""
-            SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS, ACTION_TIMING, EVENT_MANIPULATION
+            SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION
             FROM INFORMATION_SCHEMA.TRIGGERS
             WHERE TRIGGER_SCHEMA = ?
             ORDER BY TRIGGER_NAME
@@ -444,7 +465,7 @@ class MySQLDialect : DatabaseDialect {
                         "arg_count" to "0",
                         "arg_names" to "",
                         "schema" to safeDb,
-                        "description" to (rs.getString("REMARKS") ?: ""),
+                        "description" to "",
                         "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: "")
                     ))
                 }
@@ -672,6 +693,16 @@ class MySQLDialect : DatabaseDialect {
 
     /**
      * 获取函数/存储过程/触发器的详细信息（后端自动解析 routineType）。
+     *
+     * ## ⚠️ 这两条查询与 [listRoutines] 是**同一处错误的两个副本**
+     *
+     * 两者当初都从 H2 抄了 `REMARKS` 列，于是真 MySQL 上一律报
+     * `Unknown column 'REMARKS' in 'field list'`。已按 [listRoutines] 的实测对照表改正：
+     * `ROUTINES` 取 `ROUTINE_COMMENT`，`TRIGGERS` 不取注释列。
+     *
+     * 之所以要**两处都改**而不是只改一个：列表与详情是两条独立的 SQL，
+     * 只修列表的话点开详情又会报同一句红字 —— 而这种「列表好了、点进去又坏」的
+     * 半修状态最难查。
      */
     override suspend fun getRoutineInfo(conn: Connection, routineName: String, schema: String): Map<String, String> = withContext(Dispatchers.IO) {
         val safeName = sanitizeIdentifier(routineName, "routine name")
@@ -679,7 +710,7 @@ class MySQLDialect : DatabaseDialect {
 
         // 1. 查 ROUTINES（函数/过程）
         conn.prepareStatement("""
-            SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS,
+            SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, ROUTINE_COMMENT,
                    SQL_DATA_ACCESS, IS_DETERMINISTIC, SECURITY_TYPE, CREATED, LAST_ALTERED
             FROM INFORMATION_SCHEMA.ROUTINES
             WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ?
@@ -702,7 +733,7 @@ class MySQLDialect : DatabaseDialect {
                         "security_definer" to (rs.getString("SECURITY_TYPE") ?: "DEFINER"),
                         "arg_count" to countParameters(conn, safeDb, safeName),
                         "arg_names" to listParameterNames(conn, safeDb, safeName),
-                        "description" to (rs.getString("REMARKS") ?: ""),
+                        "description" to (rs.getString("ROUTINE_COMMENT") ?: ""),
                         "trigger_table" to "",
                         "created" to (rs.getTimestamp("CREATED")?.toString() ?: ""),
                         "last_altered" to (rs.getTimestamp("LAST_ALTERED")?.toString() ?: "")
@@ -711,9 +742,9 @@ class MySQLDialect : DatabaseDialect {
             }
         }
 
-        // 2. 查 TRIGGERS
+        // 2. 查 TRIGGERS —— 同 [listRoutines]：TRIGGERS 没有注释列，不取
         conn.prepareStatement("""
-            SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS, ACTION_TIMING, EVENT_MANIPULATION
+            SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION
             FROM INFORMATION_SCHEMA.TRIGGERS
             WHERE TRIGGER_SCHEMA = ? AND TRIGGER_NAME = ?
         """.trimIndent()).use { stmt ->
@@ -731,7 +762,7 @@ class MySQLDialect : DatabaseDialect {
                         "security_definer" to "DEFINER",
                         "arg_count" to "0",
                         "arg_names" to "",
-                        "description" to (rs.getString("REMARKS") ?: ""),
+                        "description" to "",
                         "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: "")
                     )
                 }
@@ -1027,11 +1058,19 @@ class MySQLDialect : DatabaseDialect {
 
     // region Triggers (触发器)
 
+    /**
+     * 列出触发器。
+     *
+     * ⚠️ 这里**不选任何注释列**：MySQL 的 `INFORMATION_SCHEMA.TRIGGERS` 没有注释列
+     * （实测 8.4.9 全列清单，见 [listRoutines] 的对照表）。原实现照 H2 抄了 `REMARKS`，
+     * 在真 MySQL 上必然 `Unknown column 'REMARKS' in 'field list'` ——
+     * 表现是对象树「触发器」一节整节变红，而表和视图都正常，很容易被当成「这个库没有触发器」。
+     */
     override suspend fun listTriggers(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
         val safeDb = sanitizeIdentifier(schema.ifBlank { conn.catalog ?: "" }, "database name")
         val triggers = mutableListOf<Map<String, String>>()
         conn.prepareStatement(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
+            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE " +
             "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME"
         ).use { stmt ->
             stmt.setString(1, safeDb)
@@ -1040,7 +1079,7 @@ class MySQLDialect : DatabaseDialect {
                     triggers.add(mapOf(
                         "name" to rs.getString("TRIGGER_NAME"),
                         "table" to rs.getString("EVENT_OBJECT_TABLE"),
-                        "description" to (rs.getString("REMARKS") ?: ""),
+                        "description" to "",
                         "schema" to safeDb
                     ))
                 }
