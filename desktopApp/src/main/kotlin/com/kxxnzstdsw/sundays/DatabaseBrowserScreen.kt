@@ -44,6 +44,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import com.kxxnzstdsw.sundays.ui.WinMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,10 +53,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -1543,6 +1548,9 @@ private fun PreviewTabArea(
                     // 与 onCellEdit 同源但**独立**传：行级「选中行」的 clickable 只在
                     // 真能编辑时才让位，否则只读浏览会整行点不动。
                     cellEditable = state.isTableEditable(current),
+                    onFilterChange = { state.setTabFilter(current, it) },
+                    onOrderByChange = { state.setTabOrderBy(current, it) },
+                    onSearchChange = { state.setTabSearch(current, it) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1586,6 +1594,153 @@ private fun TabStrip(
     }
 }
 
+/**
+ * 表预览的**过滤 / 排序 / 搜索**行。
+ *
+ * 三者的定位与分工：
+ * - **搜索**：用户友好的表内文本查找，编译成 `LIKE '%词%'`（转义在 [SqlLiterals]）
+ * - **过滤**：手写 `WHERE` 片段，给需要精确条件的场景
+ * - **排序**：手写 `ORDER BY` 片段（引擎侧 `validateOrderBy` 挡注入）
+ *
+ * **全部交给引擎执行** —— 前端不在本地过滤。当前页只有 100 行，本地过滤等于
+ * 「在这一页里筛」，翻到第 2 页结果就完全变了，而用户以为筛的是整张表。
+ *
+ * 排序做成一组**预设**（而不是自由文本框）：自由文本框每次输入都会打一次引擎，
+ * 而「按 ID 升序」这种意图用下拉点两下就够了，真要复杂排序再进过滤框手写。
+ */
+@Composable
+private fun TableFilterBar(
+    tab: TablePreviewTab,
+    onFilterChange: (String) -> Unit,
+    onOrderByChange: (String) -> Unit,
+    onSearchChange: (String) -> Unit,
+) {
+    // 本地草稿：受控输入框每敲一个字符都触发一次引擎往返会打爆数据库，
+    // 所以文本先落在这里，回车或失焦才提交。
+    var searchDraft by remember(tab) { mutableStateOf(tab.searchTerm) }
+    var filterOpen by remember(tab) { mutableStateOf(tab.whereClause.isNotBlank()) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = searchDraft,
+            onValueChange = { searchDraft = it },
+            label = { Text("搜索") },
+            singleLine = true,
+            modifier = Modifier
+                .width(200.dp)
+                .testTag(TABLE_SEARCH_FIELD_TAG),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearchChange(searchDraft) }),
+        )
+        Spacer(Modifier.width(8.dp))
+        WinButton(
+            onClick = { onSearchChange(searchDraft) },
+            enabled = !tab.loading && searchDraft != tab.searchTerm,
+            shape = SundaysPalette.buttonShape,
+        ) { Text("搜索") }
+        Spacer(Modifier.width(8.dp))
+        // 「清除」只在有条件时出现：没有条件时摆一个按不动的按钮是噪音
+        if (tab.whereClause.isNotBlank() || tab.searchTerm.isNotEmpty() || tab.orderByClause.isNotBlank()) {
+            WinButton(
+                onClick = {
+                    searchDraft = ""
+                    filterOpen = false
+                    onFilterChange("")
+                    onOrderByChange("")
+                    onSearchChange("")
+                },
+                shape = SundaysPalette.buttonShape,
+            ) { Text("清除") }
+            Spacer(Modifier.width(8.dp))
+        }
+        // 排序预设 —— 覆盖绝大多数「我想按 X 看」的需求
+        var orderOpen by remember { mutableStateOf(false) }
+        Box {
+            WinButton(
+                onClick = { orderOpen = true },
+                shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(TABLE_ORDER_BTN_TAG),
+            ) {
+                Text(
+                    if (tab.orderByClause.isBlank()) "排序" else "排序：${tab.orderByClause}",
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            DropdownMenu(expanded = orderOpen, onDismissRequest = { orderOpen = false }) {
+                ORDER_PRESETS.forEach { (label, clause) ->
+                    WinMenuItem(
+                        text = { Text(if (clause.isEmpty()) label else "$label（$clause）") },
+                        onClick = {
+                            orderOpen = false
+                            onOrderByChange(clause)
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        WinButton(
+            onClick = { filterOpen = !filterOpen },
+            shape = SundaysPalette.buttonShape,
+            modifier = Modifier.testTag(TABLE_FILTER_BTN_TAG),
+        ) { Text(if (filterOpen) "隐藏过滤" else "过滤") }
+    }
+    if (filterOpen) {
+        var whereDraft by remember(tab) { mutableStateOf(tab.whereClause) }
+        OutlinedTextField(
+            value = whereDraft,
+            onValueChange = { whereDraft = it },
+            label = { Text("WHERE 条件（不含 WHERE 关键字）") },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp)
+                .testTag(TABLE_FILTER_FIELD_TAG),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onFilterChange(whereDraft) }),
+        )
+        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+            WinButton(
+                onClick = { onFilterChange(whereDraft) },
+                enabled = !tab.loading && whereDraft != tab.whereClause,
+                shape = SundaysPalette.buttonShape,
+            ) { Text("应用") }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                // 错误一定要就地显示：引擎回的 `ORA-00933` 之类不在这里，
+                // 用户只会看到「刷新后表格空了」，完全无从判断是自己写错了还是引擎挂了
+                text = tab.error?.takeIf { it.isNotBlank() && whereDraft != tab.whereClause }
+                    ?.let { "条件有误：$it" } ?: "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** 排序预设 —— `(标签, ORDER BY 子句)`。空子句表示「不排序」。 */
+private val ORDER_PRESETS: List<Pair<String, String>> = listOf(
+    "不排序" to "",
+    "第一列升序" to "1 ASC",
+    "第一列降序" to "1 DESC",
+)
+
+/** 表预览过滤行的 UI 测试 tag。 */
+internal const val TABLE_SEARCH_FIELD_TAG = "tableSearchField"
+internal const val TABLE_SEARCH_BTN_TAG = "tableSearchBtn"
+internal const val TABLE_FILTER_BTN_TAG = "tableFilterBtn"
+internal const val TABLE_FILTER_FIELD_TAG = "tableFilterField"
+internal const val TABLE_ORDER_BTN_TAG = "tableOrderBtn"
+
 @Composable
 private fun PreviewTabContent(
     tab: TablePreviewTab,
@@ -1593,6 +1748,9 @@ private fun PreviewTabContent(
     onPageSizeChange: (PageSize) -> Unit,
     onCellEdit: ((CellEdit) -> Unit)? = null,
     cellEditable: Boolean = onCellEdit != null,
+    onFilterChange: (String) -> Unit = {},
+    onOrderByChange: (String) -> Unit = {},
+    onSearchChange: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1637,6 +1795,12 @@ private fun PreviewTabContent(
                 }
             }
         }
+        TableFilterBar(
+            tab = tab,
+            onFilterChange = onFilterChange,
+            onOrderByChange = onOrderByChange,
+            onSearchChange = onSearchChange,
+        )
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
             // 错误分支**必须排在最前**：翻页失败时 columns 仍留着上一页的、rows 已清空，
@@ -2531,6 +2695,44 @@ class TablePreviewTab(
      * 也不能用行索引或「猜测的 id 列」去发 `UPDATE`** —— 后者会静默改错行。
      */
     var primaryKeyColumn: String? by mutableStateOf(null)
+
+    /**
+     * 过滤条件（`WHERE` 子句的**内容**，不含 `WHERE` 关键字）。
+     *
+     * 空串 = 不过滤。改动会让本页回到第 1 页 —— 在第 3 页上把过滤条件收紧，
+     * 结果集可能只剩 2 页，停在第 3 页会看到一张空表。
+     */
+    var whereClause: String by mutableStateOf("")
+
+    /**
+     * 排序子句（`ORDER BY` 的**内容**，不含 `ORDER BY` 关键字）。空串 = 不排序。
+     *
+     * 引擎侧 `DataListRequest.order_by` 收的就是裸子串，并由 `DatabaseDialect.validateOrderBy`
+     * 挡注入（`name; DROP TABLE users` 这类会被拒）—— 所以**不要**在前端再拼一次校验，
+     * 两处校验规则会漂移。
+     */
+    var orderByClause: String by mutableStateOf("")
+
+    /** 表内文本搜索词 —— 编译成 `WHERE` 里的 `LIKE '%词%'`（见 [applyTextSearch]）。 */
+    var searchTerm: String by mutableStateOf("")
+
+    /**
+     * 把本 tab 的**生效过滤条件**算出来 —— 手工 `WHERE` 与表内搜索的合并。
+     *
+     * 两者都是 AND 关系：用户手填 `status = 'paid'` 又搜 `bob`，结果就是
+     * `status = 'paid' AND name LIKE '%bob%'`。
+     *
+     * @return `null` 表示没有过滤条件（不传 `where`）。
+     */
+    fun effectiveWhere(): String? {
+        val manual = whereClause.trim()
+        val like = SqlLiterals.likeContains(searchTerm)
+        return when {
+            manual.isNotEmpty() && like != null -> "$manual AND $like"
+            manual.isNotEmpty() -> manual
+            else -> like
+        }
+    }
 
     /**
      * 本 tab 的 in-flight 失效代次 —— 语义与 [SqlSheet.generation] 一致，但作用域是**单个 tab**。
@@ -3861,6 +4063,33 @@ class DatabaseBrowserState(
     }
 
     /**
+     * 改过滤 / 排序条件 —— **必须回到第 1 页**。
+     *
+     * 在第 3 页把过滤条件收紧，结果集可能只剩 2 页；停在第 3 页用户看到的是
+     * 一张**空表**，而引擎没报错、总数也变了 —— 那是最难自查的一种「看起来坏了」。
+     */
+    fun setTabFilter(tab: TablePreviewTab, where: String) {
+        if (tab.whereClause == where) return
+        tab.whereClause = where
+        tab.page = 1
+        loadTabPreview(tab, targetPage = 1)
+    }
+
+    fun setTabOrderBy(tab: TablePreviewTab, orderBy: String) {
+        if (tab.orderByClause == orderBy) return
+        tab.orderByClause = orderBy
+        tab.page = 1
+        loadTabPreview(tab, targetPage = 1)
+    }
+
+    fun setTabSearch(tab: TablePreviewTab, term: String) {
+        if (tab.searchTerm == term) return
+        tab.searchTerm = term
+        tab.page = 1
+        loadTabPreview(tab, targetPage = 1)
+    }
+
+    /**
      * 载入某个表预览标签页的**指定页**。
      *
      * [targetPage] 默认取 tab 自己记的页码：翻页是「改 tab.page + 重新载入」这一对动作，
@@ -3893,6 +4122,11 @@ class DatabaseBrowserState(
                             // `pageSize = 0` 在 DATA.LIST 里是**流式**哨兵（逐行 frame，无 paged body），
                             // 预览固定走分页路径，故下限钳到 1。
                             pageSize = tab.pageSize.coerceAtLeast(1)
+                            // 过滤与排序**全部交给引擎**：`where` / `order_by` 是裸 SQL 片段，
+                            // 引擎侧 `DatabaseDialect.validateOrderBy` 负责挡排序注入。
+                            // 前端不在本地过滤 —— 那样只能筛当前页，翻页后结果就不对了。
+                            where = tab.effectiveWhere().orEmpty()
+                            orderBy = tab.orderByClause.trim()
                         }
                     }
                 }

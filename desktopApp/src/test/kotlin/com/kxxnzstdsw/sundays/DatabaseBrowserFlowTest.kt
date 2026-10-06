@@ -1177,6 +1177,80 @@ class DatabaseBrowserFlowTest {
         )
     }
 
+    /**
+     * 回归：**过滤 / 排序 / 搜索真的进了引擎请求**。
+     *
+     * 靠「筛完行数变没变」判断会被引擎的宽松行为骗（H2 接受批量 DDL 那次教训）。
+     * 这里用 spy 直接量发出去的 `DataListRequest`。
+     */
+    @Test
+    fun `filter order and search reach the engine request`() = runBlocking {
+        val reqs = mutableListOf<com.kxxnzstdsw.grpc.DataListRequest>()
+        val spy = object : com.kxxnzstdsw.client.EngineClient {
+            override fun handle(request: com.kxxnzstdsw.grpc.Request): kotlinx.coroutines.flow.Flow<com.kxxnzstdsw.grpc.Response> {
+                if (request.category == com.kxxnzstdsw.grpc.Category.DATA &&
+                    request.action == com.kxxnzstdsw.grpc.Action.LIST
+                ) {
+                    reqs += request.dataRequest.list
+                }
+                return engine.handle(request)
+            }
+            override suspend fun testConnection(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.testConnection(config)
+            override suspend fun disconnect(config: com.kxxnzstdsw.grpc.ConnectionConfig) =
+                engine.disconnect(config)
+            override fun close() = Unit
+        }
+        val state = DatabaseBrowserState(spy, CoroutineScope(Dispatchers.Default))
+        state.bindConnection(TestConnectionFactory.build(jdbcUrl))
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        val table = state.tablesFor(db, "USERS")
+        state.openTab(db, table)
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+
+        // 默认：不过滤、不排序
+        assertEquals("", reqs.last().where, "默认不该带过滤条件")
+        assertEquals("", reqs.last().orderBy, "默认不该带排序")
+
+        // 手写过滤
+        state.setTabFilter(tab, "id > 1")
+        tab.awaitSettled()
+        assertEquals("id > 1", reqs.last().where, "手写 WHERE 必须进到请求里")
+
+        // 搜索词与手写条件是 AND 关系，且搜索词被转义
+        state.setTabSearch(tab, "O'Brien")
+        tab.awaitSettled()
+        assertEquals(
+            "id > 1 AND LIKE '%O''Brien%'", reqs.last().where,
+            "搜索应与手写条件 AND，且单引号被翻倍转义",
+        )
+
+        // 排序
+        state.setTabOrderBy(tab, "id DESC")
+        tab.awaitSettled()
+        assertEquals("id DESC", reqs.last().orderBy, "ORDER BY 必须进到请求里")
+    }
+
+    /** 改条件后**必须回到第 1 页** —— 在第 3 页收紧过滤会看到一张空表。 */
+    @Test
+    fun `changing the filter resets to the first page`() = runBlocking {
+        val state = newBrowser()
+        state.refreshDatabases()
+        val db = state.firstLoadedDatabase()
+        state.tablesFor(db, "WIDE")
+        // 用**真的** tab：手工 `TablePreviewTab(db, "WIDE")` 能造出来，但那样测的是
+        // 一个从未加载过的对象，页码复位之外的路径一概没走到
+        state.openTab(db, "WIDE")
+        val tab = state.tabs.single()
+        tab.awaitSettled()
+        tab.page = 3   // 模拟「用户翻到第 3 页」
+
+        state.setTabFilter(tab, "id > 1")
+        assertEquals(1, tab.page, "改过滤条件后必须回到第 1 页，否则会停在越界的空页上")
+    }
+
     @Test
     fun `a rolled back transaction leaves no trace`() = runBlocking {
         val state = newBrowser()
