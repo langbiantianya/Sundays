@@ -56,6 +56,10 @@ dependencies {
     // 把方言插件放到 testImplementation 是为了让测试源码可见 H2Dialect 构造器.
     // H2 JDBC 驱动已经在上面的 runtimeOnly(libs.h2) 提供运行时加载.
     testImplementation(project(":dialect-h2"))
+    // FeatureWalkthroughTest 要在 **H2 与 SQLite 两个方言**上跑同一批走查用例:
+    // 对象浏览的能力差异只有跨方言才暴露得出来（SQLite 无触发器 / 无函数，
+    // 而 H2 三样都有）。driver 侧由 runtimeOnly(libs.sqlite) 在运行时提供。
+    testImplementation(project(":dialect-sqlite"))
     testImplementation(project(":api"))
 }
 

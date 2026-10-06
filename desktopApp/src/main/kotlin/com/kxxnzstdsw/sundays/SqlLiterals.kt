@@ -37,14 +37,34 @@ internal object SqlLiterals {
     fun quote(value: String): String = "'" + value.replace("'", "''") + "'"
 
     /**
-     * 表内搜索词 → `LIKE '%词%'` 的完整谓词；空词返回 `null`（表示不过滤）。
+     * 表内搜索词 → `CAST(列 AS VARCHAR) LIKE '%词%'` 的完整谓词；空词返回 `null`（不过滤）。
+     *
+     * ## 为什么必须带**列名**、且必须 CAST
+     *
+     * 原先这里只返回 `"LIKE '%词%'"` —— 一个**没有左操作数**的片段。
+     * `SqlLiteralsTest` 把这个片段当成正确输出断言了下来，而**整条链一次也没跑过真库**，
+     * 于是发出去的 SQL 是 `WHERE LIKE '%user_25%'`，H2 / SQLite / PostgreSQL **全部语法错误**。
+     * 表内搜索这个功能从上线起就没能成功执行过一次。
+     *
+     * 「单测全绿」在这里是个教训：它绿是因为它只测**片段的转义**，而缺陷在**片段的拼接**上 ——
+     * 转义对了不等于拼出来的 SQL 是合法的。判据必须落在**发出去的那条语句**上。
+     *
+     * 搜索跨**所有列**（调用方用 `OR` 连起来），因为 `DATA.LIST` 的响应只回行数据、
+     * **不回列类型**，没有依据挑出「文本列」—— 而用户搜的是「这张表里哪一行有这个词」。
+     *
+     * **CAST 不是可选的**：不带 CAST 时 `id LIKE '%2%'` 在 H2 直接类型错误，
+     * 在 PostgreSQL 是 `operator does not exist: integer ~~ text`。
+     * `CAST(… AS VARCHAR)` 在 H2 / SQLite / PostgreSQL / MySQL 上都成立，是这几个方言的公共子集。
      *
      * 放在 `TablePreviewTab.effectiveWhere()` 里调用，**不在 UI 层拼** ——
      * 拼 SQL 的地方越少，能出错的地方就越少。
+     *
+     * @param column 结果集里的列名（与 `TableColumn.key` 同源）
      */
-    fun likeContains(term: String): String? {
+    fun likeContains(column: String, term: String): String? {
+        val col = column.trim()
         val t = term.trim()
-        if (t.isEmpty()) return null
-        return "LIKE ${quote("%$t%")}"
+        if (t.isEmpty() || col.isEmpty()) return null
+        return "CAST($col AS VARCHAR) LIKE ${quote("%$t%")}"
     }
 }

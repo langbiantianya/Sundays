@@ -1220,11 +1220,25 @@ class DatabaseBrowserFlowTest {
         assertEquals("id > 1", reqs.last().where, "手写 WHERE 必须进到请求里")
 
         // 搜索词与手写条件是 AND 关系，且搜索词被转义
+        //
+        // ⚠️ 期望值改过一次：原先断言的是 `"id > 1 AND LIKE '%O''Brien%'"` ——
+        // 一个**没有左操作数**的残句。测试绿了很久，而真库上它发出去就是
+        // `WHERE LIKE '%…'`，H2 / SQLite / PG **全部语法错误**。单测钉住的是
+        // 「片段的转义」，缺陷在「片段的拼接」上，于是谁也拦不住。
+        //
+        // 现在搜索要铺到**每一列**（`DATA.LIST` 不回列类型，挑不出「文本列」），
+        // 且必须 CAST —— 不带 CAST 时 `id LIKE '%2%'` 在 H2 直接类型错误。
+        //
+        // ⚠️ 列名必须在**设置搜索之前**取：搜索 `O'Brien` 命中 0 行，响应会把
+        // `tab.columns` 换成空，而 `where` 是在**发请求那一刻**用当时的列算出来的。
+        // 断言时再读列，读到的是「空」，于是期望值变成 `id > 1 AND ()`。
+        val colsAtSearchTime = tab.columns.map { it.key }
         state.setTabSearch(tab, "O'Brien")
         tab.awaitSettled()
+        val searchPredicates = colsAtSearchTime.map { "CAST($it AS VARCHAR) LIKE '%O''Brien%'" }
         assertEquals(
-            "id > 1 AND LIKE '%O''Brien%'", reqs.last().where,
-            "搜索应与手写条件 AND，且单引号被翻倍转义",
+            "id > 1 AND (${searchPredicates.joinToString(" OR ")})", reqs.last().where,
+            "搜索应与手写条件 AND、铺到每一列、且单引号被翻倍转义",
         )
 
         // 排序

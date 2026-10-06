@@ -73,8 +73,10 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **多 sheet**：一个连接一个 sheet，各自持有独立浏览状态 | `SheetDescriptor` |
 | **浏览** | 库列表（`SCHEMA.LIST`） | `SchemaTreePanel` |
 | | 表列表懒加载（展开时才 `TABLE.LIST`） | `loadTables` |
+| | **对象浏览**：库级「视图 / 触发器 / 过程·函数」+ 表级「索引 / 外键」 | `loadDatabaseObjects` / `loadTableObjects` |
 | | 双击 / 单击打开预览标签页，同表去重 | `openTab` |
 | | 引擎侧真分页（每页 10/20/50/100/200/300/500） | `DATA.LIST` + `DataTable` |
+| | **过滤 / 排序 / 表内搜索**（全部下推给引擎，零本地筛） | `setTabFilter` / `setTabOrderBy` / `setTabSearch` |
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
 | | 树面板宽度**可拖拽**（双击复位，范围钳位） | `shared/ui/DragHandle.kt` |
@@ -86,9 +88,14 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 补全弹层按内容自适应宽度，靠右时**向左翻转** | `CompletionPopup` |
 | | SQL 格式化 | `Formatter` |
 | | 执行（流式行帧）+ 结果表 + 结果分页 | `SQL.EXECUTE` |
+| | **多语句脚本**（`CREATE…; INSERT…; INSERT…` 一次执行） | `SqlSheet.multiStatement` |
+| | **事务**：`BEGIN` / `提交` / `回滚`，session id 透传 | `beginTransaction` / `commit` / `rollback` |
+| | **只读模式**（发出去之前就拦，引擎那边什么都没发生） | `rejectIfReadOnly` |
+| | **危险写操作确认**（`DROP` / 全表 `UPDATE` 等） | `DangerousSql` |
 | | **停止执行**（`SYSTEM.CANCEL` → `Statement.cancel()`） | `cancelSql` |
 | | 结果集**封顶 5000 行** + 显式截断提示 | `SQL_RESULT_MAX_ROWS` |
 | | 非 SELECT 显示「已影响 N 行」 | `affectedRows` |
+| **数据流转** | **导出**对话框（CSV / JSON / Excel / Markdown / Parquet） | `exportQuery` |
 | **造数工作台** | 多脚本，各自独立文本与统计 | `GenerateScript` |
 | | Lua 编辑 + 语法高亮 | `CodeEditor` |
 | | 补全：关键字 + **引擎注入的 13 个沙箱宿主函数**（带签名） | `extraCompletions` |
@@ -104,7 +111,9 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 
-这一栏是最高性价比的待办 —— 底层已就绪，只差界面。
+> ⚠️ 本表已剔除**后来补上**的几项（v2.16~v2.19 期间落地），它们现在是 §3.1 的内容：
+> 多语句执行、事务控制、对象浏览（库级 + 表级）、过滤 / 排序 / 表内搜索、
+> 只读模式 + 危险操作确认、导出 UI。执行证据见 [`TEST_CASES.md`](./TEST_CASES.md)。
 
 | 引擎路由 | 能力 | 前端缺什么 |
 |---|---|---|
@@ -112,14 +121,17 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | `TABLE.GET_DDL` | 取任意对象的 DDL 文本 | 对象详情面板里一个「查看 DDL」 |
 | `TABLE.TRUNCATE` | 清空表 | 树节点右键菜单项 |
 | `TABLE.RENAME` | 重命名表 | 同上 |
-| `VIEW` / `INDEX` / `TRIGGER` / `FOREIGN_KEY` 五个 Category | 视图 / 索引 / 触发器 / 外键的增删改查 | 树里对应的节点分组（现在只有「库 / 表」两级） |
-| `FUNCTION` + `Action.CALL` | 存储过程 / 函数 | 对象浏览 + 调用面板 |
+| `VIEW` / `INDEX` / `TRIGGER` / `FOREIGN_KEY` 的 **增删改** | 对象浏览目前**只读**（能列出来，不能建 / 改 / 删） | 树节点右键菜单 + 对象详情面板 |
+| `FUNCTION` + `Action.CALL` | **调用**存储过程 / 函数 | 调用面板（列出来的那部分已做） |
 | `USER` + `Action.GRANTS` | 用户与权限 | 用户管理面板 |
 | `IMPORT.RUN_IMPORT` | CSV / JSON Lines 导入（可取消、可容错） | 导入向导（选文件 → 映射列 → 目标表 → 预览） |
-| `EXPORT.RUN_EXPORT` | 导出为 CSV / JSON / Excel / Markdown / Parquet | 导出对话框（`DataTable` 上右键即可） |
-| `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO` | 事务会话（固定连接 + autocommit=false） | 事务模式开关 + 显式提交 / 回滚按钮 |
-| `SQL.EXECUTE` + `multi_statement = true` | 多语句脚本（`SqlScriptSplitter` 只切顶层 `;`） | 前端目前**硬编码 `multiStatement = false`**，改一行即可放开 |
+| `SYSTEM.SESSION_INFO` | 事务会话信息 | 把当前 session 的隔离级别 / 是否自动提交显示出来 |
 | `SQL.EXPLAIN` | 执行计划 | ⚠️ proto 里标了 `defined but not routed in dispatcher` —— **引擎侧也还没实现** |
+
+> **对象浏览的一处方言限制**：`SQLiteDialect.listForeignKeys` 走
+> `PRAGMA foreign_key_list`，而该 PRAGMA **不暴露约束名**，所以界面上显示的是方言拼出来的
+> `fk_<表>_<序号>`，而不是建表时写的名字。要真名得解析 `sqlite_master` 的建表 SQL。
+> H2 / PostgreSQL / MySQL 走 `INFORMATION_SCHEMA`，名字是真的。
 
 ### 3.3 完全没有（需要从零做）
 
@@ -263,16 +275,13 @@ end
 | 优先级 | 事项 | 依据 |
 |---|---|---|
 | **P0** | **数据编辑**（单元格增删改 + 批量） | 现在 `DataTable` 只读，这是「能看」与「能用」的分界线。引擎侧可用 `SQL.EXECUTE` 走 `UPDATE`/`DELETE` 实现，不需要新路由 |
-| **P0** | **导入 / 导出 UI** | 引擎 `IMPORT.RUN_IMPORT` / `EXPORT.RUN_EXPORT` 完整可用（多格式、可取消、可容错），只差向导与对话框 |
-| **P0** | **对象浏览**（视图 / 索引 / 触发器 / 外键 / 过程 / 函数） | 五个 Category 引擎侧已通，树里加节点分组即可 |
+| **P0** | **导入 UI** | 引擎 `IMPORT.RUN_IMPORT` 完整可用（可取消、可容错），只差向导 |
 | **P1** | **DDL 编辑 + 查看 DDL** | `TABLE.CREATE/UPDATE/DELETE/GET_DDL` 已通；可视化编辑器是 DataGrip / Navicat 的标配 |
-| **P1** | **放开多语句** | 前端硬编码 `multiStatement = false`，改一行 |
-| **P1** | **事务控制 UI** | `BEGIN/COMMIT/ROLLBACK` 已通，只差开关与按钮 |
-| **P1** | **过滤 / 排序 / 表内搜索** | 补全浏览体验的最小闭环 |
+| **P1** | 对象浏览的**增删改** + 对象详情面板 | 现在只能「列出来」，不能建 / 改 / 删，也看不到 DDL |
+| **P1** | **存储过程 / 函数调用** | `Action.CALL` 已通，调用面板没有 |
 | **P2** | **执行计划** | 需引擎侧补 `EXPLAIN` 路由（proto 已定义但未接） |
 | **P2** | **实时错误检测 + 快速修复** | DataGrip 的核心竞争力，需要 SQL 解析器 |
 | **P2** | **重构（重命名并同步引用）** | 同上 |
-| **P2** | **只读模式 + 危险操作预警** | 成本低、风险收益比高 |
 | **P3** | **ER 图 / 数据建模 / BI** | 工作量大，建议等 P0~P2 稳了再做 |
 | **P3** | **更多方言** | 架构上零成本（插件 SPI），纯工作量 |
 | **P3** | **AI 助手** | 需要先有可靠的 schema 上下文能力 |
@@ -283,6 +292,7 @@ end
 
 | 文档 | 内容 |
 |---|---|
+| [`TEST_CASES.md`](./TEST_CASES.md) | **功能测试用例**（H2 / SQLite 双方言真机走查，含实际结果与首轮发现的缺陷） |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | 前端架构：状态机、布局、契约、为什么这么写 |
 | [`../engine/README.md`](../engine/README.md) | 引擎能力全集（含尚未被 UI 使用的部分） |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎架构：路由、方言 SPI、连接池、事务 |

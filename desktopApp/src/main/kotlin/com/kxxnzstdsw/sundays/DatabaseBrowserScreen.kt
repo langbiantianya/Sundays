@@ -1308,34 +1308,44 @@ private fun DatabaseNode(
                     // 库级对象（视图 / 触发器 / 过程·函数）排在表之后。
                     // 顺序有讲究：用户 90% 的时间在找表，把表放前面、对象放后面，
                     // 免得每展开一个库都先滚过一屏用不上的东西。
-                    val objErr = state.objectLoadError.entries
-                        .firstOrNull { it.key.startsWith("$name::") }?.value
+                    //
+                    // ⚠️ 错误必须**逐类**显示，不能「任意一类出错 → 整个对象区换成一行错误」。
+                    // SQLite 没有触发器与存储过程（`SQLiteDialect` 对它们抛
+                    // UnsupportedOperationException），于是原实现下 **视图也跟着消失了** ——
+                    // 用户看到的只是一行红字「对象加载失败」，而那恰恰是唯一有内容的那一类。
+                    // 「一个 schema 失败不该让其他同类对象消失」在同一个 kind 内已经处理过，
+                    // 但跨 kind 这层漏了；**只有同时跑两个方言才照得出来**。
                     val objBusy = state.loadingObjects.any { it.first == name }
                     val objs = state.objectsByDatabase[name]
-                    when {
-                        objErr != null -> Text(
-                            text = "  对象加载失败: $objErr",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
-                        )
-                        objs == null && objBusy -> Text(
+                    if (objs == null && objBusy) {
+                        Text(
                             text = "  对象 加载中…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
                         )
-                        else -> Column(modifier = Modifier.padding(start = 24.dp)) {
+                    } else {
+                        Column(modifier = Modifier.padding(start = 24.dp)) {
                             Text(
                                 text = "对象",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             DatabaseBrowserState.DatabaseObjectKind.entries.forEach { kind ->
-                                ObjectGroupRow(
-                                    label = kind.label,
-                                    items = objs?.get(kind).orEmpty(),
-                                )
+                                val err = state.objectLoadError["$name::${kind.name}"]
+                                if (err != null) {
+                                    Text(
+                                        text = "${kind.label}：$err",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+                                    )
+                                } else {
+                                    ObjectGroupRow(
+                                        label = kind.label,
+                                        items = objs?.get(kind).orEmpty(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -2962,18 +2972,36 @@ class TablePreviewTab(
      * 把本 tab 的**生效过滤条件**算出来 —— 手工 `WHERE` 与表内搜索的合并。
      *
      * 两者都是 AND 关系：用户手填 `status = 'paid'` 又搜 `bob`，结果就是
-     * `status = 'paid' AND name LIKE '%bob%'`。
+     * `status = 'paid' AND (CAST(...) LIKE … OR CAST(...) LIKE …)`。
+     *
+     * 搜索按**所有列 OR** 起来：用户搜的是「这张表里哪一行有这个词」，而不是
+     * 「哪个已知文本列里有这个词」—— 后者我们**判断不了**，因为 `DATA.LIST` 的响应
+     * 只回行数据、不回列类型（与 [primaryKeyColumn] 同一类信息缺口）。
      *
      * @return `null` 表示没有过滤条件（不传 `where`）。
      */
     fun effectiveWhere(): String? {
         val manual = whereClause.trim()
-        val like = SqlLiterals.likeContains(searchTerm)
+        val like = likeOverAllColumns()
         return when {
             manual.isNotEmpty() && like != null -> "$manual AND $like"
             manual.isNotEmpty() -> manual
             else -> like
         }
+    }
+
+    /**
+     * 搜索词铺到每一列上，`OR` 连成一个括号组。
+     *
+     * **列还没拿到时返回 `null`**（不加过滤），而不是退回「无列名 LIKE」——
+     * 后者发出去必然语法错误，而此刻表本来还没加载出数据，加不加过滤没有区别。
+     */
+    private fun likeOverAllColumns(): String? {
+        val term = searchTerm.trim()
+        if (term.isEmpty()) return null
+        val predicates = columns.mapNotNull { SqlLiterals.likeContains(it.key, term) }
+        if (predicates.isEmpty()) return null
+        return predicates.joinToString(" OR ", prefix = "(", postfix = ")")
     }
 
     /**
@@ -3129,11 +3157,13 @@ class DatabaseBrowserState(
     val schemasByDatabase: Map<String, List<String>> get() = _schemasByDatabase
 
     /**
-     * 表级对象要用的 schema 名。空列表（还没解析 / 该库不支持 schema 层）时留空 ——
-     * 多数方言把空串当作「默认 schema」，而 H2 方言的 `listViews` 明确要求 `PUBLIC`。
+     * 已解析过的 schema 名 —— 直接读缓存（**不触发解析**）。
+     *
+     * 需要「解析完再发查询」的调用点请用可挂起的 `resolveSchemas`；这里只给
+     * 「拿到就用、拿不到就退化成默认值」的地方用。多数方言把空串当作「默认 schema」，
+     * 而 H2 的 `listIndexes` / `listViews` 明确要求 `PUBLIC` —— 所以退化成空串是
+     * **看得见的错**，不是安全的兜底。
      */
-    private val tableSchemaOrDefault: String
-        get() = expandedDatabases.firstNotNullOfOrNull { _schemasByDatabase[it]?.firstOrNull() } ?: ""
     val tableLoadError: Map<String, String> get() = _tableLoadError
 
     /** 打开的标签页 */
@@ -4270,21 +4300,7 @@ class DatabaseBrowserState(
             loadingObjects += database to kind
         }
         scope.launch {
-            val schemas = runCatching {
-                engine.invoke(engineConn(database = database)) {
-                    category = Category.SCHEMA
-                    action = Action.LIST
-                    schemaRequest = schemaRequest {
-                        list = schemaListRequest {
-                            level = "schema"
-                            this.database = database
-                        }
-                    }
-                }
-            }.getOrNull()?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty()
-            // 存下来给表级对象（索引 / 外键）复用 —— 那是「每张表一次往返」，
-            // 不能每张表都重新解析一遍 schema
-            _schemasByDatabase[database] = schemas
+            val schemas = resolveSchemas(database)
 
             // 先撤掉占位：真正的 loading 由 loadDatabaseObjectsFor 重新置上，
             // 否则「解析 schema 期间」和「拉对象期间」之间会有一段假转圈
@@ -4302,19 +4318,64 @@ class DatabaseBrowserState(
     }
 
     /**
+     * 解析某个库的 schema 名列表并缓存 —— **可挂起**，调用方能真的等到结果。
+     *
+     * 抽出来的理由：库级对象与表级对象（索引 / 外键）都要这一步，而表级对象必须
+     * **拿到结果再发查询**（见 [loadTableObjects]）。原先只有 `loadDatabaseObjects`
+     * 那个「发射后不等」的版本，于是表级对象只能带着空 schema 去查 —— 请求成功、
+     * 结果为空、界面显示「(无)」且不重试。
+     */
+    private suspend fun resolveSchemas(database: String): List<String> {
+        _schemasByDatabase[database]?.let { return it }
+        val schemas = runCatching {
+            engine.invoke(engineConn(database = database)) {
+                category = Category.SCHEMA
+                action = Action.LIST
+                schemaRequest = schemaRequest {
+                    list = schemaListRequest {
+                        level = "schema"
+                        this.database = database
+                    }
+                }
+            }
+        }.getOrNull()?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty()
+        _schemasByDatabase[database] = schemas
+        return schemas
+    }
+
+    /**
      * 拉某张表的**表级对象**（索引 / 外键）。
      *
      * 引擎侧这两类要 `table_name`（`IndexListRequest` / `ForeignKeyListRequest`），
      * 所以不能跟库级对象一起拉 —— 那是「每张表一次往返」，一张几十列的库直接爆炸。
      * 代价是它们只在**单独展开表节点时**才可见，这也是 DataGrip 的做法。
+     *
+     * ## 为什么必须**先等 schema 解析完**再发查询
+     *
+     * `INDEX.LIST` / `FOREIGN_KEY.LIST` 的 `schema` 参数要的是 **schema 名**
+     * （H2 恒为 `PUBLIC`、SQLite 为 `main`），空串会被当成「默认 schema」而查不到东西 ——
+     * H2 的 `listIndexes` 明确要求 `PUBLIC`。
+     *
+     * 原实现是「schema 没解析就**发起**一次解析，然后**立刻**带着空 schema 去查」。
+     * 而 `toggleDatabase` 展开库时是**并发**拉库级对象与表列表的，用户在 schema 往返
+     * 返回之前点开某张表的索引，查询就带着空 schema 发了出去：请求**成功**、
+     * 返回**空列表**，界面显示「(无)」，且**没有任何重试**。用户必须收起再展开一次才看得到。
+     *
+     * 「请求成功但结果是空的」比「请求失败」更难察觉 —— 失败会有红色提示，
+     * 空列表看上去像「这张表本来就没有索引」。所以这里改成：解析完再查。
+     *
+     * 代价是最坏情况多等一个往返（schema 通常已在展开库时解析好了）。
      */
     fun loadTableObjects(database: String, table: String) {
         val slot = "$database::$table"
-        // schema 还没解析（用户没展开过这个库，或直接点了表）时先解析一次
-        if (_schemasByDatabase[database] == null) loadDatabaseObjects(database)
         for (kind in TableObjectKind.entries) {
             loadingTableObjects += slot to kind
-            scope.launch {
+        }
+        scope.launch {
+            // schema 没解析就**等它** —— 见上方「为什么必须先等」。解析不出来（MySQL 那类
+            // 没有 schema 概念的方言）时拿到空列表，那正是它应有的样子。
+            val schema = resolveSchemas(database).firstOrNull() ?: ""
+            for (kind in TableObjectKind.entries) {
                 val resp = runCatching {
                     engine.invoke(engineConn(database = database)) {
                         category = when (kind) {
@@ -4326,13 +4387,13 @@ class DatabaseBrowserState(
                             TableObjectKind.INDEX -> indexRequest = indexRequest {
                                 list = indexListRequest {
                                     tableName = table
-                                    schema = tableSchemaOrDefault
+                                    this.schema = schema
                                 }
                             }
                             TableObjectKind.FOREIGN_KEY -> foreignKeyRequest = foreignKeyRequest {
                                 list = foreignKeyListRequest {
                                     tableName = table
-                                    schema = tableSchemaOrDefault
+                                    this.schema = schema
                                 }
                             }
                         }
