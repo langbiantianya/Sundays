@@ -59,6 +59,19 @@ class ConnectionManagerFlowTest {
 
         // 磁盘上没有 drivers/ dialects/ 目录：方言与驱动全部来自应用类路径（Direct 模式的真实部署形态）
         engine = IdbEngine(driversDir = File("/nonexistent"), dialectsDir = File("/nonexistent"))
+
+        // ⚠️ 显式注入 H2 方言 —— **本类所有用例都要**，放在 setUp 而不是某个用例体内。
+        //
+        // 原因：`engine.close()` 会连带清空 `DialectLoader` 的注册表，而 SPI bootstrap
+        // 是全局幂等的（只扫一次），所以**别的测试类跑过之后这里就再也解析不到方言了**。
+        // 之前只有第二个用例补了这一句，第一个用例靠「恰好跑在别人前面」——
+        // 加上 `ConnectedSourceEndToEndTest`（五个方言、每个都 close 一次引擎）之后，
+        // 它就稳定红了（`ComposeTimeoutException: Condition still not satisfied`，
+        // 症状是「等连接成功等满 10s」，完全指不到「方言没注册」）。
+        //
+        // 教训：**测试之间通过全局单例互相干扰，代价总是别人付的。** 与其靠顺序，
+        // 不如让每个类都自备依赖。
+        DialectLoader.registerForTesting("H2", H2Dialect())
     }
 
     @After

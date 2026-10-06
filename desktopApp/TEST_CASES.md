@@ -282,3 +282,67 @@
 `ConnectionManagerFlowTest` 的末尾接上浏览与执行，而不是继续用真窗口盲按 ——
 真窗口探针的价值在于**发现「有没有问题」**（本轮就发现了输入注入失效与向导焦点异常），
 不在于替代可断言的测试。
+
+---
+
+## 6. 连上真数据源之后的功能测试（`ConnectedSourceEndToEndTest`）
+
+> 这一节补的是此前**三类测试各覆盖一半、没人串起来**的那道缝。
+> 执行代码：[`ConnectedSourceEndToEndTest.kt`](./src/test/kotlin/com/kxxnzstdsw/sundays/ConnectedSourceEndToEndTest.kt)
+
+### 6.1 补的是哪条缺口
+
+| 测试 | 覆盖 | 缺什么 |
+|---|---|---|
+| `ConnectionManagerFlowTest` | 走向导 → 连接 / 断开 / 落盘 | **连上就结束，不浏览** |
+| `FeatureWalkthroughTest` | 浏览 / 过滤 / 搜索 / 对象 / 事务 / 只读 | **直接注入已连接的 `DatabaseBrowserState`**，不走连接 |
+| `DialectSmokeTest` | 五方言 × 7 项 | **直打引擎**，完全不碰界面 |
+
+于是「连得上」与「连上之后能用」之间那道缝一直没被测过 —— 而它恰恰是最容易坏的地方：
+会话、连接池、schema 解析、标识符大小写，任何一环不对都是**连上了但一用就废**。
+
+### 6.2 本类做的事
+
+真引擎建库并播种 → `ConnectionSession.connect()` **真连上**（走 `IdbEngine.testConnection` 建池）
+→ 界面里**真点**树与表 → 读数据 → 过滤 / 排序 / 搜索下推 → SQL 工作台执行
+→ 多语句 / 事务可见性 / 只读 → 断开。
+
+**五个方言全部通过**（H2 / SQLite / DuckDB / MySQL / PostgreSQL，含真远程库）。
+
+### 6.3 实测数据（走查时打出来的，可核对）
+
+| | H2 | SQLite | DuckDB | MySQL | PostgreSQL |
+|---|---|---|---|---|---|
+| 库名 | `SMOKE<ts>`（**大写**） | 临时文件路径 | `main` | `sundays_smoke_<ts>` | `sundays_smoke_<ts>` |
+| 表名 | `E2E_ORDERS`（**大写**） | `e2e_orders` | `e2e_orders` | `e2e_orders` | `e2e_orders` |
+| 预览总行数 | 12 | 12 | 12 | 12 | 12 |
+| 搜索 `PAID` 命中 | 4 | 4 | 4 | 4 | 4 |
+| 搜索谓词的 CAST | `VARCHAR` | `VARCHAR` | `VARCHAR` | **`CHAR`** | `VARCHAR` |
+| SQL 结果行数 | 3 | 3 | 3 | 3 | 3 |
+| 事务回滚 / 提交 | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+> **MySQL 那一列的 `CHAR` 就是 v2.26 那个修复**：它的 `CAST` 不接受 `VARCHAR`，
+> 而 PostgreSQL 上 `CHAR` 是 `CHARACTER(1)` 的别名会**静默截断**。
+> 同一个功能在两个真服务器上分别用不同写法、各自跑通 —— 这是本地嵌入式库永远给不出的证据。
+
+> ⚠️ **两个远程库上还有你的其它库**：MySQL 的库列表是 `[my_test01, shop, sundays_smoke_<ts>]`，
+> PostgreSQL 是 `[examquestions, postgres, sundays_smoke_<ts>]`。本测试**只在自己的
+> `sundays_smoke_*` 库里建表**，`tearDown` 无条件 DROP，不碰其它任何一个。
+
+### 6.4 两个判据上的坑（首轮全红时就踩到）
+
+**① 不能拿 `databases.first()` 当探针库。** MySQL 会列出所有非系统库，
+第一个未必是刚建的那个，于是失败只报一句
+`NoSuchElementException: Collection contains no element matching the predicate` ——
+完全指不到真因。改成「先按工作区名精确匹配，匹配不上再逐个展开去找」。
+
+**② 不能断言界面上的「共 N 条」。** 那行是分页栏里的**描述性**文本，
+容器窄于 560dp 时**按设计隐藏**（见 `TablePaginationLayoutTest` 记的降级规则）。
+断它等于把用例焊死在某个窗口宽度上，而且失败时看到的是「界面没显示总数」，
+与真因（宽度不够）八竿子打不着。正确性由 `tab.total` 断言，界面表现交给布局测试。
+
+### 6.5 关于「走不走向导 UI」
+
+向导 UI 本身由 `ConnectionManagerFlowTest` 覆盖；本类从 `ConnectionSession.connect()` 起步 ——
+那**正是**向导最后一步调用的入口，所以跳过的是那几下点击，**跳过的不是任何逻辑**。
+换来的是**每个方言都能跑同一套**，不必为四种向导形态各写一遍。

@@ -52,6 +52,34 @@ interface SmokeTarget {
     fun direct(workspace: String): Connection
 
     /**
+     * 用独立直连数一行。
+     *
+     * 事务用例靠它判「未提交的数据对别人不可见」——**这必须在引擎之外看**，
+     * 在引擎里看只能看到自己那个会话，永远「可见」。
+     */
+    fun count(workspace: String, table: String, where: String = "1 = 1"): Int =
+        direct(workspace).use { c ->
+            c.createStatement().use { s ->
+                s.executeQuery("SELECT COUNT(*) FROM $table WHERE $where").use { rs ->
+                    rs.next(); rs.getInt(1)
+                }
+            }
+        }
+
+    /**
+     * 表还在不在。
+     *
+     * **刻意不用 `INFORMATION_SCHEMA`** —— 那是 H2 专有的元数据视图，SQLite 上直接语法错。
+     * 改成「直接查它，查得动就说明表还在」：这本来就是要回答的问题，且全方言通用。
+     */
+    fun tableExists(workspace: String, table: String): Boolean = runCatching {
+        direct(workspace).use { c ->
+            c.createStatement().use { s -> s.executeQuery("SELECT COUNT(*) FROM $table").use { it.next() } }
+        }
+        true
+    }.getOrDefault(false)
+
+    /**
      * 引擎能不能回**真实的**外键约束名 —— 且是不是**用户给的那个**名字。
      *
      * - SQLite：`PRAGMA foreign_key_list` **不暴露约束名**，方言只能拼 `fk_<表>_<序号>`
