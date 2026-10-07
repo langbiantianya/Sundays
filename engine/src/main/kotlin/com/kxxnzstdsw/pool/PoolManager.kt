@@ -16,13 +16,15 @@ object PoolManager {
     private val pools = ConcurrentHashMap<String, HikariDataSource>()
 
     /**
-     * 获取连接（单参数版本 — 不设置 schema 上下文）。
-     * 调用方负责必要时调用 [getConnection] 双参数版本或自行 setSearchPath。
+     * 获取连接（单参数版本 — 不设置 schema / catalog 上下文）。
+     * 调用方负责必要时调用 [getConnection] 双参数版本或自行 setSearchPath / setCatalog。
      */
     fun getConnection(config: ConnectionConfig): Connection {
         val hashKey = poolKey(config, "")
         val dataSource = pools.computeIfAbsent(hashKey) { createDataSource(config, "") }
-        return dataSource.connection
+        val conn = dataSource.connection
+        applyCatalog(conn, config)
+        return conn
     }
 
     /**
@@ -42,7 +44,63 @@ object PoolManager {
         if (effectiveSchema.isNotBlank()) {
             resolveDialect(config).setSearchPath(conn, effectiveSchema)
         }
+        // catalog 与 schema 同理：**每次借出都设一遍**，不靠建池时的 connectionInitSql。
+        // 理由见 [applyCatalog]。
+        applyCatalog(conn, config)
         return conn
+    }
+
+    /**
+     * 把会话的默认 catalog 切到 [ConnectionConfig.database]。
+     *
+     * ## 为什么必须有这一步
+     *
+     * 前端在左侧树上点哪个库，就把哪个库名放进 `ConnectionConfig.database`
+     * （它也参与 [configKey]，于是每个库拿到**各自的连接池**）。
+     * 但每个池的 JDBC URL 都来自连接配置里的同一个 `config.jdbcUrl` ——
+     * **URL 里钉死的就是连接时指定的那个库**。
+     *
+     * 于是 `database` 只是个「池的区分标签」，从来没被真正应用到会话上：
+     * `DataHandler.list` 拼出来的是 `SELECT * FROM <table>`（裸表名），
+     * 裸表名按会话默认库解析，于是
+     *
+     * ```
+     * Table 'sundays_probe.orders' doesn't exist
+     * ```
+         * 而用户在树上点的是 `shop`。表现就是：**连接配置里指定的那个库能看，
+     * 其他库一点就报错**，且错误信息里那个库名恰好是「我没点的那个」，
+     * 很难自己联想到根因。
+     *
+     * 表列表为什么是好的？因为 `TableHandler.list` 走的是 `information_schema`，
+     * 本来就跨库 —— 于是「表列得出来、点开就报错」，这个割裂正是本缺陷的指纹。
+     *
+     * ## 为什么下沉到方言，而不是这里直接 `conn.catalog = x`
+     *
+     * `ConnectionConfig.database` 这个字段**是重载的**：MySQL 放 catalog 名，
+     * DuckDB 放的是 `.duckdb` **文件路径**（`DuckDbSmoke` 就这么配的）。
+     * 而 DuckDB JDBC 的 `setCatalog(x)` 内部发的是 `SET schema = 'x'` ——
+     * 直接报 `Catalog Error: No catalog + schema named "C:\...\xx.duckdb"`，
+     * 连接整个建不起来（实测：`DialectSmokeTest` [DuckDB] 与
+     * `DuckDBHandlerIntegrationTest` 全红）。
+     *
+     * 「有没有 catalog 可切」只有方言自己知道，答案在 [DatabaseDialect.switchCatalog]
+     * （默认空实现 = 没有，永远不抛）。
+     *
+     * 与 schema 完全同构：不靠建池时的 `connectionInitSql`，**每次借出都设一遍**。
+     */
+    private fun applyCatalog(conn: Connection, config: ConnectionConfig) {
+        val catalog = config.database
+        if (catalog.isBlank()) return
+        try {
+            resolveDialect(config).switchCatalog(conn, catalog)
+        } catch (e: java.sql.SQLException) {
+            // 方言声称自己有 catalog（否则走不到这里），那失败就是**真实失败**
+            // （库不存在 / 无权限）—— 必须抛出去。
+            // 吞掉的话，后续查询会静默跑在**错误的库**上，读到别的库的同名表，
+            // 比报错危险得多。把库名写进消息，界面上才看得出是哪一步失败的。
+            logger.warn("Failed to switch catalog to '$catalog': ${e.message}")
+            throw java.sql.SQLException("切换到数据库 '$catalog' 失败：${e.message}", e)
+        }
     }
 
     /**

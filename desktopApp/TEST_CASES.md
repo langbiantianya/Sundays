@@ -1090,3 +1090,141 @@ gRPC 的 `StreamObserver.onNext` **不是线程安全的**。子进程侧每个 
 
 **并发缺陷的回归测试必须有牙齿。** 4 并发抓不住（1/3），
 必须把并发度和帧密度拉到让竞态几乎必然发生（24/24），再用变异验证确认它真的会红。
+
+### 9.16 缺陷：左侧树里选的库根本没进查询 —— 只有连接配置指定的库能看
+
+用户在树上点别的库里的表，界面上立刻报错：
+
+```
+Table 'sundays_probe.orders' doesn't exist
+```
+
+而他点的是 `shop`。**错误信息里那个库名恰好是「我没点的那个」** ——
+这就是为什么它不容易被自己联想到根因。
+
+#### 根因：`database` 只是个「池的区分标签」，从来没被应用到会话上
+
+链路本身是对的：树节点 `onOpenTable(name, tbl)` → `openTab(schema)` →
+`TablePreviewTab.schema` → `engineConn(database = tab.schema)`，
+一路都带着那个库名（`DatabaseBrowserScreen.kt` 逐层核对过，无需改）。
+
+问题在引擎侧。`PoolManager`：
+
+- `configKey` **含** `config.database` ⇒ 每个库拿到**各自的连接池**（这看着像已经处理了）
+- 但 `createDataSource` 里 `resolvedJdbcUrl = config.jdbcUrl` ——
+  **每个池都用同一个 URL**，而 URL 里钉死的就是连接时指定的那个库
+
+所以「按库分池」这件事做了一半：池分开了，会话却全都在同一个库上。
+而 `DataHandler.list` 拼的是裸表名（`SELECT * FROM <table>`），
+裸表名按会话默认库解析 ⇒ 只有连接配置里那个库能查到。
+
+表列表为什么是好的？因为 `TableHandler.list` 走的是
+`dialect.listTables(conn, config.database, schema)`，查的是 `information_schema`，
+**本来就跨库**。于是「表列得出来、点开就报错」—— 这个割裂正是本缺陷的指纹。
+
+#### 真 MySQL 上的复现（不是推演）
+
+```
+jdbcUrl 里的库      = jdbc:mysql://192.168.1.5:3306/sundays_probe
+会话默认 catalog    = sundays_probe
+information_schema 里 shop 的表数 = 32          ← 表列得出来
+裸表名 SELECT * FROM `user` -> 失败: Table 'sundays_probe.user' doesn't exist   ← 点开就报错
+conn.setCatalog("shop") 后 catalog = shop      ← 切库本身是可行的
+```
+
+#### 修法
+
+`PoolManager.applyCatalog` —— 每次借出连接时把会话 catalog 切到 `config.database`，
+与既有的 `setSearchPath`（schema）完全同构：不靠建池时的 `connectionInitSql`，
+**每次借出都设一遍**。
+
+**第一版栽在 DuckDB 上。** 最初写成「无脑 `conn.catalog = x`，把 SQLState `0A000`
+（feature not supported）当不支持方言放行」。全量回归直接红一片：
+
+```
+切换到数据库 'C:\...\sundays-smoke.duckdb' 失败：Catalog Error: SET schema:
+No catalog + schema named "C:\...\sundays-smoke.duckdb"
+```
+
+`DuckDBHandlerIntegrationTest` / `DialectSmokeTest [DuckDB]` / `ConnectedSourceEndToEndTest [DuckDB]` 全中。
+
+原因是 **`ConnectionConfig.database` 这个字段是重载的**：MySQL 放 catalog 名，
+而 DuckDB 放的是 `.duckdb` **文件路径**（`DuckDbSmoke.config` 就是这么配的）。
+DuckDB JDBC 的 `setCatalog(x)` 内部发的是 `SET schema = 'x'` —— 于是拿文件路径去
+当 schema 用，直接炸。而且它抛的 SQLState 不是 `0A000`，容错分支根本接不住。
+
+**教训：能不能切 catalog 只有方言自己知道。** 于是下沉成 SPI 方法
+`DatabaseDialect.switchCatalog(conn, catalog)`，**默认空实现 = 没有，永远不抛**；
+只有 `MySQLDialect` 覆盖它（`conn.catalog =`，即 `USE <db>`）。
+「没有 catalog 概念」这件事由方言自己声明，不再靠猜异常类型。
+
+**为什么真实失败不能吞**：若是「目标库不存在 / 无权限」，吞掉就会让查询静默跑在
+**错误的库**上，读到别的库的同名表 —— 比报错危险得多。所以 MySQL 的实现让异常照抛，
+`PoolManager` 只负责把库名补进消息里。
+
+顺带修正一处**事实错误**：`MySQLDialect.supportsCrossDatabase` 原本是 `false`，
+注释写「MySQL 单连接单库」。这不只是笔误 —— 它会让人以为「按 database 分池就够了」，
+从而**漏掉真正要做的那一步**。MySQL 一个实例多个 database，同一连接 `USE` 一下即可，
+已改为 `true`（`SystemListDriversIntegrationTest` 的对应断言、方言 README、
+`DatabaseDialect` 的 KDoc 一并更正）。该标志目前只经 `SYSTEM.LIST_DRIVERS` 对外暴露，
+不参与任何行为判定，所以改动是纯事实修正、无行为风险。
+
+#### 为什么测试只能打真 MySQL
+
+先试过用 H2 造等价场景（`CREATE DATABASE` + `conn.setCatalog`），
+实测 **H2 的 `setCatalog` 是静默 no-op**：`otherdb` 被当成 schema 处理，
+切完 catalog 纹丝不动，读出来的还是默认库的数据。
+
+拿它写测试会得到一条**永远绿、但什么都验不到**的用例 —— 比没有测试更糟。
+H2 / SQLite / DuckDB 在桌面端也各自只连一个库，不存在跨库浏览场景；
+真正需要跨 catalog 的就是 MySQL（一个实例多个 database）。
+
+#### 回归测试：`CrossDatabaseQueryTest`（3 项，真 MySQL，不可达时 assumeTrue 跳过）
+
+**两条用例而不是一条** —— 只测「另一个库里的表能查到」有个致命漏洞：
+只要 `setCatalog` 的异常被吞掉，查询就会静默跑在默认库上。
+若目标表名在默认库里恰好不存在那是硬报错（好）；
+但若**同名表两边都有**，就会安安静静返回**错的行**，而「能查到行」这种断言照样绿。
+
+| 用例 | 钉住什么 |
+|---|---|
+| `非默认库独有的表能查到` | 完全没切库 → 修之前是 `Table '默认库.表名' doesn't exist` |
+| `同名表读到的是选中库的内容` | 切库失败被吞掉 → 修之前**静默返回错的行** |
+| `连接配置指定的库仍然正常` | 回归护栏：切库不能反过来把原本能用的默认库弄坏 |
+
+#### 变异验证
+
+摘掉 `applyCatalog(conn, config)` 调用后连跑：
+
+```
+同名表读到的是选中库的内容   FAILED  expected:<[另一个库的行]> but was:<[默认库的行]>
+非默认库独有的表能查到       FAILED  Table 'sundays_smoke.probe_only_here' doesn't exist
+连接配置指定的库仍然正常     通过                      ← 护栏是有效的，不是恒真
+```
+
+2/3 红，且**两种失败形态都精确复现了用户报的现象**。装回修复后 3/3 绿。
+
+#### 验证
+
+- `CrossDatabaseQueryTest` 3/3（真 MySQL，未被 skip）
+- 全量 `:engine:test :shared:jvmTest :desktopApp:test` + 四个方言模块 → **849 项 / 0 失败**
+  （engine 298、desktopApp 315、engine-grpc-client 21、dialect-h2 65、
+  dialect-sqlite 62、dialect-duckdb 88）
+- 跳过的 7 项全是平台/环境相关（POSIX-only 的 UDS 三项 + headless AWT 对话框两项 +
+  IPC 配置两项），**没有一条是远程库 skip** —— 也就是说真 MySQL 的
+  `DialectSmokeTest` / `CrossDatabaseQueryTest` / `ConnectedSourceEndToEndTest`
+  这一轮都真的跑了。
+
+#### 教训
+
+**「按 X 分池」不等于「按 X 生效」。** `config.database` 进了池 key、每个库拿到了
+各自的池，看起来这件事已经做了 —— 但池是按库分的，**连接却全都连到同一个库**。
+分池和切库是两件事，只做前者等于没做。
+
+**测试要挑能暴露该缺陷的那一侧。** H2 是这里最顺手的选项，也正因如此最危险：
+它对 `setCatalog` 静默 no-op，写出来的测试会永远绿、却什么都验不到。
+
+**「容错」要先问：这条路径上各方言的语义一致吗。** 第一版按 SQLState 容错，
+看着稳妥，实际是拿一个统一假设去套四种不同的语义 —— DuckDB 直接把容错分支冲穿。
+把判断交回给**知道答案的那一方**（方言），比在调用方猜异常类型可靠得多。
+

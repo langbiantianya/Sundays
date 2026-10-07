@@ -59,7 +59,11 @@ class SystemListDriversIntegrationTest {
         assertTrue(mysql.supportsUser)
         assertTrue(mysql.supportsPassword)
         assertFalse(mysql.supportsSchema)
-        assertFalse(mysql.supportsCrossDatabase)
+        // MySQL 一个实例多个 database，同一条连接 `USE` 一下就能换库 —— 跨库查询成立。
+        // （曾经断言 false，理由是「单连接单库」，那条理由是错的。
+        //   错误陈述会让人以为「按库分池就够了」，于是缺了真正的那一步 ——
+        //   见 DesktopBrowser TEST_CASES.md §9.16。）
+        assertTrue(mysql.supportsCrossDatabase)
         assertTrue(mysql.jdbcUrlExample.startsWith("jdbc:mysql://"))
         // capabilities
         assertTrue(mysql.capabilitiesList.contains("USERS"))

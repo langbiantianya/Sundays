@@ -204,6 +204,32 @@ v2.16 新增 6 个 action 与 1 个 category：
    列表里删除连接、或编辑后字段变化时，调用方应显式断开，否则旧池（按旧字段建 key）将无法再被取用，只会随 `idleTimeout` 或进程退出回收。
    **v2.16 起** `close(config)` 会**先**调 `TransactionManager.closeSessionsFor(config)`（`closeAll()` 先调 `TransactionManager.closeAll()`），否则会话钉住的连接会被从会话底下关掉，后续 `COMMIT` 会在一条死连接上失败。
 7. **会话连接（v2.16）**：`getConnection(config, schema, sessionId)` 在 `sessionId` 为空时即原有「从池里借」；非空时返回 `TransactionManager.connectionFor(...)` 钉住的那条连接（`autocommit=false`），由会话而非 handler 决定归还时机（详见 §3.7）。
+8. **catalog 切换（v2.17）**：每次借出连接时把会话 catalog 切到 `config.database`（`PoolManager.applyCatalog`）。
+
+   > **为什么「按 database 分池」不等于「按 database 生效」**
+   >
+   > `config.database` 进了 pool key，于是每个库拿到各自的池 —— 看起来这件事已经做了。
+   > 但 `createDataSource` 里 `resolvedJdbcUrl = config.jdbcUrl`，**每个池都用同一个 URL**，
+   > 而 URL 里钉死的就是连接时指定的那个库。于是**池按库分开了，连接却全都连到同一个库**。
+   >
+   > `DataHandler.list` 拼的是裸表名（`SELECT * FROM <table>`），裸表名按会话默认库解析，
+   > 于是 `Table '默认库.表名' doesn't exist`。表列表却正常，因为 `TableHandler.list` 走
+   > `information_schema`（本来就跨库）—— **「表列得出来、点开就报错」正是这个缺陷的指纹**。
+   >
+   > 与 schema 完全同构（每次借出都设一遍，不靠建池时的 `connectionInitSql`）。
+   > **切换能力下沉到方言 SPI `DatabaseDialect.switchCatalog`（默认空实现 = 不切换，永远不抛）**，
+   > 只有 `MySQLDialect` 覆盖它。原因：`ConnectionConfig.database` 是**重载**字段 ——
+   > MySQL 放 catalog 名，DuckDB 放 `.duckdb` **文件路径**，而 DuckDB JDBC 的
+   > `setCatalog(x)` 内部发的是 `SET schema = 'x'`，拿路径去当 schema 直接炸
+   > （实测 `DialectSmokeTest [DuckDB]` / `DuckDBHandlerIntegrationTest` 全红）。
+   > 「有没有 catalog 可切」只有方言自己知道，不要在调用方猜异常类型。
+   >
+   > **真实失败必须照抛**：吞掉会让查询静默跑在**错误的库**上、读到别的库的同名表。
+
+   ⚠️ **方言支持度不等价**：实测 H2 的 `Connection.setCatalog` 是**静默 no-op**
+   （`CREATE SCHEMA` 建出来的名字被当 schema 处理，切完 catalog 纹丝不动）。
+   只有 MySQL 这类「一个实例多个 database」的服务端方言真正需要它；
+   验证跨库行为**只能打真 MySQL**，用 H2 写出来的测试会永远绿、却什么都验不到。
 
 ### 3.4 导出子进程隔离机制 (Export Subprocess Isolation)
 

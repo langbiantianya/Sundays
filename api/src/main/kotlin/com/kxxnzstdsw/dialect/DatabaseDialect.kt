@@ -86,7 +86,13 @@ interface DatabaseDialect {
 
     /**
      * 是否支持跨 database 查询。
-     * PG/H2 支持；MySQL 单连接单库（不支持）；SQLite 用 ATTACH。
+     *
+     * ⚠️ MySQL **支持**（一个实例多个 database，同一条连接 `USE` 一下即可）——
+     * 这里曾经写着「不支持 / 单连接单库」，是错的，而且错得有害：
+     * 它会让人以为「按 database 分池就够了」，从而漏掉真正要做的那一步
+     * （借出连接时真的把 catalog 切过去）。见 [switchCatalog]。
+     *
+     * H2 的 `setCatalog` 是静默 no-op，SQLite 靠 `ATTACH` —— 两者都另说。
      */
     val supportsCrossDatabase: Boolean get() = false
 
@@ -136,6 +142,38 @@ interface DatabaseDialect {
      * @return SET 语句的 SQL 字符串，无需 SET 时返回 null
      */
     fun buildSetSearchPathSql(schema: String): String? = null
+
+    /**
+     * 把会话的默认 catalog 切到 [catalog]（`ConnectionConfig.database` 的语义）。
+     *
+     * ## 为什么这是一个 SPI 方法，而不是在 [PoolManager] 里无脑 `conn.catalog = x`
+     *
+     * **`ConnectionConfig.database` 这个字段是重载的**，各方言含义不同：
+     *
+     * | 方言 | `database` 的实际含义 | 切 catalog 是否成立 |
+     * |---|---|---|
+     * | MySQL | catalog 名（一个实例多个 database） | ✅ 需要 |
+     * | PostgreSQL | catalog == database，**但连上就锁死在那一个库** | ❌ 无意义 |
+     * | SQLite / DuckDB | **文件路径**（`DuckDbSmoke` 里 `database` 就是 `xx.duckdb` 路径） | ❌ 有害 |
+     * | H2 | `setCatalog` 是**静默 no-op** | ❌ 无效 |
+     *
+     * DuckDB 那一行是实测踩出来的：它的 JDBC `setCatalog(x)` 内部发的是
+     * `SET schema = 'x'`，而 `x` 是文件路径，于是直接报
+     * `Catalog Error: SET schema: No catalog + schema named "C:\...\xx.duckdb"`
+     * —— 连接整个建不起来（`DialectSmokeTest` [DuckDB] / `DuckDBHandlerIntegrationTest` 全红）。
+     *
+     * 所以「有没有 catalog 可切」必须由**方言自己**回答，默认空实现 = 没有。
+     *
+     * ## 异常约定
+     *
+     * 没有 catalog 概念的方言走默认实现，**永远不抛**。
+     * 有 catalog 概念的实现（目前只有 MySQL）应当让**真实失败照抛** ——
+     * 「目标库不存在 / 无权限」若被吞掉，查询会静默跑在**错误的库**上，
+     * 读到别的库的同名表，比报错危险得多。
+     */
+    fun switchCatalog(conn: Connection, catalog: String) {
+        // 默认空实现：该方言的 `database` 不是 catalog（H2 / SQLite / DuckDB / PostgreSQL）
+    }
 
     /**
      * 列出所有 database（导航第一级：MySQL 的 SHOW DATABASES / PG 的 pg_database / H2 的 [config.database]）。

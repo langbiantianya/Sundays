@@ -20,7 +20,7 @@ idb_engine 的 **MySQL 方言实现**，以 SPI 插件形式提供。引擎通�
 | `requiresHost` / `requiresPort` | `true` |
 | `supportsUser` / `supportsPassword` | `true` |
 | `supportsSchema` | `false`（schema == database，无二级导航） |
-| `supportsCrossDatabase` | `false`（单连接单库） |
+| `supportsCrossDatabase` | `true`（一个实例多个 database，同一连接 `USE` 即可换库） |
 | `jdbcUrlExample` | `jdbc:mysql://127.0.0.1:3306/mydb` |
 | `capabilities` | `USERS, PRIVILEGES, ROUTINES, VIEWS, INDEXES, FOREIGN_KEYS, TRIGGERS, EXPORT, DDL_TRANSACTION` |
 

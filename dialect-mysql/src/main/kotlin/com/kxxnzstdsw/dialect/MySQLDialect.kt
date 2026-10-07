@@ -14,7 +14,10 @@ class MySQLDialect : DatabaseDialect {
     override val connectionType = ConnectionType.CLIENT_SERVER
     override val defaultPort = 3306
     override val supportsSchema = false            // MySQL 的 schema == database，无二级导航
-    override val supportsCrossDatabase = false     // MySQL 单连接单库
+    // MySQL 一个实例多个 database，同一条连接 `USE` 一下就能换库 —— 跨库查询成立。
+    // （曾经写的是 false /「单连接单库」，那条注释是错的，且会让人以为下面那个
+    //   `switchCatalog` 是多余的。见 DesktopBrowser TEST_CASES.md §9.16。）
+    override val supportsCrossDatabase = true
     override val jdbcUrlExample = "jdbc:mysql://127.0.0.1:3306/mydb"
     override val capabilities = setOf(
         DialectCapability.USERS,
@@ -30,6 +33,33 @@ class MySQLDialect : DatabaseDialect {
 
     override fun buildJdbcUrl(host: String, port: Int, database: String): String {
         return "jdbc:mysql://$host:$port/$database?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    }
+
+    /**
+     * 把会话切到 [catalog]（MySQL 的 `USE <db>`）。
+     *
+     * MySQL 一个实例多个 database，同一条连接里 `USE` 一下就能换库 ——
+     * 所以「连接配置里指定的库」从来不该限制住能查哪些库。
+     *
+     * ## 为什么必须有这一步
+     *
+     * `PoolManager` 按 `(config, schema)` 分池，而每个池都用连接配置里的**同一个**
+     * `jdbcUrl` 建，URL 里钉死的就是连接时指定的库。于是「池按库分开了，连接却全都
+     * 连到同一个库」。而 `DataHandler.list` 拼的是裸表名（`SELECT * FROM <table>`），
+     * 裸表名按会话默认库解析，于是
+     *
+     * ```
+     * Table 'sundays_probe.orders' doesn't exist     ← 而用户在树上点的是 shop
+     * ```
+     *
+     * ## 异常约定
+     *
+     * **真实失败照抛**（库不存在 / 无权限），绝不吞 —— 吞掉会让后续查询静默跑在
+     * **错误的库**上，读到别的库的同名表，比报错危险得多。
+     */
+    override fun switchCatalog(conn: Connection, catalog: String) {
+        if (catalog.isBlank()) return
+        conn.catalog = catalog
     }
 
     override fun configureConnectionForStreaming(conn: Connection): Boolean {
