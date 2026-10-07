@@ -132,7 +132,14 @@ function Write-Text { param([string]$text)
 # 只覆盖**路径**会用到的那批：字母数字、\ / : . - _ 与空格。中文打不了（需要 UNICODE 通道）。
 function Send-AsciiChar { param([char]$ch)
     $shift = $false
-    if ($ch -ge 'a' -and $ch -le 'z') { $vk = [int][char]([char]::ToUpperInvariant($ch)); $shift = $true }
+    # 字母的 VK 码**本身就是大写**（VK_A=0x41 就是 'A'），打出来是小写还是大写
+    # 完全由 Shift 决定。所以：小写输入 → 按住 VK 但**不按** Shift；大写输入 → 按 Shift。
+    #
+    # 原来这里两种情况都按 Shift，于是 `TYPE:amount` 打出 `AMOUNT`。
+    # SQL 不区分关键字大小写、MySQL 的 LIKE 也不区分，所以**几乎照不出来**；
+    # 而 Lua 的函数名是**大小写敏感**的 —— 写造数脚本时 `insert` 被打成 `INSERT`
+    # 就是「未定义函数」。这条是造数工作台走查时被逼出来的。
+    if ($ch -ge 'a' -and $ch -le 'z') { $vk = [int][char][char]::ToUpperInvariant($ch); $shift = $false }
     else {
         switch ($ch) {
             '0' { $vk = 0x30 } '1' { $vk = 0x31 } '2' { $vk = 0x32 } '3' { $vk = 0x33 } '4' { $vk = 0x34 }
