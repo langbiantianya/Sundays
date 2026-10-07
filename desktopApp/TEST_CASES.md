@@ -719,3 +719,34 @@ bad_ref / customers / order_items / orders
 `amount > 500` 会被打成 `AMOUNT, 500`，语句还「像模像样」地被提交，
 报错指向别处。现在改成只用 `keybd_event`，并补齐 SQL 必需的符号
 （`= < > ( ) ' " % * # @ ; |` 等），打不了的字符**明确报告**而不是悄悄跳过。
+
+### 9.11 缺陷：向导「测试连接」把会话留下，保存后要点两次
+
+**现象**：新建连接 → 填地址 → 「测试连接」→ 显示「连接成功」→ 保存 →
+总览面板显示**「已连接」**，按钮是**「断开」**。用户点它想连上，拿到的是**断开**。
+必须先手动断一次、再点一次才能真的连上。
+
+**根因**：`ConnectionSession.testConnection` 只调了引擎的 `testConnection` 就把
+`statuses[id]` 写成 `CONNECTED`，**从不归还池**。而引擎侧
+（`IdbEngine.testConnection` 的 KDoc 自述）会**建（或复用）HikariCP 池**：
+
+> 首次调用会用 config 创建连接池 —— 这一步即「初始化连接」
+
+也就是说「探测」在引擎那一层根本不是只读的。新建连接时没有旧配置可断开，
+池就原封不动留在了引擎里。
+
+**修法**：探测结束时区分两种情况 ——
+本来就连着（`wasConnected`）则保持不动，**不能顺手把用户的活会话掐掉**；
+否则把池 `disconnect` 掉、状态保持 `DISCONNECTED`。「测过了」不等于「连上了」。
+失败路径同样归还池（否则坏配置也会留下一个池）。
+状态回填前 `bumpStatusGeneration`，把用户在探测期间发起的连接/断开作废。
+
+**既有测试把 bug 写成了契约**：`ConnectionManagerFlowTest > quick connect to h2...`
+原先断言「测试连接应初始化出一个连接池」且状态为 `CONNECTED` ——
+那正是 bug 本身。已改写为「探测完池归零、状态回 `DISCONNECTED`，**再点连接**才建池」。
+
+**验证**：新增 `TestConnectionDoesNotOpenSessionTest`（4 项，fake engine 记录
+`disconnect` 调用次数：新建连接探测后池归零 / 已在连接时探测不动用户的池 /
+探测失败也归还池 / 状态回填不被在途操作覆盖）。
+变异验证 —— 去掉归还逻辑 → **2 条精确变红**；改回后 4/4 绿。
+全量：shared 243/0（1 跳过）、desktopApp 300/0。

@@ -272,15 +272,48 @@ class ConnectionSession(
     /**
      * 向导「测试连接」—— 直连引擎测试并同步会话状态，返回值供向导内展示结果。
      * 供 `ConnectionManagerScreen.onTestConnection` 使用（suspend 回调）。
+     *
+     * ## ⚠️ 测试连接是**探测**，不是一次会话 —— 探测完必须把池还回去
+     *
+     * 引擎侧 `testConnection` 会**建（或复用）HikariCP 连接池**再做 `isValid` 校验
+     * （见 `IdbEngine.testConnection` 的 KDoc：「首次调用会用 config 创建连接池 ——
+     * 这一步即『初始化连接』」）。而连接列表里的「连接状态」是**按会话**记的：
+     * 一旦 `testConnection` 把状态写成 `CONNECTED`，总览面板的按钮就变成「断开」。
+     *
+     * 于是踩坑路径是：
+     *
+     * ```
+     * 向导「测试连接」 → 状态 CONNECTED、池留在引擎里
+     *   → 保存（新建连接时没有旧配置可断开，池原封不动留下）
+     *   → 总览面板显示「已连接」、按钮是「断开」
+     *   → 用户点那个按钮想连接 —— 得到的是**断开**
+     * ```
+     *
+     * 用户必须先手动断一次才能正常连接。**这不是「要先断开」的用法问题，
+     * 是探测留下了会话**。
+     *
+     * 所以这里在探测结束时：本来就连着的话保持不动（不能顺手把用户的会话掐掉），
+     * 否则把池释放掉、状态保持 `DISCONNECTED` —— 「测过了」不等于「连上了」。
      */
     suspend fun testConnection(config: ConnectionConfig): TestResult {
+        // 探测前是否已经是一次活着的会话 —— 决定要不要把池还回去
+        val wasConnected = statuses[config.id]?.state == ConnectionState.CONNECTED
+
         val response = engine.testConnection(engineConfig(config))
-        statuses = statuses + (config.id to
-            if (response.ok) {
-                ConnectionStatus(ConnectionState.CONNECTED, response.driver)
-            } else {
-                ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { "连接失败" })
-            })
+
+        if (!wasConnected) {
+            runCatching { engine.disconnect(engineConfig(config)) }
+        }
+
+        // 状态回填也要过代次：探测期间用户可能已经点了连接/断开。
+        // 这里**不**用 bump —— 探测是同步 suspend，回填紧接着发生，
+        // 但仍要先把用户在途的操作代次作废，否则它晚到的结果会把探测结论覆盖掉。
+        bumpStatusGeneration(config.id)
+        statuses = statuses + (config.id to when {
+            !response.ok -> ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { "连接失败" })
+            wasConnected -> ConnectionStatus(ConnectionState.CONNECTED, response.driver)
+            else -> ConnectionStatus()
+        })
         return TestResult(success = response.ok, message = response.error)
     }
 

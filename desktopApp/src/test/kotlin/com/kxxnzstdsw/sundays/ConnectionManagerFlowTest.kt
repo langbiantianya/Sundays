@@ -125,23 +125,38 @@ class ConnectionManagerFlowTest {
         onNodeWithText("jdbc:h2:mem:flowtest", substring = true).assertExists()
         onNodeWithText("下一步").performClick()
 
-        // 测试连接 → 引擎按需建池 + isValid
+        // 测试连接 → **探测**：引擎建池做 `isValid` 校验，探测完把池还回去。
+        //
+        // ⚠️ 这里原先的契约是「测试连接应初始化出一个连接池、状态置 CONNECTED」，
+        // 而那正是用户报告的毛病：**探测顺手开了一个会话**，
+        // 于是下一步的「连接」按钮变成「断开」，用户保存后再点那个按钮拿到的是断开，
+        // 必须先手动断一次才能正常连上（见 `ConnectionSession.testConnection` 的 KDoc）。
+        //
+        // 正确契约：探测只回答「通不通」，不改变会话。
         onNodeWithText("测试连接").performClick()
-        waitUntil(timeoutMillis = 10_000) { session.statuses.values.any { it.state == ConnectionState.CONNECTED } }
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("连接成功!", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
         onNodeWithText("连接成功!", substring = true).assertExists()
-        assertEquals(1, PoolManager.activePoolCount(), "测试连接应初始化出一个连接池")
+        waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 0 }
+        assertTrue(
+            session.statuses.values.all { it.state == ConnectionState.DISCONNECTED },
+            "探测完必须回到未连接 —— 否则「连接」按钮会变「断开」，" +
+                "用户保存后再点它拿到的是断开（实测要手动断一次才连得上）",
+        )
 
         // 快速连接流程最后一步「连接」→ 不落盘，直接选中并连库
         onNodeWithText("连接").performClick()
         waitUntil(timeoutMillis = 10_000) { session.selectedConnection != null }
         assertTrue(session.connectionList.connections.isEmpty(), "快速连接不写入持久化列表")
         // 标签由 connectionStatuses 驱动：connect() 同步置 CONNECTING（标签「连接中」）、
-        // 异步回填 CONNECTED（标签「已连接」）。测试连接那步已让状态是 CONNECTED，
-        // 因此不能只等状态 —— 直接等 UI 标签收敛，避免中间态一闪而过抓不到。
+        // 异步回填 CONNECTED（标签「已连接」）。不能只等状态 —— 直接等 UI 标签收敛，
+        // 避免中间态一闪而过抓不到。
         waitUntil(timeoutMillis = 10_000) {
             onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
         }
         onNodeWithText("已连接").assertExists()
+        waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 1 }
 
         // 「断开」→ 释放引擎连接池
         onNodeWithText("断开").performClick()
