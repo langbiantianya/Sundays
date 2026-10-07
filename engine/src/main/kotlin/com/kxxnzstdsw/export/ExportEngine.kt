@@ -43,13 +43,25 @@ object ExportEngine {
             outputDir.mkdirs()
         }
 
-        val fileName = when (request.format) {
-            ExportFormat.CSV -> "${request.fileName}.csv"
-            ExportFormat.JSON_LINES -> "${request.fileName}.jsonl"
-            ExportFormat.SQL_INSERT -> "${request.fileName}.sql"
-            ExportFormat.EXCEL -> "${request.fileName}.xlsx"
-            ExportFormat.PARQUET -> "${request.fileName}.parquet"
+        val extension = when (request.format) {
+            ExportFormat.CSV -> "csv"
+            ExportFormat.JSON_LINES -> "jsonl"
+            ExportFormat.SQL_INSERT -> "sql"
+            ExportFormat.EXCEL -> "xlsx"
+            ExportFormat.PARQUET -> "parquet"
         }
+        // ⚠️ 扩展名只补**没带**的时候。
+        //
+        // 调用方给的 fileName 常常已经带了扩展名（桌面端的对话框就是按格式预填
+        // `export.csv` 的），原来无条件拼一次 → 落到磁盘上的是 `export.csv.csv`。
+        // 用户在「输出文件」里看到 `export.csv`，实际拿到的却是 `export.csv.csv` ——
+        // 下游脚本按名字取文件就找不到。
+        val fileName = if (request.fileName.endsWith(".$extension", ignoreCase = true)) {
+            request.fileName
+        } else {
+            "${request.fileName}.$extension"
+        }
+        logger.info("导出目标: $outputDir${File.separator}$fileName（格式=${request.format}）")
         val outputFile = File(outputDir, fileName)
 
         val connection = PoolManager.getConnection(config, "")

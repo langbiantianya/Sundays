@@ -97,7 +97,7 @@ object PayloadAdapter {
     fun toJsonElement(value: Value): JsonElement {
         return when (value.kindCase) {
             Value.KindCase.NULL_VALUE -> JsonNull
-            Value.KindCase.NUMBER_VALUE -> JsonPrimitive(value.numberValue)
+            Value.KindCase.NUMBER_VALUE -> numberPrimitive(value.numberValue)
             Value.KindCase.STRING_VALUE -> JsonPrimitive(value.stringValue)
             Value.KindCase.BOOL_VALUE -> JsonPrimitive(value.boolValue)
             Value.KindCase.STRUCT_VALUE -> {
@@ -113,6 +113,37 @@ object PayloadAdapter {
             Value.KindCase.KIND_NOT_SET -> JsonNull
             else -> JsonNull
         }
+    }
+
+    /**
+     * double → JsonPrimitive，**整数不补小数点**
+     *
+     * 为什么不能直接 `JsonPrimitive(d)`：
+     * protobuf 的 [Value.numberValue] 是 double，没有整数类型。于是任何一个整数
+     * （行数、列数、主键 ID…）走完 gRPC 往返都会变成 `3.0`，而
+     * `JsonPrimitive(3.0).content` 是字符串 `"3.0"`。
+     *
+     * 而业务层读这些字段用的是 `jsonPrimitive?.longOrNull` / `intOrNull`，
+     * 这两个 API 走的是 `content.toLongOrNull()`，**对 `"3.0"` 一律返回 null**。
+     * 调用方基本都写了 `?: 0` 兜底，于是数字字段安静地变成 0 —— 不报错、不抛异常，
+     * 只是值错了。
+     *
+     * 实测症状：导出完成帧里 `filePath`（字符串，content 就是原文）完好无损，
+     * 只有 `exportedRows` 恒为 0，导出进度弹窗永远停在「正在连接引擎…」。
+     *
+     * 这里在边界把能表示成整数的 double 还原成整数字面量，让 `Value` 往返对
+     * 调用方**无损**。真正的非整数（如 1.5、金额、比率）仍按 double 输出，
+     * `doubleOrNull` 照常解析。
+     *
+     * 已知精度边界：protobuf 侧本身就是 double，所以 |值| > 2^53 的整数本来就
+     * 存不住。这里用 `Long.MIN_VALUE..Long.MAX_VALUE` 做范围判断只是为了让超出
+     * 范围的 double 退回 `doubleOrNull` 能解析的形态，不会凭空产生错误字面量。
+     */
+    private fun numberPrimitive(d: Double): JsonPrimitive {
+        if (d.isFinite() && d % 1.0 == 0.0 && d >= Long.MIN_VALUE.toDouble() && d <= Long.MAX_VALUE.toDouble()) {
+            return JsonPrimitive(d.toLong())
+        }
+        return JsonPrimitive(d)
     }
 
     /**

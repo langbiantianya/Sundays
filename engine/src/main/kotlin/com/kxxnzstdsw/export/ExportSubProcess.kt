@@ -45,16 +45,16 @@ object ExportSubProcess {
 
     fun run() {
         val port = System.getProperty("idb.export.hub.port")?.toIntOrNull() ?: 50099
-        logger.info("Export SubProcess starting (gRPC mode), listening on :$port")
+        logger.info("Export SubProcess starting (gRPC mode), listening on :$port"); System.err.println("[export-sub] 启动，监听 :$port")
 
         // 加载 drivers / dialects（子进程独立 classpath）
         try {
             val baseDir = findBaseDir()
             com.kxxnzstdsw.loader.DriverLoader.loadFromDir(File(baseDir, "drivers"))
             com.kxxnzstdsw.loader.DialectLoader.loadFromDir(File(baseDir, "dialects"))
-            logger.info("Loaded drivers and dialects from $baseDir")
+            logger.info("Loaded drivers and dialects from $baseDir"); System.err.println("[export-sub] 驱动/方言已加载: $baseDir")
         } catch (e: Exception) {
-            logger.warn("Failed to load drivers/dialects", e)
+            logger.warn("Failed to load drivers/dialects", e); System.err.println("[export-sub] 驱动/方言加载失败: ${e.message}")
         }
 
         // 优雅退出 hook
@@ -71,7 +71,7 @@ object ExportSubProcess {
             .build()
             .also { it.start() }
 
-        logger.info("ExportHub gRPC server started on :$port")
+        logger.info("ExportHub gRPC server started on :$port"); System.err.println("[export-sub] ExportHub 已启动 :$port")
 
         try {
             server?.awaitTermination()
@@ -91,17 +91,45 @@ object ExportSubProcess {
      */
     private class ExportHubImpl : ExportHubGrpc.ExportHubImplBase() {
         override fun stream(responseObserver: StreamObserver<ExportHubResponse>): StreamObserver<ExportCommand> {
-            logger.info("Parent connected to ExportHub")
+            logger.info("Parent connected to ExportHub"); System.err.println("[export-sub] 父进程已连接")
+
+            // ⚠️ gRPC 的 `StreamObserver.onNext` **不是线程安全的**。
+            //
+            // 每个 START_EXPORT 都跑在 `scope`(Dispatchers.IO) 的独立协程里，
+            // 多个导出并发时就会有多条线程同时对**同一条**流调 onNext，
+            // 内层 `ServerCallImpl.sendHeaders` 直接 `checkState(!headersSent)`
+            // 抛 "sendHeaders has already been called" —— 整条流当场废掉，
+            // 用户的体感就是「导到一半卡死 / 莫名其妙失败」。
+            //
+            // 真实场景：同时导两张表、或一个探活命令和真导出重叠。
+            // 所以这里给每条流配一把锁，把「发帧」串行化。
+            // 用对象锁而不是全局锁：不同父进程连接之间互不阻塞。
+            val sendLock = Any()
+
+            /** 线程安全地发一帧；流已关闭时返回 false 而不是把异常抛回业务协程。 */
+            fun sendFrame(response: ExportHubResponse): Boolean = synchronized(sendLock) {
+                try {
+                    responseObserver.onNext(response)
+                    true
+                } catch (e: Exception) {
+                    // 流已被父进程关闭时会走到这里。不该让一个已废的流把导出协程带崩
+                    logger.warn("Failed to send frame on ExportHub stream", e)
+                    System.err.println("[export-sub] 发帧失败（流可能已关闭）: ${e.message}")
+                    false
+                }
+            }
 
             return object : StreamObserver<ExportCommand> {
                 override fun onNext(cmd: ExportCommand) {
-                    logger.debug("Subprocess received command: ${cmd.kind}")
+                    logger.debug("Subprocess received command: ${cmd.kind}"); System.err.println("[export-sub] 收到命令 ${cmd.kind} id=${cmd.id}")
                     when (cmd.kind) {
-                        Kind.START_EXPORT -> handleStartExport(cmd, responseObserver)
+                        // `::sendFrame` 必须显式取引用：裸写 `sendFrame` 会被 Kotlin 当成一次调用
+// （报 "Function invocation expected"），而不是一个函数值。
+Kind.START_EXPORT -> handleStartExport(cmd, ::sendFrame)
                         Kind.STOP_EXPORT -> handleStopExport(cmd.exportId)
                         Kind.SHUTDOWN -> {
                             logger.info("Received SHUTDOWN")
-                            responseObserver.onCompleted()
+                            synchronized(sendLock) { runCatching { responseObserver.onCompleted() } }
                             scope.launch {
                                 kotlinx.coroutines.delay(100)
                                 server?.shutdownNow()
@@ -127,11 +155,13 @@ object ExportSubProcess {
 
     /**
      * 处理 START_EXPORT — 启动独立协程调用 ExportHandler.executeAsSubprocess
+     *
+     * @param send 线程安全的发帧函数（见 [ExportHubImpl.stream] 里关于 onNext 线程安全的说明）
      */
-    private fun handleStartExport(cmd: ExportCommand, responseObserver: StreamObserver<ExportHubResponse>) {
+    private fun handleStartExport(cmd: ExportCommand, send: (ExportHubResponse) -> Boolean) {
         val id = cmd.id
         if (id.isBlank()) {
-            responseObserver.onNext(
+            send(
                 ExportHubResponse.newBuilder()
                     .setId("unknown")
                     .setSuccess(false)
@@ -142,7 +172,7 @@ object ExportSubProcess {
             return
         }
         if (activeExports.containsKey(id)) {
-            responseObserver.onNext(
+            send(
                 ExportHubResponse.newBuilder()
                     .setId(id)
                     .setSuccess(false)
@@ -173,11 +203,12 @@ object ExportSubProcess {
                 // executeAsSubprocess 直接返回 Flow<ExportHubResponse>（subprocess wire shape），
                 // 省去 typed Response ↔ Value 的来回转换
                 ExportHandler.executeAsSubprocess(request).collect { hubResp ->
-                    responseObserver.onNext(hubResp)
+                    System.err.println("[export-sub] 回帧 id=${hubResp.id} end=${hubResp.end} success=${hubResp.success} 有数据=${hubResp.hasData()}")
+                    send(hubResp)
                 }
             } catch (e: Exception) {
-                logger.error("Export failed: $id", e)
-                responseObserver.onNext(
+                logger.error("Export failed: $id", e); System.err.println("[export-sub] 导出抛异常 id=$id: $e")
+                send(
                     ExportHubResponse.newBuilder()
                         .setId(id)
                         .setSuccess(false)

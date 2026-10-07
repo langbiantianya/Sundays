@@ -979,3 +979,114 @@ ExportProcessManager.collectResponses(id).collect { emit(it) }   // ← 只有�
   临时加 `-Djava.awt.headless=true` 跑过一遍：3/3 绿，兜底路径确实有效
 - 真窗口复验：选 `build` → 「浏览」→ 「选择」→ 输出目录写回 `...\desktopApp\build`；
   「开始导出」→ 进度弹窗显示该目录 + 「正在连接引擎…」+ 不确定进度条
+
+### 9.15 引擎侧单测：导出链路一共有 5 个缺陷，而且**没有一个会被「导出成功了吗」发现**
+
+§9.14 收尾时进度弹窗显示的永远是「正在连接引擎…」，导出完成帧的行数恒为 0。
+这一节把整条链路拉到**引擎模块的单测**里逐段拆开 —— 用户的要求是
+「从 engine 模块的单测验证，不行就多加点日志输出」。加了日志之后，
+一共挖出 5 个真实缺陷，其中 4 个和这行 0 有关。
+
+先说日志：桌面应用被 IDE / Gradle 拉起时 stdout 用户根本看不到，
+SLF4J 在这个场景下还可能整个是 NOP。所以父子两侧关键点都直接
+`System.err.println("[export]…")` / `"[export-sub]…"`，并且子进程的
+stdout / stderr 被重定向到 **`engine/build/libs/export-subprocess.log`** ——
+用户能看到的地方。定位「子进程到底有没有起来、发出了几帧、每帧几个字」全靠它。
+
+#### 缺陷 1：`PayloadAdapter` 把整数变成 `3.0`，于是 `exportedRows` 读不回来
+
+`google.protobuf.Value` 只有 `number_value`（double），没有整数类型。
+于是 `3` 走完 gRPC 往返变成 `3.0`，而 `JsonPrimitive(3.0).content` 是字符串 `"3.0"`。
+业务层读这些字段用的是 `jsonPrimitive?.longOrNull` —— 它走 `content.toLongOrNull()`，
+**对 `"3.0"` 一律返回 null**。调用方基本都写了 `?: 0` 兜底，
+于是数字安静地变成 0：不报错、不抛异常，只是值错了。
+
+症状完全对得上：完成帧里 `filePath`（字符串，`content` 就是原文）完好无损，
+**只有 `exportedRows` 恒为 0**。
+
+修法：`PayloadAdapter.numberPrimitive` 在边界把能表示成整数的 double
+还原成整数字面量。真正的非整数（1.5、金额、比率）仍按 double 输出。
+
+> 这不只是导出的问题 —— 任何「响应里的整数经 protobuf 往返后再用
+> `intOrNull`/`longOrNull` 读」的地方都中招。边界必须自己扛。
+
+#### 缺陷 2：并发导出直接把 ExportHub 流搞坏
+
+gRPC 的 `StreamObserver.onNext` **不是线程安全的**。子进程侧每个 `START_EXPORT`
+都跑在 `Dispatchers.IO` 的独立协程里，两个导出重叠时就有两条线程同时对
+同一条流调 `onNext`，内层 `ServerCallImpl.sendHeaders` 直接 checkState 失败，
+抛 `sendHeaders has already been called`，**整条流当场废掉**。
+
+真实场景不是测试造出来的：**用户同时导两张表，就是这个并发度**。
+表现是「其中一个导出莫名其妙失败 / 进度条卡死」，而且偶发。
+
+修法：`ExportSubProcess.stream()` 给每条流配一把对象锁（不同父进程连接互不阻塞），
+所有发帧路径都过 `sendFrame`；父进程侧的 `commandObserver.onNext` 同样不线程安全，
+也加了 `sendLock`（换流时连锁一起换，避免新流去抢旧流正在持有的锁）。
+
+#### 缺陷 3：`localhost` 会被解析成 IPv6 `::1`
+
+同一个 `localhost` 同时出现在建流和探活两处。Windows 上它同时解析出
+`127.0.0.1` 和 `::1`，顺序还会变；一旦 gRPC 挑了 `::1`，而对端只监听 IPv4，
+就得到一句莫名其妙的 `UNAVAILABLE: io exception`
+（真实堆栈：`Connection refused: getsockopt: localhost/[0:0:0:0:0:0:0:1]:60467`）。
+
+导出子进程永远和父进程同机，根本没有「跨主机」这一说。改成写死
+`127.0.0.1`（`ExportProcessManager.EXPORT_HUB_HOST`）。
+
+这是**偶发且无法复现**的那一类：一旦命中，用户看到的就是「导出无反应」。
+
+#### 缺陷 4：已成功的导出后面还会跟一句失败
+
+`publishResponse` 收到终止帧后**不能**立刻把 flow 从 map 里删 ——
+`ExportHandler` 是先 `startExport`、**后** `collectResponses(id)` 的，
+删早了它会 `computeIfAbsent` 造一条**全新的**空流，终止帧就永远送不到。
+所以删除被 `delay(50)` 推后。
+
+而这 50ms 里子进程一死，`failPendingExports` 就会给一条**已经成功**的导出
+补一帧失败 —— 界面上「导出成功了」后面又跟一句失败。
+新增 `endedExports` 集合：「已收口」不再用「已从 map 里消失」来表达。
+
+#### 缺陷 5（探针自己的）：探活用的假导出污染了并发度
+
+原先的探活是「先发一条 `START_EXPORT`，能发出去就说明对面起来了」。
+两个问题：
+
+- gRPC 客户端对**还没在监听**的端口**不会立刻抛**，`onNext` 照常返回，
+  错误稍后才从 `onError` 异步回来 —— 于是这条「探活」命令本身就成了第一条失败帧，
+  测试拿到的形态和真 bug 一模一样，看着像导出坏了，其实是对面还没起；
+- 它自己也是一个并发导出，掩盖 / 诱发真正的并发竞态。
+
+改成轮询 TCP 端口，**并且顺序要紧：先等端口、再建流** ——
+`stub.stream()` 拿到的 `ClientCall` 会立刻去连，对面没 bind 就是 `Connection refused`，
+而这个失败是异步回来的，等端口等到了也救不回来。
+生产代码 `ExportProcessManager.awaitHubReadyOrReportFailure` 本来就是这个顺序。
+
+#### 验证
+
+- `PayloadAdapterNumberRoundTripTest`（6 项，新）：整数往返后 `longOrNull`/`intOrNull` 都能读回；
+  小数仍是 `double`；NaN / 无穷退回 double 形态而不是被当整数处理
+- `ExportPipelineIntegrationTest`（4 项，新）：
+  - `subprocess export writes the file` —— 引擎本体，真连 H2 真写文件，
+    中文 / 负数 / 含逗号字段都验
+  - `a bad output directory fails loudly instead of silently` ——
+    坏目录必须响亮失败（`end=true` + 非空 error），而不是「什么都没发生」
+  - `the ExportHub stream carries progress back` —— gRPC 通道往返
+  - `concurrent exports on one hub stream do not corrupt it` ——
+    **24 个导出同时压一条流**，每个都必须成功收口、文件都在、流不能断
+- `ExportEndToEndIntegrationTest`（桌面层 → 引擎 → **真子进程** → 磁盘有文件）：
+  断言进度里出现过非零行数（就是缺陷 1 的那条断言）
+- **变异验证**：`concurrent` 用例在 24 并发下，把 `synchronized(sendLock)` 摘掉
+  连跑 3 次 → **3/3 红**；装回锁连跑 3 次 → **3/3 绿**。
+  （4 并发时只抓到 1/3，锚不住，所以把并发度提到 24）
+- 全量：`:engine:test :shared:jvmTest :desktopApp:test` → **631 项 / 0 失败**
+  （engine 298、desktopApp 312、engine-grpc-client 21）
+
+#### 教训
+
+**测试必须在能跑的环境里可跑。** Gradle 测试的 classpath 上没有 jar，
+导出子进程根本起不来 —— 这条链路只在打包产物里被验证过，这也正是它烂掉这么久的原因。
+先给子进程启动加上「退回本进程 classpath」这条路，链路才第一次能在单测里被跑起来。
+
+**并发缺陷的回归测试必须有牙齿。** 4 并发抓不住（1/3），
+必须把并发度和帧密度拉到让竞态几乎必然发生（24/24），再用变异验证确认它真的会红。

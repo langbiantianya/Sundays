@@ -214,6 +214,39 @@ v2.16 新增 6 个 action 与 1 个 category：
 - **内存限制**：子进程 `-Xmx512m`
 - **响应流管线**：子进程通过 `ExportHub` 将进度帧转发回主进程，主进程再 emit 到上游 gRPC StreamObserver
 
+#### 这条链路上的四条硬约束（踩过的坑，改动前请先读）
+
+1. **每一层流式路由都必须保证「一定会以成功或失败收口」。** 缺一层就变成静默：
+   `EXPORT.RUN_EXPORT` 的帧从子进程 `ExportEngine` → `ExportHandler.executeAsSubprocess`
+   （`callbackFlow` + `Channel`，工作协程只 `trySend`，`send` 全在 flow 自己的协程里 ——
+   在别人的协程里 `emit` 会撞 Flow 不变量）→ ExportHub → 主进程 `ExportProcessManager`
+   → 上游 gRPC。任何一环没兜底，界面上的表现都是「点了导出，什么也没发生」。
+   兜底点包括：`startExport` 返回 Boolean、订阅早于下发、子进程退出补失败帧、
+   hub 流断开补失败帧、上游 `withTimeoutOrNull` 看门狗。
+
+2. **gRPC 的 `StreamObserver.onNext` 不是线程安全的。** 多个导出并发时，
+   父子两侧都会并发调 `onNext`，内层 `sendHeaders` 直接 checkState 失败抛
+   `sendHeaders has already been called`，**整条流当场废掉**。
+   子进程侧每条流配一把对象锁（`sendLock` / `sendFrame`），
+   父进程侧配一把发命令锁（`ExportProcessManager.sendLock` / `sendCommand`）。
+
+3. **地址写死 `127.0.0.1`，不要用 `localhost`。** `localhost` 在 Windows 上会解析出 `::1`，
+   一旦挑了 IPv6 去连只监听 IPv4 的子进程，得到的是无法复现的
+   `UNAVAILABLE: io exception`。同机进程没有「跨主机」这一说，见
+   `ExportProcessManager.EXPORT_HUB_HOST`。
+
+4. **`Value` 只有 `double number_value`。** 任何整数经 protobuf 往返都会变成 `3.0`，
+   而 `JsonPrimitive(3.0).content` 是 `"3.0"`，`longOrNull` / `intOrNull` 对它返回 null。
+   业务层普遍写 `?: 0` 兜底，于是数字**安静地变成 0** —— 不报错、不抛异常，只是错了。
+   `PayloadAdapter.numberPrimitive` 在边界把整数还原回去。
+
+#### 排障入口
+
+子进程 stdout / stderr 重定向到 **`engine/build/libs/export-subprocess.log`**
+（每次启动会覆盖）。父进程侧关键点打 `[export]…`、子进程打 `[export-sub]…`。
+桌面应用被 IDE / Gradle 拉起时 stdout 用户看不到，SLF4J 还可能是 NOP，
+所以这里用的是 `System.err.println` 而不是 logger。
+
 ### 3.5 Schema 导航层级 (Navigation Hierarchy)
 
 数据库连接后，前端导航分为两级（PG/H2 支持两级，MySQL 仅支持 database）：
