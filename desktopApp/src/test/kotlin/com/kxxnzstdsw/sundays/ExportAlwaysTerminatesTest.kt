@@ -198,6 +198,63 @@ class ExportAlwaysTerminatesTest {
         )
     }
 
+    @Test
+    fun `progress is reported frame by frame not only the final count`() = runBlocking {
+        // 进度弹窗的全部价值在「动起来」这三个字上。
+        // 只在最后一帧报一次行数 = 弹窗从头到尾纹丝不动，用户和面对 §9.13 那个
+        // 静默缺陷时**分辨不出区别** —— 那这一整轮改动就白做了。
+        val out = Files.createTempDirectory("sundays-export-progress").toFile()
+        val file = out.resolve("p.csv").also { it.writeText("id\n") }
+        val seen = mutableListOf<Long>()
+        val state = newState(SteppingEngine(file, listOf(100, 500, 1200)))
+        state.exportQuery("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, out.absolutePath, "p.csv") { p ->
+            seen += p.rowsWritten
+        }
+        assertEquals(
+            listOf(100L, 500L, 1200L), seen,
+            "每一帧进度都要往外抛（含最后一帧 completed）——只报最后一帧的话，弹窗全程不动，" +
+                "用户和面对 §9.13 那个静默缺陷时分辨不出区别",
+        )
+    }
+
+    /** 按给定行数逐帧推进度，最后一帧带 `completed=true`。 */
+    private class SteppingEngine(
+        private val file: File,
+        private val steps: List<Long>,
+    ) : EngineClient {
+        override fun handle(request: com.kxxnzstdsw.grpc.Request): Flow<com.kxxnzstdsw.grpc.Response> =
+            flow {
+                steps.forEachIndexed { i, rows ->
+                    val last = i == steps.lastIndex
+                    emit(com.kxxnzstdsw.grpc.response {
+                        id = request.id
+                        success = true
+                        stream = true
+                        export = com.kxxnzstdsw.grpc.exportResponse {
+                            progress = com.kxxnzstdsw.grpc.ExportProgressFrame.newBuilder()
+                                .setExportedRows(rows)
+                                .setCompleted(last)
+                                .setFilePath(if (last) file.absolutePath else "")
+                                .build()
+                        }
+                    })
+                }
+            }
+
+        override suspend fun invoke(
+            connection: GrpcConnectionConfig,
+            configure: com.kxxnzstdsw.grpc.RequestKt.Dsl.() -> Unit,
+        ): com.kxxnzstdsw.grpc.Response = error("本用例不走非流式路径")
+
+        override suspend fun testConnection(
+            config: GrpcConnectionConfig,
+        ): com.kxxnzstdsw.grpc.SystemTestConnectionResponse = error("本用例不测连接")
+
+        override suspend fun disconnect(config: GrpcConnectionConfig): Boolean = false
+
+        override fun close() = Unit
+    }
+
     @Suppress("unused")
     private fun unusedFileImport() = File(".") // 保留 File 引用（上面的类型签名需要）
 }

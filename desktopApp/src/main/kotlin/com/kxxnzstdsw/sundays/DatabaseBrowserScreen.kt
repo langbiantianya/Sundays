@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -159,6 +160,7 @@ import com.kxxnzstdsw.sundays.ui.WinTextButton
 import com.kxxnzstdsw.sundays.ui.WinTextField
 import com.kxxnzstdsw.sundays.ui.tabStripContainerColor
 import com.kxxnzstdsw.sundays.ui.WinIconButton
+import com.kxxnzstdsw.sundays.ui.WinOutlinedButton
 import com.kxxnzstdsw.sundays.ui.winShape
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -1595,6 +1597,14 @@ private fun PreviewTabArea(
                 // 导出对话框：挂在 `PreviewTabArea` 这一层而不是 `DataTable` 的右键菜单里 ——
                 // 引擎的导出是**子进程**跑一段 SQL，右键菜单塞不下一整套格式/路径/文件名
                 var exportSql by remember { mutableStateOf<String?>(null) }
+                // 导出进行中。`visible` 与 `running` 分开：用户点「后台运行」只是把窗口
+                // 藏起来，导出**仍在跑**，所以状态不能随着弹窗一起被清掉。
+                var exportJob by remember {
+                    mutableStateOf<DatabaseBrowserState.ExportProgress?>(null)
+                }
+                var exportTarget by remember {
+                    mutableStateOf<Pair<String, String>?>(null)
+                }
                 if (exportSql != null) {
                     ExportDialog(
                         presetSql = exportSql!!,
@@ -1603,14 +1613,32 @@ private fun PreviewTabArea(
                         onConfirm = { fmt, dir, name, tbl ->
                             val sql = exportSql!!
                             exportSql = null
+                            exportTarget = name to dir
+                            exportJob = DatabaseBrowserState.ExportProgress(0, false)
                             scope.launch {
                                 // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
                                 // 后者会把表格换成「读取失败」面板，导出成功不该长那样
-                                state.exportQuery(sql, fmt, dir, name, tbl)
+                                state.exportQuery(sql, fmt, dir, name, tbl) { p ->
+                                    // 每帧都写状态：进度条与行数一起动，
+                                    // 这正是「它在工作」这件事唯一可信的证据
+                                    exportJob = p
+                                }
                                     .onSuccess { current.notice = "已导出 ${it.rowsWritten} 行 → ${it.file}" }
                                     .onFailure { current.notice = "导出失败：${it.message}" }
+                                exportJob = null
                             }
                         },
+                    )
+                }
+                // 进度弹窗放在 `PreviewTabContent` **之外** —— 它是模态浮层，
+                // 与下面那块可滚动的表格没有布局关系
+                exportJob?.let { p ->
+                    val (fname, fdir) = exportTarget ?: ("" to "")
+                    ExportProgressDialog(
+                        fileName = fname,
+                        outputDir = fdir,
+                        rowsWritten = p.rowsWritten,
+                        onBackground = { exportJob = null },
                     )
                 }
                 PreviewTabContent(
@@ -1911,12 +1939,18 @@ internal const val EXPORT_CONFIRM_BTN_TAG = "exportConfirmBtn"
 /**
  * 导出对话框 —— 选格式、输出目录、文件名。
  *
- * ## 为什么输出目录是个自由文本框
+ * ## 路径怎么选：系统对话框 + 手动输入，两条路都在
  *
- * 引擎侧 `ExportRunRequest.output_dir` 收的是**绝对路径**，且导出在**引擎进程**里执行
- * （Direct 模式下就是本进程）。桌面应用没有可靠的「系统目录选择器」可用（Compose
- * Desktop 至今没有原生 file picker），所以给一个带默认值的文本框，让用户粘贴路径 ——
- * 默认填当前工作目录，用户不填也能跑。
+ * 抄一段 `C:\Users\xxx\...` 出来既慢又容易打错，而引擎侧 `ExportRunRequest.output_dir`
+ * 收的确实是**绝对路径**、引擎自己没得挑 —— 这个交互欠用户的只能在这里补。
+ * 所以：
+ *
+ * - **「浏览…」** 调 [NativePathPicker]（`java.awt.FileDialog`，在 Windows 上就是
+ *   资源管理器那套系统对话框；失败时退回 Swing 的目录选择器），一步把
+ *   **目录 + 文件名**一起定下来；
+ * - **两个文本框仍然可编辑**：网络路径、UNC、刚在别处复制来的路径，
+ *   以及无头/CI 环境下压根弹不出系统对话框时，手动输入是唯一能走通的路。
+ *   把选择器做成「只能选」反而会在这些场景下把功能整个堵死。
  */
 @Composable
 private fun ExportDialog(
@@ -1925,6 +1959,7 @@ private fun ExportDialog(
     onConfirm: (DatabaseBrowserState.ExportFormat, String, String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var format by remember { mutableStateOf(DatabaseBrowserState.ExportFormat.CSV) }
     var dir by remember { mutableStateOf(System.getProperty("user.dir") ?: "") }
     // 文件名给一个**合法**的默认：中文 + 空格 + 斜杠在文件系统与 SQL 里都有特殊含义，
@@ -1941,6 +1976,19 @@ private fun ExportDialog(
     // 只有选 SQL INSERT 才问目标表；其余格式的「目标表」是参数校验里的硬要求
     val needsTable = format == DatabaseBrowserState.ExportFormat.SQL_INSERT
     val canSubmit = dir.isNotBlank() && name.isNotBlank() && (!needsTable || tableName.isNotBlank())
+    // 选择器是**阻塞**的模态框，绝不能在重组过程中直接调；
+    // 也不该让用户等着期间界面是死的 —— 交给 IO 线程，点完再回主线程写回状态
+    val pickPath: (Boolean) -> Unit = { wholeFile ->
+        scope.launch {
+            val picked = if (wholeFile) {
+                NativePathPicker.pickFile(dir, name)
+            } else {
+                NativePathPicker.pickDirectory(dir, name)
+            } ?: return@launch
+            dir = picked.dir
+            if (picked.name.isNotBlank()) name = picked.name
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1968,20 +2016,48 @@ private fun ExportDialog(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = dir,
-                    onValueChange = { dir = it },
-                    label = { Text("输出目录（绝对路径）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag(EXPORT_DIR_FIELD_TAG),
-                )
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("文件名") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag(EXPORT_NAME_FIELD_TAG),
-                )
+                // 输出目录：文本框 + 系统选择器**并排**。
+                // 两个入口都要有 —— 见本函数的 KDoc：手动输入在网络路径与无头环境下
+                // 是唯一走得通的路，把它拿掉等于把功能堵死。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = dir,
+                        onValueChange = { dir = it },
+                        label = { Text("输出目录（绝对路径）") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).testTag(EXPORT_DIR_FIELD_TAG),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    WinOutlinedButton(
+                        onClick = { pickPath(false) },
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(EXPORT_BROWSE_DIR_BTN_TAG),
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("浏览")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("文件名") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).testTag(EXPORT_NAME_FIELD_TAG),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // 一步把目录 + 文件名一起定下来 —— 最常用的一条路
+                    WinOutlinedButton(
+                        onClick = { pickPath(true) },
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(EXPORT_BROWSE_FILE_BTN_TAG),
+                    ) {
+                        Icon(Icons.Default.SaveAlt, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("选文件")
+                    }
+                }
                 if (needsTable) {
                     OutlinedTextField(
                         value = tableName,
@@ -2007,9 +2083,97 @@ private fun ExportDialog(
     )
 }
 
+/**
+ * 导出进行中的进度弹窗。
+ *
+ * ## 为什么是弹窗而不是工具条上的一行小字
+ *
+ * 导出可能跑好几分钟，期间用户完全不知道应用是**在忙**还是**卡死了**——
+ * §9.13 那个缺陷之所以拖了这么久才被认真对待，正是因为界面上什么都不动。
+ * 一个明确写着「正在导出」的模态窗，至少把「它在工作」这件事说清楚了。
+ *
+ * ## 为什么是**不确定**进度条
+ *
+ * 引擎只推「已导出 N 行」，没有总数（见 [DatabaseBrowserState.ExportProgress] 的说明）。
+ * 拿表预览的行数凑一个百分比是**撒谎**：预览可能带过滤，导出的是整张表。
+ * 不确定态 + 如实的行数，是这两者之间唯一诚实的组合。
+ *
+ * ## 为什么只能「后台运行」而不能「取消」
+ *
+ * 取消要一路传到引擎子进程（`EXPORT.STOP_EXPORT`），而那条链路正是当前最不可靠的一段。
+ * 与其摆一个按了没反应的按钮，不如给一个**一定做得到**的动作：
+ * 关掉窗口，导出继续，结果照样写进预览顶部的提示行。
+ */
+@Composable
+private fun ExportProgressDialog(
+    fileName: String,
+    outputDir: String,
+    rowsWritten: Long,
+    onBackground: () -> Unit,
+) {
+    AlertDialog(
+        // 「关掉」只是藏起窗口，导出继续 —— 不能让用户以为点 X 就取消了导出
+        onDismissRequest = onBackground,
+        title = { Text("正在导出") },
+        text = {
+            Column {
+                Text(
+                    text = "$fileName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = outputDir,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(12.dp))
+                // 不确定态：引擎不给总数（见 KDoc）
+                androidx.compose.material3.LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().testTag(EXPORT_PROGRESS_DIALOG_TAG),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    // 还没收到第一帧时显示「正在连接…」而不是「0 行」——
+                    // 「0 行」会被读成「导出失败」，那正是我们要避免的误读
+                    text = if (rowsWritten > 0) "已导出 $rowsWritten 行…" else "正在连接引擎…",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(EXPORT_PROGRESS_ROWS_TAG),
+                )
+            }
+        },
+        confirmButton = {
+            WinButton(
+                onClick = onBackground,
+                shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(EXPORT_PROGRESS_BACKGROUND_BTN_TAG),
+            ) { Text("后台运行") }
+        },
+    )
+}
+
 internal const val EXPORT_DIR_FIELD_TAG = "exportDirField"
 internal const val EXPORT_NAME_FIELD_TAG = "exportNameField"
 internal const val EXPORT_TABLE_FIELD_TAG = "exportTableField"
+
+/** 导出对话框里的「浏览」（系统目录选择器）。 */
+internal const val EXPORT_BROWSE_DIR_BTN_TAG = "exportBrowseDirBtn"
+
+/** 导出对话框里的「选文件」（系统文件选择器，目录 + 文件名一起定）。 */
+internal const val EXPORT_BROWSE_FILE_BTN_TAG = "exportBrowseFileBtn"
+
+/** 导出进行中的进度弹窗。 */
+internal const val EXPORT_PROGRESS_DIALOG_TAG = "exportProgressDialog"
+
+/** 进度弹窗里的行数读数。 */
+internal const val EXPORT_PROGRESS_ROWS_TAG = "exportProgressRows"
+
+/** 进度弹窗里的「后台运行」按钮。 */
+internal const val EXPORT_PROGRESS_BACKGROUND_BTN_TAG = "exportProgressBackgroundBtn"
 
 /** 表预览过滤行的 UI 测试 tag。 */
 internal const val TABLE_SEARCH_FIELD_TAG = "tableSearchField"
@@ -3729,6 +3893,22 @@ class DatabaseBrowserState(
     data class ExportResult(val file: String, val rowsWritten: Long)
 
     /**
+     * 导出进度的一帧 —— 引擎每导出一批就推一次。
+     *
+     * ## 为什么只有行数、没有百分比
+     *
+     * 引擎的 `ExportProgressFrame` 里就只有 `exported_rows` / `column_count` /
+     * `completed`，**没有总行数**：导出走的是一条普通 `SELECT`，引擎不会为了报进度
+     * 先跑一遍 `COUNT(*)`（大表上那是白等一遍）。
+     *
+     * 前端**不能**拿表预览那一行的行数来充当总数 ——
+     * 预览可能带着过滤/搜索条件，而导出的是整张表，两者对不上。
+     * 报一个假的百分比比不报更糟，所以进度条走不确定态（indeterminate），
+     * 旁边如实显示「已导出 N 行」。
+     */
+    data class ExportProgress(val rowsWritten: Long, val completed: Boolean)
+
+    /**
      * 导出的**看门狗超时**（毫秒）。
      *
      * 取 5 分钟：真正的大表导出按行推进、可能跑很久，这个值不该误伤正常导出；
@@ -3751,6 +3931,8 @@ class DatabaseBrowserState(
      * 文件路径都会丢。
      *
      * @param format `SQL_INSERT` 时 [tableName] 必填 —— 引擎要拼出 `INSERT INTO <表>`。
+     * @param onProgress 每收到一帧进度就调一次（**在引擎的协程里**，不是主线程）。
+     *   UI 层用它驱动进度弹窗；不给就用默认的空实现，行为与过去完全一致。
      * @return 失败时 `Result.failure`；成功时 [ExportResult]。
      */
     suspend fun exportQuery(
@@ -3759,6 +3941,7 @@ class DatabaseBrowserState(
         outputDir: String,
         fileName: String,
         tableName: String = "",
+        onProgress: (ExportProgress) -> Unit = {},
     ): Result<ExportResult> {
         // 参数先在**前端**校验：让引擎那边才报错的话，用户看到的是一句 JDBC 异常，
         // 还要在对话框里猜是自己哪里填错了
@@ -3799,6 +3982,9 @@ class DatabaseBrowserState(
                     if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "导出失败" })
                     val p = resp.export.progress
                     rows = p.exportedRows
+                    // 进度要**逐帧**往外抛，而不是只留最后一帧：
+                    // 进度弹窗的价值全在「动起来」这件事上，只报最终行数等于没报
+                    onProgress(ExportProgress(rowsWritten = p.exportedRows, completed = p.completed))
                     if (p.completed) {
                         file = p.filePath
                         if (p.error.isNotBlank()) throw IllegalStateException(p.error)
