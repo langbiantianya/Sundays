@@ -247,7 +247,12 @@ fun DataTable(
             shape = winShape(4.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            // ⚠️ 这里**必须**用 [BoxWithConstraints] 把可视宽读出来，见 [contentWidthFor] 的说明：
+            // 表头与表体都挂在 `horizontalScroll` 里，而滚动容器给子项的是**无界宽度**，
+            // 此时 `Modifier.fillMaxWidth()` 是空操作、`Modifier.weight(1f)` 拿到 **0** 宽。
+            BoxWithConstraints {
+                val contentWidth = contentWidthFor(columns, maxWidth)
+                Column(modifier = Modifier.fillMaxSize()) {
                 // 表头与表体**共用同一个** ScrollState。
                 //
                 // 两处各 `rememberScrollState()` 时，表头能横滚、表体不能 —— 用户拖表头把
@@ -255,7 +260,10 @@ fun DataTable(
                 // 按列名读数会读到隔壁那一列。对数据库工具来说这是会读错数据的缺陷，
                 // 不是「体验不好」。
                 val hScroll = rememberScrollState()
-                TableHeader(columns = columns, theme = theme, hScroll = hScroll)
+                TableHeader(
+                    columns = columns, theme = theme, hScroll = hScroll,
+                    contentWidth = contentWidth,
+                )
                 WinDivider(color = theme.borderColor)
                 TableBody(
                     columns = columns,
@@ -267,6 +275,7 @@ fun DataTable(
                     hScroll = hScroll,
                     editable = cellEditable,
                     onCellEdit = onCellEdit,
+                    contentWidth = contentWidth,
                 )
                 WinDivider(color = theme.borderColor)
                 TablePagination(
@@ -284,6 +293,7 @@ fun DataTable(
                         PageSize.ALL_VALUES
                     },
                 )
+                }
             }
         }
         if (showDetailPanel) {
@@ -321,6 +331,46 @@ fun DataTable(
 // ============================================================================
 // 子组件：表头 (TableHeader)
 // ============================================================================
+
+/**
+ * 表头与表体**共同的内容宽度** —— 必须是一个**显式的 `Dp`**，而不是靠 `fillMaxWidth()`。
+ *
+ * ## 为什么
+ *
+ * 表头与表体都挂在 `Modifier.horizontalScroll` 里，而**滚动容器给子项的是无界宽度**。
+ * 无界宽度下两个惯用写法同时失效：
+ *
+ * - `Modifier.fillMaxWidth()`：没有上界可填，等于空操作；
+ * - `Modifier.weight(1f)`：`Row` 分不出剩余空间，**每个加权子项拿到 0 宽**。
+ *
+ * 于是数据行整行收缩到只剩「一个字符」的宽度（实测 1024px 视口下塌成 **28px**），
+ * 5 个 `weight` 列全挤在 x=0 互相盖住 —— 表预览里除第一列外**全是空白或乱码**。
+ * 表头看起来正常，是因为它的 `Row` 在同一条链上恰好先拿到了视口宽度。
+ *
+ * ## 为什么定宽列的测试一直是绿的
+ *
+ * `TableColumnAlignmentTest` 用的是 12 列 × **140dp 定宽**，走 `Modifier.width(140.dp)`
+ * —— 那是**显式宽度**，在无界容器里照样成立。只有 `weight` 路径会塌。
+ * 而 `DatabaseBrowserScreen` 建列时**只给 key 与 header**（`TableColumn(key, header)`），
+ * 也就是全部走 `weight` 路径 —— 于是浏览器一连真数据库就必然踩中。
+ *
+ * ## 怎么算
+ *
+ * 与 `Row` 的分配规则一致：**先给定宽子项自然宽度，剩下的按权重分**。
+ * 于是「有加权列」时内容宽度就是视口宽（不足则由定宽列撑开并触发横滚），
+ * 「全是定宽列」时就是定宽之和（超出视口即横滚）。两种情形都保住了
+ * 原有的「共用一个 ScrollState、表头表体永远对齐」的契约。
+ */
+private fun contentWidthFor(columns: List<TableColumn>, viewport: Dp): Dp {
+    if (columns.isEmpty()) return viewport
+    val fixed = columns.fold(0.dp) { acc, c -> acc + (c.width ?: 0.dp) }
+    val hasWeighted = columns.any { it.width == null }
+    // 分隔线与左右内边距按 1dp / 12dp 估算，量级足够（差几 dp 不影响判断），
+    // 真正要紧的是**有没有被固定成一个具体值**。
+    val chrome = 24.dp + (columns.size - 1).coerceAtLeast(0).dp
+    val minimum = fixed + chrome
+    return if (hasWeighted) maxOf(viewport, minimum) else minimum
+}
 
 /** 表头容器的 UI 测试 tag —— 见 `TableColumnAlignmentTest`。 */
 const val TABLE_HEADER_TAG = "sundays.tableHeader"
@@ -400,10 +450,12 @@ private fun TableHeader(
     columns: List<TableColumn>,
     theme: DataTableTheme,
     hScroll: ScrollState,
+    /** 见 [contentWidthFor]：必须是显式宽度，不能用 `fillMaxWidth()`（滚动容器内是空操作）。 */
+    contentWidth: Dp,
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
+            .width(contentWidth)
             .background(theme.headerBackground)
             .horizontalScroll(hScroll)
             // 供 TableColumnAlignmentTest 量「表头是否真的能横滚」与表体位移是否一致
@@ -438,6 +490,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
     hScroll: ScrollState,
     editable: Boolean,
     onCellEdit: ((CellEdit) -> Unit)?,
+    /** 见 [contentWidthFor] —— 行宽必须显式给，不能靠 `fillMaxWidth()`。 */
+    contentWidth: Dp,
 ) {
     if (rows.isEmpty()) {
         Box(
@@ -474,6 +528,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
                 // 后者由 [DataTable.cellEditable] 表达，见其 KDoc；这里经 [TableBody] 转手。
                 editable = editable,
                 onCellEdit = onCellEdit,
+                contentWidth = contentWidth,
             )
             WinDivider(color = theme.borderColor)
         }
@@ -521,6 +576,8 @@ private fun TableRowView(
     contextMenuState: ContextMenuState,
     editable: Boolean,
     onCellEdit: ((CellEdit) -> Unit)?,
+    /** 行宽 —— 见 [contentWidthFor]。 */
+    contentWidth: Dp,
 ) {
     val background = when {
         isSelected -> theme.rowBackgroundSelected
@@ -547,7 +604,9 @@ private fun TableRowView(
     // 「把 SelectionContainer 挪进 Row 里、只包单元格」这个看起来无害的重构，
     // 改变了受约束节点的测量链。
     val rowModifier = Modifier
-        .fillMaxWidth()
+        // ⚠️ **不能**用 `fillMaxWidth()`：本行在 `horizontalScroll` 里，拿到的是无界宽度，
+        // fillMaxWidth 会静默失效，整行收缩成一个字符宽、几列叠在一起（见 [contentWidthFor]）。
+        .width(contentWidth)
         .background(background)
         .then(if (editable) Modifier else Modifier.clickable(onClick = onClick))
         .onRightClick { offset -> contextMenuState.show(offset, row) }

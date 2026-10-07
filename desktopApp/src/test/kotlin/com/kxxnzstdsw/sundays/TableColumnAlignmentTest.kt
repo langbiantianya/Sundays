@@ -7,7 +7,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.ScrollWheel
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -101,5 +103,102 @@ class TableColumnAlignmentTest {
             headerAfter, bodyAfter, 0.01f,
             "表头与表体必须共用同一个 ScrollState，否则列名与数据列错位",
         )
+    }
+
+    // ========================================================================
+    // weight 列 —— 本组三条在修 bug 之前**全都是绿的**
+    // ========================================================================
+
+    /**
+     * 复现背景：本文件原先只用**定宽列**（`width = 140.dp`）。定宽走 `Modifier.width()`，
+     * 那在 `horizontalScroll` 的无界约束里依然成立，所以一直测不出问题。
+     *
+     * 而 `DatabaseBrowserScreen` 建列时只给 key 与 header（`TableColumn(key, header)`），
+     * 全部走 **`weight` 路径** —— 而 `weight` 在无界宽度下拿到的是 **0**。
+     * 结果：数据行整行收缩成一个字符宽（实测 1024px 视口下塌成 **28px**），
+     * 5 个 `weight` 列全挤在 x=0 互相盖住，**表预览里除第一列外全是空白**。
+     *
+     * 也就是说：只要连上真数据库点开任意一张表，这个缺陷立刻可见；
+     * 而全部既有测试都因为只测定宽列而放过了它。
+     */
+    private fun weightColumns(): List<TableColumn> =
+        listOf("id", "customer_id", "amount", "status", "placed_at")
+            .map { TableColumn(key = it, header = it) }
+
+    private fun ComposeUiTest.renderWeightTable() {
+        setContent {
+            SundaysTheme {
+                DataTable(
+                    columns = weightColumns(),
+                    rows = listOf(
+                        TableRow(
+                            id = 1L,
+                            cells = mapOf(
+                                "id" to "1", "customer_id" to "2", "amount" to "123.45",
+                                "status" to "PENDING", "placed_at" to "2024-02-02 01:01:00",
+                            ),
+                        ),
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                    showDetailPanel = false,
+                )
+            }
+        }
+        waitForIdle()
+    }
+
+    @Test
+    fun `weight columns make the data row span the viewport instead of collapsing`() =
+        runComposeUiTest {
+            renderWeightTable()
+            val viewportWidth = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode()
+                .boundsInRoot.width
+            // 用**合并树**：数据行挂了 `clickable`，行内所有单元格会合并成一个语义节点，
+            // 它的边界就是整行的边界（未合并的树里只能量到文本自身，那是另一回事）。
+            val rowWidth = onNodeWithText("PENDING").fetchSemanticsNode().boundsInRoot.width
+            assertTrue(
+                rowWidth > viewportWidth * 0.8f,
+                "数据行应铺满视口（视口 $viewportWidth，实测行宽 $rowWidth）—— " +
+                    "塌成几十像素就意味着几列叠在一起，表预览只有第一列看得见",
+            )
+        }
+
+    @Test
+    fun `weight columns in the body are spread apart and not stacked`() = runComposeUiTest {
+        renderWeightTable()
+        // 逐格取边界：五个值必须**落在五个不同的横向位置**。
+        // 缺陷未修时它们的 left 全都等于行起点（x=0），也就是互相压在一起。
+        val values = listOf("1", "2", "123.45", "PENDING", "2024-02-02 01:01:00")
+        val lefts = values.map { value ->
+            val node = onAllNodesWithText(value, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .firstOrNull { it.boundsInRoot.width > 0 }
+            assertNotNull(node, "表预览里找不到单元格 $value —— 它的宽度塌成了 0，根本没画出来")
+            node!!.boundsInRoot.left
+        }
+        assertEquals(
+            values.size, lefts.distinct().size,
+            "五个单元格应落在五个不同的横坐标上，实测 left = $lefts（都相同就是叠在一起了）",
+        )
+    }
+
+    @Test
+    fun `weight body columns line up with the weight header columns`() = runComposeUiTest {
+        renderWeightTable()
+        // 表头与表体的列起点必须一致 —— 否则「按列名读数」会读到隔壁那一列。
+        val headerLefts = weightColumns().map {
+            onNodeWithText(it.key, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
+        }
+        val bodyLefts = listOf("1", "2", "123.45", "PENDING", "2024-02-02 01:01:00").map {
+            onAllNodesWithText(it, useUnmergedTree = true).fetchSemanticsNodes()
+                .first { n -> n.boundsInRoot.left > 0 && n.boundsInRoot.top > 30f }
+                .boundsInRoot.left
+        }
+        headerLefts.forEachIndexed { i, hl ->
+            assertEquals(
+                hl, bodyLefts[i], 2f,
+                "第 ${i + 1} 列（${weightColumns()[i].key}）表头在 $hl、表体在 ${bodyLefts[i]}，错位了",
+            )
+        }
     }
 }
