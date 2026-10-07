@@ -248,10 +248,22 @@ function Save-Shot { param([string]$name)
 
 Set-Foreground
 
-foreach ($raw in ($Actions -split ';')) {
+# ⚠️ **分号既是动作分隔符、又是 SQL 的命脉** —— `-Actions "PASTE:SELECT 1;SELECT 2"`
+# 会被解析成「一个 PASTE 动作 + 一个叫 `SELECT 2` 的未知动作」，后者被静默忽略。
+# 结果是**只粘进去第一条语句**，而截图上看起来「粘贴成功了」——
+# 这种半个动作生效的失败模式最容易把人带偏（实测：多语句导出验证时被它卡了一轮）。
+#
+# 修法：先按 `\;` 把**转义过的**分号换成占位符，split 完再还原。
+# 于是要粘一条含分号的 SQL，写 `PASTE:SELECT 1 \; SELECT 2` 即可。
+$SEMI_PLACEHOLDER = [string][char]0xE000
+$normalizedActions = $Actions.Replace('\;', $SEMI_PLACEHOLDER)
+
+foreach ($raw in ($normalizedActions -split ';')) {
     $raw = $raw.Trim(); if (-not $raw) { continue }
     $verb = $raw; $arg = $null
     if ($raw.Contains(':')) { $parts = $raw.Split(':', 2); $verb = $parts[0]; $arg = $parts[1] }
+    # 占位符只在**参数**里还原；动词名永远不该带它
+    if ($arg) { $arg = $arg.Replace($SEMI_PLACEHOLDER, ';') }
     $count = if ($arg -and $arg -match '^\d+$') { [int]$arg } else { 1 }
     switch ($verb.ToUpper()) {
         'TAB'       { Press-Key 0x09 $count; "  [TAB x$count]" }

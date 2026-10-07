@@ -1228,3 +1228,132 @@ H2 / SQLite / DuckDB 在桌面端也各自只连一个库，不存在跨库浏�
 看着稳妥，实际是拿一个统一假设去套四种不同的语义 —— DuckDB 直接把容错分支冲穿。
 把判断交回给**知道答案的那一方**（方言），比在调用方猜异常类型可靠得多。
 
+### 9.17 导出：起手 SQL 带上过滤与排序、可编辑、可预览；SQL 工作台也能导出（多语句多文件）
+
+#### 三个需求，一处实现
+
+1. 表预览的导出弹窗**默认带上当前的过滤与排序**（外加表内搜索）
+2. 拼出来的那条 SQL **可编辑**，编辑器**复用 SQL 工作台那套**（高亮 / 补全 / 格式化）
+3. 弹窗里能**预览**这条 SQL 的结果
+4. SQL 工作台也加**导出**按钮，直接用编辑器里的查询 SQL；**多条 SQL 导出多个文件**
+
+#### 改动 1：起手 SQL 与「屏幕上那张表」一致
+
+旧实现在 [TableFilterBar] 里恒拼 `SELECT * FROM <表>`，注释还写着「导出**整张表**
+（与当前页无关）」。于是：
+
+- 屏幕上筛出 3 行、点导出拿到全表几万行
+- 对话框里那句「将执行：SELECT …」还是**省略号小字**，用户无从判断将要导出什么
+
+新的 [TablePreviewTab.buildExportSql] 用 [effectiveWhere] + `orderByClause` 拼：
+
+```
+SELECT * FROM orders WHERE status = 'paid' ORDER BY created_at DESC
+```
+
+用 [effectiveWhere] 而不是只取 `whereClause` 是因为**表内搜索也是过滤** ——
+用户搜到只剩匹配行，导出却把不匹配的行也带上，同样是「所见非所导」。
+
+#### 改动 2：`AlertDialog` → 全屏对话框
+
+原来格式 / 目录 / 文件名 / 目标表全塞在 `AlertDialog.text` 里，现在还要再塞
+**代码编辑器**和**结果预览表** —— 那点高度根本放不下，硬塞的结果是两个都被压没。
+改成 `Dialog(usePlatformDefaultWidth = false)` + 可滚内容区。
+
+编辑器**直接用 `CodeEditorWithToolbar`**（`:shared` 那个），于是高亮、库表字段补全、
+**格式化按钮**全部天然一致 —— 不另造一个只会显示不能好好用的输入框。
+
+#### 改动 3：预览的白名单 —— 这条测试抓到了一个真漏洞
+
+预览是「点一下就发到数据库」的动作，而它就摆在一个用户刚编辑完的 SQL 编辑器旁边。
+第一版判据写成「剥掉注释后**整段**是否以 SELECT / WITH 开头」。
+
+写测试时立刻暴露了问题：
+
+```
+含写操作就不是纯只读
+AssertionError  ← isReadOnlyQuery("SELECT 1; DROP TABLE t") 返回了 true
+```
+
+**只看开头是不够的**：`SELECT 1; DROP TABLE t` 因为「第一个词是 SELECT」被放行 ——
+而这正是导出对话框里最容易被粘贴出来的形态（从别处抄来的一段脚本）。
+点一下「预览」就把表删了。
+
+改成**逐句判**：「每一句都以 SELECT / WITH 开头」，与 [DangerousSql.scan] 同样逐句遍历。
+配套补了 4 条用例钉住两侧：
+
+| 用例 | 钉住什么 |
+|---|---|
+| `只读语句后面跟一句写操作时必须拒绝` | `SELECT 1; DROP TABLE t` / `SELECT …; UPDATE …` |
+| `多条纯 SELECT 全部放行` | 反向：不能因为「有第二条」就一律拒绝 |
+| `空输入不算只读` | 返回 true 会让预览按钮亮着，点下去报莫名其妙的引擎错误 |
+| `注释里的关键字不算语义` | `SELECT 1 -- DROP TABLE t` 是只读的（注释本来就没被执行） |
+
+#### 改动 4：SQL 工作台的导出 + 多语句多文件
+
+多语句**不是**把整段脚本塞给一次导出 —— 一段脚本里若有两条 SELECT，
+一次导出只能拿到最后一组结果集，前一条的结果会被丢掉。
+所以用引擎已有的 [SqlScriptSplitter] **逐条**导出（不是 `split(";")`，
+那个会把字符串字面量、注释、PG 美元引用里的分号当成边界）。
+
+文件命名 [numberedFileName]：`export.csv` → `export_1.csv` / `export_2.csv` …，
+**只在确实多条时加序号** —— 单条却得到 `export_1.csv` 会让用户以为自己导了个片段。
+
+**写语句在切分之后立刻被剔掉**（[exportStatementsFor] 只留 `isReadOnlyQuery` 的那些）。
+导出是把查询结果落成文件，而 `UPDATE` / `DROP` 的副作用发生在**执行时** ——
+用户点了个叫「导出」的按钮却改了数据，是不能接受的。
+
+另给 `SqlSheet` 加了 `notice` 字段：导出成功不该被下一次 SELECT 前的清空抹掉，
+也不该把结果区顶成「执行失败」（与 [TablePreviewTab.notice] 同一思路）。
+
+#### 验证
+
+- 新增 `ExportSqlBuildingTest`（8）、`NumberedFileNameTest`（5）、
+  `ExportStatementSplittingTest`（6）、`ExportPreviewGuardTest`（8），
+  与既有 `NativePathPickerTest` / `ExportAlwaysTerminatesTest` /
+  `ExportEndToEndIntegrationTest` 一起覆盖导出全链路
+- **变异验证 1**：`isReadOnlyQuery` 的第一版实现（只看开头）被
+  `只读语句后面跟一句写操作时必须拒绝` 抓到
+- **变异验证 2**：下面那个「起手 SQL 丢分号」的缺陷被真窗口抓到
+
+#### 真窗口复验（真 MySQL，1440×900）
+
+| 走查项 | 结果 |
+|---|---|
+| 表预览导出起手 SQL | `SELECT * FROM probe_shared_name WHERE id >= 1` ✅ `WHERE` 还被语法高亮标出来 |
+| SQL 可编辑 + 格式化 | 编辑器带行号 / 高亮 / **「格式化」**按钮；库表字段补全也在工作（弹 `probe_shared_name 表 · sundays_xdb`） |
+| 预览 | 点「预览前 100 行」返回表头 `id \| note` + 数据行 `1 \| 另一个库的行` |
+| SQL 工作台导出 | 工具栏出现「导出」按钮（编辑器为空时禁用，输内容后点亮） |
+| 多语句 → 多文件 | 标题显示「2 条语句将导出为 2 个文件」，产出 `export_1.csv`（`id,note` / `1,另一个库的行`）与 `export_2.csv`（`id` / `1`） |
+| 成功提示 | 结果区顶部「✓ 已导出 2 个文件（共 2 条语句）：export_1.csv；export_2.csv」 |
+
+#### 真窗口抓到的缺陷：起手 SQL 用 `"\n"` 拼 → 分号丢失
+
+多语句导出第一次跑时报：
+
+```
+导出失败 1/2 条：You have an error in your SQL syntax; ... near 'SELECT id FROM
+probe_only_here' at line 2
+```
+
+**标题明明写着「2 条语句将导出为 2 个文件」，实际却按 1 条跑** —— 两个信息互相矛盾，
+而单测全绿（因为它测的是 `exportStatementsFor` 本身，没有覆盖「切完再拼回弹窗」这个往返）。
+
+根因：弹窗的 `presetSql` 用 `statements.joinToString("\n")` 拼，
+**分号被丢掉了**；而 [SqlScriptSplitter] 是按分号切的，于是用户在弹窗里点
+「开始导出」时再切一次切不开，两行被当成**一条**整段发给引擎。
+
+改成 `joinToString(";\n")`，并补 `拼回弹窗再切一次仍是原来的条数` 钉住往返 ——
+它同时断言了「带分号切得开」和「换行拼接切不开（反例）」。
+
+#### 顺带修掉的两个探针缺陷
+
+1. **`gui-probe.ps1` 的动作分隔符 `;` 与 SQL 的分号冲突** ——
+   `-Actions "PASTE:SELECT 1;SELECT 2"` 被解析成「一个 PASTE + 一个未知动作」，
+   后者**被静默忽略**，结果是只粘进第一条，而截图上看起来「粘贴成功了」。
+   这种「半个动作生效」的失败模式最容易把人带偏（实测：多语句验证时被它卡了一轮）。
+   改成支持 `\;` 转义。
+2. **编辑器高度把预览区顶出可视范围** ——
+   `maxLines = 12` 时预览按钮在滚动区外，用户打开弹窗看不到。
+   压到 7，并让结果表自己内部滚动。
+

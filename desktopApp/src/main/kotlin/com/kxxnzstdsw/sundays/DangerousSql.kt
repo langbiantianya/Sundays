@@ -142,4 +142,35 @@ internal object DangerousSql {
     }
 
     fun isDangerous(sql: String): Boolean = scan(sql).isNotEmpty()
+
+    /**
+     * 这条 SQL 是否**只会读**（可安全用于「预览」）。
+     *
+     * ## 判据与 [scan] 的关系：白名单，且**逐句**判
+     *
+     * 导出对话框里的「预览」是一键发到数据库的动作，而它就摆在一个用户刚编辑完的
+     * SQL 编辑器旁边。用黑名单（"不含危险关键字"）是不够的 —— 没被列进黑名单的
+     * 写操作（`CREATE` / `ALTER` / `CALL` / 存储过程…）会静默跑掉。
+     *
+     * ⚠️ **必须逐句判，不能只看整段的开头**。
+     * 只看开头时，`SELECT 1; DROP TABLE t` 会因为「第一个词是 SELECT」而被放行 ——
+     * 而它在导出对话框里是最容易粘贴出来的形态（一段从别处抄来的脚本）。
+     * 判据改成「**每一句**都以 SELECT / WITH 开头」，与 [scan] 同样逐句遍历。
+     *
+     * 放行两种开头：`SELECT` 与 `WITH`（CTE）。后者最终要么落到 SELECT，
+     * 要么落到 DML —— 而 DML 整体不在白名单里，一样会被拒。
+     *
+     * ⚠️ **注释与字面量必须先剥掉**：否则
+     * `-- 查询用户\nSELECT * FROM t` 会因为开头是 `--` 而被判成「不是只读」，
+     * 明明安全却点不了预览。复用 [stripCommentsAndLiterals] 而不是另写一份，
+     * 是为了让它与 [scan] 永远保持同一套词法规则。
+     */
+    fun isReadOnlyQuery(sql: String): Boolean {
+        val stmts = statements(stripCommentsAndLiterals(sql))
+        if (stmts.isEmpty()) return false
+        return stmts.all { raw ->
+            val head = raw.trimStart().uppercase()
+            head.startsWith("SELECT") || head.startsWith("WITH")
+        }
+    }
 }

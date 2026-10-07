@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -106,6 +107,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.google.protobuf.Value as ProtoValue
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.Action
@@ -143,6 +145,7 @@ import com.kxxnzstdsw.sundays.editor.GenerateHelpers
 import com.kxxnzstdsw.sundays.editor.language.SqlDialectProfile
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorState
 import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
+import com.kxxnzstdsw.sundays.editor.ui.rememberCodeEditorState
 import com.kxxnzstdsw.sundays.settings.formatBytes
 import com.kxxnzstdsw.sundays.table.CellEdit
 import com.kxxnzstdsw.sundays.table.DataTable
@@ -1607,11 +1610,12 @@ private fun PreviewTabArea(
                 }
                 if (exportSql != null) {
                     ExportDialog(
+                        state = state,
                         presetSql = exportSql!!,
                         presetTableName = current.tableName,
+                        catalog = current.schema,
                         onDismiss = { exportSql = null },
-                        onConfirm = { fmt, dir, name, tbl ->
-                            val sql = exportSql!!
+                        onConfirm = { fmt, sql, dir, name, tbl ->
                             exportSql = null
                             exportTarget = name to dir
                             exportJob = DatabaseBrowserState.ExportProgress(0, false)
@@ -1814,10 +1818,11 @@ private fun TableFilterBar(
         if (onExport != null) {
             Spacer(Modifier.width(8.dp))
             WinButton(
-                // 导出**整张表**（与当前页无关）。SQL 在这里拼而不是交给调用方 ——
-                // 一来「导出整表」是这条按钮的固有语义，不该由调用方每次重写；
-                // 二来少一层 lambda 就少一处同名遮蔽。
-                onClick = { onExport.invoke("SELECT * FROM ${tab.tableName}") },
+                // 导出的是**屏幕上这张表**：过滤 / 排序 / 表内搜索都进起手 SQL，
+                // 而不是恒为整张表（见 [TablePreviewTab.buildExportSql] 的 KDoc）。
+                // SQL 在这里拼而不是交给调用方 ——「导出当前视图」是这条按钮的
+                // 固有语义，不该由调用方每次重写。
+                onClick = { onExport.invoke(tab.buildExportSql()) },
                 shape = SundaysPalette.buttonShape,
                 modifier = Modifier.testTag(TABLE_EXPORT_BTN_TAG),
             ) {
@@ -1936,14 +1941,97 @@ internal const val TABLE_EXPORT_BTN_TAG = "tableExportBtn"
 /** 导出对话框里「开始导出」按钮的 UI 测试 tag。 */
 internal const val EXPORT_CONFIRM_BTN_TAG = "exportConfirmBtn"
 
+/** 导出对话框里可编辑 SQL 的 UI 测试 tag。 */
+internal const val EXPORT_SQL_EDITOR_TAG = "exportSqlEditor"
+
+/** 导出对话框里「预览」按钮的 UI 测试 tag。 */
+internal const val EXPORT_PREVIEW_BTN_TAG = "exportPreviewBtn"
+
+/** SQL 工作台「导出」按钮的 UI 测试 tag。 */
+internal const val SQL_EXPORT_BTN_TAG = "sqlExportBtn"
+
 /**
- * 导出对话框 —— 选格式、输出目录、文件名。
+ * 把一段脚本切成待逐条导出的语句。
+ *
+ * 复用引擎侧的 [com.kxxnzstdsw.engine.SqlScriptSplitter] 而不是 `split(";")` ——
+ * 后者会把字符串字面量、注释、PG 美元引用函数体里的分号当作语句边界，
+ * 于是一句 `SELECT ';' AS x` 会被劈成两半。
+ *
+ * 只保留**读**语句。导出是把查询结果落成文件；把 `UPDATE` / `DROP` 也塞进导出
+ * 是没有意义的，而它们的副作用是在执行时发生 —— 这里在**切分之后、发送之前**
+ * 就把它们剔掉，用户不会因为点了个「导出」而改动了数据。
+ */
+internal fun exportStatementsFor(script: String): List<String> =
+    com.kxxnzstdsw.engine.SqlScriptSplitter.split(script)
+        .filter { it.isNotBlank() && DangerousSql.isReadOnlyQuery(it) }
+
+/** SQL 工作台「导出」的进度（多语句时用来显示「第 k/N 条」）。 */
+internal data class SqlExportProgress(val done: Int, val total: Int)
+
+/**
+ * 多语句导出时给第 [index] 条语句生成文件名。
+ *
+ * ## 规则：只在**确实有多条**时加序号
+ *
+ * [total] == 1 时原样返回 —— 单条语句却得到 `export_1.csv`，
+ * 会让用户以为自己导了个「片段」，而完整脚本导出本来就该是文件名原样。
+ *
+ * ## 为什么要编号而不是拼进文件名主体
+ *
+ * `SELECT ...` → `订单_2024.csv` 变成 `订单_2024_1.csv` 还好，
+ * 但用户取名成 `报表(1).csv` 时会得到 `报表(1)_1.csv`。把序号插在扩展名前、
+ * 只碰扩展名左边那一段，至少不会把括号、引号这类有语法含义的东西搞乱。
+ */
+internal fun numberedFileName(base: String, index: Int, total: Int): String {
+    if (total <= 1) return base
+    val dot = base.lastIndexOf('.')
+    // 无扩展名 / 隐藏文件（`.env` 这种 dot 在开头）都直接追加
+    val safeDot = if (dot <= 0) -1 else dot
+    val stem = if (safeDot < 0) base else base.substring(0, safeDot)
+    val ext = if (safeDot < 0) "" else base.substring(safeDot)
+    // ⚠️ `${stem}_` 的花括号不能省：`$stem_` 会被 Kotlin 解析成一个叫 `stem_` 的变量
+    return "${stem}_${index + 1}$ext"
+}
+
+/**
+ * protobuf [ProtoValue] → 可读文本。
+ *
+ * ⚠️ **不能**直接用 `Value.toString()`：那给的是 `string_value: "另一个库的行"`
+ * 这种调试串，拿去和真实内容比永远不相等 —— 而值本身其实是对的。
+ */
+internal fun unwrapProtoValue(v: ProtoValue): String = when (v.kindCase) {
+    ProtoValue.KindCase.STRING_VALUE -> v.stringValue
+    ProtoValue.KindCase.NUMBER_VALUE ->
+        if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
+        else v.numberValue.toString()
+    ProtoValue.KindCase.BOOL_VALUE -> v.boolValue.toString()
+    else -> ""
+}
+
+/**
+ * 导出对话框 —— 选格式与路径，**编辑导出 SQL**，并预览结果。
+ *
+ * ## 为什么要从 `AlertDialog` 换成全屏对话框
+ *
+ * 原实现把格式单选、目录、文件名、目标表全塞进 `AlertDialog.text` 里，最下面
+ * 再加一行「将执行：SELECT …」的**只读省略号小字**。现在要把**代码编辑器**和
+ * **结果预览表**也放进去 —— `AlertDialog` 那点高度根本放不下，硬塞的结果是
+ * 两个都缩成看不见。
+ *
+ * ## 三个设计决定
+ *
+ * 1. **起手 SQL = 屏幕上这张表**（过滤 + 排序 + 表内搜索），见
+ *    [TablePreviewTab.buildExportSql]。旧实现恒为整张表。
+ * 2. **SQL 可编辑，编辑器直接复用工作台的 [CodeEditorWithToolbar]** —— 于是
+ *    高亮、关键字/库表字段补全、**格式化按钮**全部天然一致，
+ *    不另造一个只会显示不能好好用的输入框。
+ * 3. **预览只放行 SELECT / WITH**（[DangerousSql.isReadOnlyQuery]）——
+ *    预览是一键发到数据库的动作，必须在发送**之前**就拦住写操作。
  *
  * ## 路径怎么选：系统对话框 + 手动输入，两条路都在
  *
  * 抄一段 `C:\Users\xxx\...` 出来既慢又容易打错，而引擎侧 `ExportRunRequest.output_dir`
- * 收的确实是**绝对路径**、引擎自己没得挑 —— 这个交互欠用户的只能在这里补。
- * 所以：
+ * 收的确实是**绝对路径**、引擎自己没得挑 —— 这个交互欠用户的只能在这里补。所以：
  *
  * - **「浏览…」** 调 [NativePathPicker]（`java.awt.FileDialog`，在 Windows 上就是
  *   资源管理器那套系统对话框；失败时退回 Swing 的目录选择器），一步把
@@ -1951,12 +2039,18 @@ internal const val EXPORT_CONFIRM_BTN_TAG = "exportConfirmBtn"
  * - **两个文本框仍然可编辑**：网络路径、UNC、刚在别处复制来的路径，
  *   以及无头/CI 环境下压根弹不出系统对话框时，手动输入是唯一能走通的路。
  *   把选择器做成「只能选」反而会在这些场景下把功能整个堵死。
+ *
+ * @param catalog 当前库 —— 预览要发到它上面。
+ * @param statementCount >1 时对话框会把 SQL 当脚本逐条导出（SQL 工作台的多语句入口）。
  */
 @Composable
 private fun ExportDialog(
+    state: DatabaseBrowserState,
     presetSql: String,
     presetTableName: String,
-    onConfirm: (DatabaseBrowserState.ExportFormat, String, String, String) -> Unit,
+    catalog: String = "",
+    statementCount: Int = 1,
+    onConfirm: (DatabaseBrowserState.ExportFormat, String, String, String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1966,6 +2060,8 @@ private fun ExportDialog(
     // 让用户在一个已经能跑的值上去改，比让他从一个空框开始猜格式稳妥
     var name by remember { mutableStateOf("export.${DatabaseBrowserState.ExportFormat.CSV.extension}") }
     var tableName by remember { mutableStateOf(presetTableName) }
+    // 可编辑的导出 SQL。起手值 = 调用方拼好的（表预览 = 带上过滤与排序的整条 SELECT）。
+    var sql by remember(presetSql) { mutableStateOf(presetSql) }
     // 换格式时同步扩展名 —— 否则用户选「Excel」却导出成 export.csv，
     // 打开时才发现格式不对，那比多一个下拉糟糕得多
     var lastFormat by remember { mutableStateOf(format) }
@@ -1975,7 +2071,8 @@ private fun ExportDialog(
     }
     // 只有选 SQL INSERT 才问目标表；其余格式的「目标表」是参数校验里的硬要求
     val needsTable = format == DatabaseBrowserState.ExportFormat.SQL_INSERT
-    val canSubmit = dir.isNotBlank() && name.isNotBlank() && (!needsTable || tableName.isNotBlank())
+    val canSubmit = dir.isNotBlank() && name.isNotBlank() &&
+        (!needsTable || tableName.isNotBlank()) && sql.isNotBlank()
     // 选择器是**阻塞**的模态框，绝不能在重组过程中直接调；
     // 也不该让用户等着期间界面是死的 —— 交给 IO 线程，点完再回主线程写回状态
     val pickPath: (Boolean) -> Unit = { wholeFile ->
@@ -1990,97 +2087,315 @@ private fun ExportDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("导出结果") },
-        text = {
-            Column {
-                Text(
-                    "将执行：${presetSql.take(60).replace('\n', ' ')}" +
-                        if (presetSql.length > 60) "…" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("格式", style = MaterialTheme.typography.labelMedium)
-                DatabaseBrowserState.ExportFormat.entries.forEach { f ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = format == f, onClick = { format = f })
+    // ---- 预览状态 ----
+    // 只放行 SELECT / WITH：预览是一键发到数据库的动作，写操作必须在**发送之前**
+    // 就被挡住，不能发出去再说（判据见 DangerousSql.isReadOnlyQuery）。
+    val previewable = DangerousSql.isReadOnlyQuery(sql)
+    var preview by remember { mutableStateOf<SqlPreviewRows?>(null) }
+    var previewError by remember { mutableStateOf<String?>(null) }
+    var previewing by remember { mutableStateOf(false) }
+    // 预览代次：SQL 一改，上一次的结果立刻作废 —— 否则用户看到的表格
+    // 属于上一条语句，而对话框里摆着新写的 SQL，两者对不上却没有任何提示。
+    var previewGen by remember { mutableStateOf(0) }
+    fun invalidatePreview() {
+        previewGen++
+        preview = null
+        previewError = null
+    }
+    val runPreview: () -> Unit = {
+        val snapshot = sql
+        val gen = ++previewGen
+        previewing = true
+        previewError = null
+        scope.launch {
+            val result = state.previewExportSql(snapshot, catalog)
+            if (gen != previewGen) return@launch   // 迟到的响应直接丢
+            result
+                .onSuccess { preview = it; previewError = null }
+                .onFailure { preview = null; previewError = it.message ?: "预览失败" }
+            previewing = false
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.92f)
+                .testTag(EXPORT_DIALOG_TAG),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // ---- 标题行 ----
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "导出结果",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    if (statementCount > 1) {
                         Text(
-                            f.label,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.testTag("exportFormat_${f.name}"),
+                            text = "$statementCount 条语句将导出为 $statementCount 个文件",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                // 输出目录：文本框 + 系统选择器**并排**。
-                // 两个入口都要有 —— 见本函数的 KDoc：手动输入在网络路径与无头环境下
-                // 是唯一走得通的路，把它拿掉等于把功能堵死。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = dir,
-                        onValueChange = { dir = it },
-                        label = { Text("输出目录（绝对路径）") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f).testTag(EXPORT_DIR_FIELD_TAG),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    WinOutlinedButton(
-                        onClick = { pickPath(false) },
-                        shape = SundaysPalette.buttonShape,
-                        modifier = Modifier.testTag(EXPORT_BROWSE_DIR_BTN_TAG),
+                Spacer(Modifier.height(10.dp))
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                ) {
+                    // ---- 格式 ----
+                    Text("格式", style = MaterialTheme.typography.labelMedium)
+                    // 横向排布：竖排五个单选会把对话框撑到需要滚动才看得到路径输入框
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("浏览")
+                        DatabaseBrowserState.ExportFormat.entries.forEach { f ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = format == f, onClick = { format = f })
+                                Text(
+                                    f.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.testTag("exportFormat_${f.name}"),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+
+                    // ---- 输出目录 / 文件名 ----
+                    // 文本框 + 系统选择器**并排**：手动输入在网络路径与无头环境下
+                    // 是唯一走得通的路，把它拿掉等于把功能堵死。
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = dir,
+                            onValueChange = { dir = it },
+                            label = { Text("输出目录（绝对路径）") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag(EXPORT_DIR_FIELD_TAG),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        WinOutlinedButton(
+                            onClick = { pickPath(false) },
+                            shape = SundaysPalette.buttonShape,
+                            modifier = Modifier.testTag(EXPORT_BROWSE_DIR_BTN_TAG),
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("浏览")
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("文件名") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag(EXPORT_NAME_FIELD_TAG),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        // 一步把目录 + 文件名一起定下来 —— 最常用的一条路
+                        WinOutlinedButton(
+                            onClick = { pickPath(true) },
+                            shape = SundaysPalette.buttonShape,
+                            modifier = Modifier.testTag(EXPORT_BROWSE_FILE_BTN_TAG),
+                        ) {
+                            Icon(Icons.Default.SaveAlt, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("选文件")
+                        }
+                    }
+                    if (needsTable) {
+                        OutlinedTextField(
+                            value = tableName,
+                            onValueChange = { tableName = it },
+                            label = { Text("目标表名（INSERT INTO …）") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag(EXPORT_TABLE_FIELD_TAG),
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // ---- SQL（可编辑）----
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("导出 SQL（可编辑）", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "起手值已带上当前预览的过滤与排序",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    // 直接复用工作台的编辑器：高亮 / 库表字段补全 / **格式化**按钮
+                    // 全部天然一致，不另造一个只会显示不能好好用的输入框。
+                    //
+                    // ⚠️ maxLines 刻意压到 7：起手 SQL 通常是一两行，编辑器再高
+                    // 就把下面的**预览区**顶出可视范围 —— 用户打开弹窗看不到「预览」按钮，
+                    // 而「先看看会导出什么」恰恰是这个弹窗最该先做的事。
+                    // 需要写长 SQL 时它自己内部滚动，不影响可用性。
+                    CodeEditorWithToolbar(
+                        text = sql,
+                        onTextChange = { sql = it; invalidatePreview() },
+                        languageId = state.sqlDialectProfile().languageId,
+                        editorState = rememberCodeEditorState(sql),
+                        showLanguageSwitcher = false,
+                        minLines = 3,
+                        maxLines = 7,
+                        modifier = Modifier.fillMaxWidth().testTag(EXPORT_SQL_EDITOR_TAG),
+                    )
+
+                    // ---- 预览 ----
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("预览", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(8.dp))
+                        WinButton(
+                            onClick = runPreview,
+                            enabled = previewable && !previewing,
+                            shape = SundaysPalette.buttonShape,
+                            modifier = Modifier.testTag(EXPORT_PREVIEW_BTN_TAG),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (previewing) "预览中…" else "预览前 100 行")
+                        }
+                        if (!previewable) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "仅 SELECT / WITH 可预览（写操作请用「执行 SQL」）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    when {
+                        previewError != null -> Text(
+                            text = previewError!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        preview == null -> Text(
+                            text = "点上方按钮把这条 SQL 跑一次，先看看会导出什么。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // 结果表自己内部滚动（heightIn），不再撑高外层内容区 ——
+                        // 否则一屏 100 行会把「开始导出」推到很远的下方
+                        else -> SqlPreviewTable(preview!!)
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("文件名") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f).testTag(EXPORT_NAME_FIELD_TAG),
-                    )
+
+                Spacer(Modifier.height(8.dp))
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
                     Spacer(Modifier.width(8.dp))
-                    // 一步把目录 + 文件名一起定下来 —— 最常用的一条路
-                    WinOutlinedButton(
-                        onClick = { pickPath(true) },
+                    WinButton(
+                        onClick = { onConfirm(format, sql, dir, name, tableName) },
+                        enabled = canSubmit,
                         shape = SundaysPalette.buttonShape,
-                        modifier = Modifier.testTag(EXPORT_BROWSE_FILE_BTN_TAG),
-                    ) {
-                        Icon(Icons.Default.SaveAlt, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("选文件")
-                    }
-                }
-                if (needsTable) {
-                    OutlinedTextField(
-                        value = tableName,
-                        onValueChange = { tableName = it },
-                        label = { Text("目标表名（INSERT INTO …）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag(EXPORT_TABLE_FIELD_TAG),
-                    )
+                        modifier = Modifier.testTag(EXPORT_CONFIRM_BTN_TAG),
+                    ) { Text("开始导出") }
                 }
             }
-        },
-        confirmButton = {
-            WinButton(
-                onClick = { onConfirm(format, dir, name, tableName) },
-                enabled = canSubmit,
-                shape = SundaysPalette.buttonShape,
-                modifier = Modifier.testTag(EXPORT_CONFIRM_BTN_TAG),
-            ) { Text("开始导出") }
-        },
-        dismissButton = {
-            WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
-        },
-    )
+        }
+    }
+}
+
+/** 导出对话框整体的 UI 测试 tag —— 内容区可滚，测试要量它得有个固定锚点。 */
+internal const val EXPORT_DIALOG_TAG = "exportDialog"
+
+/** 预览结果 —— 列名与前 N 行，供导出对话框的预览表渲染。 */
+data class SqlPreviewRows(
+    val columns: List<String>,
+    /** 列名 → 列类型；与 [columns] 等长（下标一一对应）。 */
+    val columnTypes: List<String>,
+    val rows: List<Map<String, String>>,
+    /** 引擎还在推帧但前端已攒够 [rows] —— UI 要如实说「已截断」，不能装作全量。 */
+    val truncated: Boolean = false,
+)
+
+/**
+ * 预览结果的只读表格。
+ *
+ * **刻意不复用 `DataTable`** —— 那张表带分页 / 单元格编辑 / 行选中，
+ * 每一项在「预览」这个场景下都是多余的，而且 [DataTable] 的行 id 依赖主键，
+ * 而任意 SELECT 的结果集未必有主键。
+ */
+@Composable
+private fun SqlPreviewTable(preview: SqlPreviewRows) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 240.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            preview.columns.forEach { col ->
+                Text(
+                    text = col,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (preview.rows.isEmpty()) {
+            Text(
+                text = "（0 行）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(8.dp),
+            )
+        } else {
+            preview.rows.forEach { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    preview.columns.forEach { col ->
+                        Text(
+                            text = row[col].orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+        Text(
+            text = "共 ${preview.rows.size} 行" +
+                if (preview.truncated) "（已截断到 ${preview.rows.size} 行）" else "",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(8.dp),
+        )
+    }
 }
 
 /**
@@ -2415,6 +2730,80 @@ private fun SqlWorkbenchPane(
                 onDismiss = { pendingDangerous = null },
             )
         }
+
+        // ---- 导出（与表预览共用同一个对话框，见 [ExportDialog]）----
+        // 待导出的语句列表。null = 没点导出；空列表 = 点了但一条有效语句都没有。
+        var exportStatements by remember { mutableStateOf<List<String>?>(null) }
+        var exportJob by remember { mutableStateOf<SqlExportProgress?>(null) }
+        exportStatements?.let { statements ->
+            // ⚠️ **必须用 `";\n"` 拼，不能用 `"\n"`** ——
+            // [com.kxxnzstdsw.engine.SqlScriptSplitter] 是按**分号**切语句的。
+            // 用换行拼出来的起手 SQL 在弹窗里再切一次时切不开，会被当成**一条**语句
+            // 整段发给引擎，于是报一句莫名其妙的语法错：
+            //     near 'SELECT id FROM xxx' at line 2
+            // （真窗口实测抓到，标题写着「2 条语句」而实际按 1 条跑，两个信息还互相矛盾。）
+            val joined = statements.joinToString(";\n")
+            ExportDialog(
+                state = state,
+                presetSql = joined,
+                // 多语句时不给「目标表」预设：逐条导出时每条自己带 WHERE / 列，
+                // 同一个目标表名多半是错的，让用户自己填
+                presetTableName = if (statements.size == 1) "" else "",
+                catalog = schema,
+                statementCount = statements.size,
+                onDismiss = { exportStatements = null },
+                onConfirm = { fmt, sql, dir, name, tbl ->
+                    // 编辑器里改过的 SQL 优先于点按钮时那份快照 ——
+                    // 否则用户在对话框里改了 SQL，导出的却是旧的
+                    val stmts = exportStatementsFor(if (sql.isNotBlank()) sql else joined)
+                    exportStatements = null
+                    if (stmts.isNotEmpty()) {
+                        exportJob = SqlExportProgress(0, stmts.size)
+                        actionScope.launch {
+                            val results = state.exportQueries(
+                                statements = stmts,
+                                format = fmt,
+                                outputDir = dir,
+                                baseFileName = name,
+                                tableName = tbl,
+                            ) { done, total -> exportJob = SqlExportProgress(done, total) }
+                            val ok = results.mapNotNull { it.getOrNull() }
+                            val failed = results.filter { it.isFailure }
+                            sheet?.let { s ->
+                                s.error = when {
+                                    failed.isEmpty() -> null
+                                    // 只报第一条失败的原文，其余只带计数 —— 一屏塞十条
+                                    // 异常既读不下去，也会把「哪条错了」淹没掉
+                                    else -> "导出失败 ${failed.size}/${stmts.size} 条：" +
+                                        failed.first().exceptionOrNull()?.message
+                                }
+                                if (ok.isNotEmpty()) {
+                                    s.notice = buildString {
+                                        append("已导出 ${ok.size} 个文件")
+                                        if (stmts.size > 1) append("（共 ${stmts.size} 条语句）")
+                                        append("：")
+                                        append(
+                                            ok.joinToString("；") {
+                                                it.file.substringAfterLast('\\').substringAfterLast('/')
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            exportJob = null
+                        }
+                    }
+                },
+            )
+        }
+        exportJob?.let { job ->
+            ExportProgressDialog(
+                fileName = if (job.total > 1) "第 ${job.done + 1}/${job.total} 条" else "export",
+                outputDir = "",
+                rowsWritten = 0,
+                onBackground = { exportJob = null },
+            )
+        }
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
         Column(modifier = Modifier.fillMaxSize()) {
             if (sheet == null) {
@@ -2557,6 +2946,23 @@ private fun SqlWorkbenchPane(
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (sheet.running) "执行中…" else "执行 SQL")
                             }
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        // 导出：把**当前 sheet 的 SQL** 原样送进导出对话框。
+                        //
+                        // 多语句在这里是**逐条导出成多个文件**（见 [exportStatements]）——
+                        // 不是把整段脚本塞给一次导出：一段脚本里若有两条 SELECT，
+                        // 一次导出只能拿到最后一组结果集，前一条的结果会被丢掉。
+                        // 逐条导出才符合「每条查询各自一份结果」的直觉。
+                        WinButton(
+                            onClick = { exportStatements = exportStatementsFor(sheet.editor.text) },
+                            enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
+                            shape = SundaysPalette.buttonShape,
+                            modifier = Modifier.testTag(SQL_EXPORT_BTN_TAG),
+                        ) {
+                            Icon(Icons.Filled.SaveAlt, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("导出")
                         }
                     },
                     modifier = Modifier
@@ -2817,12 +3223,45 @@ private fun SqlResultArea(
         color = MaterialTheme.colorScheme.surface,
         modifier = modifier,
     ) {
+        // 导出提示条：与表预览的 [TablePreviewTab.notice] 同思路 ——
+        // 导出成功不该被下一次 SELECT 前的清空抹掉，也不该把结果区顶成「执行失败」。
+        // 它排在所有结果分支**之前**：导出成功后紧接着看结果的用户，
+        // 第一眼要看到的是「文件已经写到哪儿了」。
+        if (sheet?.notice != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = sheet.notice!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         when {
+            // ⚠️ 有导出结果时**不要**再显示「尚未执行 SQL」—— 那句话与刚出现的
+            // 「已导出 2 个文件」并排，读起来像自相矛盾（导出明明已经发生过了）。
+            // 此时只留顶部那行提示，不占满整块区域。
             sheet == null -> EmptyHint(
                 title = "尚未执行 SQL",
                 description = "在上方编辑器输入 SQL，点「执行 SQL」即在此查看结果。",
                 modifier = Modifier.fillMaxSize(),
             )
+            sheet.notice != null && sheet.error == null &&
+                sheet.rows.isEmpty() && sheet.affectedRows == null && !sheet.running -> {
+                // 占位：结果区空，但已经有话说清楚了（顶部那行）
+            }
             sheet.running -> Box(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 contentAlignment = Alignment.Center,
@@ -3256,6 +3695,34 @@ class TablePreviewTab(
     }
 
     /**
+     * 按当前预览条件拼出一条**可读、可编辑**的 SELECT，供导出对话框起手用。
+     *
+     * ## 为什么把过滤与排序拼进来
+     *
+     * 原来的导出按钮拼的是 `SELECT * FROM <表>` —— 恒为**整张表**，与用户眼前的
+     * 过滤、排序、表内搜索全都对不上。屏幕上筛出 3 行、点导出却拿到全表几万行，
+     * 而对话框里那行「将执行：SELECT * FROM xxx」还是**只读的一行小字**，
+     * 用户根本无从判断将要导出什么。
+     *
+     * 现在起手 SQL 与 [effectiveWhere] / [orderByClause] 同源：导出的就是
+     * 「屏幕上这张表」。而且它进了**可编辑**的代码编辑器（见 [ExportDialog]），
+     * 想改成 `SELECT a, b`、加个 `LIMIT`、换聚合方式都行。
+     *
+     * ## 为什么用 [effectiveWhere] 而不是只取 [whereClause]
+     *
+     * 表内搜索框也是过滤。用户在搜索框敲了词、屏幕上只剩匹配行，
+     * 导出却把不匹配的行也带进去，同样是「所见非所导」。
+     *
+     * @return 单行 SQL；无过滤无排序时就是 `SELECT * FROM <表>`。
+     */
+    fun buildExportSql(): String {
+        val sb = StringBuilder("SELECT * FROM ").append(tableName)
+        effectiveWhere()?.takeIf { it.isNotBlank() }?.let { sb.append(" WHERE ").append(it.trim()) }
+        orderByClause.trim().takeIf { it.isNotEmpty() }?.let { sb.append(" ORDER BY ").append(it) }
+        return sb.toString()
+    }
+
+    /**
      * 搜索词铺到每一列上，`OR` 连成一个括号组。
      *
      * **列还没拿到时返回 `null`**（不加过滤），而不是退回「无列名 LIKE」——
@@ -3540,6 +4007,14 @@ class DatabaseBrowserState(
 
         /** 最近一次执行错误（连接失败 / SQL 语法 / 引擎抛异常）。 */
         var error: String? by mutableStateOf(null)
+
+        /**
+         * 最近一次**导出**的结果提示（文件名 / 成功条数）。
+         *
+         * 与 [error] 分开存，理由同 [TablePreviewTab.notice]：导出成功不该把
+         * 执行结果区顶成「读取失败」，而导出失败也不该被下一次 SELECT 前的清空抹掉。
+         */
+        var notice: String? by mutableStateOf(null)
 
         /** 结果区视图状态（分页 / 选中行）—— 每次重新执行归位。 */
         var resultPage: Int by mutableStateOf(1)
@@ -4072,6 +4547,101 @@ class DatabaseBrowserState(
         val writes = DangerousSql.scan(sql)
         if (writes.isEmpty()) return null
         return "只读模式下不允许写操作，已拦下：${writes.joinToString("；") { it.statement }}"
+    }
+
+    /**
+     * 导出对话框里的「预览」—— 跑一条 SQL 取回前 [limit] 行。
+     *
+     * ## 为什么**只允许 SELECT / WITH**
+     *
+     * 预览是「点一下就发到数据库」的动作，而它出现的地方恰恰是用户**刚编辑完
+     * 一条任意 SQL** 的编辑器里。让用户在这里敲一条 `UPDATE` 然后点「预览」，
+     * 却在按钮旁边没有半个字提示，是不可接受的。
+     *
+     * 所以判据放在**发送之前**：不是 SELECT 开头就拒绝，并把原因说清楚。
+     * 代价是 CTE（`WITH …`）也在白名单里 —— 它最终要么是 SELECT 要么是 DML，
+     * 后者仍会被 [DangerousSql.scan] 二次拦下。
+     *
+     * @return 成功时是「列名 + 行」，失败时是给用户看的文案。
+     */
+    suspend fun previewExportSql(
+        sql: String,
+        catalog: String,
+        limit: Int = 100,
+    ): Result<SqlPreviewRows> {
+        val statement = sql.trim()
+        if (statement.isEmpty()) return Result.failure(IllegalArgumentException("SQL 为空"))
+        if (!DangerousSql.isReadOnlyQuery(statement)) {
+            return Result.failure(
+                IllegalArgumentException("预览只执行 SELECT / WITH 语句；这条是写操作，请改用「执行 SQL」"),
+            )
+        }
+        val schema = currentSchema()
+        activeDatabases.add(catalog.ifBlank { schema })
+        return runCatching {
+            val req = request {
+                id = java.util.UUID.randomUUID().toString()
+                this.connection = engineConn(database = catalog.ifBlank { schema })
+                category = Category.SQL
+                action = Action.EXECUTE
+                sqlRequest = com.kxxnzstdsw.grpc.sqlRequest {
+                    execute = com.kxxnzstdsw.grpc.sqlExecuteRequest {
+                        this.sql = statement
+                        multiStatement = false
+                        // 只读标记：即便 [DangerousSql.isReadOnlyQuery] 的白名单被绕过，
+                        // 引擎侧还有一道（见 engine 侧 SqlEngineHandler 的只读处理）
+                        readOnly = true
+                    }
+                }
+            }
+            // 行帧是 `Response.sql_row_frame`（顶层字段），不是 `Response.sql` ——
+            // 后者只装 `execute` / `explain` 两个终止体。抄 [executeSql] 的读法。
+            val columnNames = LinkedHashSet<String>()
+            val rows = mutableListOf<Map<String, String>>()
+            var truncated = false
+            engine.handle(req).collect { resp ->
+                if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "预览失败" })
+                if (resp.hasSqlRowFrame()) {
+                    val values = resp.sqlRowFrame.row.valuesMap
+                    if (values.isEmpty()) return@collect
+                    columnNames += values.keys
+                    // 攒够上限就只记「已截断」，不再攒 —— 引擎还在推帧，
+                    // 继续收只会在堆里压一份用不上的数据。
+                    if (rows.size < limit) {
+                        rows += values.entries.associate { (k, v) -> k to unwrapProtoValue(v) }
+                    } else {
+                        truncated = true
+                    }
+                }
+            }
+            SqlPreviewRows(
+                columns = columnNames.toList(),
+                columnTypes = List(columnNames.size) { "" },
+                rows = rows,
+                truncated = truncated,
+            )
+        }
+    }
+
+    /**
+     * 依次导出多条 SQL，每条一个文件。
+     *
+     * 供 SQL 工作台的「导出」使用 —— 那里用户写的是一整段脚本，逐条导出才符合
+     * 「每条查询各自一份结果」的直觉。文件名由 [numberedFileName] 加序号。
+     *
+     * @param onProgress 每条开始前回调一次（**在引擎协程里，不是主线程**），供进度弹窗显示「第 k/N 条」。
+     * @return 每条的结果（成功与失败都在列表里 —— 一条挂了不该让前面几条白跑）。
+     */
+    suspend fun exportQueries(
+        statements: List<String>,
+        format: ExportFormat,
+        outputDir: String,
+        baseFileName: String,
+        tableName: String = "",
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): List<Result<ExportResult>> = statements.mapIndexed { index, sql ->
+        onProgress(index, statements.size)
+        exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName)
     }
 
     // ------------------------------------------------------------------------
