@@ -366,12 +366,15 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {
+                // 通知中心**屏级共享**：连接 A 的导出失败、连接 B 的 SQL 报错、
+                // 以及任务成败，都收进同一个列表 —— 按连接分开就断了「刚才发生了什么」。
+                val notifications = remember { NotificationCenter() }
                 // 按 sheet id 懒创建浏览器 state；sheet 关闭时 entry 会被移除（见 onCloseSheet），
                 // 否则 map 的强引用会让该连接的 SQL 文本 / 造数脚本 / 预览标签页一直存活。
                 val sheetConfigs = openSheetIds  // List<ConnectionConfig>，transient + 持久化 sheet 都直接可用
                 sheetConfigs.forEach { cfg ->
                     if (browsers[cfg.id] == null) {
-                        browsers[cfg.id] = DatabaseBrowserState(engine, scope)
+                        browsers[cfg.id] = DatabaseBrowserState(engine, scope, notifications)
                     }
                 }
                 val sheets = sheetConfigs.map { cfg ->
@@ -418,6 +421,7 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                                 )
                             }
                     },
+                    notifications = notifications,
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (addDialogVisible) {

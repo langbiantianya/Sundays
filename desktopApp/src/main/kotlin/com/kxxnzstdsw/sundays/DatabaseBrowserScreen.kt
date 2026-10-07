@@ -70,6 +70,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
@@ -170,6 +171,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Done
+import java.io.File
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -242,6 +248,14 @@ fun DatabaseBrowserScreen(
     onDisconnect: (ConnectionConfig) -> Unit,
     onOpenSettings: () -> Unit = {},
     memoryProbe: (suspend () -> EngineMemory?)? = null,
+    /**
+     * 屏级共享的通知中心。
+     *
+     * 由调用方 `remember` 一个传进来，而不是本函数内部建 ——
+     * 因为 [DatabaseBrowserState] 也要往里推任务成败通知，而那些 state 由调用方创建，
+     * 两边必须是**同一个**实例。默认参数给一个空实现是为了让既有测试不必改。
+     */
+    notifications: NotificationCenter = remember { NotificationCenter() },
     modifier: Modifier = Modifier,
 ) {
     // 堆占用的**读数与「面板是否展开」都提到屏级**，不放在状态栏自己的组合里 ——
@@ -258,6 +272,44 @@ fun DatabaseBrowserScreen(
     var memoryBarHovered by remember { mutableStateOf(false) }
     // 状态栏实测高度 —— 详情面板要锚在它正上方，写死一个常数会在字体缩放 / 紧凑档下错位
     val barHeight = remember { mutableIntStateOf(0) }
+
+    // ------------------------------------------------------------------
+    // 通知中心：错误对账
+    // ------------------------------------------------------------------
+    //
+    // 为什么不逐点埋点：报错散落在 `ConnectionStatus` / `TablePreviewTab.error` /
+    // `SqlSheet.error` / `DatabaseBrowserState.generateError` /
+    // `state.errorMessage` 五处，每一处埋一次推送，等于把「什么算一次错误」的判断
+    // 散到五个文件里。
+    //
+    // 改成**屏级对账**：每个错误来源算一个指纹，本帧与上帧比对 ——
+    //   - 新出现的指纹 → 推一条
+    //   - 这一帧没有的指纹 → 从去重集合移除（**下次再犯会再报**）
+    //
+    // ⚠️ 去重是必须的：连接失败出现在**每一次重组**里，
+    // 没有它就会刷出几十条一模一样的通知，把面板淹掉。
+    // 直接用注入进来的那个中心 —— 它同时被各 [DatabaseBrowserState] 拿着推任务通知，
+    // 本屏只是把入口与面板画出来。**不能另建一个**，否则任务通知进 A 面板、
+    // 报错进 B 面板，用户会以为通知丢了。
+    val notificationCenter = notifications
+    //
+    // ⚠️ [ErrorSource.key] 必须唯一且稳定，且**推送与遗忘两边用同一个 key**。
+    // 第一版这里把 pushOnce 的指纹写成 `title|detail`，而 forgetSourcesNotIn 传的是
+    // `mapValues { … }.keys`（形如 `sql:连接id:SQL 1`）—— 两者对不上，于是每次
+    // 都把所有来源 forget 掉、再当成新的重推一遍。真窗口上表现为「同一个错误连点三次
+    // → 徽标 2」，去重形同虚设。
+    //
+    // 所以把「这一帧有哪些错误」抽成纯函数 [collectErrorSources]：指纹在这里算一次，
+    // 两边共用同一个 key。顺带它可单测 —— 而屏里的 derivedStateOf 本身测不到。
+    val errorSources by remember { derivedStateOf { collectErrorSources(sheets) } }
+    LaunchedEffect(errorSources) {
+        val center = notificationCenter
+        errorSources.forEach { src ->
+            center.pushOnce(src.key, AppNotification.Severity.ERROR, src.title, src.detail)
+        }
+        // 遗忘**这一帧没有**的来源 —— 否则「失败 → 修好 → 又失败」只会报第一次
+        center.forgetSourcesNotIn(errorSources.map { it.key }.toSet())
+    }
 
     if (memoryProbe != null) {
         // 轮询循环的 key 必须是 Unit，不能是 memoryProbe：调用方每次重组传进来的都是**新 lambda
@@ -343,6 +395,15 @@ fun DatabaseBrowserScreen(
                     onToggleDetail = { memoryDetailOpen = !memoryDetailOpen },
                     onMeasuredHeight = { barHeight.intValue = it },
                     onHoverChange = { memoryBarHovered = it },
+                    // 通知中心入口放在状态栏**最右** —— 与堆内存同行，右端对齐。
+                    // 位置是它该在的地方：常驻、不抢视线，又在「发生了什么」最该被看见的角落。
+                    trailing = {
+                        NotificationBell(
+                            unread = notificationCenter.unreadCount,
+                            open = notificationCenter.panelOpen,
+                            onToggle = { notificationCenter.panelOpen = !notificationCenter.panelOpen },
+                        )
+                    },
                 )
             }
         }
@@ -356,6 +417,22 @@ fun DatabaseBrowserScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     // 底部留出「状态栏 + 其上方那条分割线」的高度，面板正好贴在它上沿
+                    .padding(
+                        end = 10.dp,
+                        bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
+                    ),
+            )
+        }
+
+        // 通知面板：与内存详情面板**同级**、同样锚在状态栏正上方。
+        // 打开面板本身就算「已读」—— 用户是来看的，不是来确认红点的。
+        if (notificationCenter.panelOpen) {
+            LaunchedEffect(Unit) { notificationCenter.markAllRead() }
+            val density = LocalDensity.current
+            NotificationCenterPanel(
+                center = notificationCenter,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
                     .padding(
                         end = 10.dp,
                         bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
@@ -664,6 +741,8 @@ private fun EngineMemoryStatusBar(
     onToggleDetail: () -> Unit,
     onMeasuredHeight: (Int) -> Unit,
     onHoverChange: (Boolean) -> Unit,
+    /** 行尾插槽 —— 通知中心入口挂在这里（见 [DatabaseBrowserScreen] 的状态栏注释）。 */
+    trailing: @Composable RowScope.() -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -734,9 +813,265 @@ private fun EngineMemoryStatusBar(
                 style = MaterialTheme.typography.labelSmall,
                 color = ink,
             )
+            Spacer(Modifier.width(8.dp))
+            trailing()
         }
     }
 }
+
+/** 右下角通知中心的入口按钮 —— 铃铛 + 未读数。 */
+@Composable
+private fun NotificationBell(
+    unread: Int,
+    open: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(winShape(4.dp))
+            .background(
+                if (open) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+            )
+            .clickable(onClickLabel = if (open) "关闭通知中心" else "打开通知中心", onClick = onToggle)
+            .testTag(NOTIFICATION_BELL_TAG)
+            .padding(horizontal = 8.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Notifications,
+            contentDescription = "通知中心",
+            tint = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(15.dp),
+        )
+        if (unread > 0) {
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = unread.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/**
+ * 通知中心面板。
+ *
+ * ## 画在**根 Box** 而不是状态栏内部
+ *
+ * 状态栏只有 20dp 高，面板画在里面会浮出父级边界，而浮出部分是**收不到指针事件**的 ——
+ * 点击会**穿透**到下方的表格行上（表现为「点一下关闭面板，结果表格里还选中了一行」）。
+ * 与内存详情面板同一个坑、同一个解法（见 [EngineMemoryStatusBar] 的 KDoc）。
+ *
+ * ## 每条给**完整原文**，不截断
+ *
+ * 引擎错误常常是 `ORA-00933: table or view does not exist` 这类，
+ * 省略号一截断就失去可诊断性。面板宽度够放下，且可滚动。
+ */
+@Composable
+private fun NotificationCenterPanel(
+    center: NotificationCenter,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = modifier.width(420.dp).heightIn(max = 420.dp).testTag(NOTIFICATION_PANEL_TAG),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "通知",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                val errors = center.notifications.count { it.severity == AppNotification.Severity.ERROR }
+                Text(
+                    text = buildString {
+                        append("${center.notifications.size} 条")
+                        if (errors > 0) append(" · $errors 条失败")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                WinOutlinedButton(
+                    onClick = { center.markAllRead() },
+                    enabled = center.unreadCount > 0,
+                    shape = SundaysPalette.buttonShape,
+                ) {
+                    Icon(Icons.Filled.Done, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("全部已读")
+                }
+                Spacer(Modifier.width(6.dp))
+                WinOutlinedButton(
+                    onClick = { center.clear() },
+                    enabled = center.notifications.isNotEmpty(),
+                    shape = SundaysPalette.buttonShape,
+                    modifier = Modifier.testTag(NOTIFICATION_CLEAR_BTN_TAG),
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("清空")
+                }
+            }
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (center.notifications.isEmpty()) {
+                Text(
+                    text = "暂无通知。任务成败与各处报错都会出现在这里。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            } else {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    center.notifications.forEach { n -> NotificationRow(n) }
+                }
+            }
+        }
+    }
+}
+
+/** 通知面板里的一条。 */
+@Composable
+private fun NotificationRow(n: AppNotification) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Icon(
+            imageVector = when (n.severity) {
+                AppNotification.Severity.SUCCESS -> Icons.Filled.Check
+                AppNotification.Severity.ERROR -> Icons.Filled.Close
+                AppNotification.Severity.INFO -> Icons.Filled.Refresh
+            },
+            contentDescription = null,
+            tint = when (n.severity) {
+                AppNotification.Severity.SUCCESS -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.error
+            },
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = n.title,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+            )
+            // 引擎原文完整给出，不截断 —— 排障时省略号等于没有
+            Text(
+                text = n.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = formatNotificationTime(n.timestamp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+/**
+ * 通知时间 → `HH:mm`（当天）或 `MM-dd HH:mm`（更早）。
+ *
+ * 通知是「最近发生过的事」，跨天的那几条看一眼就知道是昨天的事就够了。
+ */
+internal fun formatNotificationTime(ts: Long): String {
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+    fun p(v: Int) = "%02d".format(v)
+    val hm = "${p(cal.get(java.util.Calendar.HOUR_OF_DAY))}:${p(cal.get(java.util.Calendar.MINUTE))}"
+    val today = java.util.Calendar.getInstance()
+    val sameDay = cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+        cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+    return if (sameDay) hm else {
+        "${p(cal.get(java.util.Calendar.MONTH) + 1)}-${p(cal.get(java.util.Calendar.DAY_OF_MONTH))} $hm"
+    }
+}
+
+/**
+ * 一个错误来源的快照 —— 屏级对账用（见 [DatabaseBrowserScreen]）。
+ *
+ * @property key **唯一且稳定**的来源标识。推送与遗忘两边都用它 ——
+ *   两边算得不一样，去重就会失效（第一版正是栽在这里）。
+ */
+internal data class ErrorSource(val key: String, val title: String, val detail: String)
+
+/**
+ * 把「当前所有 sheet 的所有报错」收成一份来源清单。
+ *
+ * ## 为什么不逐点埋点
+ *
+ * 报错散落在 `ConnectionStatus` / `TablePreviewTab.error` / `SqlSheet.error` /
+ * `DatabaseBrowserState.generateError` / `state.errorMessage` 五处。
+ * 每一处埋一次推送，等于把「什么算一次错误」的判断散到五个文件里，
+ * 而且新增一处报错来源就必然漏埋一次。
+ *
+ * ## 抽成纯函数的原因
+ *
+ * 屏里那个 `derivedStateOf` 测不到 —— 于是第一版把两边的 key 算得不一样
+ * （`pushOnce` 用 `title|detail`，`forgetSourcesNotIn` 用 map 的结构 key），
+ * **去重完全失效**，真窗口上表现为「同一个错误连点三次 → 徽标 2」。
+ * 有了这个函数，同一份 key 既能被屏用，也能被测试直接验。
+ */
+internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSource> = buildList {
+    // key = **结构标识 + 错误文本的哈希**。
+    //
+    // ⚠️ 少了后半段就会漏报：同一个 SQL sheet 里 `Table 'a' doesn't exist`
+    // 变成 `Table 'b' doesn't exist` 时结构标识没变 → 去重命中 → 用户看到的
+    // 还是上一次的错误，而界面上早就换了。
+    //
+    // 用哈希而不是原文：key 会进内存集合，原文可能有几百字、还带换行。
+    // 哈希冲突的风险可以忽略 —— 这里是「同源同文才算同一次」的去重，
+    // 不是安全校验；真撞上了表现是少报一次通知，不会误报或报错。
+    fun keyOf(where: String, detail: String) = "$where#${detail.hashCode()}"
+
+    sheets.forEach { s ->
+        val b = s.browser
+        if (s.status.state == ConnectionState.FAILED && s.status.message.isNotBlank()) {
+            add(
+                ErrorSource(
+                    keyOf("conn:" + s.connection.id, s.status.message),
+                    "连接失败 · " + s.connection.name,
+                    s.status.message,
+                ),
+            )
+        }
+        b.errorMessage?.takeIf { it.isNotBlank() }?.let {
+            add(ErrorSource(keyOf("dbs:" + s.connection.id, it), "加载数据库失败", it))
+        }
+        b.generateError?.takeIf { it.isNotBlank() }?.let {
+            add(ErrorSource(keyOf("gen:" + s.connection.id, it), "造数失败", it))
+        }
+        b.tabs.forEach { t ->
+            t.error?.takeIf { it.isNotBlank() }?.let {
+                add(
+                    ErrorSource(
+                        keyOf("tab:" + t.key, it),
+                        "读取 ${t.tableName} 失败",
+                        it,
+                    ),
+                )
+            }
+        }
+        b.sqlSheets.forEach { q ->
+            q.error?.takeIf { it.isNotBlank() }?.let {
+                add(ErrorSource(keyOf("sql:" + s.connection.id + ":" + q.title, it), "SQL 执行失败", it))
+            }
+        }
+    }
+}
+
+/** 通知中心入口按钮的 UI 测试 tag。 */
+internal const val NOTIFICATION_BELL_TAG = "notificationBell"
+
+/** 通知面板本身的 UI 测试 tag。 */
+internal const val NOTIFICATION_PANEL_TAG = "notificationPanel"
+
+/** 通知面板「清空」按钮的 UI 测试 tag。 */
+internal const val NOTIFICATION_CLEAR_BTN_TAG = "notificationClearBtn"
 
 /**
  * 堆内存详情面板 —— 设置页「系统信息」内存段的**缩小版**。
@@ -3985,6 +4320,14 @@ internal fun schemaCompletionSignature(
 class DatabaseBrowserState(
     private val engine: EngineClient,
     private val scope: CoroutineScope,
+    /**
+     * 屏级共享的通知中心 —— **所有 sheet 共用一个**。
+     *
+     * 传 null 是给「只需要跑逻辑、不关心通知」的调用方（测试）留的出口；
+     * 那种情况下任务成败仍然照常记进 [backgroundTasks] 与各 sheet 的提示行，
+     * 只是不往通知中心推。
+     */
+    private val notifications: NotificationCenter? = null,
 ) {
     /** 数据库名称列表(来自 SCHEMA.LIST level=database) */
     var databases: List<String> by mutableStateOf(emptyList())
@@ -4696,6 +5039,11 @@ class DatabaseBrowserState(
                             detail = r.file,
                         )
                     }
+                    notifications?.push(
+                        AppNotification.Severity.SUCCESS,
+                        "导出完成 · $fileName",
+                        "已导出 ${r.rowsWritten} 行 → ${r.file}",
+                    )
                 }
                 .onFailure { e ->
                     updateTask(taskId) {
@@ -4704,6 +5052,11 @@ class DatabaseBrowserState(
                             detail = e.message ?: "导出失败",
                         )
                     }
+                    notifications?.push(
+                        AppNotification.Severity.ERROR,
+                        "导出失败 · $fileName",
+                        e.message ?: "导出失败",
+                    )
                 }
                 .also { onComplete(it) }
         }
@@ -4762,6 +5115,34 @@ class DatabaseBrowserState(
                                 ?: "导出失败",
                         )
                     }
+                }
+            }
+            // 通知**按批次汇总**成一条，而不是每条推一条 ——
+            // 一次导出 20 条语句推 20 条通知会把面板刷爆，而用户真正想知道的
+            // 只是「这一批成了几条、哪几条挂了」。逐条明细在任务面板里。
+            val okCount = results.count { it.isSuccess }
+            val failed = results.filter { it.isFailure }
+            notifications?.let { nc ->
+                when {
+                    failed.isEmpty() -> nc.push(
+                        AppNotification.Severity.SUCCESS,
+                        "导出完成 · ${results.size} 个文件",
+                        okCount.toString() + " 个文件已写出：" +
+                            results.mapNotNull { it.getOrNull()?.file }
+                                .joinToString("；") { File(it).name },
+                    )
+                    // 部分失败必须**说清楚是部分**：只报成功数会让用户以为全好了
+                    okCount == 0 -> nc.push(
+                        AppNotification.Severity.ERROR,
+                        "导出失败 · 0/${results.size} 个文件",
+                        failed.first().exceptionOrNull()?.message ?: "导出失败",
+                    )
+                    else -> nc.push(
+                        AppNotification.Severity.ERROR,
+                        "导出部分失败 · ${okCount}/${results.size} 个文件",
+                        "成功 ${okCount} 个，失败 ${failed.size} 个：" +
+                            (failed.first().exceptionOrNull()?.message ?: "未知原因"),
+                    )
                 }
             }
             onComplete(results)
