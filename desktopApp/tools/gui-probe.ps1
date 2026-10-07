@@ -4,13 +4,15 @@
 
 .DESCRIPTION
     回答一个具体问题：在这个环境里，能不能**操作真的跑起来的应用**？
-    结论（实测，见 desktopApp/TEST_CASES.md §5）：
-      - 鼠标（SendInput `mouse_event` 与 `PostMessage` 两种投递）**都进不去**；
-      - **键盘（`keybd_event`）进得去** —— Tab / Shift+Tab / Enter / Space 能改配色、
-        开关紧凑模式、翻页、打开对话框。
+    结论（实测，见 desktopApp/TEST_CASES.md §5、§9.12）：
+      - **鼠标**：`mouse_event` + `SetCursorPos` **进得去** Skiko 窗口 —— 点树节点展开、
+        双击表名打开预览、点工具条按钮，全部生效。
+        （早先记的「鼠标都进不去」是**误判**：当时只试了 `SendInput` 与 `PostMessage`
+        两种投递，没试 `mouse_event`，而 `gui-probe.ps1` 本身只实现了键盘那一半。
+        鼠标那一半现在放在 `click-window.ps1`。）
+      - **键盘**（`keybd_event`）也进得去。
 
-    所以这个脚本只做键盘。鼠标那半边没留在代码里，但它的结论是有意的 ——
-    它证明的是「不能靠鼠标」，而不是「没试过鼠标」。
+    所以这个脚本主要做键盘；纯点击用 `click-window.ps1`（按窗口内相对坐标点）。
 
     ⚠️ **SendInput 的文字通道实测是坏的**：无论成功与否它都可能**静默失败**
     （结构体大小不对 / 权限不够时返回 0），而「界面毫无反应」和「应用收不到输入」
@@ -22,10 +24,11 @@
     注意 Android Studio 打开同名项目时也会有一个 `sundays` 窗口，别认错。
 
 .PARAMETER Actions
-    逗号分隔的动作序列：
+    分号分隔的动作序列：
       TAB:3 / SHIFTTAB:2 / DOWN:2 / UP:2 / LEFT / RIGHT
       ENTER / SPACE / ESC / CTRLA / BACKSPACE:5
-      TYPE:任意文本（含中文，走 KEYEVENTF_UNICODE）
+      PASTE:任意文本   ← **输文本首选这个**（剪贴板 + Ctrl+V，不经输入法）
+      TYPE:任意文本    逐字符敲键盘，仅在没有剪贴板时用（中文与部分符号会打错）
       WAIT:800        等待毫秒
       SHOT:名字       截图到 -OutDir
 
@@ -51,6 +54,7 @@ param(
 #    这里所有形参与局部变量都刻意避开这些名字。
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -64,6 +68,7 @@ public class Probe {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, IntPtr e);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public KEYBDINPUT ki; }
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
@@ -74,6 +79,14 @@ public class Probe {
 $script:INPUT_KEYBOARD   = 1
 $script:KEYEVENTF_KEYUP   = 0x0002
 $script:KEYEVENTF_UNICODE = 0x0004
+
+# ⚠️ 必须让本进程 DPI-aware，否则截图**只截到窗口左上角一块**（见 TEST_CASES.md §9.12）。
+#
+# PowerShell 默认 DPI-unaware：此时 GetWindowRect 返回**逻辑**坐标（1152dp 窗口 → 1152），
+# 而 CopyFromScreen 取的是**物理**像素。两者混用，1440 物理像素宽的窗口只拍到 1152，
+# 右边 288px、下边 180px 从来没进过截图 —— 于是「按钮被画到窗口外」「右边距消失」
+# 全是这么来的，而布局本身逐像素是对的。
+[void][Probe]::SetProcessDPIAware()
 
 # SizeOf 必须传**实例**；传 Type 拿到的是 RuntimeType，Marshal 会直接抛。
 $script:InputSize = [System.Runtime.InteropServices.Marshal]::SizeOf((New-Object Probe+INPUT))
@@ -186,6 +199,38 @@ function Send-AsciiChar { param([char]$ch)
     [Probe]::keybd_event([byte]$vk, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 15
     [Probe]::keybd_event([byte]$vk, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 15
     if ($shift) { [Probe]::keybd_event(0x10, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 15 }
+    # ⚠️ 必须显式 return $true。
+    # PowerShell 里函数返回的是**输出流里的一切**，没有 return 就是 $null；
+    # 而调用方写的是 `if (-not (Send-AsciiChar $ch))` —— $null 也算「打不了」。
+    # 结果：字符**其实打进去了**，警告却报「这些字符打不了，已跳过：amount > 500」，
+    # 把整条语句都算成失败。排查时会被这条假警告带偏（真失败的那一个字符反而看不见）。
+    return $true
+}
+
+function Paste-Text { param([string]$text)
+    # 走**剪贴板 + Ctrl+V**，而不是逐字符敲键盘。
+    #
+    # ## 为什么逐字符敲不可靠
+    #
+    # 本机默认输入法是中文拼音，而 **Shift 会切换中/英**（微软拼音的默认行为）。
+    # SQL 里必须带 Shift 的字符一大半：`>` `'` `(` `)` `*` `%` `+` `:` `|` `!` `?`
+    # 于是打 `a>b` 得到的是 `阿。b` —— 第一个字母进拼音组字，
+    # `>` 里的 Shift 顺手把输入法切成中文态，`组字` 被提交，`.` 也没了。
+    #
+    # 更糟的是它**时灵时不灵**：打 `amount >= 500` 恰好全程英文态，看着完全正常，
+    # 只是 `>` 丢了。于是「SQL 少一个符号 → 服务端报语法错」这种症状会被
+    # 误判成产品 bug，实际是探针自己把语句打坏了。
+    #
+    # ## 为什么剪贴板没这个问题
+    #
+    # WM_PASTE 直接送 Unicode 文本，不经过键盘布局、不经过输入法。
+    # 中文、SQL 符号、大小写全部原样到位。
+    [System.Windows.Forms.Clipboard]::SetText($text)
+    Start-Sleep -Milliseconds 200
+    [Probe]::keybd_event(0x11, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 50
+    Send-Keys @(0x56)   # V
+    [Probe]::keybd_event(0x11, 0, 2, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
 }
 
 function Save-Shot { param([string]$name)
@@ -223,6 +268,8 @@ foreach ($raw in ($Actions -split ';')) {
                        Send-Keys @(0x41)
                        [Probe]::keybd_event(0x11,0,2,[IntPtr]::Zero); "  [CTRL+A]" }
         'TYPE'      { Write-Text $arg; "  [TYPE] $arg" }
+        # ⚠️ 输入文本**优先用 PASTE**，别用 TYPE。理由见 [Paste-Text] 的注释。
+        'PASTE'     { Paste-Text $arg; "  [PASTE] $arg" }
         'WAIT'      { Start-Sleep -Milliseconds $count; "  [WAIT ${count}ms]" }
         'SHOT'      { Save-Shot $arg }
         # 把鼠标挪到窗口右下角（通常是空白）**再截图**。

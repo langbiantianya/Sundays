@@ -736,7 +736,11 @@ private fun ConnectionOverviewPanel(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(CONNECT_OVERVIEW_PANEL_TAG),
+    ) {
         // 历史配置可能没有 jdbcUrl（v2.11 之前保存的空 URL）—— 引擎侧无法建池，先引导去补全
         val connectable = buildJdbcUrl(connection).isNotBlank()
 
@@ -756,7 +760,10 @@ private fun ConnectionOverviewPanel(
         Spacer(modifier = Modifier.height(16.dp))
 
         Surface(
-            modifier = Modifier.fillMaxWidth().uiBevel(raised = true),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(CONNECT_OVERVIEW_CARD_TAG)
+                .uiBevel(raised = true),
             shape = winShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
@@ -794,7 +801,9 @@ private fun ConnectionOverviewPanel(
         Spacer(modifier = Modifier.height(24.dp))
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(CONNECT_OVERVIEW_ACTIONS_TAG),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1673,6 +1682,15 @@ private fun StepLayout(
 
 /** 连接列表项（点它 = 选中）。 */
 fun connectionCardTag(connectionId: String) = "connectionCard_$connectionId"
+
+/** 连接总览面板根列 —— 量布局用，见 TEST_CASES.md §9.12。 */
+const val CONNECT_OVERVIEW_PANEL_TAG = "connectOverviewPanel"
+
+/** 连接总览面板的「连接信息 / 连接状态」卡片。 */
+const val CONNECT_OVERVIEW_CARD_TAG = "connectOverviewCard"
+
+/** 连接总览面板底部的「删除 / 编辑 / 连接」按钮行 —— 首屏唯一的连接入口。 */
+const val CONNECT_OVERVIEW_ACTIONS_TAG = "connectOverviewActions"
 
 /** 快速连接步的方言卡（MySQL / PostgreSQL / H2 / DuckDB / SQLite）。 */
 fun quickConnectCardTag(title: String) = "quickConnectCard_$title"

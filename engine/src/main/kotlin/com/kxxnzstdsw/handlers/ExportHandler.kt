@@ -76,13 +76,51 @@ object ExportHandler {
             return@flow
         }
 
-        // 启动导出分支
+        // 启动导出分支。
+        //
+        // ⚠️ **订阅必须早于下发命令**，且 `startExport` 的失败必须自己收口成终止帧。
+        //
+        // [ExportProcessManager.collectResponses] 拿到的是 `replay = 0` 的 SharedFlow：
+        // **没有订阅者时 emit 出去的值直接丢**。原来「先 startExport 再 collect」，
+        // 小表（几十行）的整轮导出可能在订阅建立之前就回完了 —— 帧全丢，
+        // `collect` 永远等不到东西。
+        //
+        // 更糟的是另一条路径：`startExport` 在「通道没就绪」时只写日志就返回，
+        // 于是既没有命令、也没有人回帧 —— 前端 `collect` 永久挂起，
+        // 对话框关了、文件没有、界面一句话都没有（实测，见 TEST_CASES.md §9.13）。
+        // 所以这里两处都要堵：先订阅，收不到就**一定**回一帧 `success=false`。
         ensureSubprocessRunning(jarPath)
         // 转发给子进程的 ExportCommand 仍然使用 map<string,Value> payload — 子进程 wire 协议保持旧形态
-        ExportProcessManager.startExport(id, config, runReqToPayloadMap(runReq))
+        val responses = ExportProcessManager.collectResponses(id)
+        val started = ExportProcessManager.startExport(id, config, runReqToPayloadMap(runReq))
+        if (!started) {
+            emit(
+                response {
+                    this.id = id
+                    success = false
+                    error = "导出子进程通道未就绪（ExportHub 未连接），导出没有启动"
+                }
+            )
+            return@flow
+        }
 
         // 收集子进程响应（已由 ExportProcessManager 转为 typed Response）转发给上游 gRPC StreamObserver
-        ExportProcessManager.collectResponses(id).collect { emit(it) }
+        var completed = false
+        responses.collect {
+            if (it.export.hasProgress() && it.export.progress.completed) completed = true
+            emit(it)
+        }
+        // 流结束了却从没收到 `completed` 帧 —— 与其让上游无限等待，
+        // 不如把「没等到完成」这件事本身作为失败报出去。
+        if (!completed) {
+            emit(
+                response {
+                    this.id = id
+                    success = false
+                    error = "导出已结束但没有收到完成帧（子进程可能中途退出）"
+                }
+            )
+        }
     }
 
     /**
@@ -118,12 +156,25 @@ object ExportHandler {
                     )
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // ⚠️ 必须是 **Throwable**，不是 Exception。
+            //
+            // 驱动装不上时抛的不是异常而是错误：`java.lang.ServiceConfigurationError`
+            // / `NoClassDefFoundError` 都是 `Error`。原来只 catch Exception，
+            // 于是这类失败**直接逃逸**，一帧终止帧都不发 ——
+            // 主进程那边 `collectResponses(id).collect { }` 永远挂着，
+            // 界面上「点了导出，什么也没发生」，磁盘上也没有文件。
+            //
+            // 实测（TEST_CASES.md §9.13）：子进程的 classpath 由
+            // `ExportProcessManager.start` 从 `engine/build/libs/libs/*.jar` 拼出来，
+            // 那里面**没有 MySQL 驱动**，于是每个真实库的导出都会走到这条路径。
+            // 打包分发时驱动在不在那儿另说，但「无论哪一步炸了都必须给出结论」这条契约
+            // 必须在代码里成立 —— 否则一次环境问题就变成一次静默。
             emit(
                 exportHubResponse {
                     this.id = id
                     success = false
-                    error = e.message ?: "Export failed"
+                    error = e.message ?: e::class.java.simpleName
                     end = true
                 }
             )

@@ -165,6 +165,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 数据库浏览屏幕 —— 第二屏；**多 sheet**：每个已建连接的数据库浏览会话是一个 sheet，
@@ -1603,9 +1604,11 @@ private fun PreviewTabArea(
                             val sql = exportSql!!
                             exportSql = null
                             scope.launch {
+                                // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
+                                // 后者会把表格换成「读取失败」面板，导出成功不该长那样
                                 state.exportQuery(sql, fmt, dir, name, tbl)
-                                    .onSuccess { current.error = "已导出 ${it.rowsWritten} 行 → ${it.file}" }
-                                    .onFailure { current.error = "导出失败：${it.message}" }
+                                    .onSuccess { current.notice = "已导出 ${it.rowsWritten} 行 → ${it.file}" }
+                                    .onFailure { current.notice = "导出失败：${it.message}" }
                             }
                         },
                     )
@@ -2067,6 +2070,27 @@ private fun PreviewTabContent(
                         text = "共 ${tab.total} 行 · 第 ${tab.page} 页 · 每页 ${tab.pageSize}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 「非读取结果」的提示单独占一行：导出成功/失败**不能**塞进 [TablePreviewTab.error]。
+                //
+                // 为什么：error 的语义是「这次读取失败了」，渲染分支会把整块表格换成
+                // 「读取失败」面板。于是「已导出 25 行」会被显示成**读取失败**，而且用户
+                // 刚导出的数据在屏幕上消失 —— 报喜的那一行反而把内容顶没了。
+                //
+                // 失败文案也走这里：导出不成功时**数据是好的**，只是文件没生成，
+                // 显示成「读取失败」同样是假的。
+                tab.notice?.let { notice ->
+                    Text(
+                        text = notice,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (notice.startsWith("导出失败"))
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 12.dp),
                     )
                 }
             }
@@ -2987,6 +3011,15 @@ class TablePreviewTab(
     var rows: List<TableRow> by mutableStateOf(emptyList())
     var loading: Boolean by mutableStateOf(false)
     var error: String? by mutableStateOf(null)
+
+    /**
+     * 非读取结果的提示（导出成功 / 失败）。
+     *
+     * 与 [error] 分开是因为两者**语义不同、渲染后果也不同**：[error] 会把整块表格换成
+     * 「读取失败」面板，而导出成不成功跟这张表读没读出来毫无关系 ——
+     * 导成功了报「读取失败」、导失败了数据还好好的，两种都是骗用户。
+     */
+    var notice: String? by mutableStateOf(null)
     var total: Long by mutableStateOf(0L)
     var page: Int by mutableStateOf(1)
     var pageSize: Int by mutableStateOf(100)
@@ -3696,6 +3729,19 @@ class DatabaseBrowserState(
     data class ExportResult(val file: String, val rowsWritten: Long)
 
     /**
+     * 导出的**看门狗超时**（毫秒）。
+     *
+     * 取 5 分钟：真正的大表导出按行推进、可能跑很久，这个值不该误伤正常导出；
+     * 但它必须存在 —— 引擎那条流式路由在「命令没发出去」或「子进程中途没了」时
+     * 可能**一帧都不回**，此时 `collect` 会永远挂着，界面既不成功也不失败，
+     * 用户看到的是「点了导出，然后什么也没发生」。
+     *
+     * 与其指望每一层都记得收口，不如在这层兜一道底：
+     * 超时也要变成一条**用户看得见**的失败。
+     */
+    internal var exportTimeoutMs: Long = 5 * 60 * 1000
+
+    /**
      * 导出一段 SQL 的结果 —— 发 `EXPORT.RUN_EXPORT`。
      *
      * ## 为什么要用 [EngineClient.handle] 而不是 [EngineClient.invoke]
@@ -3743,14 +3789,25 @@ class DatabaseBrowserState(
             }
             var file = ""
             var rows = 0L
-            engine.handle(req).collect { resp ->
-                if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "导出失败" })
-                val p = resp.export.progress
-                rows = p.exportedRows
-                if (p.completed) {
-                    file = p.filePath
-                    if (p.error.isNotBlank()) throw IllegalStateException(p.error)
+            // ⚠️ `withTimeoutOrNull` 不是「防御性编程」，是这条契约的**实现**：
+            // 引擎在命令没发出去 / 子进程中途消失时会**一帧都不回**，
+            // 光靠 `collect` 结束前的检查是够不着的 —— 得有人替它兜底。
+            // 没有这一行时，真窗口上点「开始导出」的表现是：对话框关了，
+            // 文件没有，界面上一个字都没有（实测，见 TEST_CASES.md §9.13）。
+            val finished = withTimeoutOrNull(exportTimeoutMs) {
+                engine.handle(req).collect { resp ->
+                    if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "导出失败" })
+                    val p = resp.export.progress
+                    rows = p.exportedRows
+                    if (p.completed) {
+                        file = p.filePath
+                        if (p.error.isNotBlank()) throw IllegalStateException(p.error)
+                    }
                 }
+                true
+            }
+            if (finished != true) {
+                throw IllegalStateException("导出超过 ${exportTimeoutMs / 1000} 秒仍未返回，已中止")
             }
             if (file.isBlank()) throw IllegalStateException("导出已结束但引擎没有回报文件路径")
             ExportResult(file = file, rowsWritten = rows)

@@ -94,19 +94,7 @@ object ExportProcessManager {
 
         // 1. 启动子进程
         val libsDir = File(jarPath).parentFile?.absoluteFile
-        val classPath = if (libsDir != null) {
-            val libs = File(libsDir, "libs")
-            if (libs.exists()) {
-                val jars = libs.listFiles { f -> f.extension == "jar" }
-                jars?.joinToString(File.pathSeparator) { it.absolutePath }
-                    ?.let { "$jarPath${File.pathSeparator}$it" }
-                    ?: jarPath
-            } else {
-                jarPath
-            }
-        } else {
-            jarPath
-        }
+        val classPath = buildSubprocessClassPath(jarPath, libsDir)
 
         try {
             val javaHome = System.getProperty("java.home")
@@ -139,8 +127,18 @@ object ExportProcessManager {
 
             // 监控进程退出
             scope.launch {
-                process?.waitFor()
-                logger.info("Export subprocess exited with code: ${process?.exitValue()}")
+                val code = process?.waitFor()
+                logger.info("Export subprocess exited with code: $code")
+                // ⚠️ 子进程没了 ⇒ 所有**在等**的导出都不可能再有回帧。
+                //
+                // 这一步以前只是 `stop()`：流被关掉、observer 置空，而
+                // 每个 exportId 的 SharedFlow **一帧都没写**。主进程那边
+                // `collectResponses(id).collect { }` 于是永远挂着 ——
+                // 界面上「点了导出，什么也没发生」，磁盘上也没有文件。
+                //
+                // 子进程在启动阶段就崩掉（classpath 缺驱动等）是最容易触发它的场景：
+                // 连 ExportHub 都没起来，自然一帧都发不出来。
+                failPendingExports("导出子进程已退出（code=$code），导出中止")
                 stop()
             }
 
@@ -250,15 +248,89 @@ object ExportProcessManager {
     }
 
     /**
-     * 发送导出启动命令到子进程
+ * 拼导出子进程的 classpath —— 引擎 jar **加上**它旁边的每一个 jar 目录。
+ *
+ * ## 为什么不能只拼 `libs/`
+     *
+ * `engine/build/libs/` 下并排放着**三个** jar 目录：
+ *
+ * | 目录 | 内容 | 少了会怎样 |
+ * |---|---|---|
+ * | `libs/` | 第三方依赖（gRPC / HikariCP / protobuf…） | 引擎自己起不来 |
+ * | `drivers/` | **JDBC 驱动**（mysql-connector-j 等） | 连不上任何真实库 |
+ * | `dialects/` | 方言插件 | 认不出 `MYSQL` |
+ *
+ * 原来只拼 `libs/`，于是导出子进程**装不上 JDBC 驱动**，
+ * 连库时抛的是 `ServiceConfigurationError` / `NoClassDefFoundError` ——
+ * 那是 `Error` 不是 `Exception`，于是**一帧终止帧都没发**，
+ * 主进程永远等着，用户看到的是「点了导出，什么也没发生」。
+ *
+ * 这里按目录枚举而不是写死某一个：以后再加一个 jar 目录也不会漏。
+ */
+    private fun buildSubprocessClassPath(jarPath: String, libsDir: File?): String {
+        if (libsDir == null || !libsDir.isDirectory) return jarPath
+        val jars = libsDir.listFiles { f: File -> f.isDirectory }
+            ?.flatMap { dir -> dir.listFiles { f: File -> f.extension == "jar" }?.toList().orEmpty() }
+            .orEmpty()
+        if (jars.isEmpty()) return jarPath
+        return (listOf(jarPath) + jars.map { it.absolutePath }).joinToString(File.pathSeparator)
+    }
+
+    /**
+     * 给所有**还没收口**的导出补一帧失败。
+     *
+     * 没有这一步，「子进程没了」这件事只活在日志里；调用方那边是
+     * 一个永远不结束的 `collect` —— 用户看到的是彻底没有反馈。
+     *
+     * 已经收到过 `completed` 的导出不在 [responseFlows] 里（`publishResponse`
+     * 收到终止帧后会移除），所以这里天然只处理「还在等」的那些。
      */
-    fun startExport(id: String, connection: ConnectionConfig, payload: Map<String, Value>) {
+    private fun failPendingExports(reason: String) {
+        val pending = responseFlows.keys.toList()
+        if (pending.isEmpty()) return
+        logger.warn("Export subprocess gone, failing ${pending.size} pending export(s): $pending")
+        pending.forEach { exportId ->
+            val flow = responseFlows.remove(exportId) ?: return@forEach
+            scope.launch {
+                flow.emit(
+                    Response.newBuilder()
+                        .setId(exportId)
+                        .setSuccess(false)
+                        .setStream(true)
+                        .setEnd(true)
+                        .setError(reason)
+                        .build()
+                )
+            }
+        }
+    }
+
+    /**
+     * 发送导出启动命令到子进程。
+     *
+     * ## 返回值为什么不能省
+     *
+     * 原来这里是 `Unit` + 「失败只写日志」。而调用方 [com.kxxnzstdsw.handlers.ExportHandler]
+     * 发完命令就去 `collectResponses(id)` —— **那个 SharedFlow 只有子进程回帧才会被写**。
+     * 于是「通道没就绪」这一种失败，前端的表现是：
+     *
+     * ```
+     * 点「开始导出」 → 对话框关闭 → 引擎什么都没回 → collect 永久挂起
+     *   → 既没有成功、也没有失败 → 界面上一个字都没有，磁盘上也没有文件
+     * ```
+     *
+     * 用户既不知道成没成，也不知道该不该重试；而日志默认不进控制台，等于**彻底静默**。
+     * 所以这里把「命令有没有真的交给 gRPC 流」变成返回值，由调用方收口成终止帧。
+     *
+     * @return `true` = 命令已交给流；`false` = 通道未就绪或发送抛异常。
+     */
+    fun startExport(id: String, connection: ConnectionConfig, payload: Map<String, Value>): Boolean {
         val observer = commandObserver
         if (observer == null) {
             logger.error("Cannot start export: stream not open")
-            return
+            return false
         }
-        try {
+        return try {
             val cmd = ExportCommand.newBuilder()
                 .setKind(Kind.START_EXPORT)
                 .setId(id)
@@ -267,8 +339,10 @@ object ExportProcessManager {
                 .build()
             observer.onNext(cmd)
             logger.info("Sent START_EXPORT command: $id")
+            true
         } catch (e: Exception) {
             logger.error("Failed to send START_EXPORT command", e)
+            false
         }
     }
 
