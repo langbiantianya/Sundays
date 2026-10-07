@@ -1,6 +1,7 @@
 package com.kxxnzstdsw.integration
 
 import com.kxxnzstdsw.export.ExportSubProcess
+import com.kxxnzstdsw.export.ExportProcessManager
 import com.kxxnzstdsw.grpc.ExportCommand
 import com.kxxnzstdsw.grpc.ExportHubGrpc
 import com.kxxnzstdsw.grpc.ExportHubResponse
@@ -26,6 +27,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -330,6 +332,77 @@ class ExportPipelineIntegrationTest : H2Fixture() {
 
     private fun stringValue(v: String): com.google.protobuf.Value =
         com.google.protobuf.Value.newBuilder().setStringValue(v).build()
+
+    // ---------------------------------------------------------------------
+    // ④ 通道可用性：断流之后必须能自愈
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `hasUsableChannel requires both the process and the stream`() {
+        // ## 这条钉的是一个**永久性**缺陷
+        //
+        // hub 流断开时 ExportProcessManager 的 onError 只清 commandObserver、
+        // **不动** isRunning（子进程确实还活着，进程监控也没触发 stop()）。
+        //
+        // 而 ensureSubprocessRunning 原先只看 `isRunning`，于是判据恒真 →
+        // 「建流」分支永远被跳过 → startExport 拿到 null observer → 返回 false →
+        // 用户看到「导出子进程通道未就绪」。**它永远不会自愈，重启应用才恢复。**
+        //
+        // 实测形态：第一次导出成功，第二次开始全部失败。
+        //
+        // 修法是引入 hasUsableChannel（进程在 **且** 流在）并让建流判据改用它。
+        // 这里钉住「两者缺一不可」这个语义 —— 只看其中一个都会退回原缺陷。
+        val mgr = ExportProcessManager
+        mgr.stop()
+        assertFalse(
+            mgr.hasUsableChannel,
+            "刚 stop 之后通道必然不可用（进程不在）",
+        )
+        assertFalse(mgr.isRunning, "stop 之后进程标记也应清掉")
+    }
+
+    @Test
+    fun `流丢了之后下一次导出必须自愈而不是报通道未就绪`() = runBlocking {
+        // ## 这条对「把判据写回 isRunning」是**红**的
+        //
+        // 摆出漂移态（进程在、流没了），然后走**父进程**路径真跑一次导出。
+        // 判据写错时：[ensureSubprocessRunning] 直接 return → startExport 拿到
+        // null observer → 回「导出子进程通道未就绪（ExportHub 未连接）」；
+        // 判据正确时：重建流 → 命令发得出去 → 文件真的写出来。
+        //
+        // ⚠️ 必须走 [ExportHandler.executeInMainProcess] 而不是 `executeAsSubprocess`：
+        // 后者是**子进程侧**入口，直接调 `ExportEngine.export`，**根本不碰**
+        // `ExportProcessManager` —— 第一版用了它，于是永远成功、0.09 秒跑完，
+        // 判据写对写错都是绿的。测「建流判据」就得测**编排那一侧**。
+        //
+        // 断言的是**文件是否存在**而不是「有没有报错」——
+        // 后者对「换个错法继续失败」没抵抗力。
+        val dir = java.nio.file.Files.createTempDirectory("sundays-heal").toFile()
+        try {
+            // ⚠️ 必须先 `stop()` 清残留：[ExportProcessManager] 是单例，
+            // 其它用例起过子进程、结束时 `stop()` —— 谁后跑状态就不一样。
+            // 而 `stop()` 在 `_isRunning` 已是 false 时会**提前 return、不清 observer**，
+            // 所以还要显式摆一次漂移态。
+            ExportProcessManager.stop()
+            ExportProcessManager.simulateStreamLostWhileProcessAlive()
+            assertTrue(ExportProcessManager.isRunning, "漂移态：进程标记为真")
+            assertFalse(ExportProcessManager.hasUsableChannel, "漂移态：流确实没有")
+
+            val frames = ExportHandler.executeInMainProcess(exportRequest("SELECT 1", dir, "healed.csv")).toList()
+            val last = frames.last()
+            assertTrue(
+                last.success,
+                "漂移态下应当重建流并成功导出，而不是「通道未就绪」：error='${last.error}'",
+            )
+            assertTrue(
+                File(dir, "healed.csv").exists(),
+                "文件应已生成：${dir.absolutePath}",
+            )
+        } finally {
+            runCatching { ExportProcessManager.stop() }
+            dir.deleteRecursively()
+        }
+    }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }

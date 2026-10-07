@@ -147,6 +147,68 @@ object ExportProcessManager {
     val isRunning: Boolean get() = _isRunning.get()
 
     /**
+     * 父进程自己的导出日志 —— 与子进程日志写到**同一个文件**。
+     *
+     * ## 为什么父进程也要落盘
+     *
+     * 子进程日志早就有文件重定向，但父进程这边只有 `System.err` / SLF4J。
+     * 桌面应用被 IDE / Gradle 启动时那些 stderr **用户根本看不到** ——
+     * 于是排查「第一次导出成功、第二次报通道未就绪」时，能看到的只有子进程日志，
+     * 而**断流发生在父进程这一侧**，日志正好在盲区里。
+     *
+     * 写成同目录的 `export-manager.log`：父子两条链路一起看，顺序也连得上。
+     */
+    private fun managerLog(message: String) {
+        logger.info(message)
+        System.err.println(message)
+        runCatching {
+            val file = resolveLibsDir(null)?.resolve("export-manager.log") ?: return@runCatching
+            file.parentFile?.mkdirs()
+            file.appendText("${System.currentTimeMillis()} $message`n")
+        }
+    }
+
+    /**
+     * 导出通道**当下能不能用** —— 判据是「进程在」**且**「流在」。
+     *
+     * ## 为什么不直接用 [isRunning]
+     *
+     * 这两个状态会**不一致**：[onError] / [onCompleted] 在 hub 流断开时只清
+     * `commandObserver`、**不动** `_isRunning`（子进程确实还活着，进程监控线程
+     * 也没触发 `stop()`）。于是 `isRunning == true` 而 `commandObserver == null`。
+     *
+     * 后果是致命的：[ExportHandler.ensureSubprocessRunning] 原先只看 `isRunning`，
+     * 于是「跳过建流」→ `startExport` 拿到 null observer → 返回 false →
+     * 用户看到「导出子进程通道未就绪」。而**它永远不会自愈**：
+     * 那个判据永远为真，重建流的代码永远不执行。
+     * 实测形态：第一次导出成功，第二次开始**全部**失败，重启应用才恢复。
+     *
+     * 所以凡是「能不能发命令」的判断都必须走这个，不能走 [isRunning]。
+     */
+    val hasUsableChannel: Boolean get() = _isRunning.get() && commandObserver != null
+
+    /**
+     * **仅测试用**：把状态摆成「进程还活着、但流没了」这个漂移态。
+     *
+     * ## 为什么需要这个钩子
+     *
+     * 那个漂移态是 `onError` 的自然产物，**正常路径下无法从外部构造** ——
+     * 而它恰恰是本缺陷的触发条件。没有它，「修了没有」就只能靠真窗口里
+     * 碰一次断流来试，那既不可复现也不该成为回归手段。
+     *
+     * 有了它，[ExportPipelineIntegrationTest] 才能真正端到端地验：
+     * 摆出漂移态 → 发起导出 → 断言**不是**「通道未就绪」，
+     * 也就是「修法真的会重建流」。这一条对把判据写回 `isRunning` 的变异是红的。
+     *
+     * 不用反射是刻意的：`commandObserver` 是 private 字段，
+     * 反射改它既脆弱又绕过类型检查。
+     */
+    internal fun simulateStreamLostWhileProcessAlive() {
+        _isRunning.set(true)
+        commandObserver = null
+    }
+
+    /**
      * 启动子进程并连接 gRPC channel
      *
      * @param jarPath idb-engine.jar 路径
@@ -154,7 +216,7 @@ object ExportProcessManager {
     fun start(jarPath: String?): Int {
         // 原子抢占 — 防止两个 caller 同时启动两个子进程
         if (!_isRunning.compareAndSet(false, true)) {
-            logger.warn("Export subprocess already running"); System.err.println("[export] Export subprocess already running")
+            logger.warn("Export subprocess already running"); managerLog("[export] Export subprocess already running（复用）")
             return hubPort
         }
 
@@ -247,7 +309,7 @@ object ExportProcessManager {
             }
 
             process = builder.start()
-            logger.info("导出子进程已启动: pid=${process?.pid()} classpath=${classPath.split(File.pathSeparator).size} 项"); System.err.println("[export] 子进程已启动 pid=${process?.pid()} classpath=${classPath.split(File.pathSeparator).size} 项 cwd=${libsDir}")
+            managerLog("[export] 子进程已启动 pid=${process?.pid()} classpath=${classPath.split(File.pathSeparator).size} 项 cwd=${libsDir}")
 
             // 监控进程退出
             scope.launch {
@@ -401,11 +463,11 @@ object ExportProcessManager {
             if (!ready) kotlinx.coroutines.delay(100)
         }
         if (!ready) {
-            System.err.println("[export] 等待 hub 端口 $hubPort 就绪超时（${timeoutMs}ms）")
+            managerLog("[export] 等待 hub 端口 $hubPort 就绪超时（${timeoutMs}ms，observer=${commandObserver != null}）")
             failPendingExports("导出子进程在 ${timeoutMs / 1000} 秒内没有就绪")
             return
         }
-        System.err.println("[export] hub 端口 $hubPort 已就绪，建立流")
+        managerLog("[export] hub 端口 $hubPort 已就绪，建立流")
         val ch = ManagedChannelBuilder.forAddress(EXPORT_HUB_HOST, hubPort)
             .usePlaintext()
             .keepAliveTime(30, TimeUnit.SECONDS)
@@ -420,16 +482,24 @@ object ExportProcessManager {
             }
 
             override fun onError(t: Throwable) {
-                logger.error("ExportHub bidi stream error", t); System.err.println("[export] hub 流出错: $t")
+                logger.error("ExportHub bidi stream error", t)
+                managerLog("[export] hub 流出错（commandObserver 置空，isRunning 保持不变）: $t")
                 commandObserver = null
+                // ⚠️ 旧 channel 必须在这里释放 —— 它已经废了（流断了），
+                // 而 [awaitHubReadyOrReportFailure] 重建时会**新建**一个。
+                // 不关的话每次断流都漏一条连接池，导出用得越久漏得越多。
+                runCatching { channel?.shutdownNow() }
+                channel = null
                 // 流断了 ⇒ 这一局里所有在等的导出都不可能再有回帧。
                 // 不补失败帧的话，上游就是无限等待（§9.15 的老毛病）。
                 failPendingExports("导出通道断开：${t.message ?: t::class.java.simpleName}")
             }
 
             override fun onCompleted() {
-                logger.info("Subprocess closed ExportHub stream"); System.err.println("[export] 子进程关闭了 hub 流")
+                managerLog("[export] 子进程关闭了 hub 流（commandObserver 置空）")
                 commandObserver = null
+                runCatching { channel?.shutdownNow() }
+                channel = null
                 failPendingExports("导出通道已关闭")
             }
         }
@@ -550,7 +620,7 @@ object ExportProcessManager {
     fun startExport(id: String, connection: ConnectionConfig, payload: Map<String, Value>): Boolean {
         val observer = commandObserver
         if (observer == null) {
-            logger.error("Cannot start export: stream not open"); System.err.println("[export] 通道未就绪，命令没发出去 id=$id")
+            managerLog("[export] 通道未就绪，命令没发出去 id=$id（isRunning=$isRunning observer=${commandObserver != null}）")
             return false
         }
         val cmd = ExportCommand.newBuilder()
@@ -561,7 +631,7 @@ object ExportProcessManager {
             .build()
         val ok = sendCommand(observer, cmd)
         if (ok) {
-            logger.info("Sent START_EXPORT command: $id"); System.err.println("[export] 命令已下发 id=$id")
+            managerLog("[export] 命令已下发 id=$id")
         } else {
             logger.error("Failed to send START_EXPORT command for $id")
         }

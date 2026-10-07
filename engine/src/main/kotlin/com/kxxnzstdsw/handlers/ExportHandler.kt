@@ -283,19 +283,36 @@ object ExportHandler {
 
     /**
      * 启动或复用导出子进程
+     *
+     * ## ⚠️ 判据是「通道能不能用」，不是「进程在不在」
+     *
+     * 原来写的是 `if (!ExportProcessManager.isRunning)`。但 hub 流断开时
+     * [com.kxxnzstdsw.export.ExportProcessManager] 的 `onError` 只清 observer、
+     * **不动** `isRunning`（子进程确实还活着）—— 于是这个判据为真，
+     * 整个「建流」分支被跳过，`startExport` 拿到 null observer 返回 false，
+     * 用户看到「导出子进程通道未就绪」。
+     *
+     * 更糟的是它**永远不会自愈**：判据恒真，重建流的代码永远不执行 ——
+     * 实测形态是「第一次导出成功，之后全部失败，重启应用才恢复」。
+     *
+     * 所以这里用 [com.kxxnzstdsw.export.ExportProcessManager.hasUsableChannel]：
+     * 通道不在就重建（进程还在就只重连，进程没了才重启）。
      */
     private suspend fun ensureSubprocessRunning(jarPath: String?) {
+        if (ExportProcessManager.hasUsableChannel) return
+        // 进程可能还在（只是流断了），这时 `start` 里的 CAS 会挡住重复拉起，
+        // 后面的 awaitHubReady 会直接重建流 —— 两条路都能收敛到「通道可用」。
         if (!ExportProcessManager.isRunning) {
             ExportProcessManager.start(jarPath)
-            // ⚠️ 原来这里只 `delay(200ms)`，然后就 `observer.onNext(cmd)`。
-            //
-            // 子进程要 2~3 秒才起得来（JVM + 加载方言插件），200ms 之后它还没 bind，
-            // gRPC 直接回 `UNAVAILABLE: io exception` —— 而那个错误**只被记了一行日志**，
-            // `commandObserver` 置空。于是命令没发出去、也没人回帧，桌面那边永远等
-            // （TEST_CASES.md §9.15）。改成**真的等端口能连上**再返回：
-            // 这是唯一能保证「命令发出时对面在听」的办法。
-            ExportProcessManager.awaitHubReadyOrReportFailure()
         }
+        // ⚠️ 原来这里只 `delay(200ms)`，然后就 `observer.onNext(cmd)`。
+        //
+        // 子进程要 2~3 秒才起得来（JVM + 加载方言插件），200ms 之后它还没 bind，
+        // gRPC 直接回 `UNAVAILABLE: io exception` —— 而那个错误**只被记了一行日志**，
+        // `commandObserver` 置空。于是命令没发出去、也没人回帧，桌面那边永远等
+        // （TEST_CASES.md §9.15）。改成**真的等端口能连上**再返回：
+        // 这是唯一能保证「命令发出时对面在听」的办法。
+        ExportProcessManager.awaitHubReadyOrReportFailure()
     }
 
     /**

@@ -958,11 +958,157 @@ private const val MEMORY_ALERT_RATIO = 0.85f
  * 该按钮变为「返回表预览」（点它回到表预览）；从另一个工作台切过来时直接进入目标工作台。
  * 状态由 [DatabaseBrowserState.activePane] 持有，每 sheet 独立 —— 切换不清空任何工作台状态。
  * 未连接时禁用（两个工作台的执行都必须依赖已建立的连接池）。
+ *
+ * 右侧的**「任务」入口**不属于任何 pane —— 导出/导入这类后台任务跨 pane 存在，
+ * 「后台运行」的语义恰恰是「我先干别的，回头再看它」，所以这个入口必须在任何 pane 都看得见。
+ * 徽标上的数字只数**运行中**的任务：已完成的留在面板里，不该在工具栏上一直占位。
  */
+/**
+ * 任务面板 —— 后台任务列表。
+ *
+ * ## 为什么它必须常驻可唤起，而不是「导出完弹个通知」
+ *
+ * 后台任务的特点是**用户主动离开**它（切 pane、去别的表、干活别的）。
+ * 一次性通知只在用户**没走开**的时候有用 —— 而他走开了正是这件事发生的前提。
+ * 所以入口得在任何 pane 都在（[BrowserToolBar] 右侧），面板则按需唤起。
+ *
+ * ## 展示什么
+ *
+ * 每条任务：**状态图标 + 文件名 + 目录/格式 + 一行状态说明**。
+ * 状态说明走 [DatabaseBrowserState.BackgroundTask.statusLine]，
+ * 其中运行中未收到首帧时是「正在连接引擎…」而不是「0 行」——
+ * 「0 行」会被读成「导出失败」。
+ *
+ * ⚠️ 面板**不提供取消**。取消要一路传到引擎子进程（`EXPORT.STOP_EXPORT`），
+ * 而那条链路是本项目最不可靠的一段（§9.15 的四层收口就是为它做的）。
+ * 与其摆一个按了没反应的按钮，不如只给「清除已完成」——
+ * 那是**一定做得到**的动作（纯本地状态删除）。
+ */
+@Composable
+private fun BackgroundTaskPanel(
+    tasks: List<DatabaseBrowserState.BackgroundTask>,
+    onClearFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier.fillMaxWidth().testTag(TASK_PANEL_TAG),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "后台任务",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${tasks.count { it.isRunning }} 个进行中 / 共 ${tasks.size} 个",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                // 只给「清除已完成」—— 正在跑的行留着，否则用户一点就把它们从视野里弄没了
+                WinOutlinedButton(
+                    onClick = onClearFinished,
+                    enabled = tasks.any { !it.isRunning },
+                    shape = SundaysPalette.buttonShape,
+                    modifier = Modifier.testTag(TASK_CLEAR_BTN_TAG),
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("清除已完成")
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            if (tasks.isEmpty()) {
+                Text(
+                    text = "暂无后台任务。导出、导入这类耗时操作会出现在这里。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                tasks.forEach { task -> BackgroundTaskRow(task) }
+            }
+        }
+    }
+}
+
+/** 任务面板里的一行。 */
+@Composable
+private fun BackgroundTaskRow(task: DatabaseBrowserState.BackgroundTask) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 状态图标：运行中用进度圈（它在动，一眼看出「还在跑」）；收口后换成静态图标
+        when (task.status) {
+            DatabaseBrowserState.BackgroundTask.Status.RUNNING ->
+                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+            DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED ->
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "完成",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp),
+                )
+            DatabaseBrowserState.BackgroundTask.Status.FAILED ->
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "失败",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp),
+                )
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = task.title,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                // 目录可能很长，副标题单行省略；完整路径在状态行/失败原因里给
+                text = task.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = task.statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = when (task.status) {
+                    DatabaseBrowserState.BackgroundTask.Status.RUNNING -> MaterialTheme.colorScheme.primary
+                    DatabaseBrowserState.BackgroundTask.Status.FAILED -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+/** 工具栏「任务」按钮的 UI 测试 tag。 */
+internal const val TASK_PANEL_BTN_TAG = "backgroundTaskPanelBtn"
+
+/** 任务面板本身的 UI 测试 tag —— 面板没有语义，测试要量它得靠它。 */
+internal const val TASK_PANEL_TAG = "backgroundTaskPanel"
+
+/** 「清除已完成」按钮的 UI 测试 tag。 */
+internal const val TASK_CLEAR_BTN_TAG = "backgroundTaskClearBtn"
+
 @Composable
 private fun BrowserToolBar(
     activePane: BrowserPane,
     connected: Boolean,
+    runningTaskCount: Int,
+    taskPanelOpen: Boolean,
+    onToggleTaskPanel: () -> Unit,
     onSelectPane: (BrowserPane) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -999,6 +1145,36 @@ private fun BrowserToolBar(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            Spacer(Modifier.weight(1f))
+            WinButton(
+                onClick = onToggleTaskPanel,
+                shape = SundaysPalette.buttonShape,
+                colors = if (taskPanelOpen) {
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                } else {
+                    ButtonDefaults.buttonColors()
+                },
+                modifier = Modifier.testTag(TASK_PANEL_BTN_TAG),
+            ) {
+                Icon(
+                    imageVector = if (runningTaskCount > 0) Icons.Filled.Bolt else Icons.Filled.TableChart,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("任务", maxLines = 1, softWrap = false)
+                if (runningTaskCount > 0) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "($runningTaskCount)",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }
@@ -1067,13 +1243,27 @@ private fun ActiveSheetContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // 任务面板的开关是**纯 UI 状态**，放在 composable 的 remember 里而不是状态机里 ——
+        // 面板收起不该被「换个 pane 就重置」这种语义波及，而它本身也不需要活过组合。
+        var taskPanelOpen by remember(sheet.browser) { mutableStateOf(false) }
         // 工具栏归属当前激活 sheet —— 放在内容区内（而非 sheet 标签条之上），
         // 这样工具与它作用的连接在同一视觉块内，切换 sheet 时工具栏也随之更换。
         BrowserToolBar(
             activePane = sheet.browser.activePane,
             connected = sheet.status.state == ConnectionState.CONNECTED,
+            runningTaskCount = sheet.browser.runningTasks.size,
+            taskPanelOpen = taskPanelOpen,
+            onToggleTaskPanel = { taskPanelOpen = !taskPanelOpen },
             onSelectPane = sheet.browser::selectPane,
         )
+        // 任务面板紧贴工具栏之下 —— 它是那个「任务 (N)」按钮的直接延伸，
+        // 而不是漂在别处的浮层：用户点按钮是为了「就在这儿看」，不是「去某个地方看」。
+        if (taskPanelOpen) {
+            BackgroundTaskPanel(
+                tasks = sheet.browser.backgroundTasks,
+                onClearFinished = sheet.browser::clearFinishedTasks,
+            )
+        }
         // 连接失败原因此前**只在连接管理页**能看到，浏览屏上只有一个红点 ——
         // 用户在浏览屏看到红点，却不知道是密码错了、网络断了还是驱动没装，
         // 只能切回去猜。失败原因就在手边的 [ConnectionStatus.message] 里，
@@ -1596,18 +1786,15 @@ private fun PreviewTabArea(
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             val current = state.tabs.getOrNull(state.selectedTabIndex)
             if (current != null) {
+                // 单元格编辑这类**瞬时**操作仍用组合作用域 —— 它们随 pane 离开而被取消是对的。
+                // 导出不用它：导出动辄几十秒，必须活过 pane 切换（见 [DatabaseBrowserState.startExport]）。
                 val scope = rememberCoroutineScope()
                 // 导出对话框：挂在 `PreviewTabArea` 这一层而不是 `DataTable` 的右键菜单里 ——
                 // 引擎的导出是**子进程**跑一段 SQL，右键菜单塞不下一整套格式/路径/文件名
                 var exportSql by remember { mutableStateOf<String?>(null) }
-                // 导出进行中。`visible` 与 `running` 分开：用户点「后台运行」只是把窗口
-                // 藏起来，导出**仍在跑**，所以状态不能随着弹窗一起被清掉。
-                var exportJob by remember {
-                    mutableStateOf<DatabaseBrowserState.ExportProgress?>(null)
-                }
-                var exportTarget by remember {
-                    mutableStateOf<Pair<String, String>?>(null)
-                }
+                // 进度弹窗跟踪的是**状态机里的任务**（见 [DatabaseBrowserState.startExport]），
+                // 不是本地的 job 变量：任务活过 pane 切换，composable 的 remember 活不过。
+                var trackedTaskId by remember { mutableStateOf<String?>(null) }
                 if (exportSql != null) {
                     ExportDialog(
                         state = state,
@@ -1617,32 +1804,30 @@ private fun PreviewTabArea(
                         onDismiss = { exportSql = null },
                         onConfirm = { fmt, sql, dir, name, tbl ->
                             exportSql = null
-                            exportTarget = name to dir
-                            exportJob = DatabaseBrowserState.ExportProgress(0, false)
-                            scope.launch {
+                            trackedTaskId = state.startExport(sql, fmt, dir, name, tbl) { result ->
                                 // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
                                 // 后者会把表格换成「读取失败」面板，导出成功不该长那样
-                                state.exportQuery(sql, fmt, dir, name, tbl) { p ->
-                                    // 每帧都写状态：进度条与行数一起动，
-                                    // 这正是「它在工作」这件事唯一可信的证据
-                                    exportJob = p
-                                }
-                                    .onSuccess { current.notice = "已导出 ${it.rowsWritten} 行 → ${it.file}" }
-                                    .onFailure { current.notice = "导出失败：${it.message}" }
-                                exportJob = null
+                                val notice = result.fold(
+                                    onSuccess = { "已导出 ${it.rowsWritten} 行 → ${it.file}" },
+                                    onFailure = { "导出失败：${it.message}" },
+                                )
+                                current.notice = notice
                             }
                         },
                     )
                 }
                 // 进度弹窗放在 `PreviewTabContent` **之外** —— 它是模态浮层，
-                // 与下面那块可滚动的表格没有布局关系
-                exportJob?.let { p ->
-                    val (fname, fdir) = exportTarget ?: ("" to "")
+                // 与下面那块可滚动的表格没有布局关系。
+                //
+                // 只跟踪**自己发起的那个**任务：同时有别的导出在跑时，不该把别人的进度
+                // 显示成当前这个标签页的。
+                val tracked = trackedTaskId?.let { id -> state.backgroundTasks.firstOrNull { it.id == id } }
+                if (tracked != null && tracked.isRunning) {
                     ExportProgressDialog(
-                        fileName = fname,
-                        outputDir = fdir,
-                        rowsWritten = p.rowsWritten,
-                        onBackground = { exportJob = null },
+                        fileName = tracked.title,
+                        outputDir = tracked.subtitle,
+                        rowsWritten = tracked.progress ?: 0L,
+                        onBackground = { trackedTaskId = null },
                     )
                 }
                 PreviewTabContent(
@@ -2734,7 +2919,8 @@ private fun SqlWorkbenchPane(
         // ---- 导出（与表预览共用同一个对话框，见 [ExportDialog]）----
         // 待导出的语句列表。null = 没点导出；空列表 = 点了但一条有效语句都没有。
         var exportStatements by remember { mutableStateOf<List<String>?>(null) }
-        var exportJob by remember { mutableStateOf<SqlExportProgress?>(null) }
+        // 本次发起的任务 id —— 进度弹窗只跟踪它们（别人的任务不该显示成我的）
+        var trackedTaskIds by remember { mutableStateOf<List<String>>(emptyList()) }
         exportStatements?.let { statements ->
             // ⚠️ **必须用 `";\n"` 拼，不能用 `"\n"`** ——
             // [com.kxxnzstdsw.engine.SqlScriptSplitter] 是按**分号**切语句的。
@@ -2758,15 +2944,15 @@ private fun SqlWorkbenchPane(
                     val stmts = exportStatementsFor(if (sql.isNotBlank()) sql else joined)
                     exportStatements = null
                     if (stmts.isNotEmpty()) {
-                        exportJob = SqlExportProgress(0, stmts.size)
-                        actionScope.launch {
-                            val results = state.exportQueries(
-                                statements = stmts,
-                                format = fmt,
-                                outputDir = dir,
-                                baseFileName = name,
-                                tableName = tbl,
-                            ) { done, total -> exportJob = SqlExportProgress(done, total) }
+                        // 每条语句一个任务（见 [DatabaseBrowserState.startExportBatch]）——
+                        // 面板要能回答「哪一条失败了」，合成一条就答不了。
+                        trackedTaskIds = state.startExportBatch(
+                            statements = stmts,
+                            format = fmt,
+                            outputDir = dir,
+                            baseFileName = name,
+                            tableName = tbl,
+                        ) { results ->
                             val ok = results.mapNotNull { it.getOrNull() }
                             val failed = results.filter { it.isFailure }
                             sheet?.let { s ->
@@ -2790,18 +2976,28 @@ private fun SqlWorkbenchPane(
                                     }
                                 }
                             }
-                            exportJob = null
                         }
                     }
                 },
             )
         }
-        exportJob?.let { job ->
+        // 进度弹窗跟踪本次发起的全部任务；任一条还在跑就显示。
+        // 「后台运行」只把弹窗收起来 —— 任务在 [DatabaseBrowserState.backgroundTasks] 里继续，
+        // 工具栏的「任务 (N)」入口能看到（见 [BrowserToolBar]）。
+        val trackedTasks = trackedTaskIds.mapNotNull { id ->
+            state.backgroundTasks.firstOrNull { it.id == id }
+        }
+        val anyRunning = trackedTasks.any { it.isRunning }
+        if (anyRunning) {
             ExportProgressDialog(
-                fileName = if (job.total > 1) "第 ${job.done + 1}/${job.total} 条" else "export",
-                outputDir = "",
-                rowsWritten = 0,
-                onBackground = { exportJob = null },
+                fileName = if (trackedTasks.size > 1) {
+                    "${trackedTasks.count { it.isRunning }}/${trackedTasks.size} 条语句"
+                } else {
+                    trackedTasks.firstOrNull()?.title ?: "export"
+                },
+                outputDir = trackedTasks.firstOrNull()?.subtitle.orEmpty(),
+                rowsWritten = trackedTasks.firstOrNull { it.isRunning }?.progress ?: 0L,
+                onBackground = { trackedTaskIds = emptyList() },
             )
         }
         // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
@@ -4366,6 +4562,229 @@ class DatabaseBrowserState(
 
     /** 导出结果 —— 引擎终止帧回的实际文件路径。 */
     data class ExportResult(val file: String, val rowsWritten: Long)
+
+    // --------------------------------------------------------------------
+    // 后台任务
+    // --------------------------------------------------------------------
+
+    /**
+     * 一个**后台任务**的快照。
+     *
+     * ## 为什么需要它，而不是继续用「弹窗 + remember」
+     *
+     * 「后台运行」这个按钮原本只是把进度弹窗藏起来，导出确实还在跑 —— 但：
+     *
+     * 1. 协程挂在 [PreviewTabArea] 的 `rememberCoroutineScope()` 上，
+     *    **一切 pane 那个协程就被取消**。于是「后台运行」其实是骗人的：
+     *    用户切到 SQL 工作台，导出就死了，而界面上什么痕迹都不留。
+     * 2. 进度状态同样是 composable 的 `remember`，切 pane 后连「刚才在导出什么」都没了。
+     *
+     * 修法是两件事：协程改用 [DatabaseBrowserState] 持有的**应用级** scope，
+     * 状态改存进本状态机（per-sheet）。于是任务活过 pane 切换，
+     * 并且在任何 pane 都能从工具栏的「任务」入口看到。
+     *
+     * @property progress 已处理行数；`null` 表示引擎还没推第一帧（此时显示「正在连接引擎…」，
+     *   **不能显示「0 行」** —— 那会被读成「导出失败」，见 [ExportProgress]）。
+     * @property detail 成功时是结果文件路径，失败时是原因；运行中为 `null`。
+     */
+    data class BackgroundTask(
+        val id: String,
+        val kind: Kind,
+        /** 主标题 —— 通常是文件名。 */
+        val title: String,
+        /** 副标题 —— 输出目录 / 格式。 */
+        val subtitle: String,
+        val progress: Long? = null,
+        val status: Status,
+        val detail: String? = null,
+        val startedAt: Long,
+    ) {
+        enum class Kind { EXPORT, IMPORT, GENERATE }
+
+        enum class Status {
+            /** 正在跑（还没收口）。 */
+            RUNNING,
+
+            /** 已成功收口 —— [detail] 是文件路径。 */
+            SUCCEEDED,
+
+            /** 已失败收口 —— [detail] 是原因。 */
+            FAILED,
+        }
+
+        /** 正在跑的任务 —— 工具栏徽标与进度弹窗只看这些。 */
+        val isRunning: Boolean get() = status == Status.RUNNING
+
+        /**
+         * 一行说清它现在怎么样。
+         *
+         * **运行中且还没收到第一帧时说「正在连接引擎…」而不是「0 行」** ——
+         * 「0 行」会被读成「导出失败」，而引擎启动子进程本来就要几秒。
+         */
+        val statusLine: String
+            get() = when (status) {
+                Status.RUNNING -> progress?.let { "正在导出 · 已写出 $it 行" } ?: "正在连接引擎…"
+                Status.SUCCEEDED -> detail?.let { "完成 · $it" } ?: "完成"
+                Status.FAILED -> detail?.let { "失败 · $it" } ?: "失败"
+            }
+    }
+
+    /**
+     * 后台任务列表 —— **最新的在前**。
+     *
+     * 用 [mutableStateListOf] 而不是 `List<...> by mutableStateOf`：
+     * 后者每次更新都要整份替换并重新分配，前端却只改了一个任务的进度字段；
+     * 前者能让 Compose 只重组受影响的行。
+     */
+    val backgroundTasks = mutableStateListOf<DatabaseBrowserState.BackgroundTask>()
+
+    /** 正在跑的任务 —— 工具栏徽标计数 / 进度弹窗的数据源。 */
+    val runningTasks: List<DatabaseBrowserState.BackgroundTask>
+        get() = backgroundTasks.filter { it.isRunning }
+
+    /**
+     * 清掉**已收口**的任务，运行中的留着。
+     *
+     * 只给「已完成」的清理 —— 正在跑的任务行必须留着，否则用户一点清理，
+     * 那个导出就从视野里消失了。
+     */
+    fun clearFinishedTasks() {
+        backgroundTasks.removeAll { !it.isRunning }
+    }
+
+    /**
+     * 启动一次**后台**导出：登记任务 + 在**应用级** scope 上跑。
+     *
+     * ## 为什么不用调用方的 scope
+     *
+     * 调用方（[PreviewTabArea] / [SqlWorkbenchPane]）的 `rememberCoroutineScope()`
+     * 会在该 composable 离开组合时取消所有协程。导出动辄几十秒，
+     * 用户切个 pane 就被杀掉 —— ��而「后台运行」这个按钮恰恰在暗示它能活着跑完。
+     *
+     * @param onComplete 在**引擎协程**里回调（非主线程）；主要用于把结果写到 tab / sheet 的提示行。
+     * @return 任务 id，供调用方后续对账。
+     */
+    fun startExport(
+        sql: String,
+        format: ExportFormat,
+        outputDir: String,
+        fileName: String,
+        tableName: String = "",
+        onComplete: (Result<ExportResult>) -> Unit = {},
+    ): String {
+        val taskId = "task-" + java.util.UUID.randomUUID()
+        backgroundTasks.add(
+            0,
+            DatabaseBrowserState.BackgroundTask(
+                id = taskId,
+                kind = DatabaseBrowserState.BackgroundTask.Kind.EXPORT,
+                title = fileName,
+                subtitle = "$outputDir · ${format.label}",
+                status = DatabaseBrowserState.BackgroundTask.Status.RUNNING,
+                startedAt = System.currentTimeMillis(),
+            ),
+        )
+        scope.launch {
+            exportQuery(sql, format, outputDir, fileName, tableName) { p ->
+                updateTask(taskId) { it.copy(progress = p.rowsWritten) }
+            }
+                .onSuccess { r ->
+                    updateTask(taskId) {
+                        it.copy(
+                            progress = r.rowsWritten,
+                            status = DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED,
+                            detail = r.file,
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    updateTask(taskId) {
+                        it.copy(
+                            status = DatabaseBrowserState.BackgroundTask.Status.FAILED,
+                            detail = e.message ?: "导出失败",
+                        )
+                    }
+                }
+                .also { onComplete(it) }
+        }
+        return taskId
+    }
+
+    /** 按 id 更新任务（不存在则忽略 —— 任务可能已被「清除」）。 */
+    private fun updateTask(taskId: String, transform: (DatabaseBrowserState.BackgroundTask) -> DatabaseBrowserState.BackgroundTask) {
+        val idx = backgroundTasks.indexOfFirst { it.id == taskId }
+        if (idx >= 0) backgroundTasks[idx] = transform(backgroundTasks[idx])
+    }
+
+    /**
+     * 顺序导出多条 SQL —— **每条一个任务**，串行跑。
+     *
+     * ## 为什么是「N 个任务」而不是「1 个任务」
+     *
+     * 面板存在的意义就是回答「刚才那批导出怎么样了」。N 条合成一条时，
+     * 用户只能看到「成功了」或「失败了」，看不出**哪一条**失败 ——
+     * 而多语句导出里单条失败恰恰是最常见的形态（一条 SQL 引用了不存在的列）。
+     *
+     * ## 为什么**串行**而不是每条各起一个协程
+     *
+     * 每个协程都会驱动一次引擎导出，大表并发会把数据库压垮，而且并发度不可控。
+     * 串行的代价只是「慢一点」，换来的是「行为可预期」。
+     *
+     * @return 任务 id 列表（顺序与 [statements] 一致）。
+     */
+    fun startExportBatch(
+        statements: List<String>,
+        format: ExportFormat,
+        outputDir: String,
+        baseFileName: String,
+        tableName: String = "",
+        onComplete: (List<Result<ExportResult>>) -> Unit = {},
+    ): List<String> {
+        if (statements.isEmpty()) return emptyList()
+        val taskIds = statements.mapIndexed { index, _ ->
+            newExportTask(numberedFileName(baseFileName, index, statements.size), format, outputDir)
+        }
+        scope.launch {
+            val results = statements.mapIndexed { index, sql ->
+                exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName) { p ->
+                    updateTask(taskIds[index]) { it.copy(progress = p.rowsWritten) }
+                }.also { result ->
+                    updateTask(taskIds[index]) {
+                        it.copy(
+                            progress = result.getOrNull()?.rowsWritten ?: it.progress,
+                            status = if (result.isSuccess) {
+                                DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED
+                            } else {
+                                DatabaseBrowserState.BackgroundTask.Status.FAILED
+                            },
+                            detail = result.getOrNull()?.file
+                                ?: result.exceptionOrNull()?.message
+                                ?: "导出失败",
+                        )
+                    }
+                }
+            }
+            onComplete(results)
+        }
+        return taskIds
+    }
+
+    /** 登记一个运行中的导出任务，返回它的 id。 */
+    private fun newExportTask(fileName: String, format: ExportFormat, outputDir: String): String {
+        val id = "task-" + java.util.UUID.randomUUID()
+        backgroundTasks.add(
+            0,
+            DatabaseBrowserState.BackgroundTask(
+                id = id,
+                kind = DatabaseBrowserState.BackgroundTask.Kind.EXPORT,
+                title = fileName,
+                subtitle = "$outputDir · ${format.label}",
+                status = DatabaseBrowserState.BackgroundTask.Status.RUNNING,
+                startedAt = System.currentTimeMillis(),
+            ),
+        )
+        return id
+    }
 
     /**
      * 导出进度的一帧 —— 引擎每导出一批就推一次。
