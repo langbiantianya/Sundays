@@ -386,6 +386,30 @@ const val TABLE_BODY_TAG = "sundays.tableBody"
  */
 const val TABLE_PAGINATION_TAG = "sundays.tablePagination"
 
+// ============================================================================
+// 分页控件的 tag —— 键盘可达性
+//
+// 分页栏上一共 7 个可交互控件（每页选择器 + 4 个翻页按钮 + 菜单项），
+// 而「首页 / 末页 / 共 N 条」在窄容器下会**消失**（见 PAGINATION_COMPACT_WIDTH）。
+// 于是同一个「每页 20 / 下一页」在不同窗口宽度下对应不同的 Tab 序 ——
+// 真窗口走查只能靠 tag 定位，没有第二条路。
+// ============================================================================
+
+/** 「每页 N」选择器。 */
+const val TABLE_PAGE_SIZE_CHIP_TAG = "sundays.pageSizeChip"
+
+/** 「每页」下拉里的单项 —— 前缀 + `PageSize.name`。 */
+const val TABLE_PAGE_SIZE_ITEM_TAG = "sundays.pageSizeItem_"
+
+/** 翻页按钮。 */
+const val TABLE_NAV_FIRST_TAG = "sundays.navFirst"
+const val TABLE_NAV_PREV_TAG = "sundays.navPrev"
+const val TABLE_NAV_NEXT_TAG = "sundays.navNext"
+const val TABLE_NAV_LAST_TAG = "sundays.navLast"
+
+/** 「当前页 / 总页数」读数。 */
+const val TABLE_PAGE_INDICATOR_TAG = "sundays.pageIndicator"
+
 /**
  * 单元格 testTag 的前缀 —— 完整 tag 为 `"$TABLE_CELL_TAG_PREFIX<列 key>"`。
  *
@@ -874,6 +898,7 @@ private fun TablePagination(
                     AssistChip(
                         onClick = { pageSizeExpanded = true },
                         label = { Text(pageSize.label, maxLines = 1, softWrap = false) },
+                        modifier = Modifier.testTag(TABLE_PAGE_SIZE_CHIP_TAG),
                     )
                     DropdownMenu(
                         expanded = pageSizeExpanded,
@@ -881,6 +906,8 @@ private fun TablePagination(
                     ) {
                         pageSizeOptions.forEach { size ->
                             WinMenuItem(
+                                // 菜单项不获取焦点，只能靠 tag 定位
+                                modifier = Modifier.testTag(TABLE_PAGE_SIZE_ITEM_TAG + size.name),
                                 text = { Text(size.label) },
                                 onClick = {
                                     onPageSizeChange(size)
@@ -904,10 +931,14 @@ private fun TablePagination(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!compact) {
-                    NavButton("首页", enabled = currentPage > 1) { onPageChange(1) }
+                    NavButton("首页", enabled = currentPage > 1, tag = TABLE_NAV_FIRST_TAG) {
+                        onPageChange(1)
+                    }
                     Spacer(modifier = Modifier.width(4.dp))
                 }
-                NavButton("上一页", enabled = currentPage > 1) { onPageChange(currentPage - 1) }
+                NavButton("上一页", enabled = currentPage > 1, tag = TABLE_NAV_PREV_TAG) {
+                    onPageChange(currentPage - 1)
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "$currentPage / $totalPages",
@@ -915,12 +946,17 @@ private fun TablePagination(
                     color = theme.headerText.color,
                     maxLines = 1,
                     softWrap = false,
+                    modifier = Modifier.testTag(TABLE_PAGE_INDICATOR_TAG),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                NavButton("下一页", enabled = currentPage < totalPages) { onPageChange(currentPage + 1) }
+                NavButton("下一页", enabled = currentPage < totalPages, tag = TABLE_NAV_NEXT_TAG) {
+                    onPageChange(currentPage + 1)
+                }
                 if (!compact) {
                     Spacer(modifier = Modifier.width(4.dp))
-                    NavButton("末页", enabled = currentPage < totalPages) { onPageChange(totalPages) }
+                    NavButton("末页", enabled = currentPage < totalPages, tag = TABLE_NAV_LAST_TAG) {
+                        onPageChange(totalPages)
+                    }
                 }
             }
         }
@@ -953,11 +989,12 @@ private fun TablePagination(
  * 不是缺陷修复，等它真的成为问题再说。
  */
 @Composable
-private fun NavButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun NavButton(label: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     WinButton(
         onClick = onClick,
         enabled = enabled,
         shape = SundaysPalette.buttonShape,
+        modifier = Modifier.testTag(tag),
     ) {
         Text(text = label, maxLines = 1, softWrap = false)
     }

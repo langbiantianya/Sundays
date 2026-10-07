@@ -151,6 +151,7 @@ import com.kxxnzstdsw.sundays.table.TableRow
 import com.kxxnzstdsw.sundays.ui.DragHandle
 import com.kxxnzstdsw.sundays.ui.SettingsEntryButton
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
+import com.kxxnzstdsw.sundays.ui.focusRing
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
@@ -429,6 +430,46 @@ internal const val SQL_TRANSACTION_BTN_TAG = "sqlTransactionBtn"
 /** 分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
 internal const val SCHEMA_DRAG_HANDLE_TAG = "schemaDragHandle"
 
+// ============================================================================
+// 键盘可达性：testTag 与可见焦点环
+//
+// 真窗口 GUI 走查卡死在这两件事上（见 TEST_CASES.md §9.9）：
+//   - 定位一个控件只能靠「按 N 次 Tab + 截图猜」，而**大量控件不画焦点指示**，
+//     猜错一次就可能误触别的功能（实测误开过「添加数据库连接」弹窗）；
+//   - **disabled 的按钮不在 Tab 序里**，于是「再一格就是它」这种推断直接失效。
+//
+// 所以下面这一组 tag 不是「给测试方便」的小事，而是**键盘可自动化的前提**。
+// ============================================================================
+
+/** 左侧「＋添加连接」按钮。 */
+internal const val SHEET_ADD_BTN_TAG = "sheetAddBtn"
+
+/** 工作台切换按钮（SQL / 造数）。 */
+internal const val PANE_TOGGLE_SQL_TAG = "paneToggleSql"
+internal const val PANE_TOGGLE_GENERATE_TAG = "paneToggleGenerate"
+
+/** 表预览工具条「清除」—— 只在有条件时出现，没有 tag 就只能靠猜它是不是在。 */
+internal const val TABLE_CLEAR_BTN_TAG = "tableClearBtn"
+
+/** sheet 标签与其关闭按钮 —— 名字会重复（同名连接可开多个 sheet），所以按 id 定位。 */
+internal fun sheetTabTag(connectionId: String) = "sheetTab_$connectionId"
+internal fun sheetTabCloseTag(connectionId: String) = "sheetTabClose_$connectionId"
+
+/** 工作台切换按钮按 pane 定位。 */
+internal fun paneToggleTag(pane: BrowserPane): String = when (pane) {
+    BrowserPane.TABLE -> "paneToggleTable"
+    BrowserPane.SQL -> PANE_TOGGLE_SQL_TAG
+    BrowserPane.GENERATE -> PANE_TOGGLE_GENERATE_TAG
+}
+
+/** 库节点 / 表叶子 / 表的「索引·外键」展开箭头。 */
+internal fun schemaDbNodeTag(database: String) = "schemaDb_$database"
+internal fun schemaTableLeafTag(table: String) = "schemaTable_$table"
+internal fun schemaTableObjectsTag(table: String) = "schemaTableObjects_$table"
+
+/** 排序预设菜单项按序号定位（菜单项不获取焦点，没有别的办法）。 */
+internal fun tableOrderMenuItemTag(index: Int) = "tableOrderItem_$index"
+
 /**
  * SQL 结果集在内存里最多攒多少行 —— 超出即停止累积并标 `rowsTruncated`。
  *
@@ -474,7 +515,9 @@ private fun SheetTabRow(
         // 点击后由调用方弹出 AddConnectionDialog。
         WinIconButton(
             onClick = onAdd,
-            modifier = Modifier.padding(horizontal = 4.dp),
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .testTag(SHEET_ADD_BTN_TAG),
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
@@ -499,6 +542,7 @@ private fun SheetTabRow(
                 Tab(
                     selected = active,
                     onClick = { onSelect(sheet.connection.id) },
+                    modifier = Modifier.testTag(sheetTabTag(sheet.connection.id)),
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             ConnectionStatusDot(sheet.status.state, 10.dp)
@@ -510,6 +554,7 @@ private fun SheetTabRow(
                                 contentDescription = "关闭 sheet",
                                 modifier = Modifier
                                     .size(16.dp)
+                                    .testTag(sheetTabCloseTag(sheet.connection.id))
                                     .clickable { onClose(sheet.connection.id) },
                             )
                         }
@@ -972,6 +1017,7 @@ private fun PaneToggleButton(
         shape = SundaysPalette.buttonShape,
         // 复古两套下由 WinButton 把斜面翻转为凹陷；现代主题仍用 primary 填充表达激活态
         selected = isActive,
+        modifier = Modifier.testTag(paneToggleTag(pane)),
         colors = if (isActive) {
             ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -1244,7 +1290,9 @@ private fun DatabaseNode(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRing()
                 .clickable { state.toggleDatabase(name) }
+                .testTag(schemaDbNodeTag(name))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1405,11 +1453,13 @@ private fun TableLeaf(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRing()
                 .clickable(
                     onClickLabel = "打开表 $tableName",
                     role = Role.Button,
                     onClick = onOpen,
                 )
+                .testTag(schemaTableLeafTag(tableName))
                 .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1422,6 +1472,7 @@ private fun TableLeaf(
                     contentDescription = if (expanded) "收起 $tableName 的索引与外键" else "展开 $tableName 的索引与外键",
                     modifier = Modifier
                         .size(16.dp)
+                        .testTag(schemaTableObjectsTag(tableName))
                         .clickable { onToggleObjects() },
                 )
                 Spacer(Modifier.width(2.dp))
@@ -1676,6 +1727,7 @@ private fun TableFilterBar(
             onClick = { onSearchChange(searchDraft) },
             enabled = !tab.loading && searchDraft != tab.searchTerm,
             shape = SundaysPalette.buttonShape,
+            modifier = Modifier.testTag(TABLE_SEARCH_BTN_TAG),
         ) { Text("搜索") }
         Spacer(Modifier.width(8.dp))
         // 「清除」只在有条件时出现：没有条件时摆一个按不动的按钮是噪音
@@ -1689,6 +1741,7 @@ private fun TableFilterBar(
                     onSearchChange("")
                 },
                 shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(TABLE_CLEAR_BTN_TAG),
             ) { Text("清除") }
             Spacer(Modifier.width(8.dp))
         }
@@ -1707,8 +1760,11 @@ private fun TableFilterBar(
                 )
             }
             DropdownMenu(expanded = orderOpen, onDismissRequest = { orderOpen = false }) {
-                ORDER_PRESETS.forEach { (label, clause) ->
+                ORDER_PRESETS.forEachIndexed { index, (label, clause) ->
                     WinMenuItem(
+                        // ⚠️ 菜单项**必须**逐项带 tag：下拉菜单打开后没有任何一项会获得焦点，
+                        // 键盘用户（以及真窗口走查）只能靠 tag 定位，别的办法都没有。
+                        modifier = Modifier.testTag(tableOrderMenuItemTag(index)),
                         text = { Text(if (clause.isEmpty()) label else "$label（$clause）") },
                         onClick = {
                             orderOpen = false

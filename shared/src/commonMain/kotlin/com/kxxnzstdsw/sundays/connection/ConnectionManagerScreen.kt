@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import com.kxxnzstdsw.sundays.ui.focusRing
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -205,6 +207,13 @@ fun ConnectionManagerScreen(
             onEditConnection = onEditConnection,
             onDeleteConnection = requestDelete,
             modifier = Modifier
+                // ⚠️ 这里**曾经**试过改成 `fillMaxWidth()`：本意是「右栏是从属区域，
+                // 应当占满剩余宽度」，想顺带治 §9.4 的按钮溢出。**实测毫无变化** ——
+                // 步骤条宽度与改之前逐像素一致（各 383px、总宽 1550px），说明右栏
+                // 本来就是满宽的，溢出来自更里面。所以改动被回退了：
+                // 留一个验证不了的「修复」只会让人以为问题解决了。
+                //
+                // §9.4 的真因仍未隔离，已知事实见 TEST_CASES.md §9.4。
                 .widthIn(min = 350.dp)
                 .fillMaxHeight(),
         )
@@ -419,10 +428,15 @@ private fun ConnectionListItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    // ⚠️ [focusRing] 不是装饰：这张卡片是**列表项的主要交互目标**（点它=选中），
+    // 而 `Modifier.clickable` 在非触摸模式下会加入 Tab 序却不画任何焦点指示 ——
+    // 键盘用户 Tab 得到这里时，界面和没聚焦时一模一样。
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .focusRing()
+            .clickable(onClick = onClick)
+            .testTag(connectionCardTag(connection.id)),
         shape = winShape(8.dp),
         contentColor = selectionContentColor(isSelected),
         color = selectionContainerColor(isSelected),
@@ -953,7 +967,9 @@ private fun QuickConnectCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .focusRing()
+            .clickable(onClick = onClick)
+            .testTag(quickConnectCardTag(title)),
         shape = winShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1076,10 +1092,14 @@ private fun SelectableOptionRow(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    // [focusRing] 必需：这行是向导里「选方言 / 选连接类型」的唯一点击目标，
+    // 而 `clickable` 在非触摸模式下会进 Tab 序却不画焦点指示。
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .focusRing()
+            .clickable(onClick = onClick)
+            .testTag(selectableOptionTag(title)),
         shape = winShape(8.dp),
         contentColor = selectionContentColor(isSelected),
         color = selectionContainerColor(isSelected),
@@ -1640,3 +1660,22 @@ private fun StepLayout(
         content()
     }
 }
+
+// ============================================================================
+// 键盘可达性：testTag
+//
+// 真窗口 GUI 走查卡死在这里（见 TEST_CASES.md §9.9）：列表项与向导卡片都用
+// `Modifier.clickable` —— 它在非触摸模式下**会**加入 Tab 序，却**不画任何焦点指示**，
+// 于是「Tab 了几次、焦点在哪」只能靠截图猜，猜错就误触别的功能。
+//
+// 下面这三个 tag 让「点某个具体控件」不再依赖焦点计数。
+// ============================================================================
+
+/** 连接列表项（点它 = 选中）。 */
+fun connectionCardTag(connectionId: String) = "connectionCard_$connectionId"
+
+/** 快速连接步的方言卡（MySQL / PostgreSQL / H2 / DuckDB / SQLite）。 */
+fun quickConnectCardTag(title: String) = "quickConnectCard_$title"
+
+/** 向导里的单选项（方言 / 连接类型）。 */
+fun selectableOptionTag(title: String) = "selectableOption_$title"
