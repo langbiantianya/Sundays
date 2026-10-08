@@ -1262,19 +1262,14 @@ private fun CredentialsStep(
         onUpdateEditingConnection(next.copy(jdbcUrl = buildJdbcUrl(next, query)))
     }
 
-    /** JDBC URL 输入框 → 字段：解析出的 host / port / database / 凭据回写，URL 保持用户输入原样 */
+    /**
+     * JDBC URL 输入框 → 字段：地址字段按 URL 回写，URL 经 [withParsedJdbcUrl] 归一化。
+     *
+     * 凭据的处置规则（URL 没写 userinfo 时不许清空已填的凭据）见 [withParsedJdbcUrl] ——
+     * 那条判据住在可测的纯函数里，不埋在这个 Composable 里。
+     */
     fun applyUrl(url: String) {
-        val parts = parseJdbcUrl(url, editingConnection.dialect)
-        onUpdateEditingConnection(
-            editingConnection.copy(
-                jdbcUrl = url,
-                host = parts.host,
-                port = parts.port.toIntOrNull(),
-                database = parts.database,
-                username = parts.username,
-                password = parts.password,
-            )
-        )
+        onUpdateEditingConnection(editingConnection.withParsedJdbcUrl(url))
     }
 
     StepLayout(

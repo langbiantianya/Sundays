@@ -52,6 +52,26 @@ class JdbcUrlTest {
     }
 
     @Test
+    fun `postgresql url carries no userinfo even when credentials are set`() {
+        val url = buildJdbcUrl(
+            config(
+                dialect = DialectType.POSTGRESQL,
+                host = "localhost",
+                port = 5432,
+                database = "app",
+                username = "postgres",
+                password = "666666",
+            )
+        )
+
+        // PG 驱动不认 URL 的 userinfo 段：实测 parseURL 会把 `postgres:666666@192.168.1.5`
+        // 整段当成主机名（PGHOST），凭据一个都不认，最终 UnknownHostException。
+        // 凭据走 config.username / config.password 独立传给连接池，不进 URL。
+        assertEquals("jdbc:postgresql://localhost:5432/app", url)
+        assertFalse(url.contains("@"), "PG URL 不得含 userinfo：$url")
+    }
+
+    @Test
     fun `postgresql url has no query parameters`() {
         val url = buildJdbcUrl(
             config(dialect = DialectType.POSTGRESQL, host = "localhost", port = 5432, database = "app")
@@ -138,7 +158,82 @@ class JdbcUrlTest {
     }
 
     @Test
+    fun `editing the url box does not wipe credentials the url never mentioned`() {
+        // PG 连接：用户填好了地址 + 凭据，URL 里本来就没有凭据
+        val filled = config(
+            dialect = DialectType.POSTGRESQL,
+            host = "192.168.1.5",
+            port = 5432,
+            database = "postgres",
+            username = "postgres",
+            password = "666666",
+        )
+
+        // 用户只在 URL 末尾补了个参数 —— 这是最平常的一次编辑
+        val edited = filled.withParsedJdbcUrl("jdbc:postgresql://192.168.1.5:5432/postgres?sslmode=require")
+
+        // 地址字段按 URL 走
+        assertEquals("192.168.1.5", edited.host)
+        assertEquals("postgres", edited.database)
+        // 凭据必须原封不动 —— 被清空的话用户要到「认证失败」时才发现，URL 看着却完全正常
+        assertEquals("postgres", edited.username, "URL 没写凭据不等于用户要清空凭据")
+        assertEquals("666666", edited.password)
+    }
+
+    @Test
+    fun `editing the url box does take credentials when the url states them`() {
+        val filled = config(dialect = DialectType.MYSQL, host = "localhost", port = 3306, database = "shop")
+
+        // MySQL 的 userinfo 是驱动认的形状，URL 写了就应当采纳
+        val edited = filled.withParsedJdbcUrl("jdbc:mysql://root:s3cret@localhost:3306/shop")
+
+        assertEquals("root", edited.username)
+        assertEquals("s3cret", edited.password)
+        assertEquals("localhost", edited.host)
+    }
+
+    @Test
+    fun `pasting a mysql shaped postgresql url is normalized and keeps the credentials`() {
+        val filled = config(dialect = DialectType.POSTGRESQL, host = "x", port = 5432, database = "y")
+
+        // 用户凭印象粘了个带 userinfo 的 PG URL —— 正是连不上的那种形状
+        val edited = filled.withParsedJdbcUrl("jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres")
+
+        // 就地归一化，不把连不上的 URL 原样留着
+        assertEquals("jdbc:postgresql://192.168.1.5:5432/postgres", edited.jdbcUrl)
+        // 凭据没白丢：userinfo 里的值被收进字段
+        assertEquals("postgres", edited.username)
+        assertEquals("666666", edited.password)
+    }
+
+    @Test
     fun `client server round trips every field through url and back`() {
+        // MySQL：凭据本就在 URL 的 userinfo 段里，往返无损
+        val original = config(
+            dialect = DialectType.MYSQL,
+            host = "db.internal",
+            port = 3306,
+            database = "app",
+            username = "admin",
+            password = "pw",
+        )
+
+        val parts = parseJdbcUrl(buildJdbcUrl(original), DialectType.MYSQL)
+
+        assertEquals("db.internal", parts.host)
+        assertEquals("3306", parts.port)
+        assertEquals("app", parts.database)
+        assertEquals("admin", parts.username)
+        assertEquals("pw", parts.password)
+        assertEquals(ConnectionType.CLIENT_SERVER, parts.connectionType)
+        assertTrue(parts.hasUserInfo)
+    }
+
+    @Test
+    fun `postgresql round trip keeps address fields but reports absent userinfo`() {
+        // PG 的 URL 不承载凭据（见 buildJdbcUrl），所以地址字段照常往返、
+        // 凭据则「本就不在 URL 里」—— hasUserInfo 必须如实报告 false，
+        // 否则调用方会拿空的 username 去覆盖用户填好的凭据。
         val original = config(
             dialect = DialectType.POSTGRESQL,
             host = "db.internal",
@@ -153,9 +248,53 @@ class JdbcUrlTest {
         assertEquals("db.internal", parts.host)
         assertEquals("5433", parts.port)
         assertEquals("app", parts.database)
-        assertEquals("admin", parts.username)
-        assertEquals("pw", parts.password)
         assertEquals(ConnectionType.CLIENT_SERVER, parts.connectionType)
+        assertFalse(parts.hasUserInfo, "PG URL 不带 userinfo")
+        assertEquals("", parts.username)
+        assertEquals("", parts.password)
+    }
+
+    @Test
+    fun `hasUserInfo distinguishes absent userinfo from an empty one`() {
+        // 没有 `@` → 根本没这段
+        assertFalse(parseJdbcUrl("jdbc:mysql://localhost:3306/shop", DialectType.MYSQL).hasUserInfo)
+        // 有 `user@` 但没密码 → 段存在，只是后半截为空
+        val userOnly = parseJdbcUrl("jdbc:mysql://root@localhost:3306/shop", DialectType.MYSQL)
+        assertTrue(userOnly.hasUserInfo)
+        assertEquals("root", userOnly.username)
+        assertEquals("", userOnly.password)
+    }
+
+    @Test
+    fun `normalize strips legacy postgresql userinfo but leaves everything else alone`() {
+        // 缺陷期间向导存下的形状：驱动不认，必须收拾掉
+        assertEquals(
+            "jdbc:postgresql://192.168.1.5:5432/postgres",
+            normalizeJdbcUrl("jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres", DialectType.POSTGRESQL),
+        )
+        // 只动 userinfo：host:port、库名、参数逐字保留（参数可能是 sslmode / currentSchema）
+        assertEquals(
+            "jdbc:postgresql://h:5432/db?sslmode=require&currentSchema=public",
+            normalizeJdbcUrl(
+                "jdbc:postgresql://u:p@h:5432/db?sslmode=require&currentSchema=public",
+                DialectType.POSTGRESQL,
+            ),
+        )
+        // 没有 userinfo → 幂等
+        assertEquals(
+            "jdbc:postgresql://h:5432/db",
+            normalizeJdbcUrl("jdbc:postgresql://h:5432/db", DialectType.POSTGRESQL),
+        )
+        // MySQL 的 userinfo 驱动认，原样保留（这是归一化，不是清洗）
+        assertEquals(
+            "jdbc:mysql://root:pw@h:3306/db",
+            normalizeJdbcUrl("jdbc:mysql://root:pw@h:3306/db", DialectType.MYSQL),
+        )
+        // 非本方言的 URL 绝不能碰
+        assertEquals(
+            "jdbc:postgresql://h:5432/db",
+            normalizeJdbcUrl("jdbc:postgresql://h:5432/db", DialectType.MYSQL),
+        )
     }
 
     @Test
@@ -238,15 +377,15 @@ class JdbcUrlTest {
         assertEquals("", h2.jdbcUrl)
 
         val pg = mysql.withDialect(DialectType.POSTGRESQL)
+        assertEquals(DialectType.POSTGRESQL, pg.dialect)
         assertEquals("localhost", pg.host)
         assertEquals(5432, pg.port)
         assertEquals("shop", pg.database)
         assertEquals("root", pg.username, "用户名跨方言保留")
         assertEquals("", pg.password, "切换方言清空密码")
-        assertTrue(
-            pg.jdbcUrl.startsWith("jdbc:postgresql://root@localhost:5432/shop"),
-            "url=${pg.jdbcUrl}",
-        )
+        // 从 MySQL 切到 PG 后凭据**仍在配置里**（PG 连接靠它们认证），
+        // 只是不再被折算进 URL —— 这是切方言后 PG 能连上的前提。
+        assertEquals("jdbc:postgresql://localhost:5432/shop", pg.jdbcUrl)
     }
 
     @Test

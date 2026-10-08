@@ -136,4 +136,74 @@ class ConnectionStorageTest {
     fun `missing file loads as empty list`() {
         assertTrue(ConnectionStorage.load().connections.isEmpty())
     }
+
+    /**
+     * 老配置里的 PG URL 带 userinfo —— 那正是「PG 连不上」的原因，加载时必须归一化。
+     *
+     * 这个用例盯的是**归一化不许偷走凭据**：URL 里的 `user:pass@` 被摘掉之后，
+     * 用户名密码只能从 `PersistedConnectionConfig` 的独立字段来。少一个字段，
+     * 用户的 PG 连接就会从「连不上」变成「连上但认证失败」—— 换了个错法而已。
+     */
+    @Test
+    fun `legacy postgresql url is normalized on load without losing credentials`() {
+        val legacy = """
+            {
+              "connections": [
+                {
+                  "id": "pg1",
+                  "name": "旧 PG",
+                  "dialect": "POSTGRESQL",
+                  "jdbcUrl": "jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres",
+                  "username": "postgres",
+                  "password": "666666",
+                  "createdAt": 1,
+                  "updatedAt": 2
+                }
+              ],
+              "version": 2
+            }
+        """.trimIndent()
+        val file = configFile()
+        Files.createDirectories(file.parent)
+        Files.writeString(file, legacy)
+
+        val loaded = ConnectionStorage.load().connections.single()
+
+        // 坏掉的 userinfo 段被摘掉 —— 这串 URL 直接交给驱动必然 UnknownHostException
+        assertEquals("jdbc:postgresql://192.168.1.5:5432/postgres", loaded.jdbcUrl)
+        // 凭据毫发无损：PG 连接靠它们认证
+        assertEquals("postgres", loaded.username)
+        assertEquals("666666", loaded.password)
+        // 地址字段仍从 URL 重建得出
+        assertEquals("192.168.1.5", loaded.host)
+        assertEquals(5432, loaded.port)
+        assertEquals("postgres", loaded.database)
+
+        // 归一化只发生在内存里，不主动改写用户的磁盘文件
+        assertTrue(Files.readString(file).contains("jdbc:postgresql://postgres:666666@"))
+    }
+
+    /** 新建 PG 连接时 URL 就不带 userinfo —— 落盘形状与内存一致。 */
+    @Test
+    fun `newly saved postgresql connection stores a credential free url`() {
+        val pg = ConnectionConfig(
+            id = "pg2",
+            name = "新 PG",
+            dialect = DialectType.POSTGRESQL,
+            connectionType = ConnectionType.CLIENT_SERVER,
+            host = "192.168.1.5",
+            port = 5432,
+            database = "postgres",
+            username = "postgres",
+            password = "666666",
+        ).withUrl()
+
+        assertEquals("jdbc:postgresql://192.168.1.5:5432/postgres", pg.jdbcUrl)
+
+        ConnectionStorage.save(ConnectionList(connections = listOf(pg)))
+        val loaded = ConnectionStorage.load().connections.single()
+        assertEquals("jdbc:postgresql://192.168.1.5:5432/postgres", loaded.jdbcUrl)
+        assertEquals("postgres", loaded.username)
+        assertEquals("666666", loaded.password)
+    }
 }

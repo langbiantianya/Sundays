@@ -1,8 +1,16 @@
 param(
     [Parameter(Mandatory = $true)][int]$TargetProcessId,
-    [Parameter(Mandatory = $true)][int]$X,      # 窗口内相对坐标（物理像素，左上角为 0,0）
-    [Parameter(Mandatory = $true)][int]$Y,
+    [int]$X = -1,          # 窗口内相对坐标（物理像素，左上角为 0,0）
+    [int]$Y = -1,
     [int]$Clicks = 1,
+    # 滚轮档数（**正数向下**）。向导内容列比窗口高，底部「下一步 / 保存」在折叠线以下，
+    # 缩窗口没用（内容不重排），只能滚。
+    #
+    # ⚠️ Windows WHEEL_DELTA 的方向与直觉相反：**正数向上滚，负数向下滚**。
+    # 早期版本这里直接传 `Scroll * 120`，于是「向下滚」其实在往上滚 ——
+    # 而内容本来就在顶部，看起来就像「滚不动」，误判成 verticalScroll 失效。
+    # （真机复盘见 TEST_CASES.md §9.25。）
+    [int]$Scroll = 0,
     [string]$OutDir = "C:\Users\lbty\project\Sundays\build\tmp\shots",
     [string]$Name = "click"
 )
@@ -57,11 +65,24 @@ if (-not $ok) { Write-Warning "没能把窗口 $TargetProcessId 置前（Windows
 
 $absX = $r.Left + $X
 $absY = $r.Top + $Y
+
+# 滚轮模式下也把光标放到内容区里，否则 Windows 可能把滚轮发给光标下别的窗口
 [void][CS]::SetCursorPos($absX, $absY)
 Start-Sleep -Milliseconds 350
-for ($i = 0; $i -lt $Clicks; $i++) {
-    [CS]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
-    [CS]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+
+if ($Scroll -ne 0) {
+    # MOUSEEVENTF_WHEEL(0x0800)，一格 = 120；向下滚要传**负值**（正数是向上）
+    $notches = [Math]::Abs($Scroll)
+    $delta = if ($Scroll -gt 0) { -120 } else { 120 }
+    for ($i = 0; $i -lt $notches; $i++) {
+        [CS]::mouse_event(0x0800, 0, 0, $delta, [IntPtr]::Zero)
+        Start-Sleep -Milliseconds 150
+    }
+} else {
+    for ($i = 0; $i -lt $Clicks; $i++) {
+        [CS]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
+        [CS]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+    }
 }
 Start-Sleep -Milliseconds 900
 
@@ -74,4 +95,8 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Forc
 $path = Join-Path $OutDir "$Name.png"
 $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
-"点击 ($X,$Y) x$Clicks → 屏幕 ($absX,$absY)，置前=$ok，截图：$path"
+if ($Scroll -ne 0) {
+    "滚动 ($X,$Y) x$Scroll → 屏幕 ($absX,$absY)，置前=$ok，截图：$path"
+} else {
+    "点击 ($X,$Y) x$Clicks → 屏幕 ($absX,$absY)，置前=$ok，截图：$path"
+}

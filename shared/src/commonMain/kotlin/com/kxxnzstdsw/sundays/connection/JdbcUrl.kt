@@ -15,7 +15,7 @@ package com.kxxnzstdsw.sundays.connection
  * | 方言 | URL 形状 |
  * |---|---|
  * | MySQL | `jdbc:mysql://[user[:pass]@]host[:port][/db][?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC]` |
- * | PostgreSQL | `jdbc:postgresql://[user[:pass]@]host[:port][/db]` |
+ * | PostgreSQL | `jdbc:postgresql://host[:port][/db]` —— **不带 userinfo**，见 [buildJdbcUrl] |
  * | H2（内存） | `jdbc:h2:mem:<db>;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE` |
  * | H2（文件） | `jdbc:h2:file:<path>` |
  * | DuckDB | `jdbc:duckdb:<path>`（空 = 内存库） |
@@ -84,25 +84,10 @@ private fun decodeUserInfo(raw: String): String {
 internal fun buildJdbcUrl(config: ConnectionConfig, extraQuery: String = ""): String {
     val database = config.database.trim()
     return when (config.dialect) {
-        DialectType.MYSQL, DialectType.POSTGRESQL -> {
-            val host = config.host.trim()
-            if (host.isEmpty()) return ""
-            val scheme = if (config.dialect == DialectType.MYSQL) "jdbc:mysql" else "jdbc:postgresql"
-            val port = config.port?.takeIf { it > 0 } ?: config.displayPort
-            val portPart = if (port > 0) ":$port" else ""
-            val dbPart = if (database.isNotEmpty()) "/$database" else ""
-            val user = config.username.trim()
-            // userinfo 必须 percent-encoding：用户名/密码里的 `@` 与 `/` 是合法字符，
-            // 不编码的话解析侧会把它们误当作 host/db 分隔符（见 parseClientServerUrl 的
-            // 「最后一个 @」约定），导致 URL 往返后 host/库名/凭据全部错位。
-            val credPart =
-                if (user.isEmpty()) ""
-                else "${encodeUserInfo(user)}${if (config.password.isNotEmpty()) ":${encodeUserInfo(config.password)}" else ""}@"
-            val query = extraQuery.ifBlank {
-                if (config.dialect == DialectType.MYSQL) MYSQL_DEFAULT_PARAMS else ""
-            }
-            "$scheme://$credPart$host$portPart$dbPart${if (query.isNotBlank()) "?$query" else ""}"
-        }
+        // MySQL 与 PostgreSQL 形状同源，但**凭据是否进 URL 完全不同**，必须分开写 ——
+        // 见 [mysqlCredPart] 与下面 PostgreSQL 分支的说明。
+        DialectType.MYSQL -> clientServerUrl(config, database, "jdbc:mysql", MYSQL_DEFAULT_PARAMS, extraQuery)
+        DialectType.POSTGRESQL -> clientServerUrl(config, database, "jdbc:postgresql", "", extraQuery)
 
         DialectType.H2 -> when {
             database.isEmpty() -> ""
@@ -124,6 +109,141 @@ internal fun buildJdbcUrl(config: ConnectionConfig, extraQuery: String = ""): St
 }
 
 /**
+ * client/server 类方言的 URL 拼装 —— MySQL 与 PostgreSQL 共用的骨架。
+ *
+ * ## 凭据进不进 URL：两个方言的答案相反，且**不能统一**
+ *
+ * 这不是一个可以「顺手统一」的格式细节，而是两个驱动各自的能力边界：
+ *
+ * - **MySQL**（Connector/J）解析 URL 时认 `user:pass@` 这段 userinfo，所以凭据照旧写进去。
+ * - **PostgreSQL**（`org.postgresql.Driver`）**根本不支持 userinfo**。实测 42.7.11：
+ *
+ *   ```
+ *   parseURL("jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres")
+ *     PGHOST   = postgres:666666@192.168.1.5   ← 整段被当成主机名
+ *     PGDBNAME = postgres
+ *     PGPORT   = 5432
+ *     （没有任何 PGUSER —— 凭据压根没被识别）
+ *     → java.net.UnknownHostException: postgres:666666@192.168.1.5
+ *   ```
+ *
+ *   驱动按最后一个 `:` 切端口、其余整段当 host，于是这串"主机名"永远解析不出来，
+ *   外层再包成一句无信息量的「尝试连线已失败」。**PG 连接因此 100% 连不上**。
+ *
+ * ## 凭据不写进 URL，会不会丢？
+ *
+ * 不会，三处都不依赖 PG 的 URL 带凭据：
+ *
+ * - 引擎 `PoolManager.createDataSource` 把 `config.user` / `config.password` **单独**传给 HikariCP
+ * - 持久化 `PersistedConnectionConfig` 把 `username` / `password` **独立于** `jdbcUrl` 存盘，
+ *   加载时也只从这两个字段取，从不从 URL 反解凭据
+ * - 引擎自己的 `PostgreSQLDialect.buildJdbcUrl` 产出的也是 `jdbc:postgresql://host:port/db`，
+ *   本函数现在与它一致
+ *
+ * 顺带的好处：URL 不再承载明文口令，而 `PoolManager` 建池时会把 URL 打进日志
+ * （`url=$resolvedJdbcUrl`）—— 凭据进 URL 等于把口令写进日志文件。
+ *
+ * @param defaultQuery 无显式参数时补的方言默认参数（PG 传空串）
+ */
+private fun clientServerUrl(
+    config: ConnectionConfig,
+    database: String,
+    scheme: String,
+    defaultQuery: String,
+    extraQuery: String,
+): String {
+    val host = config.host.trim()
+    if (host.isEmpty()) return ""
+    val port = config.port?.takeIf { it > 0 } ?: config.displayPort
+    val portPart = if (port > 0) ":$port" else ""
+    val dbPart = if (database.isNotEmpty()) "/$database" else ""
+    val query = extraQuery.ifBlank { defaultQuery }
+    return "$scheme://${credPartFor(config)}$host$portPart$dbPart${if (query.isNotBlank()) "?$query" else ""}"
+}
+
+/** 只有 MySQL 把凭据写进 URL 的 userinfo 段 —— PG 恒返回空串（理由见 [clientServerUrl]）。 */
+private fun credPartFor(config: ConnectionConfig): String {
+    if (config.dialect != DialectType.MYSQL) return ""
+    val user = config.username.trim()
+    if (user.isEmpty()) return ""
+    // userinfo 必须 percent-encoding：用户名/密码里的 `@` 与 `/` 是合法字符，
+    // 不编码的话解析侧会把它们误当作 host/db 分隔符（见 parseClientServerUrl 的
+    // 「最后一个 @」约定），导致 URL 往返后 host/库名/凭据全部错位。
+    val pass = if (config.password.isNotEmpty()) ":${encodeUserInfo(config.password)}" else ""
+    return "${encodeUserInfo(user)}$pass@"
+}
+
+/**
+ * 把存量 URL 归一化成 [buildJdbcUrl] 会产出的形状。
+ *
+ * ## 为什么需要它
+ *
+ * 本缺陷存在期间，向导给 PG 存下的每一条连接的 URL 里都带着一截 userinfo
+ * （`jdbc:postgresql://user:pass@host:5432/db`），而那正是连不上的原因。
+ * 只改 [buildJdbcUrl] 的话，**老配置依然是坏的** —— 用户打开列表点连接，还是那句
+ * 「尝试连线已失败」，等于修复对他们不生效。存量配置必须一并收拾掉。
+ *
+ * ## 为什么只动 PostgreSQL
+ *
+ * - 只处理 **userinfo 段**（`//` 与第一个 `/` 之间的 `@` 前缀），authority 的
+ *   host:port 与 `?` 后的参数**逐字保留** —— 参数里可能有 `sslmode` / `currentSchema`。
+ * - MySQL 的 userinfo 是**驱动认的**，留着；这里只做归一化，不是清洗。
+ * - 凭据不会丢：`PersistedConnectionConfig` 里本来就单独存着 `username` / `password`。
+ *
+ * ## 为什么这条不写成迁移
+ *
+ * 它不改动磁盘格式、不改版本号，加载时在内存里归一化即可 ——
+ * 只有当用户下次保存时才会落成新形状。改版本号 + 扫盘迁移要处理「读旧文件失败」
+ * 这类分支，而这里根本不需要碰磁盘就能拿到同样的效果。
+ */
+internal fun normalizeJdbcUrl(url: String, dialect: DialectType): String {
+    if (dialect != DialectType.POSTGRESQL) return url
+    val scheme = "jdbc:postgresql:"
+    if (!url.startsWith(scheme, ignoreCase = true)) return url
+
+    val rest = url.substring(scheme.length)
+    // 少了 `//` 的 URL 不是 driver 能用的形状，原样放过 —— 别把它改成一个
+    // 「看起来更对」但同样连不上的样子，那只会掩盖真正的问题。
+    if (!rest.startsWith("//")) return url
+    val body = rest.substring(2)
+
+    val slashAt = body.indexOf('/')
+    val authority = if (slashAt < 0) body else body.substring(0, slashAt)
+    val atAt = authority.lastIndexOf('@')
+    if (atAt < 0) return url // 本来就没有 userinfo —— 已是目标形状
+
+    val tail = if (slashAt < 0) "" else body.substring(slashAt)
+    return scheme + "//" + authority.substring(atAt + 1) + tail
+}
+
+/**
+ * 把用户手工输入的 JDBC URL 并回配置 —— 向导 URL 输入框（URL → 字段方向）的唯一实现。
+ *
+ * ## 凭据只在 URL **真的写了** userinfo 时才被采纳
+ *
+ * PG 的 URL 正常**不带**凭据（PG 驱动不认 userinfo，见 [buildJdbcUrl]）。若在这里
+ * 无条件用解析结果覆盖 `username` / `password`，那么用户只是在 URL 末尾补了个
+ * `?sslmode=require`、点一下输入框，就会把认真填过的用户名密码**静默清空** ——
+ * 而且 URL 依然合法，向导照常放行保存，直到连库时才报一句「认证失败」。
+ * 「URL 里没写凭据」和「用户要清空凭据」是完全不同的两件事，
+ * 所以判据是 [UrlParts.hasUserInfo] 而非「`username` 是否为空」。要清空请用密码框。
+ *
+ * URL 本身经 [normalizeJdbcUrl] 归一化：用户粘进来一段 MySQL 形状的 PG URL
+ * （`//u:p@h:5432/db`）时，就地摘掉那截驱动不认的 userinfo 而不是留着它连不上。
+ */
+internal fun ConnectionConfig.withParsedJdbcUrl(url: String): ConnectionConfig {
+    val parts = parseJdbcUrl(url, dialect)
+    return copy(
+        jdbcUrl = normalizeJdbcUrl(url, dialect),
+        host = parts.host,
+        port = parts.port.toIntOrNull(),
+        database = parts.database,
+        username = if (parts.hasUserInfo) parts.username else username,
+        password = if (parts.hasUserInfo) parts.password else password,
+    )
+}
+
+/**
  * JDBC URL 的字段投影。
  *
  * [connectionType] 由 URL 形状反推（H2 `mem:` → IN_MEMORY，`file:` → FILE_BASED，DuckDB → EMBEDDED，
@@ -137,6 +257,15 @@ internal data class UrlParts(
     val username: String = "",
     val password: String = "",
     val connectionType: ConnectionType = ConnectionType.UNKNOWN,
+    /**
+     * URL 里**是否出现过** userinfo 段（`//` 与 host 之间那段 `user[:pass]@`）。
+     *
+     * 为什么需要它：PG 的 URL 正常就不带凭据（见 [buildJdbcUrl]），所以
+     * `username == ""` 有两种截然不同的含义 ——「用户没填」和「这个 URL 压根没写凭据」。
+     * 调用方若拿 `username` 空与否去覆盖配置里的凭据字段，第二种情况会把用户
+     * 认真填过的用户名密码**静默清空**。有了这个标志才能把两者分开。
+     */
+    val hasUserInfo: Boolean = false,
 )
 
 /** 从 JDBC URL 解析字段（方言决定解析规则；不匹配 / 空 URL 返回空 [UrlParts]）。 */
@@ -204,6 +333,7 @@ private fun parseClientServerUrl(url: String, scheme: String): UrlParts {
         username = user,
         password = password,
         connectionType = ConnectionType.CLIENT_SERVER,
+        hasUserInfo = atIdx >= 0,
     )
 }
 

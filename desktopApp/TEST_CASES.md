@@ -1900,3 +1900,114 @@ ExportProcessManager.awaitHubReadyOrReportFailure()
 Compose UI 测试这边目前没有现成好用的（`boundsInRoot` 会不会被滚动容器裁剪钳住
 还需要实测确认），与其写一条骗自己的绿断言，不如先把这句提醒留在
 `TableWeightedColumnMinWidthTest` 的类注释里。
+
+### 9.25 真窗口抓到：向导建出来的 PG 连接 100% 连不上
+
+用户报「我自己测试发现 pg 连不上」。这次**严格只走 GUI**（不许改配置文件），
+从「新建连接」一路点到「测试连接」。
+
+#### 根因：向导把凭据塞进了 PG 不认的 URL userinfo 段
+
+`JdbcUrl.buildJdbcUrl` 里 MYSQL 与 POSTGRESQL **共用同一个分支**，
+生成 `jdbc:postgresql://user:pass@host:5432/db`。
+拿 PG 驱动直接验（42.7.11）：
+
+```
+URL: jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres
+  parseURL[PGHOST]   = postgres:666666@192.168.1.5   ← 整段被当成主机名
+  parseURL[PGDBNAME] = postgres
+  parseURL[PGPORT]   = 5432
+  （没有任何 PGUSER —— 凭据压根没被识别）
+  cause[1] java.net.UnknownHostException: postgres:666666@192.168.1.5
+```
+
+驱动按最后一个 `:` 切端口、其余整段当 host，于是这串"主机名"永远解析不出来，
+外层再包成一句**无信息量**的「尝试连线已失败」。
+换句话说：**PG 连接不是"可能连不上"，是必然连不上**，
+且错误信息里看不出任何「用户名格式不对」的线索。
+
+同一个探针里 `jdbc:postgresql://192.168.1.5:5432/postgres` + 独立凭据 → `CONNECT OK`（PG 18.4）。
+
+#### 为什么只有 PG 中招
+
+| 方言 | 驱动认不认 URL userinfo | 后果 |
+|---|---|---|
+| MySQL（Connector/J） | **认** | 照常带凭据，一直是好的 |
+| PostgreSQL（`org.postgresql.Driver`） | **不认** | 必连不上 |
+
+**MySQL 从来没有暴露过这个缺陷** —— 不是它更健壮，是它的驱动支持这个形状。
+
+#### 为什么测试全绿、手写配置却是好的
+
+这一条是本次最该记的：
+
+- 所有 PG 测试的 URL 都来自 `SmokeTarget.PostgresSmoke.urlFor()`，
+  写的是 `jdbc:postgresql://192.168.1.5:5432/$database` —— **无 userinfo**，天然正确；
+- 此前自己调试时是**直接往 `connection.json` 里塞配置**的，
+  手写的也恰好是无 userinfo 的形状。
+
+于是「探针数据的形状」与「真实路径产出的形状」**不一致**，
+真实路径上那个必然失败的形态，从头到尾没有任何一个测试碰过。
+
+> 用户坚持「不要直接改配置文件，要走 GUI」是对的：
+> **手写配置注入恰好绕开了向导的 URL 折算，也就绕开了缺陷本身。**
+> 探针数据的形状必须与真实路径一致，否则覆盖的是自己造的形状，不是产品。
+
+#### 修法（三处，缺一不可）
+
+1. **`buildJdbcUrl` 拆分支**：MySQL 保留 userinfo，PG 恒不带。
+   凭据改由已有的两条通路走 —— 引擎 `PoolManager` 把 `config.user/password`
+   单独传给 HikariCP；`PersistedConnectionConfig` 也把两者**独立于** `jdbcUrl` 存盘。
+   顺带收益：URL 不再承载明文口令，而建池日志 `url=$resolvedJdbcUrl` 会把 URL 打进日志。
+2. **`withParsedJdbcUrl`（原 `applyUrl`）只在 URL 真的写了 userinfo 时才覆盖凭据**。
+   否则 PG 的 URL 默认没有凭据，用户只要在 URL 框里补个 `?sslmode=require`、
+   点一下输入框，用户名密码就被**静默清空**，而 `canProceed` 仍然成立 ——
+   配置照存不误，直到连库才报「认证失败」。
+   判据必须是 `UrlParts.hasUserInfo`，不是「`username` 是否为空」。
+3. **加载时 `normalizeJdbcUrl`**：缺陷期间存下的每条 PG 连接，URL 里都带着那截 userinfo。
+   只改 `buildJdbcUrl` 的话**老配置依然是坏的**，修复对老用户等于没生效。
+   归一化只发生在内存里，不改磁盘格式、不升版本号。
+
+配套新增：`UrlParts.hasUserInfo` 字段（把「URL 没写凭据」与「用户要清空凭据」分成两件事）。
+
+#### 变异验证（5 组，逐条打红）
+
+| 变异 | 打红的用例 |
+|---|---|
+| 去掉 `credPartFor` 的方言守卫（PG 凭据重回 URL） | 4 个：PG 无 userinfo / PG 往返 / 切方言 / 新建 PG 落盘 |
+| 凭据无条件覆盖（去掉 `hasUserInfo` 判据） | `editing the url box does not wipe credentials…` |
+| 加载不调 `normalizeJdbcUrl` | `legacy postgresql url is normalized on load…` |
+| 粘贴时不调 `normalizeJdbcUrl` | `pasting a mysql shaped postgresql url…` |
+| 加载时改成**从 URL 反解**凭据 | 2 个（老配置 + 新建）—— 守住「归一化不许偷走凭据」 |
+
+顺带钉住一条**安全前提**：凭据不写进 URL，会不会因此丢密码？
+不会，而且有测试守着 —— `PersistedConnectionConfig` 的 `username`/`password` 独立于 URL 存盘、
+加载时也只从这两个字段取。少一个字段，用户的 PG 连接就会从「连不上」变成
+「连上但认证失败」—— 换了个错法而已，同样致命。
+
+#### 真窗口复验：全新 user home，全程只点鼠标
+
+- 第 3 步底部的 **JDBC URL 实时显示 `jdbc:postgresql://192.168.1.5:5432/postgres`**（旧版这里会是 `jdbc:postgresql://postgres:666666@…`）
+- 第 4 步点「测试连接」→ **「连接成功!」**
+- 保存 → 连接 → 对象树列出 `examquestions` / `postgres` / `sundays_smoke`，
+  展开 `examquestions → biz_user` 正常列出 23 个字段（`id int8(19) PK 非空` …），**无 pg_\* 系统对象**
+- 落盘核对：`jdbcUrl` 无 userinfo，`username` / `password` 独立成字段
+
+全量回归：**944 项 / 0 失败 / 8 跳过**（此前 935）。
+
+#### 附带记下两个「工具自己骗人」的时刻
+
+都是**先怀疑产品、再怀疑工具**才没走歪：
+
+1. **Windows 滚轮方向与直觉相反**：`WHEEL_DELTA` **正数向上、负数向下**。
+   最初 `click-window.ps1` 直接传 `Scroll * 120`，于是「向下滚」其实在往上滚；
+   而内容本来就在顶部，**看起来就像 `verticalScroll` 死了**，
+   一度差点当成产品缺陷去改布局。压小窗口、换成负值后才滚得动。
+2. **`gui-probe.ps1` 会把窗口最大化**，于是它报的窗口尺寸（1938x1048）
+   与 `click-window.ps1` 的坐标系对不上 —— 混用两点全空。
+   `fill-fields.ps1` 改用绝对坐标、全程不动窗口尺寸，就是被这个坑出来的。
+
+> 两次的共同点：**「界面没反应」有三种可能 —— 产品不响应、输入没送到、量的地方不对**，
+> 而它们长得一模一样。判据只能是**换一个独立通道再验一次**，
+> 不能靠同一套工具换个参数重试。
+

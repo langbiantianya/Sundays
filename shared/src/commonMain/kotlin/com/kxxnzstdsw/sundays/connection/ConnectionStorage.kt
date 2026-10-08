@@ -67,9 +67,20 @@ object ConnectionStorage {
     /**
      * 从 [PersistedConnectionConfig] 还原 [ConnectionConfig] —— 从 jdbcUrl 解析
      * host / port / database / connectionType（不可识别的 URL 回退到方言默认连接类型）。
+     *
+     * ## 为什么加载时要 [normalizeJdbcUrl]
+     *
+     * 缺陷存在期间向导给 PG 存下的每条连接，URL 里都带着驱动不认的 userinfo
+     * （`jdbc:postgresql://user:pass@host:5432/db`）—— 那正是「PG 连不上」的原因。
+     * 只修 [buildJdbcUrl] 的话，这些老配置依然是坏的，修复对老用户等于没生效。
+     *
+     * 凭据不会因此丢失：[PersistedConnectionConfig] 的 `username` / `password`
+     * 是独立字段，下面本来就从它们取值，**从不从 URL 反解**。所以这里可以放心地把
+     * URL 归一化，而不必担心把密码抹掉。归一化只发生在内存里，用户下次保存才落盘。
      */
     private fun PersistedConnectionConfig.toConnectionConfig(): ConnectionConfig {
-        val parts = parseJdbcUrl(jdbcUrl, dialect)
+        val normalizedUrl = normalizeJdbcUrl(jdbcUrl, dialect)
+        val parts = parseJdbcUrl(normalizedUrl, dialect)
         val (defaultType, _) = ConnectionConfig.defaultsFor(dialect)
         return ConnectionConfig(
             id = id,
@@ -81,7 +92,7 @@ object ConnectionStorage {
             username = username,
             password = password,
             connectionType = parts.connectionType.takeIf { it != ConnectionType.UNKNOWN } ?: defaultType,
-            jdbcUrl = jdbcUrl,
+            jdbcUrl = normalizedUrl,
             createdAt = createdAt,
             updatedAt = updatedAt,
         )
