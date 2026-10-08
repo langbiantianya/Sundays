@@ -2011,3 +2011,114 @@ URL: jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres
 > 而它们长得一模一样。判据只能是**换一个独立通道再验一次**，
 > 不能靠同一套工具换个参数重试。
 
+### 9.26 对象树右键：复制名称 / 引用名 / 建表 DDL
+
+用户要的是「在树里右键就能把名字和 DDL 拿走」，以便粘进 SQL 编辑器。
+这一节记的是**三件容易做错、且错了都不报错**的事。
+
+#### 一、引用名必须按方言给，不能一律双引号
+
+`SqlIdentifier` 是前端侧的第二份映射（不复用引擎的 `DatabaseDialect.quoteIdentifier`，
+理由见 `shared/ARCHITECTURE.md` §4.7）。两条硬规则：
+
+1. **MySQL 用反引号。** ANSI 双引号在 MySQL 里默认是**字符串字面量**，
+   写成 `"biz_user"` 会被当成 `SELECT 'biz_user'` 而不是标识符。
+2. **限定名判据是「该方言有没有独立 schema 层」，不是「有没有 database」。**
+
+第 2 条是最贵的坑：PG 里 `examquestions` 是 **catalog**，`public` 才是 schema。
+按「有 database 就限定」写出来的 `"examquestions"."biz_user"` 在 PG 里
+会被解析成一个**名为 examquestions 的 schema** 下的表 —— 找不到。
+用户看到的是「明明表就在眼前，引用出来却报错」。
+
+| 方言 | `tableRef` 产出 |
+|---|---|
+| MySQL（无 schema，有库名） | `` `sundays_probe`.`biz_user` `` |
+| PostgreSQL | `"public"."biz_user"` |
+| H2 | `"PUBLIC"."USERS"` |
+| 两者都空 | `"tbl"`（最小可用形态） |
+
+#### 二、**故意**不复制 `H2Dialect.quoteIdentifier` 的 uppercase
+
+引擎那边 `quoteWith(identifier.uppercase(), '"')` 是有理由的：它拿到的名字**可能来自用户输入**，
+不猜 H2 的折叠规则就命中不了。而复制场景的处境相反 —— **树上的名字就是库里真实存着的名字**：
+
+| 建表写法 | 树上显示 | 折叠后的引用 | 对不对 |
+|---|---|---|---|
+| `CREATE TABLE USERS` | `USERS` | `"USERS"` | ✅ |
+| `CREATE TABLE "users"` | `users` | `"USERS"` | ❌ **指向另一张表** |
+
+剪贴板里放一个看着像对、实际查错表的引用，比不给引用更糟。
+所以 `SqlIdentifierQuoteTest` 里的 H2 断言写的是 `"users"` 而不是 `"USERS"` ——
+**这条断言就是防止有人日后「顺手对齐」把它改回 uppercase 的。**
+
+#### 三、DDL 前端拼不出来，只能走引擎
+
+`dialect.getCreateTableDDL` 五个方言没有共性可归纳：
+PG 回填主键 / UNIQUE / CHECK，SQLite 直接读 `sqlite_master.sql` 的**原文**，MySQL 拼 ENGINE 与字符集。
+前端自己拼一份的话，五种里总有几种对不上，而**对不上的 DDL 是静默的** —— 粘进 SQL 编辑器才炸。
+
+发的是 `Category.TABLE` + `Action.GET_DDL`，且**先等 `resolveSchemas` 完成**再发，
+否则 schema 还没落到状态里，`TableGetDdlRequest.schema` 会是空的。
+
+> 协议上有个坑：`TableRequest` 的 oneof 字段名 `get_ddl` / `column_list` / `list`
+> **只差一个前缀**，写错编译期发现不了（都编译得过）。只有跑起来看行为才知道。
+
+#### 菜单挂在哪、什么条件下出现
+
+- 菜单状态存在 `SchemaTreePanel` 这一层（**不是**每个节点）：LazyColumn 回收 item 会把菜单一起带走
+- **DDL 项只在「表节点且非字段节点」出现**：字段目标的 `table` 也非空，
+  第一版只判 `target.table != null`，于是字段上冒出了「复制建表 DDL」——复制出来是整张表
+- 菜单项**先 `menu.dismiss()` 再执行动作**：`DropdownMenu` 只认 `onDismissRequest`，不认菜单项的 `onClick`
+- `DropdownMenu` 用 `expanded = target != null` 且**始终留在组合里**，不写成 `if (target != null)`
+- 右键与左键不冲突：`onRightClick` 挂在 `clickable` 前还是后都无所谓 ——
+  `clickable` 的 tap 检测只认主键，右键是次键，压根不满足 tap 条件
+  （这一条 KDoc 原本写反了，**靠变异测试没变红才发现**，见下）
+
+#### 变异验证（6 组，逐条打红）
+
+| 变异 | 打红的用例 |
+|---|---|
+| MySQL 也用双引号 | 8 项 |
+| 所有方言都用库名限定（不分 schema） | 2 项 shared + 8 项 state |
+| 去掉 `target.column == null` 判据（字段也显示 DDL） | `字段节点没有 DDL 项` |
+| `clipboard(text) \|\| true`（把失败当成功） | 2 项 |
+| 菜单项点了不 `dismiss()` | 3 项（`等待超时：菜单项 xxx 之后菜单关闭`） |
+| `tableRef` 里 schema 判据优先级改成先 database | shared + state 多项 |
+
+**一处变异没能打红，暴露的是文档写错了而不是测试弱**：
+把 `onRightClick` 与 `clickable` 的顺序颠倒，「右键不应顺带打开预览」这条**没有变红**。
+查下来原因是 `clickable` 的 tap 检测只认主键，右键压根进不了那条路径 ——
+于是 KDoc 里「必须在 clickable 之前，否则右键会顺带打开预览」的说法是**错的**，已按实现改正。
+> 这条的教训与 §9.25 那两条「工具自己骗人」同源：
+> **变异没变红时，先怀疑「被变异的东西根本不在这条路径上」，再怀疑测试。**
+> 但反过来，测试没变红**不等于**可以不查 —— 查完才知道是文档错，不是实现错。
+
+#### 真窗口复验：全新 user home，真 PostgreSQL
+
+- 快速连接 → PostgreSQL → `192.168.1.5:5432` / `examquestions` / `postgres` / `666666`
+  → 「测试连接」**连接成功!** → 连接（PID 2720，窗口 1152x720）
+- 树列出 3 个库，展开 `examquestions` → `biz_user` / `t1` / `t2` / `t3`
+- 右键 `biz_user` → 菜单弹三项：**复制名称 / 复制引用名 / 复制建表 DDL**
+- 点「复制引用名」→ 剪贴板读回 **`"public"."biz_user"`** ✅
+- 点「复制建表 DDL」→ 剪贴板读回 **`CREATE TABLE "biz_user" (…23 字段…)`** ✅
+- 通知中心铃铛未读数 1 → 2（两条 SUCCESS）
+
+截图在 `build/tmp/shots/`：`r01`（菜单弹出）、`r02`（复制引用名后菜单已关闭）、
+`r04`（复制 DDL 后菜单已关闭）。
+
+#### 新增探针：`desktopApp/tools/right-click.ps1`
+
+`click-abs.ps1` 只发左键（`MOUSEEVENTF_LEFTDOWN/UP`），对 `onRightClick` 那条
+`buttons.isSecondaryPressed` 检测链**完全无效** —— 脚本跑成功、菜单就是不出来，
+和 §9.25「工具自己骗人」是同一类坑。故新写一个：`MOUSEEVENTF_RIGHTDOWN = 0x0008` /
+`RIGHTUP = 0x0010`，绝对坐标右键后跟一张整屏截图。
+
+剪贴板也**不是**靠读脚本 stdout 验的：`ClipboardWriter` 走 AWT `SystemClipboard`，
+与 PowerShell 的 `Get-Clipboard` 是**同一个系统剪贴板**，可以直接读回 —— 这条是真值，不是替身。
+
+全量回归：**984 项 / 0 失败 / 8 跳过**（此前 944，新增 40 项）。
+
+> 第一轮曾出现一条 `ConnectedSourceEndToEndTest [MySQL] Communications link failure`，
+> 单跑通过、第二轮全量通过 → 环境偶发，与本次改动无关。**单跑通过不足以判定偶发**，
+> 要看第二轮全量是否还复现。
+

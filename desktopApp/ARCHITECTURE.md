@@ -446,6 +446,66 @@ H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持�
 测试量不到边界，只能靠 tag。**量面板而不是量里面的文字** —— 表名长度各不相同，
 量文字等于在断言「你的表名有多长」。
 
+### 对象树右键菜单：复制名称 / 引用名 / 建表 DDL
+
+库节点、表节点、字段节点都挂了 `Modifier.onRightClick`，弹出三个菜单项：
+
+| 菜单项 | 内容 | 是否走引擎 |
+|---|---|---|
+| 复制名称 | 裸名（`biz_user`） | 否 |
+| 复制引用名 | [`SqlIdentifier.tableRef`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt) —— `"public"."biz_user"` | 否 |
+| 复制建表 DDL | `dialect.getCreateTableDDL` 的产物 | **是**（`Category.TABLE` + `Action.GET_DDL`） |
+
+**DDL 必须走引擎，前端拼不出来。** 五个方言的建表语句没有共性可归纳：
+PG 回填主键 / UNIQUE / CHECK，SQLite 直接读 `sqlite_master.sql` 的**原文**，MySQL 要拼 ENGINE 与字符集。
+前端若自己拼一份，五种方言里总有几种对不上，而 DDL 对不上是**静默**的 —— 粘进 SQL 编辑器才炸。
+
+#### 菜单状态挂在 `SchemaTreePanel` 这一层，不挂每个节点
+
+菜单状态若存在每个节点自己的 `remember` 里，LazyColumn 把该项回收后**菜单会跟着一起消失** ——
+表现为「滚动一下菜单闪没了」。而且菜单需要唯一性（同时只能有一个）与统一坐标系。
+
+`TreeContextMenuState` 就是 `{ position, target }`，`target: TreeTarget(database, schema, table, column)`
+让菜单项自己判断该显示什么：
+
+```kotlin
+// DDL 项只挂在「表节点且非字段节点」上
+target.table != null && target.column == null
+```
+
+**字段目标的 `table` 也非空**，第一版只判 `target.table != null`，于是字段上冒出了「复制建表 DDL」——
+复制出来的是整张表的 DDL，与用户右键的对象不符。变异验证里专门钉了这条。
+
+#### `DropdownMenu` 不会因为菜单项被点而自动关闭
+
+它只认 `onDismissRequest`，菜单项的 `onClick` 不触发关闭。
+所以每个菜单项是**先 `menu.dismiss()` 再执行动作** —— 顺序反了的话菜单会盖在界面上不走，
+下一次右键还叠一层。`TreeContextMenuUiTest` 里每个用例都断言了「点完菜单项后菜单消失」。
+
+#### 菜单项的关闭用 `target == null` 表达，`DropdownMenu` 一直留在组合里
+
+写成 `if (target != null) DropdownMenu(...)` 的话，菜单关闭时整棵组合被拆掉，
+而弹层关闭动画需要它继续存在 —— 表现为菜单「啪」地消失而不是收起来。
+`expanded = target != null` + 始终组合，位置由 `offset` 驱动。
+
+#### `clipboard` 是 `DatabaseBrowserState` 的构造参数，不是直接调 `ClipboardWriter`
+
+```kotlin
+private val clipboard: (String) -> Boolean = { ClipboardWriter.copy(it) }
+```
+
+直接调真剪贴板的话，本机 UI 测试其实**是有头**的（`isHeadless=false`，能写能读），
+于是「无头必然失败」这个假设会**本地绿、CI 红**。做成注入参数后，成功 / 失败两条路径都与环境无关，
+`clipboard(text) || true` 这种把失败当成功的写法也能被测试抓住（变异验证第 4 组）。
+
+`ClipboardWriter.copy` 捕获 `Throwable` 而非 `Exception`：无头环境的 `HeadlessException`、
+剪贴板被别的进程占用的 `IllegalStateException`、AWT 未初始化的 `AWTError`（是 `Error` 不是 `Exception`），
+三种都不该让一次「复制」把主流程带走。空串直接返回 false —— 「复制成功但剪贴板没变」比明确失败更糟。
+
+复制失败推 **ERROR** 通知而不是静默：写失败时界面**完全没变化**，
+用户看到的是「我点了菜单项，什么都没发生」，且无头 / 剪贴板占用 / Wayland 无剪贴板服务
+三种原因用户都分辨不出来。
+
 ---
 
 ## 连接管理 (`ConnectionSession` + `MainScreen`)

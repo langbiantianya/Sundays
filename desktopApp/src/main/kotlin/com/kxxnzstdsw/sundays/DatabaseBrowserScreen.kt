@@ -84,6 +84,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
 import androidx.compose.ui.Alignment
@@ -136,12 +137,14 @@ import com.kxxnzstdsw.grpc.viewListRequest
 import com.kxxnzstdsw.grpc.viewRequest
 import com.kxxnzstdsw.grpc.systemRequest
 import com.kxxnzstdsw.grpc.tableColumnListRequest
+import com.kxxnzstdsw.grpc.tableGetDdlRequest
 import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
+import com.kxxnzstdsw.sundays.connection.SqlIdentifier
 import com.kxxnzstdsw.sundays.editor.CompletionItem
 import com.kxxnzstdsw.sundays.editor.CompletionKind
 import com.kxxnzstdsw.sundays.editor.GenerateHelpers
@@ -167,6 +170,7 @@ import com.kxxnzstdsw.sundays.ui.WinTextField
 import com.kxxnzstdsw.sundays.ui.tabStripContainerColor
 import com.kxxnzstdsw.sundays.ui.WinIconButton
 import com.kxxnzstdsw.sundays.ui.WinOutlinedButton
+import com.kxxnzstdsw.sundays.ui.onRightClick
 import com.kxxnzstdsw.sundays.ui.winShape
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -551,6 +555,51 @@ internal fun paneToggleTag(pane: BrowserPane): String = when (pane) {
 internal fun schemaDbNodeTag(database: String) = "schemaDb_$database"
 internal fun schemaTableLeafTag(table: String) = "schemaTable_$table"
 internal fun schemaTableObjectsTag(table: String) = "schemaTableObjects_$table"
+
+/**
+ * 字段行的 tag。
+ *
+ * 只给**列名文本**那一行加：字段行里还有类型、`[PK]` / `[非空]` 等多个文本节点，
+ * 不带 tag 的话测试只能靠文本匹配，于是「复制引用」拿到的是哪一行就成了运气。
+ */
+internal fun schemaColumnTag(column: String) = "schemaColumn_$column"
+
+/** 树上右键菜单三项的 UI 测试 tag（菜单项不获取焦点，只能靠 tag 定位）。 */
+internal const val TREE_MENU_COPY_NAME_TAG = "treeMenuCopyName"
+internal const val TREE_MENU_COPY_REF_TAG = "treeMenuCopyRef"
+internal const val TREE_MENU_COPY_DDL_TAG = "treeMenuCopyDdl"
+
+/**
+ * 对象树右键菜单状态。
+ *
+ * 与 [com.kxxnzstdsw.sundays.ui.ContextMenuState] 分开而不是复用：那个的 `position`
+ * 语义是「相对 DataTable 的偏移」，而这里需要的是「相对**树面板**的偏移」——
+ * 挂在面板这一层才有一致参照系（见 [TreeContextMenu] 的 KDoc）。
+ */
+@Stable
+class TreeContextMenuState {
+
+    /** 被右键的节点；`null` = 菜单关闭。 */
+    var target: DatabaseBrowserState.TreeTarget? by mutableStateOf(null)
+        private set
+
+    /** 右键点击点，相对树面板左上角。 */
+    var offset: androidx.compose.ui.geometry.Offset by mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+        private set
+
+    fun show(at: androidx.compose.ui.geometry.Offset, target: DatabaseBrowserState.TreeTarget) {
+        offset = at
+        this.target = target
+    }
+
+    fun dismiss() {
+        target = null
+    }
+}
+
+@Composable
+private fun rememberTreeContextMenuState(): TreeContextMenuState =
+    remember { TreeContextMenuState() }
 
 /** 排序预设菜单项按序号定位（菜单项不获取焦点，没有别的办法）。 */
 internal fun tableOrderMenuItemTag(index: Int) = "tableOrderItem_$index"
@@ -1791,19 +1840,112 @@ private fun SchemaTreePanel(
                     title = "无数据库",
                     description = "当前连接下未发现任何数据库。",
                 )
-                else -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(state.databases) { db ->
-                        DatabaseNode(
-                            name = db,
-                            state = state,
-                            onOpenTable = onOpenTable,
-                        )
+                else -> {
+                    // 右键菜单状态提到 LazyColumn **外面**：菜单是**屏级**的一个浮层，
+                    // 若把 `visible` 记在某个 item 的组合里，滚动时被回收的 item 会把菜单一起带走
+                    // （表现是「菜单自己关掉了」），且新 item 组合时又得重建一份状态。
+                    val treeMenu = rememberTreeContextMenuState()
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(state.databases) { db ->
+                            DatabaseNode(
+                                name = db,
+                                state = state,
+                                onOpenTable = onOpenTable,
+                                menu = treeMenu,
+                            )
+                        }
                     }
+                    TreeContextMenu(state = state, menu = treeMenu)
                 }
             }
+        }
+    }
+}
+
+/**
+ * 树上右键菜单的状态 + 弹层。
+ *
+ * ## 为什么菜单挂在 [SchemaTreePanel] 这一层而不是每个节点内
+ *
+ * 三条理由，都是从「菜单到底属于谁」推出来的：
+ *
+ * 1. **生命周期**：菜单一旦打开，它的宿主就必须一直在组合里。节点在 `LazyColumn` 里，
+ *    滚动时被回收 → 菜单跟着消失，用户正要点的项就没了。
+ * 2. **唯一性**：同一时刻只应有一个菜单。挂在节点上会出现「两个节点各有一份状态、
+ *    右键 B 时 A 的菜单还开着」的窗口。
+ * 3. **坐标系**：菜单要按「面板内相对坐标」定位，而坐标是节点给的、面板是宿主 ——
+ *    挂在面板上才有一致的参照系。
+ *
+ * @param menu 当前被右键的节点；`null` = 菜单关闭。
+ */
+@Composable
+private fun TreeContextMenu(
+    state: DatabaseBrowserState,
+    menu: TreeContextMenuState,
+) {
+    val target = menu.target
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
+    /**
+     * 菜单项的统一入口 —— 执行动作前**必须先关掉菜单**。
+     *
+     * `DropdownMenu` 不会因为「菜单项被点了」而自动关闭：它只认 `onDismissRequest`
+     * （点在菜单外 / 按 Esc / 焦点丢失），菜单项的 `onClick` 是另一条路。
+     * 第一版漏了 dismiss，真窗口上表现为：复制成功了、通知也弹了，
+     * 但**那层菜单还杵在树上不消失**，用户接着右键别处时新菜单被压在旧 Popup 底下，
+     * 于是「右键没反应了」。
+     *
+     * 纯状态机测试测不到这一层（菜单是 UI 的），它在
+     * [TreeContextMenuUiTest.clickMenuItem] 的「菜单关闭」那一步被钉住。
+     */
+    @Composable
+    fun item(tag: String, label: String, action: () -> Unit) {
+        WinMenuItem(
+            modifier = Modifier.testTag(tag),
+            text = { Text(label) },
+            onClick = {
+                // 先关菜单再干活：复制 DDL 要发引擎往返（可能几十毫秒），
+                // 菜单杵在这段时间里既挡视线又挡下一次右键
+                menu.dismiss()
+                action()
+            },
+        )
+    }
+
+    // 菜单本体必须**一直留在组合里**（`expanded` 只切可见性），不能按 target==null
+    // 整块返回：Popup 被移出组合的那一刻，Compose 要再跑一次退出动画，
+    // 菜单项在那段时间里**仍留在语义树里** —— UI 测试里就表现为
+    // 「点了菜单项，菜单项还在」。
+    // 见 [TreeContextMenuUiTest.clickMenuItem] 的「菜单关闭」那一步。
+    DropdownMenu(
+        expanded = target != null,
+        onDismissRequest = { menu.dismiss() },
+        offset = with(density) {
+            androidx.compose.ui.unit.DpOffset(
+                x = menu.offset.x.toDp(),
+                y = menu.offset.y.toDp(),
+            )
+        },
+    ) {
+        if (target == null) return@DropdownMenu
+        item(TREE_MENU_COPY_NAME_TAG, "复制名称") { state.copyTreeText(target, quoted = false) }
+        item(
+            TREE_MENU_COPY_REF_TAG,
+            // 标签写清复制的是什么：库节点给库引用、字段节点给「表.字段」，
+            // 三种形态长得不一样，只写「复制引用名」用户得自己猜
+            if (target.column != null) "复制表.字段引用" else "复制引用名",
+        ) { state.copyTreeText(target, quoted = true) }
+
+        // ⚠️ 判据必须是「表节点**且不是**字段节点」，而不是「有没有 table」——
+        // 字段目标的 `table` 也是非空的。第一版只判 `target.table != null`，
+        // 于是右键字段时菜单里也冒出「复制建表 DDL」，而 DDL 是**整张表**的，
+        // 用户在字段上点它拿到的是一张毫不相干的表的建表语句。
+        if (target.table != null && target.column == null) {
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            item(TREE_MENU_COPY_DDL_TAG, "复制建表 DDL") { state.copyTreeDdl(target) }
         }
     }
 }
@@ -1813,6 +1955,7 @@ private fun DatabaseNode(
     name: String,
     state: DatabaseBrowserState,
     onOpenTable: (schema: String, table: String) -> Unit,
+    menu: TreeContextMenuState,
 ) {
     val expanded = name in state.expandedDatabases
     val tables = state.tablesByDatabase[name]
@@ -1824,6 +1967,15 @@ private fun DatabaseNode(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRing()
+                .onRightClick { offset ->
+                    menu.show(
+                        offset,
+                        DatabaseBrowserState.TreeTarget(
+                            database = name,
+                            schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
+                        ),
+                    )
+                }
                 .clickable { state.toggleDatabase(name) }
                 .testTag(schemaDbNodeTag(name))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1877,6 +2029,9 @@ private fun DatabaseNode(
                         val slot = "$name::$tbl"
                         TableLeaf(
                             tableName = tbl,
+                            database = name,
+                            schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
+                            menu = menu,
                             onOpen = { onOpenTable(name, tbl) },
                             expanded = slot in state.expandedTableObjects,
                             onToggleObjects = { state.toggleTableObjects(name, tbl) },
@@ -1982,6 +2137,12 @@ private fun ObjectGroupRow(label: String, items: List<String>) {
 @Composable
 private fun TableLeaf(
     tableName: String,
+    /** 所属库名 —— 限定引用名要用（`schema.table` 里的 schema 与表名两段都需要它）。 */
+    database: String = "",
+    /** 所属 schema 名；空串 = 该方言没有独立 schema 层或尚未解析（见 [SqlIdentifier.tableRef]）。 */
+    schema: String = "",
+    /** 右键菜单状态 —— 由 [SchemaTreePanel] 持有并下发（见 [TreeContextMenu]）。 */
+    menu: TreeContextMenuState? = null,
     onOpen: () -> Unit,
     expanded: Boolean = false,
     onToggleObjects: (() -> Unit)? = null,
@@ -1997,6 +2158,29 @@ private fun TableLeaf(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRing()
+                // 右键与左键**不冲突**，两者互不干扰：`clickable` 的 tap 检测只认主键，
+                // 右键是次键（`isSecondaryPressed`），压根不满足 tap 条件。
+                // 试过把 `onRightClick` 挪到 `clickable` **之后**（曾以为 `consume()`
+                // 会串味），实测两轮 UI 测试都没红 —— 顺序在这里**无关**，
+                // 但保留当前写法是因为它读起来就是「先识别手势、再挂动作」。
+                .then(
+                    if (menu != null) {
+                        Modifier.onRightClick { offset ->
+                            menu.show(
+                                offset,
+                                DatabaseBrowserState.TreeTarget(
+                                    database = database,
+                                    schema = schema,
+                                    table = tableName,
+                                ),
+                            )
+                        }
+                    } else {
+                        // 预览里没有右键菜单的用法（传 null 的调用点不期待菜单出现）。
+                        // 挂一个空 Modifier 而不是硬传 —— 见 [TableLeaf.menu] 的 KDoc。
+                        Modifier
+                    }
+                )
                 .clickable(
                     onClickLabel = "打开表 $tableName",
                     role = Role.Button,
@@ -2052,6 +2236,12 @@ private fun TableLeaf(
                     columns = columns,
                     loading = columnsLoading,
                     error = columnsError,
+                    menu = menu,
+                    target = DatabaseBrowserState.TreeTarget(
+                        database = database,
+                        schema = schema,
+                        table = tableName,
+                    ),
                 )
                 ObjectGroupRow("索引", indexNames)
                 ObjectGroupRow("外键", foreignKeyNames)
@@ -2082,6 +2272,9 @@ private fun ColumnRowGroup(
     columns: List<DatabaseBrowserState.ColumnInfo>?,
     loading: Boolean,
     error: String?,
+    /** 字段行的右键菜单与目标（库/表信息）—— 传 null 则字段行不可右键，见 [ColumnRow]。 */
+    menu: TreeContextMenuState? = null,
+    target: DatabaseBrowserState.TreeTarget? = null,
 ) {
     Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2111,7 +2304,13 @@ private fun ColumnRowGroup(
                 modifier = Modifier.padding(start = 12.dp, top = 1.dp),
             )
             else -> Column(modifier = Modifier.padding(start = 12.dp)) {
-                columns.forEach { ColumnRow(it) }
+                columns.forEach { col ->
+                    ColumnRow(
+                        col = col,
+                        menu = menu,
+                        target = target?.copy(column = col.name),
+                    )
+                }
             }
         }
     }
@@ -2127,9 +2326,23 @@ private fun ColumnRowGroup(
  * 「有什么限制」。
  */
 @Composable
-private fun ColumnRow(col: DatabaseBrowserState.ColumnInfo) {
+private fun ColumnRow(
+    col: DatabaseBrowserState.ColumnInfo,
+    /** 非 null 时这一行可右键（复制字段引用）；null = 纯展示（表格编辑器里的同名列没有右键）。 */
+    menu: TreeContextMenuState? = null,
+    target: DatabaseBrowserState.TreeTarget? = null,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 1.dp, bottom = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (menu != null && target != null) {
+                    Modifier.onRightClick { offset -> menu.show(offset, target) }
+                } else {
+                    Modifier
+                }
+            )
+            .padding(top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -2138,7 +2351,10 @@ private fun ColumnRow(col: DatabaseBrowserState.ColumnInfo) {
             fontWeight = if (col.primaryKey) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            // tag 挂在**列名文本**上而不是整行：整行里还有类型与 [PK] 等多个文本节点，
+            // 挂整行时 onNodeWithTag 命中的是一个「自己没有 text」的容器节点，
+            // 测试既读不出列名、也说不清右键命中的到底是哪一行。
+            modifier = Modifier.weight(1f).testTag(schemaColumnTag(col.name)),
         )
         Spacer(Modifier.width(6.dp))
         Text(
@@ -4470,6 +4686,20 @@ class DatabaseBrowserState(
      * 只是不往通知中心推。
      */
     private val notifications: NotificationCenter? = null,
+    /**
+     * 剪贴板写入出口 —— 默认真系统剪贴板，测试注入替身。
+     *
+     * ## 为什么做成参数而不是直接调 `ClipboardWriter.copy`
+     *
+     * 复制动作的**成功与失败两条路都必须有测试**，但真实剪贴板在无头环境里必然失败、
+     * 在有头环境里必然成功 —— 环境决定了走哪条路，测试就只能测其中一半，
+     * 另一半（尤其是「失败时必须推错误通知」这条最要紧的）永远测不到。
+     * 而且 UI 测试环境在这台机器上**有头**（`isHeadless=false`），于是
+     * 「无头必然失败」这个假设还会在本地绿、在 CI 红。
+     *
+     * 注入之后两条路都能被钉住，且**与运行环境无关**。
+     */
+    private val clipboard: (String) -> Boolean = { ClipboardWriter.copy(it) },
 ) {
     /** 数据库名称列表(来自 SCHEMA.LIST level=database) */
     var databases: List<String> by mutableStateOf(emptyList())
@@ -4626,6 +4856,141 @@ class DatabaseBrowserState(
      * **看得见的错**，不是安全的兜底。
      */
     val tableLoadError: Map<String, String> get() = _tableLoadError
+
+    // ------------------------------------------------------------------------
+    // 对象树右键：复制引用名 / 复制 DDL
+    // ------------------------------------------------------------------------
+
+    /**
+     * 树上某个节点被右键时的目标。
+     *
+     * @property database 所属库（限定名要用）。
+     * @property schema 该库的 schema 名；空串 = 「这个方言没有独立 schema 层」
+     *   或尚未解析出来（见 [SqlIdentifier.tableRef] 对这两类方言的处理差异）。
+     * @property table 表名；`null` = 右键在**库节点**上。
+     * @property column 字段名；`null` = 不在字段上。
+     */
+    data class TreeTarget(
+        val database: String,
+        val schema: String = "",
+        val table: String? = null,
+        val column: String? = null,
+    )
+
+    /**
+     * 当前连接的方言 —— 复制引用名要用（MySQL 反引号、其余双引号）。
+     *
+     * 拿不到连接时按 [DialectType.UNKNOWN] 处理（双引号），而不是让整条复制路径
+     * 不可用：右键菜单此刻已经弹出来了，用户要的至少是一个能看的名字。
+     */
+    private val treeDialect: DialectType
+        get() = currentConnection?.dialect ?: DialectType.UNKNOWN
+
+    /**
+     * 节点对应的限定引用名 —— 「复制引用名」写进剪贴板的内容。
+     *
+     * 有字段名时给 `表.字段`（字段与表同一个 schema，因此只需一层限定）；
+     * 有表名时给 [SqlIdentifier.tableRef]；只有库名时给库引用。
+     */
+    fun treeReferenceText(target: TreeTarget): String {
+        val dialect = treeDialect
+        val table = target.table
+        val column = target.column
+        return when {
+            table != null && column != null -> {
+                val t = SqlIdentifier.tableRef(dialect, target.database, target.schema, table)
+                // 字段与表同属一个 schema，限定到表这一层已经足够 ——
+                // 再加一层 schema 反而把引用撑长，粘贴时要多删一段。
+                t + "." + SqlIdentifier.quote(dialect, column)
+            }
+            table != null -> SqlIdentifier.tableRef(dialect, target.database, target.schema, table)
+            else -> SqlIdentifier.databaseRef(dialect, target.database)
+        }
+    }
+
+    /** 节点显示用的裸名 —— 「复制名称」写进剪贴板的内容。 */
+    fun treePlainName(target: TreeTarget): String =
+        target.column ?: target.table ?: target.database
+
+    /** 复制成功后推一条通知（失败由各调用点自己带原因推）。 */
+    private fun notifyCopied(what: String, detail: String, ok: Boolean) {
+        val center = notifications ?: return
+        center.push(
+            if (ok) AppNotification.Severity.SUCCESS else AppNotification.Severity.ERROR,
+            if (ok) "已复制${what}" else "复制${what}失败",
+            detail,
+        )
+    }
+
+    /**
+     * 「复制引用名」/「复制名称」—— 纯本地动作，不发引擎请求。
+     *
+     * ## 为什么复制失败要推**错误**通知而不是静默
+     *
+     * 剪贴板写失败时用户手上什么都不会变，而界面**没有任何变化** —— 表现为
+     * 「我点了菜单项，什么都没发生」，且没有任何可排查的线索（无头环境 / 剪贴板被
+     * 占用 / Wayland 无剪贴板服务，三种原因用户都看不出来）。推一条错误通知，
+     * 用户至少知道是**这一步**失败了，而不是应用卡了。
+     */
+    fun copyTreeText(target: TreeTarget, quoted: Boolean) {
+        val what = if (quoted) "引用名" else "名称"
+        val text = if (quoted) treeReferenceText(target) else treePlainName(target)
+        notifyCopied(what, text, clipboard(text))
+    }
+
+    /**
+     * 「复制建表 DDL」—— 发 `TABLE.GET_DDL` 取引擎侧的建表语句再复制。
+     *
+     * ## 为什么 DDL **不能**前端拼
+     *
+     * 五个方言的建表语句差异大到没有共性可循：PG 要回填主键 / UNIQUE / CHECK /
+     * 注释且列类型要按 `information_schema` 还原长度，SQLite 直接读
+     * `sqlite_master.sql` 的原文，MySQL 要拼 `ENGINE=InnoDB` 与字符集子句。
+     * 前端拼一份的结果只会在某一个方言上看起来对 —— 这正是**引擎侧
+     * `getCreateTableDDL` 已经存在**的原因。
+     *
+     * ## schema 名的等待
+     *
+     * `TableGetDdlRequest.schema` 要的是 **schema 名**，与 [loadTableObjects] 同理：
+     * 必须等 `resolveSchemas` 回来再发，不能带着空串发一次「成功但取不到」的请求
+     * （那会退化成 H2 报 `Schema not found` / PG 查 `information_schema` 查空）。
+     */
+    fun copyTreeDdl(target: TreeTarget) {
+        val table = target.table
+        val database = target.database
+        // 字段节点上不给 DDL：DDL 是**整张表**的建表语句，从字段行点它拿到的是
+        // 一张与该字段毫不相干的表的语句。UI 侧已按 `onTableNode` 隐藏该项，
+        // 这里再挡一道是为了让「直接调状态机」也不会发出这个请求 ——
+        // 判据散在两处时，迟早会有一处被漏掉。
+        if (table == null || target.column != null) return
+        scope.launch {
+            val schema = if (target.schema.isNotBlank()) target.schema
+            else resolveSchemas(database).firstOrNull() ?: ""
+            val resp = runCatching {
+                engine.invoke(engineConn(database = database)) {
+                    category = Category.TABLE
+                    action = Action.GET_DDL
+                    tableRequest = tableRequest {
+                        getDdl = tableGetDdlRequest {
+                            tableName = table
+                            this.schema = schema
+                        }
+                    }
+                }
+            }.getOrNull()
+
+            val ddl = resp?.takeIf { it.success }?.table?.getDdl?.ddl.orEmpty()
+            if (ddl.isBlank()) {
+                // 失败原因**用引擎原文**：本项目里「请求成功但结果为空」比「请求失败」
+                // 更难察觉，而 DDL 为空几乎总是因为 schema / 表名对不上 ——
+                // 用户看到「复制失败」是没法排查的，看到原文才行。
+                val reason = resp?.error?.takeIf { it.isNotBlank() } ?: "引擎未返回建表语句"
+                notifyCopied("建表 DDL", reason, ok = false)
+            } else {
+                notifyCopied("建表 DDL", "${table}（${ddl.length} 字符）", clipboard(ddl))
+            }
+        }
+    }
 
     /** 打开的标签页 */
     var tabs: List<TablePreviewTab> by mutableStateOf(emptyList())

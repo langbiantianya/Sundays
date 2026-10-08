@@ -914,6 +914,45 @@ onEditConnection = { conn -> wizard = WizardState(conn, BASIC_INFO, NORMAL) }
 > 参考实现：`desktopApp/.../ConnectionSession.kt` 的 `newConnection()` / `quickConnect()` / `edit(config)`
 > 就是这三条语句（外加连接列表与引擎会话状态的管理）。
 
+### 4.7 `SqlIdentifier` —— 前端侧的标识符引用（对象树「复制引用名」）
+
+[`connection/SqlIdentifier.kt`](./src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt)
+把一个裸名按方言包成可粘贴进 SQL 编辑器的引用：`quote` / `qualified` / `tableRef` / `databaseRef`。
+
+#### 为什么 `shared/` 要有第二份，而不复用引擎的 `DatabaseDialect.quoteIdentifier`
+
+「复制引用名」是**纯本地**动作 —— 树上的表名本来就在本地状态里（`tablesByDatabase`），
+为一个本地动作发一次引擎往返是倒退（响应时间直接变成网络 RTT，而用户期望「点一下就进剪贴板」）。
+
+代价是引号风格要**两处同步**（同 `JdbcUrl.kt` 与 `buildJdbcUrl` 的关系）。
+`SqlIdentifierQuoteTest` 直接对照 5 个真实方言的 `quoteIdentifier` 逐个断言，任一侧单方面改引号风格即红。
+
+#### ⚠️ 与 `H2Dialect` 的一处**故意**分歧：不折叠大小写
+
+| | `H2Dialect.quoteIdentifier` | `SqlIdentifier.quote` |
+|---|---|---|
+| 输入 `users` | `"USERS"` | `"users"` |
+| 理由 | 名字**可能来自用户输入**（`SELECT * FROM users` 在 H2 命中 `USERS`），不猜折叠规则就命中不了 | 树上的名字**就是库里真实存着的名字** |
+
+H2 若用 `USERS` 建表 → 树上显示 `USERS` → 复制得 `"USERS"` ✅；
+若用 `"users"` 建表 → 树上显示 `users` → 复制得 `"users"` ✅。
+前端侧再 uppercase，第二种会被复制成 `"USERS"` —— 一个**指向另一张表的名字**。
+剪贴板里放一个看着对、实际查错表的引用，比不给引用更糟。
+
+> 这条分歧是**故意**的，不是漏抄。新增方言 / 改引号风格时，`SqlIdentifierQuoteTest`
+> 会在同一处同时暴露两侧的差异，由人判断该对齐哪一边。
+
+#### `tableRef` 的限定名判据：「有没有独立 schema 层」，不是「有没有 database」
+
+| 方言 | database 的含义 | `tableRef` 用什么限定 |
+|---|---|---|
+| MySQL | database **就是**命名空间（catalog 与 schema 合一） | database → `` `db`.`tbl` `` |
+| PG / SQLite / DuckDB / H2 | catalog 与 schema 是**两层**（PG 里 `examquestions` 是 catalog，`public` 才是 schema） | schema → `"public"."tbl"` |
+
+写成 `"examquestions"."biz_user"` 在 PG 里会被解析成一个**名为 examquestions 的 schema** 下的表，
+找不到 —— 用户看到的是「明明表就在眼前，引用出来却报错」。
+两个字段都为空时退化为裸引用：用户要的通常是「一个能粘进编辑器的引用」，不必强求全限定。
+
 ---
 
 ## 5. 顶层导航与应用主题
