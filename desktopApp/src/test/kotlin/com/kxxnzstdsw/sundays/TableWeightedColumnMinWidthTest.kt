@@ -5,8 +5,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.TABLE_BODY_TAG
 import com.kxxnzstdsw.sundays.table.TABLE_HEADER_TAG
@@ -14,6 +16,7 @@ import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 import org.junit.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -129,4 +132,18 @@ class TableWeightedColumnMinWidthTest {
             "4 列时不该有横向可滚量 —— 下限把内容撑宽过头了",
         )
     }
+
+    /**
+     * ⚠️ **这里刻意不留「表头列名可见」的断言** —— 试过两条，都不咬人：
+     *
+     * 1. 「23 个列名的语义节点都在」—— **在缺陷上照样绿**。列宽塌成 0 时
+     *    `Text` 节点依然存在于语义树（只是宽度为 0），`fetchSemanticsNodes()` 照样查得到。
+     * 2. 「第 2~6 列的语义宽度 > 0」—— **也照样绿**。`SemanticsNode.size` 量的是
+     *    **布局尺寸**，与「是否落在视口内、用户看不看得见」无关。
+     *
+     * 两条都是「量了一个对现象不敏感的量」。真窗口里表头只显示第一个列名
+     * （根因未确证，记在 `TEST_CASES.md` §9.24），要钉住它得先有一个
+     * **能量到「在视口内且可见」** 的判据 —— 目前 Compose 测试这边没有现成好用的，
+     * 与其写一条骗自己的绿断言，不如把这句话留在代码里。
+     */
 }

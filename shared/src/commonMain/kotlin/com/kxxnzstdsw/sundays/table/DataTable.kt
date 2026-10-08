@@ -491,10 +491,22 @@ const val TABLE_CELL_TAG_PREFIX = "sundays.cell."
 private val PAGINATION_COMPACT_WIDTH: Dp = 560.dp
 
 /**
- * 表头 —— 横向滚动由 [hScroll] 与表体**共享**（见 [DataTable] 调用点的说明）。
+ * 表头 —— 横向滚动由 [hScroll] 与表体**共享**（见 [DataTable] 调用点的说明），
+ * 列名与数据列因此永远对齐。
  *
  * [hScroll] 必须由调用方创建而不是这里自己 `remember`：两处各自持有状态就是「表头能滚、
  * 表体不能滚」那个缺陷的成因。
+ *
+ * [contentWidth] 排在 `horizontalScroll` **外面**这件事**动过、又被证伪、退回来了** ——
+ * 起因是 §9.21 走查时看到「表体 5 列清清楚楚、表头却只剩第一个列名 `id`」，
+ * 猜是 `weight` 在滚动容器的无界宽度里分不到空间、把 `width` 挪到滚动层内。
+ *
+ * **实测否定**：两种顺序下表头各列的语义宽度**都 > 0**（`TableWeightedColumnMinWidthTest`
+ * 量过，两种版本都绿），而真窗口里表头仍只显示第一个列名。
+ * 也就是说「列宽塌成 0」这个解释**不成立**，别再往这个方向猜了。
+ *
+ * 那个现象的**根因尚未确证**，已记在 `desktopApp/TEST_CASES.md` §9.24。
+ * 在确证之前，这里保持原样 —— 一个改不动的顺序，好过一个说不清为什么的顺序。
  */
 @Composable
 private fun TableHeader(
