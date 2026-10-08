@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -134,6 +135,7 @@ import com.kxxnzstdsw.grpc.triggerRequest
 import com.kxxnzstdsw.grpc.viewListRequest
 import com.kxxnzstdsw.grpc.viewRequest
 import com.kxxnzstdsw.grpc.systemRequest
+import com.kxxnzstdsw.grpc.tableColumnListRequest
 import com.kxxnzstdsw.grpc.tableListRequest
 import com.kxxnzstdsw.grpc.tableRequest
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -1878,6 +1880,12 @@ private fun DatabaseNode(
                             onOpen = { onOpenTable(name, tbl) },
                             expanded = slot in state.expandedTableObjects,
                             onToggleObjects = { state.toggleTableObjects(name, tbl) },
+                            columns = state.columnsOf(name, tbl),
+                            // 展开后、字段还没回来之前也算「加载中」——
+                            // 否则那一瞬间会渲染成「(无)」，看起来像这张表没有字段。
+                            columnsLoading = state.isTableObjectLoading(name, tbl) ||
+                                (state.columnsOf(name, tbl) == null && slot in state.expandedTableObjects),
+                            columnsError = state.tableObjectError["$slot::${DatabaseBrowserState.TableObjectKind.COLUMNS.name}"],
                             indexNames = state.tableObjects[slot]
                                 ?.get(DatabaseBrowserState.TableObjectKind.INDEX).orEmpty(),
                             foreignKeyNames = state.tableObjects[slot]
@@ -1979,6 +1987,10 @@ private fun TableLeaf(
     onToggleObjects: (() -> Unit)? = null,
     indexNames: List<String> = emptyList(),
     foreignKeyNames: List<String> = emptyList(),
+    /** 字段列表；`null` = 还没加载完（与「加载完但为空」要区分开，见 [ColumnRowGroup]）。 */
+    columns: List<DatabaseBrowserState.ColumnInfo>? = null,
+    columnsLoading: Boolean = false,
+    columnsError: String? = null,
 ) {
     Column {
         Row(
@@ -1998,9 +2010,16 @@ private fun TableLeaf(
                 // 展开箭头：与库节点的 chevron 同一套视觉语言。
                 // 单独一个小按钮而不是让整行双击 —— 整行单击已经占用在「打开预览」上，
                 // 同一个手势不能既开预览又展开对象。
+                //
+                // ⚠️ 描述要说「字段与索引外键」而不是只有索引外键：读屏用户听到
+                // 「展开 orders 的索引与外键」，展开后冒出几十个字段却毫无预期。
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
-                    contentDescription = if (expanded) "收起 $tableName 的索引与外键" else "展开 $tableName 的索引与外键",
+                    contentDescription = if (expanded) {
+                        "收起 $tableName 的字段、索引与外键"
+                    } else {
+                        "展开 $tableName 的字段、索引与外键"
+                    },
                     modifier = Modifier
                         .size(16.dp)
                         .testTag(schemaTableObjectsTag(tableName))
@@ -2023,13 +2042,136 @@ private fun TableLeaf(
             )
         }
         if (expanded) {
-            // 索引 / 外键放在**表节点下**而不是库节点下：引擎侧这两条路由要
-            // `table_name`，跟着表走才对得上；放库下就得把整库每张表的索引都拉一遍。
+            // 字段 / 索引 / 外键放在**表节点下**而不是库节点下：引擎侧这几条路由要
+            // `table_name`，跟着表走才对得上；放库下就得把整库每张表的都拉一遍。
             Column(modifier = Modifier.padding(start = 44.dp)) {
+                // 字段**排在最前**：用户展开一张表，八成是想知道它有哪些列、都是什么类型，
+                // 而不是先看索引。
+                ColumnRowGroup(
+                    label = "字段",
+                    columns = columns,
+                    loading = columnsLoading,
+                    error = columnsError,
+                )
                 ObjectGroupRow("索引", indexNames)
                 ObjectGroupRow("外键", foreignKeyNames)
             }
         }
+    }
+}
+
+/**
+ * 带 loading / error / empty 三态的字段分组。
+ *
+ * ## 为什么自己拿列表，而不是塞一个 `content` lambda
+ *
+ * 第一版传的是 `content: @Composable ColumnScope.() -> Unit`，空判断靠一个
+ * `var any by remember { mutableStateOf(false) }` —— 而 lambda 内部**没有**任何地方
+ * 把它置 true，于是走 else 分支就必然打印一行「(无)」。
+ * 真窗口上表现为：字段明明列了两行，下面还跟着一句「(无)」。
+ *
+ * 拿列表自己渲染就没有这个可能 —— **「有没有内容」和「渲染内容」在同一个作用域里**，
+ * 不会再有中间那个观察不到的开关。
+ *
+ * @param columns `null` = 还没加载完（与「加载完但为空」要区分开，否则加载中的一瞬间
+ *   会显示「(无)」，看起来像这张表没有字段）。
+ */
+@Composable
+private fun ColumnRowGroup(
+    label: String,
+    columns: List<DatabaseBrowserState.ColumnInfo>?,
+    loading: Boolean,
+    error: String?,
+) {
+    Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "$label：",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (loading) {
+                Spacer(Modifier.width(6.dp))
+                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(11.dp))
+            }
+        }
+        when {
+            error != null -> Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 12.dp, top = 1.dp),
+            )
+            // 加载中也显示「(无)」的话，用户会以为这张表没有字段，而那只是一瞬间的假象。
+            loading -> Unit
+            columns.isNullOrEmpty() -> Text(
+                text = "(无)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 12.dp, top = 1.dp),
+            )
+            else -> Column(modifier = Modifier.padding(start = 12.dp)) {
+                columns.forEach { ColumnRow(it) }
+            }
+        }
+    }
+}
+
+/**
+ * 一个字段行：`列名  类型  [PK] [自增] [非空]`。
+ *
+ * ## 为什么标记要跟在类型后面而不是塞进类型文本
+ *
+ * `VARCHAR(64) PK` 读起来像是类型的一部分。而 `PK` / `AI` / `NOT NULL` 是**约束**，
+ * 混进类型串里会让人以为「这是一种新类型」。分开写，扫一眼就能区分「这是什么」与
+ * 「有什么限制」。
+ */
+@Composable
+private fun ColumnRow(col: DatabaseBrowserState.ColumnInfo) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 1.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = col.name,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (col.primaryKey) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = col.typeWithSize,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        // 约束标记。空列不占位，否则没有约束的普通字段会整体左移、参差不齐
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (col.primaryKey) ColumnBadge("PK")
+            if (col.autoIncrement) ColumnBadge("AI")
+            // 只在**不可空**时标记：「可空」是绝大多数列的默认，写出来全是噪音
+            if (!col.nullable) ColumnBadge("非空")
+        }
+    }
+}
+
+/** 字段行尾的一个小约束标记。 */
+@Composable
+private fun ColumnBadge(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = winShape(3.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.dp),
+        )
     }
 }
 
@@ -4387,11 +4529,58 @@ class DatabaseBrowserState(
     private val _objectLoadError = mutableStateMapOf<String, String>()
     val objectLoadError: Map<String, String> get() = _objectLoadError
 
-    /** 表级对象的两种：**索引 / 外键**（引擎侧要 `table_name`，所以挂表节点下）。 */
+    /** 表级对象的三种：**字段 / 索引 / 外键**（引擎侧要 `table_name`，所以挂表节点下）。 */
     enum class TableObjectKind(val label: String) {
+        /** 字段 —— 走 `TABLE.LIST`（`tableColumnListRequest`），值结构化，存 [_tableColumns]。 */
+        COLUMNS("字段"),
+
         INDEX("索引"),
         FOREIGN_KEY("外键"),
     }
+
+    /**
+     * 一个字段的展示形态。
+     *
+     * 刻意**不直接存 proto 的 `ColumnDef`**：那是引擎的传输结构，UI 只需要
+     * 「名字 / 类型 / 主键 / 可空 / 自增」，中间隔一层以后引擎加字段不会波及 UI，
+     * 反过来 UI 想改展示（比如多显示一列注释）也不必动 proto 依赖。
+     */
+    data class ColumnInfo(
+        val name: String,
+        /** 类型原文；[typeWithSize] 才是「VARCHAR(64)」这种带长度的完整写法。 */
+        val type: String,
+        val size: Int,
+        val nullable: Boolean,
+        val primaryKey: Boolean,
+        val autoIncrement: Boolean,
+    ) {
+        /**
+         * `VARCHAR(64)` / `INT`。
+         *
+         * ⚠️ **不能无条件加括号**：`size` 是 proto 的 `int32`，未指定时是 **0**，
+         * 于是 `VARCHAR` 会变成 `VARCHAR(0)` —— 一个不存在的类型，
+         * 用户看了会以为这张表有问题。
+         */
+        val typeWithSize: String get() = if (size > 0) "$type($size)" else type
+    }
+
+    /**
+     * `"库::表" -> 字段列表`。
+     *
+     * 与 [_tableObjects]（只存名字）**分开**：字段要显示类型 / 主键 / 可空，
+     * 塞进 `Map<TableObjectKind, List<String>>` 就只剩名字了。
+     */
+    private val _tableColumns = mutableStateMapOf<String, List<ColumnInfo>>()
+
+    /** 表级对象加载错误：`"库::表::类型" -> 文案`。 */
+    private val _tableObjectError = mutableStateMapOf<String, String>()
+    val tableObjectError: Map<String, String> get() = _tableObjectError
+
+    fun columnsOf(database: String, table: String): List<ColumnInfo>? =
+        _tableColumns["$database::$table"]
+
+    fun isTableObjectLoading(database: String, table: String): Boolean =
+        loadingTableObjects.any { it.first == "$database::$table" }
 
     /** `"库::表" -> 该类对象名列表。 */
     private val _tableObjects = mutableStateMapOf<String, Map<TableObjectKind, List<String>>>()
@@ -6063,6 +6252,7 @@ class DatabaseBrowserState(
                         category = when (kind) {
                             TableObjectKind.INDEX -> Category.INDEX
                             TableObjectKind.FOREIGN_KEY -> Category.FOREIGN_KEY
+                            TableObjectKind.COLUMNS -> Category.TABLE
                         }
                         action = Action.LIST
                         when (kind) {
@@ -6078,17 +6268,48 @@ class DatabaseBrowserState(
                                     this.schema = schema
                                 }
                             }
+                            // 字段走 `TABLE.LIST` 的 **column_list** 分支（`TableRequest` 的 oneof 里
+                            // `list` 是表列表、`column_list` 才是列列表 —— 两个字段名只差前缀，
+                            // 写错编译期根本发现不了，只会拿到「空列表」的假成功）。
+                            // ⚠️ 这里**不能**把 catalog 塞进 `schema` —— 那会让 H2 执行
+                            // `SET SCHEMA "<库名>"` 而报「Schema not found」（同 engineConnFor 的 KDoc）。
+                            TableObjectKind.COLUMNS -> tableRequest = tableRequest {
+                                columnList = tableColumnListRequest {
+                                    tableName = table
+                                    this.schema = schema
+                                }
+                            }
                         }
                     }
                 }.getOrNull()
+                // ⚠️ 失败必须**就地留文案**，不能静默 —— 「请求成功但结果为空」看上去像
+                // 「这张表没有索引 / 没有字段」，那是比报错更难察觉的一类（见本函数上方注释）。
                 if (resp != null && resp.success) {
-                    val names = when (kind) {
-                        // 索引 / 外键的 list 元素是消息（带 columns / ref_table 等），
-                        // 树里只显示名字 —— 其余字段留给将来的对象详情面板。
-                        TableObjectKind.INDEX -> resp.index.list.itemsList.map { it.name }
-                        TableObjectKind.FOREIGN_KEY -> resp.foreignKey.list.itemsList.map { it.name }
+                    when (kind) {
+                        TableObjectKind.INDEX ->
+                            _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap())
+                                .plus(kind to resp.index.list.itemsList.map { it.name })
+                        TableObjectKind.FOREIGN_KEY ->
+                            _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap())
+                                .plus(kind to resp.foreignKey.list.itemsList.map { it.name })
+                        TableObjectKind.COLUMNS ->
+                            _tableColumns[slot] = resp.table.columns.itemsList.map {
+                                ColumnInfo(
+                                    name = it.name,
+                                    type = it.type,
+                                    size = it.size,
+                                    // proto3 的 `optional bool nullable` 有 presence 语义：
+                                    // 没给就是 null，按「默认可空」处理，与引擎的 mapper 一致。
+                                    nullable = if (it.hasNullable()) it.nullable else true,
+                                    primaryKey = it.isPrimaryKey,
+                                    autoIncrement = it.autoIncrement,
+                                )
+                            }
                     }
-                    _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap()).plus(kind to names)
+                    _tableObjectError.remove("$slot::${kind.name}")
+                } else {
+                    _tableObjectError["$slot::${kind.name}"] =
+                        resp?.error?.takeIf { it.isNotBlank() } ?: "加载失败"
                 }
                 loadingTableObjects.remove(slot to kind)
             }

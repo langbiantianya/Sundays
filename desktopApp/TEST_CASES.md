@@ -1589,3 +1589,65 @@ probe_only_here' at line 2
 - **变异验证 2**：`keyOf` 退回不含错误文本 → `错误文本变化视为新的一件事` 变红
 - 真窗口复验：徽标计数与去重（发现并修掉上面那个 bug）
 
+### 9.20 树节点展开时显示字段信息
+
+表节点展开后原本只有「索引 / 外键」两行。用户展开一张表，八成是想知道**它有哪些列、
+都是什么类型**，于是把字段加进来并**排在最前**（先看列，再看约束）。
+
+#### 数据来源与结构
+
+走 `TABLE.LIST` 的 **`column_list`** 分支（`TableColumnListRequest`）——
+⚠️ 注意 `TableRequest` 的 oneof 里 `list` 是**表列表**、`column_list` 才是**列列表**，
+两个字段名只差一个前缀，写错编译期发现不了，只会拿到「空列表」的假成功。
+
+新增 `DatabaseBrowserState.ColumnInfo` 作为 UI 侧展示形态，**不直接存 proto 的
+`ColumnDef`** —— 那是引擎的传输结构。隔一层以后引擎加字段不会波及 UI，反过来 UI 想改
+展示也不必动 proto 依赖。字段列表存**独立的** `_tableColumns` 而不复用
+`_tableObjects`（后者是 `Map<kind, List<String>>`，塞进去就只剩名字了）。
+
+#### 三处细节
+
+1. **`typeWithSize` 不能无条件加括号。** proto 的 `ColumnDef.size` 是 `int32`，
+   **未指定时是 0** —— 于是 `TEXT` 会变成 `TEXT(0)`，一个不存在的类型，
+   用户看了会以为这张表有问题。`ColumnInfoDisplayTest` 钉住这一条。
+2. **约束标记不混进类型文本。** `VARCHAR(64) PK` 读起来像「这是一种新类型」。
+   `PK` / `AI` / `非空` 跟在类型后面分开写，扫一眼就能区分「这是什么」与
+   「有什么限制」。且**只在不可空时**标「非空」—— 可空是绝大多数列的默认，
+   写出来全是噪音。
+3. **展开箭头的无障碍描述要跟着改。** 原来写「展开 orders 的索引与外键」，
+   展开后冒出几十个字段却毫无预期。改成「字段、索引与外键」。
+
+#### 真窗口当场抓到：「(无)」重复出现
+
+```
+字段：
+  id      INT(10)    [PK] [非空]
+  note    VARCHAR(64)
+  (无)          ← 不该在这里
+索引：PRIMARY
+```
+
+原因是 `ColumnRowGroup` 第一版收的是 `content: @Composable ColumnScope.() -> Unit`，
+空判断靠一个 `var any by remember { mutableStateOf(false) }` —— 而 lambda 内部
+**没有任何地方**把它置 true，于是走 else 分支就必然打印一行「(无)」。
+
+改成让分组**自己拿列表**渲染：「有没有内容」和「渲染内容」在同一个作用域里，
+中间不再有那个观察不到的开关。这类「用一个状态位代表『子组件渲染过没有』」的写法，
+状态位与实际渲染分居两处时几乎必然出错。
+
+#### 顺带修的：表级对象失败不再静默
+
+`loadTableObjects` 原来只在 `resp.success` 时写结果，失败**什么都不做** ——
+于是「请求成功但结果是空的」和「请求失败」在界面上长得一模一样，
+用户看到的是「(无)」，以为这张表本来就没有索引 / 字段。
+现在新增 `_tableObjectError`，失败就地留引擎给的原文（逐类显示，与库级对象同一套思路）。
+
+#### 验证
+
+- `ColumnInfoDisplayTest`（5 项）：带长度拼类型 / 长度为 0 不加括号 /
+  字段名与类型独立 / 约束不混进类型 / 默认可空
+- 真窗口复验（真 MySQL，展开 `sundays_xdb.probe_shared_name`）：
+  `id INT(10) [PK] [非空]`、`note VARCHAR(64)`、索引 `PRIMARY`、外键 `(无)`，
+  且修掉了重复的「(无)」
+- 全量 `:engine:test :shared:jvmTest :desktopApp:test`
+
