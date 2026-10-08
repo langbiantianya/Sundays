@@ -188,6 +188,28 @@ object ExportProcessManager {
     val hasUsableChannel: Boolean get() = _isRunning.get() && commandObserver != null
 
     /**
+     * 子进程**此刻**还活着吗 —— 判据是 [Process.isAlive]，**不是** [_isRunning]。
+     *
+     * ## 为什么 [isRunning] 当不了这个判据
+     *
+     * `_isRunning` 的语义只是「**曾经**拉起过一个子进程」，而且**只有**本对象自己会改它：
+     * [stop] 改、进程监控线程改。子进程**自己崩掉**（OOM、驱动炸、被外部杀掉）时，
+     * 标记还留在 true 上 —— 于是：
+     *
+     * - 「能不能发命令」→ [hasUsableChannel] 判 false，正确
+     * - 「要不要重启子进程」→ 旧代码看 `isRunning`，得到「在，不用重启」，**错了**
+     *
+     * 后果实测（`ExportPipelineIntegrationTest` 稳定复现）：
+     * 漂移态（标记说进程在、实际已死）下不去重启，只去 [awaitHubReadyOrReportFailure]，
+     * 而那是在等一个**已经没人监听的端口** —— 白等满 30 秒后
+     * 「导出子进程通道未就绪」，**永远不会自愈**。
+     *
+     * 「重启要等 30 秒才失败」和「根本不自愈」是两个量级的差别，
+     * 所以这条判据必须是「进程**现在**还在不在」，而不是「上次拉起时在不在」。
+     */
+    val isProcessAlive: Boolean get() = runCatching { process?.isAlive == true }.getOrDefault(false)
+
+    /**
      * **仅测试用**：把状态摆成「进程还活着、但流没了」这个漂移态。
      *
      * ## 为什么需要这个钩子
@@ -198,7 +220,13 @@ object ExportProcessManager {
      *
      * 有了它，[ExportPipelineIntegrationTest] 才能真正端到端地验：
      * 摆出漂移态 → 发起导出 → 断言**不是**「通道未就绪」，
-     * 也就是「修法真的会重建流」。这一条对把判据写回 `isRunning` 的变异是红的。
+     * 也就是「修法真的会重建通道」。这一条对把判据写回 `isRunning` 的变异是红的。
+     *
+     * ⚠️ 名字里的 `WhileProcessAlive` 是历史遗留，实测下来它造的其实是**更糟**的一档：
+     * 调用前测试刚 `stop()` 过，**子进程是真的没了**，只是标记被强行按成 true。
+     * 于是漂移态 = 「标记说进程在、实际已死」，正是子进程自己崩掉后的真实形态。
+     * 保留这个名字是为了不改已有调用点，但判断代码时按
+     * 「`isRunning` 与 `isProcessAlive` 不一致」来理解，不要当成「进程健在、只是流断了」。
      *
      * 不用反射是刻意的：`commandObserver` 是 private 字段，
      * 反射改它既脆弱又绕过类型检查。

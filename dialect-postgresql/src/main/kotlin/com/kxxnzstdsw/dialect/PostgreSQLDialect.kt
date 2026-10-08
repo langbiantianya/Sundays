@@ -54,9 +54,62 @@ class PostgreSQLDialect : DatabaseDialect {
         return "SET search_path TO ${quoteIdentifier(schema)}"
     }
 
+    /**
+     * PG 的 catalog 只能在**建连接时**选：数据库名是启动参数，JDBC 没有 `USE`。
+     *
+     * 所以这里把 URL 里的库名整段换掉，而不是靠 [switchCatalog]（本方言不覆盖它）。
+     *
+     * ## URL 的形状
+     *
+     * ```
+     * jdbc:postgresql://HOST:PORT/DB?参数=值&另一个=值
+     *                   └─authority─┘ └DB┘ └────参数────┘
+     * ```
+     *
+     * 切库只动 `/` 与 `?` 之间那一段：authority 与全部参数**原样保留**
+     * —— 参数里可能有 `currentSchema`、`sslmode`、`ApplicationName`，丢了就是行为变化。
+     *
+     * ## 为什么对库名做严格校验
+     *
+     * [catalog] 直接来自用户在树上点的那一层，不可信。库名里若含 `/` `?` `#`，
+     * 拼出来的 URL 会指向**另一个**库 —— 静默连到错的库、读到错的表，
+     * 比连不上危险得多。所以一律拒绝，让调用方拿到明确的错误。
+     *
+     * 判据可分：`/` 会截断库名、`?` 会把尾巴当参数、`#` 会截断 URL 片段。
+     * 连空白也一并拒掉 —— URL 里没转义会直接让驱动解析失败。
+     */
+    override fun jdbcUrlForCatalog(jdbcUrl: String, catalog: String): String {
+        if (catalog.isBlank()) return jdbcUrl
+        require(catalog.none { it in ILLEGAL_IN_URL_PATH }) {
+            "数据库名不能包含 ${ILLEGAL_IN_URL_PATH.joinToString("") { "「$it」" }} 等字符：'$catalog'"
+        }
+
+        // 没有前缀匹配 = 这个 URL 不归 PG 管，放行原值，交给别处的校验报错
+        if (!jdbcUrl.startsWith(jdbcUrlPrefix)) return jdbcUrl
+
+        val rest = jdbcUrl.substring(jdbcUrlPrefix.length)
+        // ⚠️ 必须先摘掉 authority 前面那两个斜杠。
+        // 直接在 `rest` 里找第一个 `/` 会落在下标 0（就是 `//` 的第一个），
+        // 于是 authority 被切成空串、host:port 整段丢失，产出 `jdbc:postgresql:/库名`。
+        // —— 这正是第一版实现的 bug，被 [PostgreSQLJdbcUrlTest] 当场抓出来的。
+        val separator = if (rest.startsWith("//")) "//" else ""
+        val body = rest.substring(separator.length)
+        val slashAt = body.indexOf('/')
+        // `jdbc:postgresql://host:port` 这种没写库名的：补一段即可
+        if (slashAt < 0) return jdbcUrlPrefix + separator + body + "/" + catalog
+
+        val authority = body.substring(0, slashAt)
+        val paramAt = body.indexOf('?', slashAt)
+        val params = if (paramAt < 0) "" else body.substring(paramAt)
+        return jdbcUrlPrefix + separator + authority + "/" + catalog + params
+    }
+
     // region companion object — 预编译正则与常量集合
 
     companion object {
+        /** 库名里出现这些字符会让 URL 的结构被重解析 —— 见 [jdbcUrlForCatalog]。 */
+        private val ILLEGAL_IN_URL_PATH = charArrayOf('/', '?', '#', ' ', '\t', '\n', '\r', '%')
+
         /** ORDER BY 格式校验：标识符可用双引号包裹，后跟可选 ASC/DESC（v2.9 #16 用 DialectUtil 工厂生成） */
         private val ORDER_BY_REGEX = DialectUtil.orderByRegex('"')
 
@@ -146,14 +199,50 @@ class PostgreSQLDialect : DatabaseDialect {
         val tables = mutableListOf<Map<String, String>>()
         val query = if (schema.isNotBlank()) {
             logger.debug("listTables: querying schema '{}' in database '{}'", schema, database)
-            // 指定了 schema → 精确过滤
+            // 指定了 schema → 精确过滤。这里**故意不**排除系统 schema：
+            // 调用方点名了 pg_catalog 就是显式意图，而 UI 侧能选到的 schema 已经被
+            // [listSchemas] 过滤过（pg_namespace 那侧 `NOT LIKE 'pg_%'`），根本点不到系统 schema。
             "SELECT table_name, table_type FROM information_schema.tables " +
             "WHERE table_schema = ? AND table_type IN ('BASE TABLE', 'VIEW') ORDER BY table_name"
         } else {
             logger.debug("listTables: querying all schemas in search_path for database '{}'", database)
-            // 未指定 → 匹配 search_path 中所有 schema
+            // 未指定 schema → 匹配 search_path 里的 schema。
+            //
+            // ## 为什么必须是 current_schemas(false) 而不是 (true)
+            //
+            // `current_schemas(include_implicit boolean)` 的 `true` 会把**隐式**在搜索路径
+            // 开头的 `pg_catalog` 也返回。实测（PG 17，`search_path = "$user", public`）：
+            //
+            // ```
+            // current_schemas(true)  = {pg_catalog, public}
+            // current_schemas(false) = {public}
+            // ```
+            //
+            // 而 `information_schema.tables` 并不只暴露用户表 —— PG 的系统目录
+            // （pg_class / pg_attribute / pg_type …）在里面同样以 `BASE TABLE` 出现，
+            // `table_schema` 就是 `pg_catalog`。实测该库有 **64 张系统表 + 80 个系统视图**。
+            //
+            // 两个条件一叠加，`ANY(current_schemas(true))` 会把整个系统目录塞进结果：
+            // 用户展开任意一个业务库，底下第一屏全是 pg_aggregate / pg_am / pg_attrdef …
+            // （`DesktopApp/TEST_CASES.md` §9.21 记着这次走查拍到的实况。）
+            //
+            // `false` 只返回 search_path 里**显式**写出的 schema（默认即 `public`），
+            // 用户的表一个不少，系统对象一个不进。
+            //
+            // ## 为什么**没有**再补一条 `AND table_schema NOT IN ('pg_catalog', …)`
+            //
+            // 试过，是多余的，而且两半都是死代码：
+            // - `pg_catalog` —— `(false)` 本来就不返回它，加了也不改变结果
+            //   （变异验证：把 `NOT IN` 换成不存在的 schema 名，测试照样全绿）
+            // - `information_schema` —— 它**压根不在** `current_schemas()` 的返回值里，
+            //   连 `(true)` 都没有（见上面实测）
+            //
+            // 过滤由 `false` 一个参数**单独完成**，不留「看着更保险、实际不生效」的余量。
+            // 与 [listSchemas]（`pg_namespace` 那侧 `NOT LIKE 'pg_%'`）的过滤意图一致 ——
+            // 同一个「不算系统对象」的判断必须只有一处定义，否则迟早一边漏。
             "SELECT table_name, table_type FROM information_schema.tables " +
-            "WHERE table_schema = ANY(current_schemas(true)) AND table_type IN ('BASE TABLE', 'VIEW') ORDER BY table_name"
+            "WHERE table_schema = ANY(current_schemas(false)) " +
+            "AND table_type IN ('BASE TABLE', 'VIEW') ORDER BY table_name"
         }
         conn.prepareStatement(query).use { stmt ->
             if (schema.isNotBlank()) stmt.setString(1, schema)

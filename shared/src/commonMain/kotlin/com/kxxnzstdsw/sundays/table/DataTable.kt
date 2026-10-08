@@ -360,17 +360,44 @@ fun DataTable(
  * 于是「有加权列」时内容宽度就是视口宽（不足则由定宽列撑开并触发横滚），
  * 「全是定宽列」时就是定宽之和（超出视口即横滚）。两种情形都保住了
  * 原有的「共用一个 ScrollState、表头表体永远对齐」的契约。
+ *
+ * ## 加权列的最小宽度 —— 为什么不能只取视口宽
+ *
+ * 浏览屏建列时**只给 key 与 header**（`TableColumn(key, header)`），`width` 为 null，
+ * 全部走 `weight` 路径。而 `weight` 是在**给定内容宽度内**均分的：
+ * 视口 650dp × 23 列 = **每列 28dp** —— 宽不过两个字符。
+ *
+ * 真窗口实测（PG `examquestions.biz_user`，23 个字段）：整张表塌成一团竖条，
+ * 表头只剩第一个列名 `id`，其余 22 个列名被压到看不见，数值互相叠着；
+ * 而点开右侧「详情」面板读数完全正常 —— **数据是对的，只是网格没法看**。
+ *
+ * 所以内容宽度必须给加权列一个**下限** [MIN_WEIGHTED_COLUMN_WIDTH]，
+ * 列一多就让内容宽于视口、**触发横向滚动**，而不是把所有列挤成不可读的宽度。
+ *
+ * 100dp 大约容纳 13~14 个字符，够放下常见的列名（`last_login_at` 正好 13 个），
+ * 也让一位数字看得清；再窄就得横滚才看得见，那不如一开始就给足宽度。
  */
 private fun contentWidthFor(columns: List<TableColumn>, viewport: Dp): Dp {
     if (columns.isEmpty()) return viewport
     val fixed = columns.fold(0.dp) { acc, c -> acc + (c.width ?: 0.dp) }
-    val hasWeighted = columns.any { it.width == null }
+    val weightedCount = columns.count { it.width == null }
     // 分隔线与左右内边距按 1dp / 12dp 估算，量级足够（差几 dp 不影响判断），
     // 真正要紧的是**有没有被固定成一个具体值**。
     val chrome = 24.dp + (columns.size - 1).coerceAtLeast(0).dp
-    val minimum = fixed + chrome
-    return if (hasWeighted) maxOf(viewport, minimum) else minimum
+    // ⚠️ 没有 `Dp.times(Int)` —— 必须先在 Float 上乘再转回 Dp，否则编译不过
+    val weightedFloor = (weightedCount * MIN_WEIGHTED_COLUMN_WIDTH.value).dp
+    val minimum = fixed + weightedFloor + chrome
+    // 两种列型都取 maxOf：定宽列加起来比视口窄时，内容宽度也不该小于视口，
+    // 否则右侧会空出一块，滚动条与底栏的边界也对不上。
+    return maxOf(viewport, minimum)
 }
+
+/**
+ * 加权列的**最小**内容宽度 —— 见 [contentWidthFor]。
+ *
+ * 定宽列不受此约束（它们本来就是显式意图），只有 `weight` 列靠下限兜底。
+ */
+private val MIN_WEIGHTED_COLUMN_WIDTH: Dp = 100.dp
 
 /** 表头容器的 UI 测试 tag —— 见 `TableColumnAlignmentTest`。 */
 const val TABLE_HEADER_TAG = "sundays.tableHeader"

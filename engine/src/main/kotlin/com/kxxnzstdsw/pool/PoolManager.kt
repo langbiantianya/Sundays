@@ -199,8 +199,21 @@ object PoolManager {
     private fun createDataSource(config: ConnectionConfig, schema: String): HikariDataSource {
         val dialect = resolveDialect(config)
         // 局部名不能叫 jdbcUrl —— apply{} 内简单名会解析到 HikariConfig.jdbcUrl 上，导致自赋值
-        val resolvedJdbcUrl = if (config.jdbcUrl.isNotBlank()) config.jdbcUrl
-                              else dialect.buildJdbcUrl(config.host, config.port, config.database)
+        val rawJdbcUrl = if (config.jdbcUrl.isNotBlank()) config.jdbcUrl
+                         else dialect.buildJdbcUrl(config.host, config.port, config.database)
+
+        // 建池时就把 URL 指向 `config.database`。
+        //
+        // 对**能在已有连接上切**的方言（MySQL）这一步是 no-op，切换交给 [applyCatalog]。
+        // 对**连上就锁死**的方言（PostgreSQL）这一步是唯一的机会 —— 数据库名是启动参数，
+        // JDBC 没有 `USE`，建完池再切已经晚了。
+        //
+        // 漏掉它的后果：PG 上从连接配置（URL 写死 bootstrap 库）连进来后，点左侧树里的
+        // 任何别的库，看到的都还是 bootstrap 库的内容 —— 静默读到错的库，比报错危险得多。
+        //
+        // 安全前提：[poolKey] 已按 `config.database` 分池，不同 catalog 拿到的是不同的池，
+        // 改写后的 URL 不会被旧池挡下来。
+        val resolvedJdbcUrl = dialect.jdbcUrlForCatalog(rawJdbcUrl, config.database)
 
         logger.info("Creating new connection pool for driver=${dialect.driverName} url=$resolvedJdbcUrl schema=$schema")
 
@@ -243,3 +256,4 @@ object PoolManager {
         pools.clear()
     }
 }
+

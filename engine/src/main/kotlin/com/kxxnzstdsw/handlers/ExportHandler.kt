@@ -300,9 +300,20 @@ object ExportHandler {
      */
     private suspend fun ensureSubprocessRunning(jarPath: String?) {
         if (ExportProcessManager.hasUsableChannel) return
-        // 进程可能还在（只是流断了），这时 `start` 里的 CAS 会挡住重复拉起，
-        // 后面的 awaitHubReady 会直接重建流 —— 两条路都能收敛到「通道可用」。
-        if (!ExportProcessManager.isRunning) {
+        // ⚠️ 判据必须是 [ExportProcessManager.isProcessAlive]（`Process.isAlive`），
+        // **不能**用 `isRunning` —— 后者只说明「曾经拉起过」，子进程自己崩了标记还留在 true。
+        //
+        // 旧代码在这里写 `if (!isRunning) start()`，于是漂移态（标记说在、实际已死）
+        // 走的是「不重启、只等端口」那条路 —— 等的是一个**已经没人监听的端口**：
+        // 白等满 30 秒后报「导出子进程通道未就绪」，**永远不会自愈**。
+        // （`ExportPipelineIntegrationTest` 稳定复现：整条用例耗时 30.14s 而其余 5 条都 <2s。）
+        //
+        // 这里先 `stop()` 再 `start()`：`start()` 里的 CAS 要求 `_isRunning == false`，
+        // 而陈旧标记还占着 true，不清掉就拉不起新进程。
+        // 对已死进程而言 `stop()` 是安全的 no-op —— 它发的 SHUTDOWN 命令无人接收，
+        // `destroyForcibly()` 打在一个已退出的进程上同样无害。
+        if (!ExportProcessManager.isProcessAlive) {
+            ExportProcessManager.stop()
             ExportProcessManager.start(jarPath)
         }
         // ⚠️ 原来这里只 `delay(200ms)`，然后就 `observer.onNext(cmd)`。

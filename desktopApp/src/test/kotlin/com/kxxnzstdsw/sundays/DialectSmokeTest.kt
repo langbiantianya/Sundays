@@ -501,6 +501,19 @@ class DialectSmokeTest(private val target: SmokeTarget) {
     /**
      * 解析 schema 名 —— 库级对象查询要的是 schema（H2 `PUBLIC` / PG `public` / MySQL 等于库名），
      * **不是**库名。拿库名去填会让 H2 执行 `SET SCHEMA "<库名>"` → Schema not found。
+     *
+     * ⚠️ **必须点名 `public`，不能拿列表的第一个**。
+     *
+     * `SCHEMA.LIST` 按 `nspname` 排序，而用户自建的 schema 完全可能排在 `public` 前面 ——
+     * 库里只要有一个叫 `alpha` 的 schema，`firstOrNull()` 就会返回它，
+     * 于是库级对象查询（视图 / 索引 / 外键）全打到**另一个 schema** 上，
+     * 冒烟报出来的是「视图列表为空」，而根因跟视图半点关系都没有。
+     *
+     * 真实踩到过：`PostgreSQLSystemObjectTest` 往同一个库建了 `probe_ns` / `probe_hidden`
+     * 两个 schema（字母序 p-r-o-b < p-u-b），`DialectSmokeTest` 的 S3 立刻变红。
+     *
+     * 「那个 schema 不叫 public」时退回第一个 —— 库里连 public 都没有是另一种情况，
+     * 那时**随便哪个 schema** 都比空强。
      */
     private fun resolveSchema(): String? = runCatching {
         val resp = invoke(Category.SCHEMA, Action.LIST) {
@@ -508,7 +521,8 @@ class DialectSmokeTest(private val target: SmokeTarget) {
                 list = schemaListRequest { level = "schema"; database = conn.database }
             }
         }
-        resp.schema.list.itemsList.firstOrNull()
+        val schemas = resp.schema.list.itemsList
+        schemas.firstOrNull { it.equals("public", ignoreCase = true) } ?: schemas.firstOrNull()
     }.getOrNull()
 
     /** 直连计数 —— 「真的落库了吗」与事务可见性都靠它。 */

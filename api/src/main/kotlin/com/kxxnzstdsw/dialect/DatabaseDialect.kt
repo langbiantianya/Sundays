@@ -153,7 +153,7 @@ interface DatabaseDialect {
      * | 方言 | `database` 的实际含义 | 切 catalog 是否成立 |
      * |---|---|---|
      * | MySQL | catalog 名（一个实例多个 database） | ✅ 需要 |
-     * | PostgreSQL | catalog == database，**但连上就锁死在那一个库** | ❌ 无意义 |
+     * | PostgreSQL | catalog == database，**但连接一建立就锁死在 URL 指的那个库** | ⚠️ 换 URL 才切得过去（见 [jdbcUrlForCatalog]） |
      * | SQLite / DuckDB | **文件路径**（`DuckDbSmoke` 里 `database` 就是 `xx.duckdb` 路径） | ❌ 有害 |
      * | H2 | `setCatalog` 是**静默 no-op** | ❌ 无效 |
      *
@@ -161,6 +161,19 @@ interface DatabaseDialect {
      * `SET schema = 'x'`，而 `x` 是文件路径，于是直接报
      * `Catalog Error: SET schema: No catalog + schema named "C:\...\xx.duckdb"`
      * —— 连接整个建不起来（`DialectSmokeTest` [DuckDB] / `DuckDBHandlerIntegrationTest` 全红）。
+     *
+     * ## PostgreSQL 那一行曾经写着「无意义」，是**错的**
+     *
+     * 错在只考虑了「连接配置的 `database` 就是用户唯一要用的库」这一种情形。
+     * 但 sundays 支持**一个连接浏览多个库**（PG 方言 `supportsCrossDatabase = true`）：
+     * 用户从连接配置（URL 里写死 `postgres`）连进来，再点左侧树里的别的库。
+     * 那时 `switchCatalog` 空实现 = **永远停在 `postgres` 库**，
+     * 用户点 `examquestions` 看到的却是 `postgres` 库的表 —— 静默读到错的库，
+     * 比报错危险得多。
+     *
+     * PG JDBC 没有 `USE`，所以这条路走不通；必须在**建池时**把 URL 里的库名换掉，
+     * 那正是 [jdbcUrlForCatalog] 的职责。本方法对 PG 保持空实现即可 ——
+     * URL 已经切对了，不需要再 `USE` 一次。
      *
      * 所以「有没有 catalog 可切」必须由**方言自己**回答，默认空实现 = 没有。
      *
@@ -174,6 +187,37 @@ interface DatabaseDialect {
     fun switchCatalog(conn: Connection, catalog: String) {
         // 默认空实现：该方言的 `database` 不是 catalog（H2 / SQLite / DuckDB / PostgreSQL）
     }
+
+    /**
+     * 把 [jdbcUrl] 改写成「连接到 [catalog]」的等价 URL，用于**建池时**。
+     *
+     * ## 为什么需要它，而不是只靠 [switchCatalog]
+     *
+     * 两类方言切换 catalog 的**时机**不同：
+     *
+     * - **能在已有连接上切**（MySQL：`USE x`）—— 建池用什么 URL 无所谓，
+     *   借出连接时 [switchCatalog] 补一刀即可。
+     * - **连接一建立就锁死在某个库**（PostgreSQL：数据库是连接的启动参数，
+     *   JDBC 没有 `USE`）—— 那么**只有在 URL 里换掉库名**才切得过去。
+     *   建完池再 [switchCatalog] 已经太晚了：连接早就落在 bootstrap 库上了。
+     *
+     * PG 上这个区别是实打实的：前端从连接配置（库里写死 `postgres`）连进来后，
+     * 点左侧树里的**任何**别的库，`information_schema` 查的都是 `postgres` 库的内容 ——
+     * 用户点 `examquestions`，看到的是 `postgres` 库的表。
+     *
+     * ## 契约
+     *
+     * - 默认实现返回**原 URL** —— 该方言的 `database` 不是可切换的 catalog，行为不变。
+     * - 只有在 [configKey] 已经按 `database` 分池的前提下改写 URL 才安全：
+     *   不同 catalog 必须拿到**不同的池**，否则改写后的 URL 会被旧池挡住（[PoolManager] 依赖这一点）。
+     * - [catalog] 不可信（来自用户点的树节点），实现**必须**校验：
+     *   拼出一个连到别的库的 URL，比不切库更危险。
+     *
+     * @param jdbcUrl 连接配置里的原始 URL（可能带方言特定参数）
+     * @param catalog 目标库名（[ConnectionConfig.database]）
+     * @return 指向 [catalog] 的 URL；不改写时返回 [jdbcUrl] 原值
+     */
+    fun jdbcUrlForCatalog(jdbcUrl: String, catalog: String): String = jdbcUrl
 
     /**
      * 列出所有 database（导航第一级：MySQL 的 SHOW DATABASES / PG 的 pg_database / H2 的 [config.database]）。

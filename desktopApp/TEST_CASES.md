@@ -1651,3 +1651,201 @@ probe_only_here' at line 2
   且修掉了重复的「(无)」
 - 全量 `:engine:test :shared:jvmTest :desktopApp:test`
 
+
+### 9.21 PostgreSQL 全功能走查：三个只有真库才暴露的缺陷
+
+对 `192.168.1.5:5432`（探针 PG）做了一次完整 GUI 走查，
+发现**三个互相叠加的缺陷**，每一个都需要真实 PG + 真实窗口才暴露。
+
+#### 缺陷一：用户库里把整个系统目录当成用户的表
+
+展开任意 PG 业务库，底下第一屏是
+
+```
+pg_aggregate / pg_am / pg_amop / pg_attrdef / pg_attribute /
+pg_auth_members / pg_authid / pg_available_extension_versions / …
+```
+
+真正的业务表被挤到 60 多行之后。
+
+**根因**：`PostgreSQLDialect.listTables` 在 `schema` 为空时走
+`table_schema = ANY(current_schemas(true))` —— 那个 `true` 是 `include_implicit`，
+而 **`pg_catalog` 正是隐式搜索路径的第一项**。实测：
+
+```
+current_schemas(true)  = {pg_catalog, public}
+current_schemas(false) = {public}
+```
+
+致命的一环是 `information_schema.tables` **并不只暴露用户表**：PG 的系统目录表在里面
+同样以 `BASE TABLE` 出现（实测目标库 **64 张系统表 + 80 个系统视图**），`table_schema`
+就是 `pg_catalog`。两个条件一叠加，整个系统目录进了结果集。
+
+改成 `current_schemas(false)`。
+
+⚠️ **没有**再补 `NOT IN ('pg_catalog', …)`：试过，是多余的，两半都是死代码 ——
+`pg_catalog` 在 `(false)` 下压根不返回，而 `information_schema` 连 `(true)` 都不在。
+
+> **为什么 MySQL 侧从来没出过这个问题**：MySQL 的系统对象住在*独立的 database*
+> （`information_schema` / `performance_schema` / `mysql` / `sys`），在**库列表**那一层
+> 就被挡掉了，根本到不了表列表。PG 的系统对象藏在 **schema 层**，库列表挡不住 ——
+> 同一份「不算系统对象」的意图，两个方言的过滤点天然不在一层。
+
+#### 缺陷二：从树上选的库根本没生效（修完缺陷一才显形）
+
+修完缺陷一、所有库都显示 `(空)` —— 因为**缺陷一和缺陷二叠在一起**：
+之前那 144 张系统表是 `postgres` 库的，现在它们被正确滤掉了，
+底下露出来的空就是缺陷二。
+
+**根因**：PG 的**数据库是连接的启动参数**，JDBC 没有 MySQL 那种 `USE`，
+连接一建立就锁死在 URL 指的那个库。而 `DatabaseDialect.switchCatalog` 对 PG 是空实现
+（当时的判断写着「PG catalog == database，连上就锁死，无意义」）。
+
+那个判断只覆盖了「连接配置的库就是唯一要用的库」这一种情形，漏掉了 sundays 的实际用法：
+**一个连接浏览多个库**（PG 方言 `supportsCrossDatabase = true`）。
+于是用户点 `examquestions`，看到的却是 `postgres` 库的表 —— **静默读到错的库**。
+
+修法：新增 SPI `DatabaseDialect.jdbcUrlForCatalog(jdbcUrl, catalog)`（默认原样返回），
+由 `PoolManager.createDataSource` 在**建池时**把 URL 的库名段换掉。
+PG 方言覆盖它；MySQL 走 `switchCatalog`（`USE`），那条路不受影响。
+
+`catalog` 直接来自用户在树上点的那一层，不可信 —— 库名里含 `/` `?` `#` 空白 `%`
+一律**拒绝**（会重解析 URL 结构、连到别的库），而不是拼接。
+
+#### 缺陷三：列一多，整张数据网格塌成不可读的宽度
+
+双击 `examquestions.biz_user`（**23 个字段**）：网格里所有列被压成窄竖条，
+表头只剩第一个列名 `id`（后面 22 个列名被压没了），数值叠成 `2 1 1 8 0 0` 这样一团。
+而点开右侧「详情」面板读数完全正常 —— **数据是对的，只是网格没法看**。
+
+**根因**：浏览屏建列只给 `TableColumn(key, header)`，`width` 为 null，全走 `weight` 路径。
+而 `weight` 是在**给定内容宽度内**均分的，`DataTable.contentWidthFor` 当时直接取视口宽：
+
+```
+视口 ≈ 650dp ÷ 23 列 = 每列 28dp   // 宽不过两个字符
+```
+
+修法：给加权列一个**最小宽度下限** `MIN_WEIGHTED_COLUMN_WIDTH = 100.dp`，
+列一多就让内容宽于视口、触发横向滚动。
+
+> **为什么既有测试一直是绿的**：`TableColumnAlignmentTest` 的 12 列**全是 `width = 140.dp`
+> 定宽**，走 `Modifier.width(...)` —— 显式宽度，下限根本管不着。
+> 现有测试**测不到**浏览屏实际使用的那条路径（全是 weighted 列）。
+
+#### 验证
+
+- `PostgreSQLSystemObjectTest`（5 项，真 PG）：系统表不进列表 / `information_schema` 的表不进列表
+  / 非 public schema 的处理 / SCHEMA.LIST 干净 / 显式 schema 分支干净
+- `PostgreSQLJdbcUrlTest`（13 项，纯函数）：换库名段 / 参数逐字保留 / IPv6 / 无库名补段 /
+  空 catalog 不动 / 非 PG URL 不动 / 切到同一库逐字不变 / 6 种危险库名一律拒绝
+- `PostgreSQLCrossDatabaseTest`（4 项，真 PG）：URL 指 A 选 B 时表列表来自 B /
+  A 独有的表不混进来 / 同名表读到 B 的内容 / A 本身仍正常
+- `TableWeightedColumnMinWidthTest`（2 项）：23 个 weighted 列能横滚 / 4 列时不多滚
+- **变异验证**（逐条确认测试有牙齿）：
+  - `current_schemas(true)` → 「系统表混入」红
+  - 硬编码 `= 'public'` → 「search_path 里的多个 schema 都可见」红
+  - 列全部 schema → 「不在搜索路径里的 schema 只在显式点名时可见」红
+  - 断开 `PoolManager` 的 `jdbcUrlForCatalog` 接线 → 3 条红，其中
+    「静默读到了 postgres 的同名表」**精确复现 GUI 上的现象**
+  - 去掉加权列下限 → 「23 列的表没有横向可滚量」红
+- 真窗口复验：展开 `sundays_smoke` 列出 4 张业务表且对象组干净（无 pg_* 噪音）；
+  `examquestions` 列出 `biz_user`/`t1`/`t2`/`t3` + 各自的触发器与函数
+- 全量 `:engine:test :shared:jvmTest :dialect-postgresql:test :desktopApp:test`
+
+#### 顺带记下两个**没有**修的观察
+
+1. **`timestamptz(35)` 的长度是假的** —— 字段列表把 PG JDBC 的 `COLUMN_SIZE` 直接当长度显示，
+   而 `timestamptz` 的 `COLUMN_SIZE` 是 35（不是 6）。`varchar(50)` 之类是对的，
+   所以单看它不像 bug，但用户会当成 `timestamptz(35)` 读。
+2. **一行里混着两个 schema 的表** —— `search_path` 有多个 schema 时，
+   `TABLE.LIST` 是不带 schema 前缀的裸表名，同名表会**互相盖住**。
+   这属于「多 schema 导航」整体没做完（UI 只展示 search_path 命中的一层），
+   要动就是一次结构性改动，不该混在这次修复里。
+### 9.22 导出通道：漂移态下「永远不自愈」的死角
+
+不是走查发现的 —— 是 §9.21 改完跑全量回归时**稳定复现**的红条，
+用「回退我的改动再跑一遍」证明与本次改动无关之后才动的手。
+
+#### 症状
+
+`ExportPipelineIntegrationTest` 的「流丢了之后下一次导出必须自愈」稳定红，
+耗时 **30.14 秒**（同类的另外 5 条都 < 2 秒），报错：
+
+```
+漂移态下应当重建流并成功导出，而不是「通道未就绪」：
+error='导出子进程通道未就绪（ExportHub 未连接），导出没有启动'
+```
+
+`engine/build/libs/export-manager.log` 里那三行说明了一切：
+
+```
+[export] 等待 hub 端口 50099 就绪超时（30000ms，observer=false）
+[export] 通道未就绪，命令没发出去 id=r-exp-1（isRunning=true observer=false）
+```
+
+**注意后面完全没有「子进程已启动」** —— 它根本没去重启，只是死等。
+
+#### 根因：判据问错了问题
+
+`ExportHandler.ensureSubprocessRunning` 写的是
+
+```kotlin
+if (!ExportProcessManager.isRunning) { ExportProcessManager.start(jarPath) }
+ExportProcessManager.awaitHubReadyOrReportFailure()
+```
+
+`isRunning` 的语义只是「**曾经**拉起过一个子进程」。子进程**自己崩掉**时
+（OOM、驱动炸、被外部杀掉），标记还留在 true 上 —— 于是：
+
+- 「能不能发命令」→ `hasUsableChannel` 判 false ✅（§9.x 修的就是这个）
+- 「要不要重启」→ `isRunning` 说「在，不用重启」❌ **问错了问题**
+
+结果漂移态下走的是「不重启、只等端口」那条路，等的是一个
+**已经没人监听的端口**：白等满 30 秒后报「通道未就绪」，**永远不会自愈**。
+
+> **教训**：「上次拉起时它在不在」和「它现在还在不在」是两个问题。
+> 前者能挡住重复拉起，后者才能决定要不要重启 —— 两者都不能省。
+
+修法：`ExportProcessManager` 加 `isProcessAlive`（判据是 `Process.isAlive`），
+`ensureSubprocessRunning` 改用它，并在重启前先 `stop()`
+（`start()` 的 CAS 要求 `_isRunning == false`，陈旧标记还占着 true 就拉不起来；
+对已死进程 `stop()` 是安全 no-op —— SHUTDOWN 无人接收、`destroyForcibly()` 打在已退出进程上无害）。
+
+修完那条用例 **30.14s → 2.787s**：从「白等 30 秒后失败」变成「2.8 秒自愈成功」。
+
+顺带修正了 `simulateStreamLostWhileProcessAlive()` 的文档：它造的其实是
+**更糟的一档** —— 调用前测试刚 `stop()` 过，**子进程是真的没了**，只是标记被强行按成 true。
+所以它模拟的正是「子进程自己崩掉后的真实形态」。
+
+#### 验证
+
+- `ExportPipelineIntegrationTest` 6/6 全绿
+- **变异验证**：把判据改回 `isRunning` → 立刻复现 **30.163s + 同样报错**
+- 全量 `:engine:test :shared:jvmTest :dialect-postgresql:test :desktopApp:test`
+
+### 9.23 顺带修掉的一个测试脆弱点：`resolveSchema()` 拿「第一个 schema」
+
+`DialectSmokeTest.resolveSchema()` 原本取 `SCHEMA.LIST` 结果的 `firstOrNull()`。
+
+`SCHEMA.LIST` 按 `nspname` 排序，而**用户自建的 schema 完全可能排在 `public` 前面** ——
+库里只要有一个叫 `alpha` 的 schema，它就会被选中，于是库级对象查询
+（视图 / 索引 / 外键）全打到**另一个 schema** 上，冒烟报出来的是
+「视图列表为空」，而根因跟视图半点关系都没有。
+
+真实踩到过：`PostgreSQLSystemObjectTest` 往同一个库建了 `probe_ns` / `probe_hidden`
+（字母序 p-r-o-b < p-u-b），`DialectSmokeTest` 的 S3 立刻变红。
+
+两处都修：
+
+1. `resolveSchema()` 改为**点名 `public`**（忽略大小写），没有才退回第一个；
+2. 两个新增的 PG 测试在 `@After` 里**把自己建的 schema / 表删掉** ——
+   `sundays_smoke` 与 `postgres` 是**共享固定库**，不是它们私有的，
+   留着只会给后来的人制造「这库里怎么有张没人认领的表」。
+
+> **教训**：往共享夹具里加东西的人有责任收尾，而**依赖共享夹具的人**
+> 也不该假设「列表的第一个就是我要的那个」——
+> 前者让后者永远绿，后者让前者一改就炸。
+> 两边都得修，才不靠运气。
+
+变异验证：手工建一个 `aaa_temp` schema（排在 `public` 前），
+`resolveSchema()` 改回 `firstOrNull()` → S3 立刻复现红；改回点名 `public` → 绿。

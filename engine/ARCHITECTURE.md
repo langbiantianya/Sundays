@@ -231,6 +231,27 @@ v2.16 新增 6 个 action 与 1 个 category：
    只有 MySQL 这类「一个实例多个 database」的服务端方言真正需要它；
    验证跨库行为**只能打真 MySQL**，用 H2 写出来的测试会永远绿、却什么都验不到。
 
+9. **catalog 切换的第二条路（v2.18）**：`DatabaseDialect.jdbcUrlForCatalog(jdbcUrl, catalog)`
+   （默认原样返回），由 `createDataSource` 在**建池时**改写 URL 的库名段。
+
+   > **为什么光有 `switchCatalog` 不够**
+   >
+   > 上面第 8 条处理的是「**能在已有连接上切**」的方言（MySQL：`USE x`）——
+   > 建池用什么 URL 无所谓，借出时补一刀即可。
+   >
+   > 而 PostgreSQL 的**数据库是连接的启动参数**，JDBC 没有 `USE`，
+   > 连接一建立就锁死在 URL 指的那个库上 —— **建完池再切已经晚了**。
+   >
+   > 这个坑之所以能活到现在，是因为当初的判断写着「PG catalog == database，连上就锁死，
+   > 切 catalog 无意义」。那句话只覆盖了「连接配置的库就是用户唯一要用的库」这一种情形，
+   > 漏掉了 sundays 的实际用法：**一个连接浏览多个库**（PG 方言 `supportsCrossDatabase = true`）。
+   > 真窗口走查的后果是：用户点 `examquestions`，看到的却是连接配置里那个
+   > `postgres` 库的内容 —— **静默读到错的库，比报错危险得多**。
+   >
+   > 两条路都要留着：MySQL 走 `switchCatalog`（运行时），PG 走 `jdbcUrlForCatalog`（建池时），
+   > 后者对 MySQL 是 no-op。实现必须校验 `catalog` ——
+   > 库名里含 `/` `?` `#` 空白 `%` 会**重解析 URL 结构**、连到别的库，一律拒绝而不是拼接。
+
 ### 3.4 导出子进程隔离机制 (Export Subprocess Isolation)
 
 数据导出模块独立运行在子进程中，通过 `ExportProcessManager` 管理。
@@ -266,12 +287,33 @@ v2.16 新增 6 个 action 与 1 个 category：
    业务层普遍写 `?: 0` 兜底，于是数字**安静地变成 0** —— 不报错、不抛异常，只是错了。
    `PayloadAdapter.numberPrimitive` 在边界把整数还原回去。
 
+5. **判据问「上次拉起时它在不在」还是「它现在还在不在」，是两道不同的题。**
+   `ExportProcessManager` 维护两个互不一致的标记：
+
+   | 标记 | 语义 | 用来回答 |
+   |---|---|---|
+   | `hasUsableChannel` | 进程标记在 **且** 流在 | **能不能发命令** |
+   | `isProcessAlive`（`Process.isAlive`） | 进程**此刻**还在跑吗 | **要不要重启** |
+   | ~~`isRunning`~~ | **曾经**拉起过一个 | 只能用来挡住重复拉起 |
+
+   子进程**自己崩掉**时（OOM / 驱动炸 / 被外部杀），`isRunning` 还留在 true。
+   拿它当「要不要重启」的判据，漂移态下就会走成「不重启、只等端口」——
+   等的是一个**已经没人监听的端口**，白等满 30 秒后报「导出子进程通道未就绪」，
+   **永远不会自愈**（实测：那条用例 30.14s 后失败，修完 2.79s 成功）。
+   `ensureSubprocessRunning` 判据换成 `isProcessAlive`，重启前先 `stop()`
+   清掉陈旧标记（`start()` 的 CAS 要求它为 false；对已死进程 `stop()` 是安全 no-op）。
+
 #### 排障入口
 
 子进程 stdout / stderr 重定向到 **`engine/build/libs/export-subprocess.log`**
-（每次启动会覆盖）。父进程侧关键点打 `[export]…`、子进程打 `[export-sub]…`。
+（每次启动会覆盖）。父进程侧关键点打 `[export]…`、子进程打 `[export-sub]…`，
+两边都落 **`engine/build/libs/export-manager.log`**（父子同文件，顺序连得起来）。
 桌面应用被 IDE / Gradle 拉起时 stdout 用户看不到，SLF4J 还可能是 NOP，
 所以这里用的是 `System.err.println` 而不是 logger。
+
+> 排查「导出成功过、之后开始失败」时**先看 `export-manager.log`**：
+> 断流发生在**父进程**这一侧，而子进程日志里什么异常都没有 —— 曾经只看得见后者，
+> 于是整个排查扑空。日志里搜 `等待 hub 端口 … 就绪超时` 能一眼认出「死等端口」这种死法。
 
 ### 3.5 Schema 导航层级 (Navigation Hierarchy)
 
