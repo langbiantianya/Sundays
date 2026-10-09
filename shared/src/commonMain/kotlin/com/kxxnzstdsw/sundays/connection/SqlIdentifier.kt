@@ -51,39 +51,81 @@ object SqlIdentifier {
     }
 
     /**
-     * 库 / 表限定名 —— [schema] 为空时退化为只有表名。
+     * 用 `.` 连接若干段，每段各自引用。
      *
-     * 限定名用 `.` 连接而非 `schema.table` 拼字符串：先各自引用再拼，才不会出现
-     * 「只有一半被引用」的中间态。
+     * 先各自引用再拼，才不会出现「只有一半被引用」的中间态。
+     * 空段直接跳过 —— 调用方不必为「这一级没有名字」单独分叉。
+     */
+    fun path(dialect: DialectType, vararg parts: String): String =
+        parts.filter { it.isNotBlank() }.joinToString(".") { quote(dialect, it) }
+
+    /**
+     * 库 / 表限定名 —— [schema] 为空时退化为只有表名。
      */
     fun qualified(dialect: DialectType, schema: String, name: String): String =
-        if (schema.isBlank()) quote(dialect, name)
-        else quote(dialect, schema) + "." + quote(dialect, name)
+        path(dialect, schema, name)
 
     /**
      * 树上某个表节点应当被引用成什么样子。
      *
-     * ## 为什么「MySQL 拿 database 当限定名、其余拿 schema」
+     * ## MySQL：`database.table`
      *
      * MySQL 的 database **就是**命名空间本身（`USE db` 之后 catalog 与 schema 合一），
-     * 所以 `` `examquestions`.`biz_user` `` 是合法且是最不容易歧义的写法。
+     * 所以 `` `examquestions`.`biz_user` `` 是合法且最不容易歧义的写法。
      *
-     * 而 PG / SQLite / DuckDB / H2 的 **database（catalog）与 schema 是两层不同的东西**：
-     * PG 里 `examquestions` 是 catalog，`public` 才是 schema，写成
-     * `"examquestions"."biz_user"` 在 PG 里会被解析成一个**名为 examquestions 的 schema**
-     * 下的表 —— 找不到，于是用户看到「明明表就在眼前，引用出来却报错」。
+     * ## PostgreSQL：`database.schema.table` —— 本库可以，别库不行
      *
-     * 所以判据不是「有没有 database」而是「**这个方言有没有独立 schema 这一层**」。
+     * 第一版按「PG 里 database 是 catalog，所以绝不能写进去」只给了 `schema.table`。
+     * **这个判断是错的**，错在把「跨库不支持」当成了「catalog 这一级不能写」。
+     *
+     * PG 一直支持 `catalog.schema.table` 三段式（不是 PG 18 才有的），
+     * PG 源码 `RangeVarGetCreationNamespace` 里的判据只有一条：
+     *
+     * ```c
+     * if (newRelation->catalogname) {
+     *     if (strcmp(newRelation->catalogname, get_database_name(MyDatabaseId)) != 0)
+     *         ereport(ERROR, ... "cross-database references are not implemented");
+     * }
+     * ```
+     *
+     * 即 **库名必须等于当前连接的库**，仅此而已。真库实测（PG 18.4 / examquestions）：
+     *
+     * | 连到 | 语句 | 结果 |
+     * |---|---|---|
+     * | `examquestions` | `FROM examquestions.public.t1` | ✅ 成功 |
+     * | `examquestions` | `FROM "examquestions"."public"."t1"` | ✅ 成功 |
+     * | `postgres` | `FROM examquestions.public.t1` | ❌ `cross-database references are not implemented` |
+     *
+     * 而**两段式**的退化路径在 PG 里任何版本、任何库都恒可用，所以 [databaseIsCurrent]
+     * 为假时退回去永远安全 —— 这是本函数最保守的一侧。
+     *
+     * > 顺带钉住一个容易混淆的反例：两段式的 `"examquestions"."biz_user"` 报的是
+     * > `relation "examquestions.biz_user" does not exist`（SQLState 42P01，**不是** 0A000）——
+     * > 它被解释成「名为 examquestions 的 schema 下的 biz_user」。所以「库名当 schema 用」
+     * > 确实会失败，但那**不能推出**「库名不能出现在引用里」——三段式是另一条路径。
+     *
+     * @param databaseIsCurrent [database] 是否就是**当前连接的**那个库。
+     *   只有 true 时 PG 才写 catalog 这一级 —— 否则粘进 SQL 编辑器必定报错，
+     *   而「看着像对、粘上就炸」的引用比不给引用更糟。
      */
-    fun tableRef(dialect: DialectType, database: String, schema: String, table: String): String =
-        when {
-            schema.isNotBlank() -> qualified(dialect, schema, table)
-            dialect == DialectType.MYSQL && database.isNotBlank() -> qualified(dialect, database, table)
-            // 既没有 schema，MySQL 那条路也走不通（database 为空）：只给表名。
-            // 这是最小可用形态 —— 用户要的通常是「一个能粘进 SQL 编辑器的引用」，
-            // 而不是一定要全限定。
-            else -> quote(dialect, table)
-        }
+    fun tableRef(
+        dialect: DialectType,
+        database: String,
+        schema: String,
+        table: String,
+        databaseIsCurrent: Boolean = false,
+    ): String = when {
+        // PG 三段式：database + schema 都有，且这个库就是当前连接的库
+        dialect == DialectType.POSTGRESQL &&
+            databaseIsCurrent && database.isNotBlank() && schema.isNotBlank() ->
+            path(dialect, database, schema, table)
+        schema.isNotBlank() -> qualified(dialect, schema, table)
+        dialect == DialectType.MYSQL && database.isNotBlank() -> qualified(dialect, database, table)
+        // 既没有 schema，MySQL 那条路也走不通（database 为空）：只给表名。
+        // 这是最小可用形态 —— 用户要的通常是「一个能粘进 SQL 编辑器的引用」，
+        // 而不是一定要全限定。
+        else -> quote(dialect, table)
+    }
 
     /** 库节点本身的引用（`USE` / 跨库查询里能用）。 */
     fun databaseRef(dialect: DialectType, database: String): String = quote(dialect, database)

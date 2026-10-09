@@ -68,6 +68,8 @@ class TreeContextMenuStateTest {
         notifications: NotificationCenter? = null,
         clipboard: (String) -> Boolean = { true },
         bind: Boolean = true,
+        /** 连接配置里的库名 —— PG 三段式引用要靠它和节点库名比对（见 [DatabaseBrowserState.treeReferenceText]）。 */
+        database: String = "",
     ) = DatabaseBrowserState(
         StubEngineClient, CoroutineScope(Dispatchers.Default), notifications, clipboard,
     ).also {
@@ -78,6 +80,7 @@ class TreeContextMenuStateTest {
                     name = "conn",
                     dialect = dialect,
                     jdbcUrl = "jdbc:dummy::memory:",
+                    database = database,
                 ),
             )
         }
@@ -88,6 +91,97 @@ class TreeContextMenuStateTest {
             ?: error("复制动作必须留下痕迹 —— 实际收到 ${center.notifications.size} 条")
 
     // ============ 复制引用名：三种节点形态 ============
+
+    @Test
+    fun `pg 表节点在库就是当前连接的库时给三段式引用`() {
+        // PG 一直支持 catalog.schema.table（不是 PG 18 才有的）。真库实测：
+        //   连到 examquestions：FROM examquestions.public.t1   ✅
+        //   连到 postgres     ：FROM examquestions.public.t1   ❌ 0A000
+        val s = state(DialectType.POSTGRESQL, database = "examquestions")
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
+        )
+        assertEquals("\"examquestions\".\"public\".\"biz_user\"", text)
+    }
+
+    @Test
+    fun `pg 字段节点给四段式引用`() {
+        // 字段接在表引用后面。PG 认 catalog.schema.table.column 四段式
+        // （实测 SELECT "examquestions"."public"."t1"."l2" FROM "examquestions"."public"."t1" 通过）
+        val s = state(DialectType.POSTGRESQL, database = "examquestions")
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(
+                database = "examquestions", schema = "public", table = "t1", column = "l2",
+            )
+        )
+        assertEquals("\"examquestions\".\"public\".\"t1\".\"l2\"", text)
+    }
+
+    @Test
+    fun `pg 节点库不是当前连接的库时退回两段式`() {
+        // 树列的是同一实例上的**所有**库（examquestions / postgres / sundays_smoke 并列），
+        // 而连接只连了其中一个 —— 所以这个组合是真实存在的。
+        // 那种情况下写 catalog 会产出粘进 SQL 编辑器必炸的引用；
+        // schema.table 那个形态在 PG 里任何版本、任何库都恒可用。
+        val s = state(DialectType.POSTGRESQL, database = "examquestions")
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(database = "postgres", schema = "public", table = "some_table")
+        )
+        assertEquals("\"public\".\"some_table\"", text)
+    }
+
+    @Test
+    fun `pg 库名大小写不一致时仍认成当前库`() {
+        // PG 对**未加引号**的库名会先小写折叠（实测 FROM EXAMQUESTIONS.public.t1 成功），
+        // 而我们复制出去的是带引号的形式（保留大小写）。所以连接配置里写成
+        // `ExamQuestions` 不该让这一级白白丢掉 —— 那正是用户报的现象。
+        val s = state(DialectType.POSTGRESQL, database = "ExamQuestions")
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
+        )
+        assertEquals("\"examquestions\".\"public\".\"biz_user\"", text)
+    }
+
+    @Test
+    fun `pg 未绑定连接时不写 catalog 而不是崩掉`() {
+        // currentConnection 为 null 时比较结果为 false → 退化成两段式。
+        // 菜单此刻已经弹出来了，给一个**能用**的引用远好过崩掉。
+        val s = state(DialectType.POSTGRESQL, bind = false)
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
+        )
+        assertEquals("\"public\".\"biz_user\"", text)
+    }
+
+    @Test
+    fun `mysql 用节点所在的库名限定而不问是不是当前库`() {
+        // MySQL 的 database 就是命名空间本身，`db`.`table` 合法，
+        // **没有** PG 那个「必须等于当前连接的库」的限制 ——
+        // 所以这里既不用退化、也不该拿连接的库名去覆盖节点自己的库名。
+        val s = state(DialectType.MYSQL, database = "examquestions")
+        assertEquals(
+            "`other_db`.`biz_user`",
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "other_db", schema = "", table = "biz_user")
+            ),
+        )
+        assertEquals(
+            "`examquestions`.`biz_user`",
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user")
+            ),
+        )
+    }
+
+    @Test
+    fun `h2 不因为库名匹配就多写一级`() {
+        // H2 走 schema 分支：catalog 与 schema 是两层，写库名会报 schema 不存在
+        val s = state(DialectType.H2, database = "EXAM")
+        val text = s.treeReferenceText(
+            DatabaseBrowserState.TreeTarget(database = "EXAM", schema = "PUBLIC", table = "USERS")
+        )
+        assertEquals("\"PUBLIC\".\"USERS\"", text)
+    }
 
     @Test
     fun `表节点给表名引用`() {

@@ -102,13 +102,63 @@ class SqlIdentifierQuoteTest {
         )
     }
 
-    // ============ tableRef：schema 层是否存在是判据 ============
+    // ============ tableRef：PG 的 catalog 这一级只在「就是当前库」时才写 ============
+
+    @Test
+    fun `postgres writes all three levels when the database is the current one`() {
+        // PG **一直**支持 catalog.schema.table 三段式（不是 PG 18 才有的特性）。
+        // 源码判据只有一条（RangeVarGetCreationNamespace）：
+        //   catalogname != get_database_name(MyDatabaseId) → 报 cross-database references...
+        // 真库实测（PG 18.4 / examquestions）：
+        //   连到 examquestions：FROM examquestions.public.t1      ✅
+        //   连到 postgres     ：FROM examquestions.public.t1      ❌ 0A000
+        assertEquals(
+            "\"examquestions\".\"public\".\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "public", "biz_user", true),
+        )
+    }
+
+    @Test
+    fun `postgres drops the catalog level when the database is not the current one`() {
+        // 树列的是**同一实例上的所有库**（树里 `examquestions` / `postgres` /
+        // `sundays_smoke` 并列），而连接只连了其中一个 —— 所以
+        // `database != 当前连接的库` 完全可能发生，那种情况下写 catalog
+        // 就会产出「粘进 SQL 编辑器必炸」的引用。
+        // 退回 schema.table：那个形态在 PG 里任何版本、任何库都恒可用。
+        assertEquals(
+            "\"public\".\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "public", "biz_user", false),
+        )
+        // 不显式传时默认就是退化的那一侧 —— 漏传参数不会静默产出三段式
+        assertEquals(
+            "\"public\".\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "public", "biz_user"),
+        )
+    }
+
+    @Test
+    fun `postgres three part form needs both database and schema`() {
+        // 变异点：把两个 isNotBlank 去掉时这两条会红 —— 空白段会被引用成 `""`，
+        // 产出 `""."public"."t` 这种凭空多一段的引用。
+        assertEquals(
+            "\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "", "biz_user", true),
+        )
+        assertEquals(
+            "\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "  ", "biz_user", true),
+        )
+        assertEquals(
+            "\"public\".\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "", "public", "biz_user", true),
+        )
+    }
 
     @Test
     fun `tableRef prefers real schema when the dialect has one`() {
         assertEquals(
             "\"public\".\"biz_user\"",
-            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "public", "biz_user"),
+            SqlIdentifier.tableRef(DialectType.H2, "EXAM", "public", "biz_user"),
         )
         assertEquals(
             "\"PUBLIC\".\"USERS\"",
@@ -117,19 +167,29 @@ class SqlIdentifierQuoteTest {
     }
 
     @Test
-    fun `tableRef falls back to database for mysql only`() {
-        // MySQL 的 database 就是命名空间本身，`db`.`table` 合法。
+    fun `mysql keeps database as qualifier and ignores the current-database flag`() {
+        // MySQL 的 database 就是命名空间本身（USE db 之后 catalog 与 schema 合一），
+        // `db`.`table` 合法，而且**没有** PG 那个「必须等于当前库」的限制
         assertEquals(
             "`examquestions`.`biz_user`",
             SqlIdentifier.tableRef(DialectType.MYSQL, "examquestions", "", "biz_user"),
         )
+        assertEquals(
+            "`examquestions`.`biz_user`",
+            SqlIdentifier.tableRef(DialectType.MYSQL, "examquestions", "", "biz_user", true),
+        )
     }
 
     @Test
-    fun `tableRef never uses database as qualifier on dialects with a separate schema layer`() {
-        // ⚠️ 本组第二要紧的一条：PG 里 `examquestions` 是 **catalog** 而 `public` 才是
-        // schema。写成 "examquestions"."biz_user" 会被解析成一个名为 examquestions 的
-        // schema 下的表 —— 找不到，而用户眼前明明就是这张表。
+    fun `never treats the database name as a schema`() {
+        // ⚠️ 「库名当 schema 用」确实会失败 —— 真库实测
+        // `"examquestions"."biz_user"` 报的是 42P01
+        // `relation "examquestions.biz_user" does not exist`（**不是** 0A000），
+        // 因为它被解释成「名为 examquestions 的 schema 下的 biz_user」。
+        //
+        // 但这条结论**不能**推出「库名不能出现在引用里」—— 三段式是另一条路径。
+        // 上一版就是在这儿把「跨库不支持」误读成「catalog 这一级不能写」，
+        // 结果 PG 用户复制到的引用永远少一级。见 [SqlIdentifier.tableRef] 的 KDoc。
         assertEquals(
             "\"biz_user\"",
             SqlIdentifier.tableRef(DialectType.POSTGRESQL, "examquestions", "", "biz_user"),
@@ -155,6 +215,11 @@ class SqlIdentifierQuoteTest {
         assertEquals("`biz_user`", SqlIdentifier.tableRef(DialectType.MYSQL, "", "", "biz_user"))
         assertEquals("`biz_user`", SqlIdentifier.tableRef(DialectType.MYSQL, "", "  ", "biz_user"))
         assertEquals("\"biz_user\"", SqlIdentifier.tableRef(DialectType.POSTGRESQL, "", "", "biz_user"))
+        // 连「就是当前库」都救不回来时也得干净退化，不能产出 `"".""."biz_user"`
+        assertEquals(
+            "\"biz_user\"",
+            SqlIdentifier.tableRef(DialectType.POSTGRESQL, "", "", "biz_user", true),
+        )
     }
 
     @Test
@@ -165,6 +230,20 @@ class SqlIdentifierQuoteTest {
             "`examquestions`.`t`",
             SqlIdentifier.tableRef(DialectType.MYSQL, "examquestions", "  ", "t"),
         )
+    }
+
+    // ============ path ============
+
+    @Test
+    fun `path skips blank segments instead of quoting them`() {
+        assertEquals(
+            "\"a\".\"b\".\"c\"",
+            SqlIdentifier.path(DialectType.POSTGRESQL, "a", "b", "c"),
+        )
+        assertEquals("\"a\".\"c\"", SqlIdentifier.path(DialectType.POSTGRESQL, "a", "", "c"))
+        assertEquals("\"a\".\"c\"", SqlIdentifier.path(DialectType.POSTGRESQL, "a", "   ", "c"))
+        assertEquals("`a`.`c`", SqlIdentifier.path(DialectType.MYSQL, "a", "", "c"))
+        assertEquals("\"c\"", SqlIdentifier.path(DialectType.POSTGRESQL, "", "", "c"))
     }
 
     // ============ databaseRef ============

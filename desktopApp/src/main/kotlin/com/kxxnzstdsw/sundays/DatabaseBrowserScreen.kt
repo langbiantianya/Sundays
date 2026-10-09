@@ -5042,21 +5042,36 @@ class DatabaseBrowserState(
     /**
      * 节点对应的限定引用名 —— 「复制引用名」写进剪贴板的内容。
      *
-     * 有字段名时给 `表.字段`（字段与表同一个 schema，因此只需一层限定）；
+     * 有字段名时给 `<表引用>.<字段>`（字段与表同一个 schema，因此只需限定到表这一层）；
      * 有表名时给 [SqlIdentifier.tableRef]；只有库名时给库引用。
+     *
+     * ## ⚠️ PG 的 catalog 这一级只在「这个库就是当前连接的库」时才写得出来
+     *
+     * PG 支持 `catalog.schema.table` 三段式（不是 PG 18 才有的），但**库名必须等于
+     * 当前连接的库**，否则报 `cross-database references are not implemented` ——
+     * PG 源码 `RangeVarGetCreationNamespace` 里只有这一条判据。
+     *
+     * 树上的库节点列的是**同一实例上的所有库**（树里能看到 `examquestions` / `postgres`
+     * / `sundays_smoke` 并列，而连接只连了其中一个），所以 `target.database` **不等于**
+     * 当前连接的库是完全可能的 —— 这时写 catalog 就会产出「粘进 SQL 编辑器必炸」的引用。
+     * 判断不等时退回 `schema.table`：那个形态在 PG 里任何版本、任何库都恒可用。
+     *
+     * 比较用 `equals(ignoreCase = true)`：PG 对**未加引号**的库名会先小写折叠
+     * （实测 `FROM EXAMQUESTIONS.public.t1` 成功），而我们复制出去的是带引号的形式
+     * （保留大小写），所以配置里大小写不一致时不该判成「不是当前库」而白白丢掉这一级。
      */
     fun treeReferenceText(target: TreeTarget): String {
         val dialect = treeDialect
         val table = target.table
         val column = target.column
+        val dbIsCurrent = target.database.equals(currentConnection?.database, ignoreCase = true)
+        val tableText = SqlIdentifier.tableRef(dialect, target.database, target.schema, table ?: "", dbIsCurrent)
         return when {
-            table != null && column != null -> {
-                val t = SqlIdentifier.tableRef(dialect, target.database, target.schema, table)
-                // 字段与表同属一个 schema，限定到表这一层已经足够 ——
-                // 再加一层 schema 反而把引用撑长，粘贴时要多删一段。
-                t + "." + SqlIdentifier.quote(dialect, column)
-            }
-            table != null -> SqlIdentifier.tableRef(dialect, target.database, target.schema, table)
+            table != null && column != null ->
+                // 字段接在表引用后面 —— PG 认 `catalog.schema.table.column` 四段式
+                // （实测 `SELECT "examquestions"."public"."t1"."l2" FROM ...` 通过）
+                tableText + "." + SqlIdentifier.quote(dialect, column)
+            table != null -> tableText
             else -> SqlIdentifier.databaseRef(dialect, target.database)
         }
     }

@@ -2023,19 +2023,25 @@ URL: jdbc:postgresql://postgres:666666@192.168.1.5:5432/postgres
 
 1. **MySQL 用反引号。** ANSI 双引号在 MySQL 里默认是**字符串字面量**，
    写成 `"biz_user"` 会被当成 `SELECT 'biz_user'` 而不是标识符。
-2. **限定名判据是「该方言有没有独立 schema 层」，不是「有没有 database」。**
+2. **判据不是「该方言有没有独立 schema 层」，而是「这个 database 能不能写进引用」。**
 
-第 2 条是最贵的坑：PG 里 `examquestions` 是 **catalog**，`public` 才是 schema。
-按「有 database 就限定」写出来的 `"examquestions"."biz_user"` 在 PG 里
-会被解析成一个**名为 examquestions 的 schema** 下的表 —— 找不到。
-用户看到的是「明明表就在眼前，引用出来却报错」。
+> ⚠️ **第 2 条的第一版是错的，被用户实测推翻** —— 详见 §9.28。
+> 原判据写的是「PG 里 `examquestions` 是 catalog，所以绝不能写进去」，
+> 于是 PG 一律给两段式 `"public"."biz_user"`。真实情况是 PG **支持**三段式
+> `"examquestions"."public"."biz_user"`，只是要求库名等于当前连接的库。
 
-| 方言 | `tableRef` 产出 |
-|---|---|
-| MySQL（无 schema，有库名） | `` `sundays_probe`.`biz_user` `` |
-| PostgreSQL | `"public"."biz_user"` |
-| H2 | `"PUBLIC"."USERS"` |
-| 两者都空 | `"tbl"`（最小可用形态） |
+两段式那个坑本身**仍然成立**，但它证明的结论比当初以为的弱得多：
+`"examquestions"."biz_user"` 报的是 **42P01**（被解释成「名为 examquestions 的 schema
+下的 biz_user」），而三段式是**另一条路径**，压根不经过那个解释。
+「这一种写法失败」推不出「catalog 这一级不能出现」。
+
+| 方言 | `tableRef` 产出 | 依据 |
+|---|---|---|
+| MySQL（无 schema，有库名） | `` `sundays_probe`.`biz_user` `` | database 就是命名空间本身 |
+| PostgreSQL（库 == 当前连接的库） | `"examquestions"."public"."biz_user"` | catalog 这一级可写 |
+| PostgreSQL（库 != 当前连接的库） | `"public"."biz_user"` | 写了会被 PG 拒绝，退回恒可用形态 |
+| H2 | `"PUBLIC"."USERS"` | catalog 与 schema 是两层 |
+| 两者都空 | `"tbl"` | 最小可用形态 |
 
 #### 二、**故意**不复制 `H2Dialect.quoteIdentifier` 的 uppercase
 
@@ -2265,4 +2271,163 @@ focusable `Popup` 的外部点击 / Esc 同理，量不到。
 它们的菜单**同样用 `DropdownMenu`** 且同样吃 `offset` 语义，因此**可能有同一个缺陷**。
 本轮没有真窗口验证过，不下结论 —— 按同样的方法（菜单项挂 `onGloballyPositioned` + 整屏截图）
 去量一次就能定论。
+
+### 9.28 PG 复制的引用少了一级：上一轮把「跨库不支持」误读成「catalog 不能写」
+
+用户报「pg 复制的引用少了数据库的那一级」。当前实现给的是 `"public"."t1"`，
+用户期望 `"examquestions"."public"."t1"`。
+
+**结论：用户是对的，上一轮的判断是错的。** 而且错得很有代表性 —— 它是靠「读文档 + 推理」
+下的结论，从没上过真库。
+
+#### 错的推理长什么样
+
+§9.26 当时的推理链是：
+
+1. PG 里 `examquestions` 是 **catalog**，`public` 才是 **schema** —— 对
+2. 写成 `"examquestions"."biz_user"` 会被解析成「名为 examquestions 的 schema 下的表」—— 对
+3. 所以**判据**是「这个方言有没有独立 schema 层」，PG 有 → 不给 database 限定 ← **错在这**
+
+第 2 步到第 3 步是一次**非法跳跃**：拿「一种两段式写法会失败」推出了「三段式也不行」。
+而 PG 恰恰支持三段式，只是走的是另一条解析路径。
+**「这种写法失败」不等于「这一级不能出现」** —— 这个坑和 §9.26 那条
+「右键顺序变异没变红，暴露的是文档写错了」是同一类：推理链本身没人验。
+
+#### PG 到底支持什么
+
+PG 源码 `RangeVarGetCreationNamespace` 里判据**只有一条**：
+
+```c
+if (newRelation->catalogname) {
+    if (strcmp(newRelation->catalogname, get_database_name(MyDatabaseId)) != 0)
+        ereport(ERROR, ... "cross-database references are not implemented");
+}
+```
+
+即 **库名必须等于当前连接的库**，仅此而已。这既不是 PG 18 才有的特性，
+也不是「PG 不支持 catalog」—— 它是 SQL 标准的 `catalog.schema.table` 形态，
+PG 一直都认，只是拒绝**真的**跨库。
+
+真库实测（PG 18.4 / `examquestions`）：
+
+| 连到 | 语句 | 结果 |
+|---|---|---|
+| `examquestions` | `FROM examquestions.public.t1` | ✅ |
+| `examquestions` | `FROM "examquestions"."public"."t1"` | ✅ |
+| `examquestions` | `UPDATE examquestions.public.t1 SET …` | ✅ |
+| `examquestions` | `SELECT "examquestions"."public"."t1"."l2" FROM …` | ✅ 四段式字段 |
+| `examquestions` | `FROM examquestions.pg_catalog.pg_class` | ✅ |
+| `examquestions` | `FROM EXAMQUESTIONS.public.t1` | ✅ 未加引号会先小写折叠 |
+| `postgres` | `FROM examquestions.public.t1` | ❌ `cross-database references are not implemented` |
+| `sundays_smoke` | `FROM examquestions.public.t1` | ❌ 同上 |
+
+对照两段式的失败形态（**注意 SQLState 不同**）：
+
+| 语句 | 结果 |
+|---|---|
+| `FROM "examquestions"."biz_user"` | ❌ **42P01** `relation "examquestions.biz_user" does not exist` |
+| `FROM nosuchdb.public.t1`（在本库） | ❌ **0A000** `cross-database references are not implemented` |
+
+42P01 与 0A000 的区别就是上一轮推理失败的现场：只看到前者，
+没去问「那三段式呢」。
+
+#### 实现
+
+判据是「**这个库是不是当前连接的库**」，而不是方言，也不是服务端版本 ——
+因为真库实测证明三段式**所有 PG 版本都支持**，加版本判据反而会平白砍掉 PG 17 的用户。
+
+| 位置 | 改动 |
+|---|---|
+| `SqlIdentifier` | 新增 `path(dialect, vararg parts)`（逐段引用、跳过空段）；`qualified` 改走它；`tableRef` 加第 5 参 `databaseIsCurrent: Boolean = false` |
+| `treeReferenceText` | `dbIsCurrent = target.database.equals(currentConnection?.database, ignoreCase = true)` |
+
+两个设计要点：
+
+- **默认 `false`** —— 漏传参数只会退化成两段式（恒可用），不会静默产出三段式。
+  默认值往**安全**的那一侧倒。
+- **`ignoreCase = true`** —— PG 对**未加引号**的库名会先小写折叠（实测
+  `FROM EXAMQUESTIONS.public.t1` 成功），而我们复制出去的是**带引号**的（保留大小写）。
+  配置里写 `ExamQuestions` 而库里是 `examquestions` 时，不该判成「不是当前库」而白白丢掉这一级。
+
+**`currentConnection.database` 拿得到吗？** 一度怀疑拿不到 —— v2 持久化格式
+（`ConnectionStorage.toPersisted`）只存 `jdbcUrl` + 凭据 + meta，**没有 database 字段**。
+但加载时 `PersistedConnectionConfig.toConnectionConfig`（`ConnectionStorage.kt:91`）
+会 `parseJdbcUrl(normalizedUrl, dialect)` **从 URL 反解出 database**。
+真窗口验证截图 `n02` 上「连接信息 → 数据库: examquestions」就是这条路径的产物。
+**探针 connection.json 里没有 `database` 字段也不影响**。
+
+#### 测试
+
+`SqlIdentifierQuoteTest` 新增 / 改名 4 条：
+
+- `postgres writes all three levels when the database is the current one`
+- `postgres drops the catalog level when the database is not the current one`
+  （并断言**不显式传参时默认就是退化那一侧**）
+- `postgres three part form needs both database and schema`
+- `never treats the database name as a schema` ← **原名** `tableRef never uses database as
+  qualifier on dialects with a separate schema layer`。那个名字本身就是错误判断的产物：
+  它宣称「有独立 schema 层的方言绝不用 database 限定」，而 PG 正是反例。
+
+`TreeContextMenuStateTest` 新增 6 条（三段式表 / 四段式字段 / 节点库≠当前库时退回 /
+大小写不一致仍认当前库 / 未绑定连接不崩 / MySQL 不受影响 / H2 不多写一级），
+并给 `state()` 助手加了 `database` 参数以便构造「当前连接的是哪个库」。
+
+变异验证 2 组全部打红：
+
+| 变异 | 打红 |
+|---|---|
+| `dbIsCurrent = true \|\| …`（去掉当前库判据） | **5 项** |
+| 三段式的两个 `isNotBlank` 改成 `isNotEmpty` | **1 项**（`postgres three part form needs both database and schema`） |
+
+#### 真窗口走查：复制出来的到底能不能用
+
+只看剪贴板不够 —— 用户要的是「能粘进 SQL 编辑器直接跑」。所以最后一步是把
+树上复制到的引用**原样拼进查询、在应用自己的 SQL 工作台里执行**：
+
+- 右键表 `t1` → 复制引用名 → 剪贴板读回 **`"examquestions"."public"."t1"`** ✅
+- 右键字段 `l2` → 复制引用名 → 剪贴板读回 **`"examquestions"."public"."t1"."l2"`** ✅
+- SQL 工作台粘 `SELECT "examquestions"."public"."t1"."l2" FROM "examquestions"."public"."t1" LIMIT 1;`
+  → **执行成功，「查询结果 · 1 行」，`l2 = 1`** ✅（截图 `n10_exec_ok.png`）
+
+> 中间踩了一次自己的坑：先写了 `SELECT l2 FROM "examquestions"."public"."t1"."l2"`
+> —— **FROM 后面不能写四段**，报 `improper qualified name (too many dotted names)`。
+> 四段式只出现在**字段位置**（SELECT 列表 / WHERE / 投影），
+> FROM 位置永远到表为止（最多三段）。这不是产品的问题，是我探针 SQL 写错了。
+> 记在这里是因为它很反直觉，值得钉住。
+
+截图在 `build/tmp/shots/`：`n02_selected`（连接信息里 database 已从 URL 解析出来）、
+`n03_browser`、`n05_menu_t1`、`n07_menu_l2`、`n09_exec`（故意写错的四段 FROM）、
+`n10_exec_ok`（正确的四段字段引用执行成功）。
+
+#### 全量回归：**1000 项 / 0 失败 / 8 跳过**（此前 989，+11）
+
+| 模块 | 用例 | 变化 |
+|---|---|---|
+| desktopApp | 415 | +7（`TreeContextMenuStateTest` 新增 7 条） |
+| shared | 272 | +4（`SqlIdentifierQuoteTest` 新增/改名 4 条 + `path` 1 条） |
+| engine | 300 | — |
+| dialect-postgresql | 13 | — |
+
+**第一轮红了 2 条，均与本次改动无关**，且都在「跟改动完全不相干的地方」：
+
+| 失败用例 | 报错 |
+|---|---|
+| `BackgroundTaskLifecycleTest` | `AssertionError: 刚登记就该是运行中` |
+| `TreeContextMenuUiTest :: 右键字段 - 给表点字段引用且没有 DDL 项` | `等待超时：语义树里出现库节点 …（30003ms）` |
+
+两个单跑全过 → 判定为 flaky。第二轮全量全绿确认不再复现。
+后者是**已记录在案**的既有脆弱点：该类每条用例都新建 `IdbEngine` + H2 内存库 + 建表，
+全量并发下这些资源是共享的，类 KDoc 里写着「拆成 10 个用例时实测每轮都有 1~2 条被掐断」。
+本轮**没有**往 `TreeContextMenuUiTest` 加用例（新增的 7 条全在状态机层），
+所以资源压力没变 —— 这也正好说明那个脆弱点还没解决，只是这轮没踩到。
+
+> 按 §9.26 那条教训，单跑通过不足以判定偶发，所以跑了两轮全量。
+
+#### 教训
+
+**关于方言语法的任何「不能」，都该去真库上问一句，而不是靠推理。**
+这一轮的推理链每一步单看都对，只有真库能证伪最后那一步 ——
+而那恰好是唯一影响用户可见行为的一步。
+和 §9.25「工具自己骗人」、§9.27「UI 层量不到就别硬断言」同源：
+**凡是「我以为」，都要找一个能真值的地方去撞一下。**
 

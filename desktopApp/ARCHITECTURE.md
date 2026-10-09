@@ -453,7 +453,13 @@ H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持�
 | 菜单项 | 内容 | 是否走引擎 |
 |---|---|---|
 | 复制名称 | 裸名（`biz_user`） | 否 |
-| 复制引用名 | [`SqlIdentifier.tableRef`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt) —— `"public"."biz_user"` | 否 |
+| 复制引用名 | [`SqlIdentifier.tableRef`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt) —— PG 给 `"examquestions"."public"."biz_user"`（库就是当前连接的库时）/ MySQL 给 `` `examquestions`.`biz_user` `` | 否 |
+
+**PG 那条 catalog 这一级是按「库 == 当前连接的库」给的，不是按方言给的。**
+PG 支持 `catalog.schema.table` 三段式，唯一限制是库名必须等于当前连接的库；
+判定用的是 `target.database == currentConnection?.database`（忽略大小写），
+不满足就退回 `schema.table` —— 那个形态在 PG 里任何版本、任何库都恒可用。
+详见 `shared/ARCHITECTURE.md` §4.7 与 `TEST_CASES.md` §9.28。
 | 复制建表 DDL | `dialect.getCreateTableDDL` 的产物 | **是**（`Category.TABLE` + `Action.GET_DDL`） |
 
 **DDL 必须走引擎，前端拼不出来。** 五个方言的建表语句没有共性可归纳：

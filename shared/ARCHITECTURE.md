@@ -917,7 +917,10 @@ onEditConnection = { conn -> wizard = WizardState(conn, BASIC_INFO, NORMAL) }
 ### 4.7 `SqlIdentifier` —— 前端侧的标识符引用（对象树「复制引用名」）
 
 [`connection/SqlIdentifier.kt`](./src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt)
-把一个裸名按方言包成可粘贴进 SQL 编辑器的引用：`quote` / `qualified` / `tableRef` / `databaseRef`。
+把一个裸名按方言包成可粘贴进 SQL 编辑器的引用：`quote` / `path` / `qualified` / `tableRef` / `databaseRef`。
+
+`path(dialect, vararg parts)` 是逐段引用后用 `.` 连接，**跳过空段**——
+调用方不必为「这一级没有名字」单独分叉，`qualified` 与 `tableRef` 的三段式都走它。
 
 #### 为什么 `shared/` 要有第二份，而不复用引擎的 `DatabaseDialect.quoteIdentifier`
 
@@ -942,16 +945,34 @@ H2 若用 `USERS` 建表 → 树上显示 `USERS` → 复制得 `"USERS"` ✅；
 > 这条分歧是**故意**的，不是漏抄。新增方言 / 改引号风格时，`SqlIdentifierQuoteTest`
 > 会在同一处同时暴露两侧的差异，由人判断该对齐哪一边。
 
-#### `tableRef` 的限定名判据：「有没有独立 schema 层」，不是「有没有 database」
+#### `tableRef` 的限定名判据：「这个 database 能不能写进引用」，不是「有没有独立 schema 层」
 
-| 方言 | database 的含义 | `tableRef` 用什么限定 |
+| 方言 | `tableRef` 用什么限定 | 条件 |
 |---|---|---|
-| MySQL | database **就是**命名空间（catalog 与 schema 合一） | database → `` `db`.`tbl` `` |
-| PG / SQLite / DuckDB / H2 | catalog 与 schema 是**两层**（PG 里 `examquestions` 是 catalog，`public` 才是 schema） | schema → `"public"."tbl"` |
+| MySQL | database → `` `db`.`tbl` `` | database 非空 |
+| PostgreSQL | catalog+schema+table → `"examquestions"."public"."tbl"` | **该库就是当前连接的库**，且 schema 非空 |
+| PostgreSQL | schema+table → `"public"."tbl"` | 上述条件不成立（**恒可用**的退化路径） |
+| SQLite / DuckDB / H2 | schema → `"public"."tbl"` / `"PUBLIC"."TBL"` | catalog 与 schema 是两层，库名不能写 |
 
-写成 `"examquestions"."biz_user"` 在 PG 里会被解析成一个**名为 examquestions 的 schema** 下的表，
-找不到 —— 用户看到的是「明明表就在眼前，引用出来却报错」。
 两个字段都为空时退化为裸引用：用户要的通常是「一个能粘进编辑器的引用」，不必强求全限定。
+
+> ⚠️ **PG 那一行的判据是被真库实测推翻过一次才对上的。**
+> 旧判据是「PG 有独立 schema 层 → 绝不给 database 限定」，于是 PG 一律给 `"public"."tbl"`。
+> **错的**：PG 支持 `catalog.schema.table` 三段式（SQL 标准形态，**不是** PG 18 才有的），
+> 唯一限制是**库名必须等于当前连接的库** ——
+> PG 源码 `RangeVarGetCreationNamespace` 里判据只有那一条 `strcmp`。
+>
+> 真库实测（PG 18.4 / `examquestions`）：
+> 连到 `examquestions` 时 `FROM examquestions.public.t1` **成功**；
+> 连到 `postgres` 时报 `cross-database references are not implemented`。
+>
+> 旧推理错在**非法跳跃**：拿「两段式 `"examquestions"."biz_user"` 会失败」（它报 **42P01**，
+> 被解释成「名为 examquestions 的 schema 下的表」）推出了「三段式也不行」——
+> 而三段式走的是**另一条解析路径**，压根不经过那个解释。
+> **「这种写法失败」不等于「这一级不能出现」。** 详见 `desktopApp/TEST_CASES.md` §9.28。
+>
+> 所以 `databaseIsCurrent` 的默认值是 **`false`**：漏传参数只会退化成恒可用的两段式，
+> 不会静默产出三段式。默认值往安全的那一侧倒。
 
 ---
 
