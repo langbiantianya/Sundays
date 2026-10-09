@@ -465,8 +465,8 @@ PG 回填主键 / UNIQUE / CHECK，SQLite 直接读 `sqlite_master.sql` 的**原
 菜单状态若存在每个节点自己的 `remember` 里，LazyColumn 把该项回收后**菜单会跟着一起消失** ——
 表现为「滚动一下菜单闪没了」。而且菜单需要唯一性（同时只能有一个）与统一坐标系。
 
-`TreeContextMenuState` 就是 `{ position, target }`，`target: TreeTarget(database, schema, table, column)`
-让菜单项自己判断该显示什么：
+`TreeContextMenuState` 是 `{ target, offsetInRoot, hostOrigin }`，
+`target: TreeTarget(database, schema, table, column)` 让菜单项自己判断该显示什么：
 
 ```kotlin
 // DDL 项只挂在「表节点且非字段节点」上
@@ -476,17 +476,69 @@ target.table != null && target.column == null
 **字段目标的 `table` 也非空**，第一版只判 `target.table != null`，于是字段上冒出了「复制建表 DDL」——
 复制出来的是整张表的 DDL，与用户右键的对象不符。变异验证里专门钉了这条。
 
-#### `DropdownMenu` 不会因为菜单项被点而自动关闭
+#### 菜单用 `Popup` 自己定位，**不用** `DropdownMenu`
 
-它只认 `onDismissRequest`，菜单项的 `onClick` 不触发关闭。
+第一版是 `DropdownMenu(offset = …)`，真窗口上**菜单恒定弹在面板顶部附近**：
+右键树里第 5 行的 `postgres`（屏幕 y≈559），菜单顶边出现在 y≈145，偏上约 414px。
+
+危险的是它**不报错** —— 复制照常成功、剪贴板确有内容、通知照样弹 SUCCESS，
+但用户盯着盖在上面的那一行点，拿到的是**另一个节点**的名字。任何异常捕获都抓不到。
+
+三层原因，每一层都得实测才定得下来：
+
+1. **`onRightClick` 给的是节点局部坐标**，不是屏幕坐标（`PointerInputChange.position`
+   相对挂 `pointerInput` 的那个节点），第一版原样透传
+2. **`DropdownMenu.offset` 的基准不是「调用它的布局节点」，是 root。** 按「相对宿主节点」
+   实现成 `at + nodeOrigin − hostOrigin`，实测偏的量**恰好等于 `hostOrigin.y`**
+   （减去时顶边在 y≈165，不减去时 y≈298，正好差 133）
+3. 再往下量才证明它把 `offset.y` 解析成「菜单**底边**相对宿主的偏移」——
+   菜单位置 = `宿主y + offset.y − 菜单高`。2 项菜单「看起来对齐」纯属高度与 offset 巧合相等，
+   3 项就偏了整整一个菜单项（实测偏 −57.5px = 60px 菜单项 + 1px divider）。
+   这个量依赖**运行时才知道的菜单高度**，补常数也修不了
+
+`Popup` 的 `offset` 是文档写明的「相对 **parent** 左上角」，可以直接定位：
+
+```kotlin
+Popup(
+    onDismissRequest = { menu.dismiss() },
+    properties = PopupProperties(focusable = true, dismissOnBackPress = true),
+    offset = IntOffset(
+        x = (clampedX - menu.hostOrigin.x).roundToInt(),
+        y = (clampedY - menu.hostOrigin.y).roundToInt(),
+    ),
+)
+```
+
+三个配套的坑：
+
+- **`onDismissRequest` 必须显式传** —— `Popup` 的默认值是**空 lambda**（`DropdownMenu` 不是）。
+  漏传时点菜单外只关弹层、`menu.target` 还在，于是「下一次右键别的节点，弹的还是上一次的菜单」
+- **存 `LayoutCoordinates` 活对象而不是缓存 `Offset`** —— 树节点展开/滚动后缓存值会过期，
+  右键当场读 `positionInRoot()`
+- **全程用 px 算位置** —— `offsetInRoot` 是指针事件的原始像素值，混进 Dp 会差一个 density
+
+边界钳位用 `LocalWindowInfo.containerSize`；`MENU_ESTIMATED_HEIGHT` 是**估算值**
+（真实高度布局后才知道，而钳位发生在布局之前），宁可偏大：贴底时多收一点，而不是截掉菜单项。
+
+#### 菜单项的关闭用 `target == null` 表达，`Popup` 整块组合
+
+`Popup` 没有 `expanded`，可见性就是「在不在组合里」，所以直接 `if (target == null) return`。
+（`DropdownMenu` 时代为了播关闭动画才需要 `expanded = target != null` + 始终组合，
+换型后那个理由不存在了。）
+
+#### 菜单不会因为菜单项被点而自动关闭
+
+它只认 dismiss 路径（点在菜单外 / 按 Esc / 焦点丢失），菜单项的 `onClick` 是另一条路。
 所以每个菜单项是**先 `menu.dismiss()` 再执行动作** —— 顺序反了的话菜单会盖在界面上不走，
 下一次右键还叠一层。`TreeContextMenuUiTest` 里每个用例都断言了「点完菜单项后菜单消失」。
 
-#### 菜单项的关闭用 `target == null` 表达，`DropdownMenu` 一直留在组合里
+#### 这个位置契约为什么不在 UI 测试里
 
-写成 `if (target != null) DropdownMenu(...)` 的话，菜单关闭时整棵组合被拆掉，
-而弹层关闭动画需要它继续存在 —— 表现为菜单「啪」地消失而不是收起来。
-`expanded = target != null` + 始终组合，位置由 `offset` 驱动。
+Popup 内节点的 `getUnclippedBoundsInRoot()` 在 `runComposeUiTest` 下与真实渲染对不上
+（诊断值 98 / 实测 161 / 反推基准 63，既不是 root(0) 也不是宿主(106)），
+所以位置断言是**主动删掉**的，而不是补一条蒙混的断言 —— **量不到就要说量不到**，
+否则下一个人会以为「这里有测试守着」。契约由状态机测试（`offsetInRoot = at + nodeOrigin`）
+与真窗口走查承担。详见 `TEST_CASES.md` §9.27。
 
 #### `clipboard` 是 `DatabaseBrowserState` 的构造参数，不是直接调 `ClipboardWriter`
 

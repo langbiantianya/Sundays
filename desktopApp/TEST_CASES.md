@@ -2122,3 +2122,147 @@ PG 回填主键 / UNIQUE / CHECK，SQLite 直接读 `sqlite_master.sql` 的**原
 > 单跑通过、第二轮全量通过 → 环境偶发，与本次改动无关。**单跑通过不足以判定偶发**，
 > 要看第二轮全量是否还复现。
 
+### 9.27 右键菜单「打开位置不对」：两层根因 + 换掉 `DropdownMenu`
+
+用户实测报「右键菜单的打开位置不对」。这一节记的是**为什么第一版的修法推理正确、却仍然错**。
+
+#### 现象：危险的地方在于它不报错
+
+右键树里第 5 行的 `postgres`（屏幕 y≈559），菜单顶边出现在 **y≈145**，偏上约 414px，
+且正好盖在 `examquestions` 那一行上。
+
+复制功能**照常工作、剪贴板确有内容**——用户盯着 `examquestions` 点「复制名称」，
+剪贴板里进来的是 `postgres`。不抛异常、通知照样弹 SUCCESS，
+任何自动断言都抓不到它，只能靠真窗口看。
+
+#### 第一层根因：节点局部坐标被当成了屏幕坐标
+
+`onRightClick` 回调里的 `PointerInputChange.position` 是**相对挂 `pointerInput` 的那个节点**的坐标，
+第一版原样透传给 `DropdownMenu(offset = …)`。节点在树里第 N 行，局部 y 只有几十像素，
+却被当成了屏幕坐标，于是菜单恒定弹在面板顶部附近。
+
+#### 第二层：`DropdownMenu.offset` 的基准不是「调用它的节点」，是「菜单底边」
+
+第一版的修法按「offset 相对宿主布局节点」的教科书理解写成 `at + nodeOrigin − hostOrigin`。
+真窗口实测菜单位置**仍然偏上**，偏的量恰好等于 `hostOrigin.y`
+（实测：减去时菜单顶边在屏幕 y≈165；不减去时 y≈298，正好差 133 = hostOrigin.y）。
+
+到这里已经能判定「基准不是宿主节点」，但还差最后一步：**它到底是什么？**
+于是做了一次基准实验 —— 给菜单项挂 `onGloballyPositioned`，量三个节点的真实渲染位置
+（1152×720 窗口，density 1.25；菜单项高 60px=48dp，divider 1dp）：
+
+| 节点 | `offset.y` | 宿主 y | 按「顶边对齐」预测的菜单底 | 实测菜单底 |
+|---|---|---|---|---|
+| `postgres`（2 项，无 divider） | 519.5 | 133 | 652.5 | 650 |
+| `biz_user`（3 项，有 divider） | 254.5 | 133 | 387.5 | 385 |
+| `t1`（3 项，有 divider） | 289.5 | 133 | 422.5 | 420 |
+
+模型完全吻合：**菜单底 = 宿主y + `offset.y` − 菜单高**。也就是 `DropdownMenu` 把 `offset.y`
+解析成「菜单**底边**相对宿主的偏移」。
+
+- 2 项菜单「看起来对齐」纯属**菜单高度与 offset 巧合相等**
+- 3 项菜单偏 −57.5px，恰好是一个菜单项（60px）+ divider（1px）
+- 这个量依赖**运行时才知道的菜单高度** → **无法用补常数修正**
+
+#### 结论：换掉 `DropdownMenu`，改用 `Popup` 自己定位
+
+`Popup` 的 `offset` 是文档写明的「相对 **parent** 左上角」，可以直接定位：
+
+```
+Popup.offset = clamp(右键点 in root) − 宿主 Column 原点
+```
+
+配套的四点，缺一个就出别的毛病：
+
+1. **`Popup` 没有 `expanded`** —— 可见性就是「在不在组合里」，
+   所以是 `if (target == null) return`，而不是原先的 `expanded = target != null` + 始终组合
+   （那是 `DropdownMenu` 为了播放关闭动画才需要的，换型后那个理由不存在了）
+2. **`onDismissRequest` 必须显式传**：`Popup` 的默认值是**空 lambda**（与 `DropdownMenu` 不同）。
+   漏传的话点菜单外 / 按 Esc 只会关掉弹层、`menu.target` 还在 →
+   组合里 Popup 一直在，于是「下一次右键别的节点，弹的还是上一次的菜单且位置不动」。
+   这正是真窗口走查当场抓到的现象
+3. **存 `LayoutCoordinates` 活对象而不是缓存 `Offset`**：树节点展开/滚动后，缓存的坐标可能已过期；
+   右键当场读 `positionInRoot()`
+4. **全程用 px 做位置运算**：`offsetInRoot` 是指针事件的原始像素值，混进 Dp 会差一个 density
+
+#### 边界钳位
+
+菜单可能比窗口还高（三个菜单项 + 贴底右键），不钳位的话下半截跑出屏幕、用户点不到最后一项。
+用 `LocalWindowInfo.containerSize` 钳位。`MENU_ESTIMATED_HEIGHT = 220.dp` 是**估算值**——
+真实高度要布局后才知道，而钳位发生在布局之前，所以宁可偏大：贴底时多收一点，而不是截掉菜单项。
+
+#### UI 测试里量不到菜单位置 —— 这不是「没测」，是「测不了」
+
+Popup 内节点的 `getUnclippedBoundsInRoot()` 在 `runComposeUiTest` 下**与真实渲染对不上**：
+诊断值 98 / 实测 161 / 反推基准 63，既不是 root(0) 也不是宿主(106)。
+
+所以 `rightClickOn` 里的位置断言被**主动删掉**，而不是「补一条断言蒙混过去」。
+硬写只会得到恒绿或恒红的假信号。位置契约由两处承担：
+**状态机测试**（`offsetInRoot = at + nodeOrigin` 的换算公式）+ **真窗口走查**。
+focusable `Popup` 的外部点击 / Esc 同理，量不到。
+
+#### 顺带修掉一个既有测试的竞态（修的是测试，不是实现）
+
+`clickMenuItem` 原来只等 `recorder.written.isNotEmpty()`，而「复制建表 DDL」要发引擎往返，
+读 `.last()` 拿到的是**上一次的** `"PUBLIC"."USERS"`。改为先记 `val before = recorder.written.size`
+再等 `size > before`。
+
+> `Popup` 版无动画、菜单出现更快，反而让这个竞态**稳定暴露**出来。
+
+#### 变异验证（2 组，全部打红）
+
+| 变异 | 打红的用例数 |
+|---|---|
+| `offsetInRoot = at`（去掉节点原点换算） | 3 项 |
+| `offsetInRoot = at + nodeOrigin − Offset(0, 133f)`（模拟减宿主原点） | 5 项 |
+
+#### 真窗口复验（Popup 版，PID 14624，窗口 1152×720，density 1.25）
+
+| 场景 | 右键点 | 菜单顶边 | 结论 |
+|---|---|---|---|
+| 表节点 `biz_user` | (150,294) | ≈295 | 对齐（此前偏 62）|
+| 库节点 `postgres` | (150,559) | ≈562 | 对齐；菜单**正确只有 2 项**（无 DDL）|
+| 字段 `l2` | (100,402) | ≈402 | 对齐；菜单为「复制名称 / 复制表.字段引用」两项、无 DDL |
+| 点菜单外 (800,600) | — | — | 菜单消失，`onDismissRequest` 生效 |
+| 关闭后再右键 `postgres` | (150,559) | ≈562 | 位置跟随新节点，项数换为 2 项 |
+| 点「复制表.字段引用」 | — | — | 剪贴板读回 **`"public"."t1"."l2"`** ✅ |
+| 贴底 `sundays_smoke` | y≈775 | ≈630 | 被钳位到窗口内，未截掉菜单项 |
+
+截图在 `build/tmp/shots/`：`v01`–`v11`（修复前复现）、`z01`–`z03`（基准实验）、
+`h01`–`h08`（菜单位置诊断）、`q01`–`q12`（Popup + `onDismissRequest` 终验）。
+
+#### 全量回归：**989 项 / 0 失败 / 8 跳过**
+
+| 模块 | 用例 | 失败 | 跳过 |
+|---|---|---|---|
+| desktopApp | 408 | 0 | 2 |
+| shared | 268 | 0 | 1 |
+| engine | 300 | 0 | 5 |
+| dialect-postgresql | 13 | 0 | 0 |
+
+> `--rerun` 必须**紧跟每个任务**写（`:engine:test --rerun :shared:jvmTest --rerun …`）。
+> 只在命令行末尾写一次，它只作用于最后一个任务，另外三个模块会静默复用旧结果 ——
+> 看起来跑了全量，其实其中三个是上一次的缓存。
+
+**第一轮全量红了 9 条，全在外部数据库集成测试里，与本次改动无关**：
+
+- `MySQLRoutineTriggerQueryTest` → `CommunicationsException: Communications link failure`
+- `PostgreSQLCrossDatabaseTest` / `PostgreSQLSystemObjectTest` → `PSQLException: FATAL: the database system is starting up`
+
+三类单跑全过、端口也通 → 环境偶发（PG 服务当时在重启）。
+按 §9.26 那条教训，**单跑通过不足以判定偶发**，所以又跑了一轮全量确认不再复现。
+树菜单相关的 29 项（`TreeContextMenuUiTest` 5 + `TreeContextMenuStateTest` 24）在第一轮
+就是绿的，与本次改动直接相关的代码没有任何问题。
+
+#### 教训
+
+**UI 层断言了一条它根本量不到的属性时，你拿到的不是保护，是一个恒绿 / 恒红的假信号。**
+量不到就要说量不到，别假装覆盖了 —— 否则下一个人会以为「这里有测试守着」。
+
+#### 已知未验证：`ContextMenu.kt` 里另两处 `DropdownMenu`
+
+`shared/.../ui/ContextMenu.kt` 的 `ContextMenuState<T>` 被 `DataTable` / `CodeEditor` 共用，
+它们的菜单**同样用 `DropdownMenu`** 且同样吃 `offset` 语义，因此**可能有同一个缺陷**。
+本轮没有真窗口验证过，不下结论 —— 按同样的方法（菜单项挂 `onGloballyPositioned` + 整屏截图）
+去量一次就能定论。
+

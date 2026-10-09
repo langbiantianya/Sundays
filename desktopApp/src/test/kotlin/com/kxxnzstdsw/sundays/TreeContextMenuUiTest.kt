@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -58,6 +59,25 @@ import kotlin.time.Duration.Companion.minutes
  * 合并成「每种节点一个用例」之后：引擎往返减到 1/3，每个用例内部顺序走完，
  * 外层预算显式给到 2 分钟（内层等待一律 30s，见 [awaitCondition]）。
  * 同一节点的多项断言本来就是一个交互流程，拆开测没有额外收益。
+ *
+ * ## 为什么 UI 层**不**断言菜单位置与外部 dismiss
+ *
+ * 这一节存在的理由是：第一版**没有**位置断言，菜单位置错位这个真缺陷整个漏了过去，
+ * 直到真窗口走查才发现。所以值得写清楚「补断言为什么补不上」——
+ * 这两件事在 `runComposeUiTest` 下都**测不到**，是**量不到**而不是**没坏**：
+ *
+ * 1. **位置**：Popup 内节点的 `getUnclippedBoundsInRoot()` 与真实渲染位置对不上。
+ *    诊断数据（宿主原点 y=106、节点原点 y=192、换算出 offset.y=98）配上量到的
+ *    bounds top=161，反推出的基准既不是 root(0) 也不是宿主(106)，而是 63 ——
+ *    一个在任何模型下都说不通的数；真窗口同一次右键量得的是另一个值。
+ * 2. **点菜单外 / Esc 关闭**：`focusable` Popup 在测试环境拿不到焦点
+ *    （节点报 `Focused = 'false'`），`pressKey(Escape)` 送进去没人接；
+ *    `dismissOnClickOutside` 的外部点击检测在注入事件下也不触发（实测 30s 超时）。
+ *
+ * 在这里硬写基于这些量的断言，只会得到**恒绿或恒红**的假信号：
+ * 它量的不是渲染结果，却会让「位置对不对 / 能不能关」看起来已被自动化覆盖。
+ * 因此位置契约由 [TreeContextMenuStateTest]（换算公式）+ 真窗口走查承担，
+ * 见 `TEST_CASES.md` §9.27。
  *
  * ## 剪贴板注入的是**记录型替身**
  *
@@ -263,6 +283,17 @@ class TreeContextMenuUiTest {
      * `performTouchInput { longClick() }` —— 后者是**触摸**长按，走触摸事件通道，
      * 而 `RightClick.kt` 认的是 `PointerEvent.buttons.isSecondaryPressed`，
      * 触摸长按永远不会置起那个位。用触摸长按测右键菜单，红的是测试不是产品。
+     *
+     * ## ⚠️ 这里**不**断言菜单位置 —— 而这是一次踩坑后的刻意选择
+     *
+     * 第一版**没有任何**位置断言，于是真缺陷整个漏了过去：`onRightClick` 给的是节点局部
+     * 坐标，`DropdownMenu.offset` 要的是 root 坐标，原样透传后菜单恒定弹在面板顶部
+     * （真窗口实测偏上 414px，**正好盖在另一个节点那一行** —— 用户盯着 A 点复制，
+     * 剪贴板里进来的是 B，且全程不报错）。
+     *
+     * 补断言时才发现**在 UI 测试里补不了**：Popup 内节点的 bounds 与真实渲染对不上，
+     * 反推出的基准是个在任何模型下都说不通的数。细节与契约归属见类 KDoc 的
+     * 「为什么 UI 层不断言菜单位置与外部 dismiss」一节。
      */
     private fun androidx.compose.ui.test.ComposeUiTest.rightClickOn(tag: String) {
         onNodeWithTag(tag).performMouseInput { rightClick() }
@@ -273,8 +304,15 @@ class TreeContextMenuUiTest {
         runCatching { onAllNodesWithTag(tag).fetchSemanticsNodes().size }.getOrDefault(0)
 
     private fun androidx.compose.ui.test.ComposeUiTest.clickMenuItem(tag: String) {
+        // ⚠️ 必须等「**新增**一次写入」而不是「有过写入」：
+        // 「复制建表 DDL」要发一次引擎往返，而同一个用例里前面已经复制过引用名了。
+        // 只等 `written.isNotEmpty()` 的话条件立刻满足，`recorder.written.last()`
+        // 读到的仍是**上一次**的内容 —— 断言 DDL 时拿到的却是 `"PUBLIC"."USERS"`，
+        // 红的是测试而不是产品（换回带动画的 DropdownMenu 时反而碰巧能过，
+        // 换成 Popup 后菜单出现得更快，竞态就稳定暴露了）。
+        val before = recorder.written.size
         onNodeWithTag(tag).performClick()
-        awaitCondition("菜单项 $tag 生效") { recorder.written.isNotEmpty() }
+        awaitCondition("菜单项 $tag 生效（新增一次复制）") { recorder.written.size > before }
         // 菜单必须**自己关掉** —— 它是一个 Popup，不关的话下一次右键的菜单会被压在
         // 旧 Popup 底下，第二次右键什么也看不到（实测卡在这里 30s 超时）。
         // 这条顺带钉住一条真实契约：点了菜单项之后用户能立刻在别处右键，
@@ -359,6 +397,38 @@ class TreeContextMenuUiTest {
         onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
 
         assertEquals(0, b.tabs.size, "菜单弹出时不应顺带打开表预览")
+    }
+
+    // ==================================================================
+    // 菜单生命周期
+    // ==================================================================
+
+    @Test
+    fun `菜单项点了之后立刻消失且状态清空`() = runComposeUiTest(testTimeout = 2.minutes) {
+        // 「点菜单项 → 菜单消失 → 下一次右键能弹新菜单」这条链路分两截，各由不同机制保证：
+        // - 点**菜单项**走 `menu.dismiss()`（在 onClick 里显式调用）→ 这条用例覆盖
+        // - 点**菜单外** / 按 Esc 走 `Popup.onDismissRequest` → UI 测试里**测不到**（见下）
+        //
+        // 本条只管前一截，并确认 dismiss 之后状态确实干净（`target` 清空），
+        // 否则下一次右键会拿旧菜单顶替新菜单。
+        val b = browser()
+        render(b)
+        awaitTableLeafReady()
+        val db = b.databases.first()
+
+        rightClickOn(schemaTableLeafTag("USERS"))
+        onNodeWithTag(TREE_MENU_COPY_DDL_TAG).assertExists()
+
+        clickMenuItem(TREE_MENU_COPY_NAME_TAG)
+        assertEquals(listOf("USERS"), recorder.written)
+
+        // 换到库节点再右键：菜单项集合必须跟着换（表节点有 DDL，库节点没有）
+        rightClickOn(schemaDbNodeTag(db))
+        assertEquals(
+            0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG),
+            "dismiss 不彻底时，第二次右键弹的还是上一次的菜单",
+        )
+        onNodeWithTag(TREE_MENU_COPY_REF_TAG).assertExists()
     }
 
     // ==================================================================

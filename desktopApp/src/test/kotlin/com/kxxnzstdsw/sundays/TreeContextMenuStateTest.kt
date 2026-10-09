@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays
 
+import androidx.compose.ui.geometry.Offset
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.ConnectionConfig as GrpcConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -296,9 +297,11 @@ class TreeContextMenuStateTest {
         val menu = TreeContextMenuState()
         assertNull(menu.target)
         val t = DatabaseBrowserState.TreeTarget(database = "d", table = "t")
-        menu.show(androidx.compose.ui.geometry.Offset(3f, 7f), t)
+        // 节点原点与 root 重合时，换算退化为恒等 —— 这条钉住「公式里是加不是减」。
+        menu.show(Offset(3f, 7f), Offset.Zero, t)
         assertEquals(t, menu.target)
-        assertEquals(3f, menu.offset.x)
+        assertEquals(3f, menu.offsetInRoot.x)
+        assertEquals(7f, menu.offsetInRoot.y)
         menu.dismiss()
         assertNull(menu.target)
     }
@@ -308,9 +311,78 @@ class TreeContextMenuStateTest {
         // 变异点：show 不覆盖 target 时这条会红 —— 用户右键 B 弹出的菜单
         // 复制出来的却是 A 的名字。
         val menu = TreeContextMenuState()
-        menu.show(androidx.compose.ui.geometry.Offset(1f, 1f), DatabaseBrowserState.TreeTarget(database = "a"))
-        menu.show(androidx.compose.ui.geometry.Offset(2f, 2f), DatabaseBrowserState.TreeTarget(database = "b"))
+        menu.show(Offset(1f, 1f), Offset.Zero, DatabaseBrowserState.TreeTarget(database = "a"))
+        menu.show(Offset(2f, 2f), Offset.Zero, DatabaseBrowserState.TreeTarget(database = "b"))
         assertEquals("b", menu.target?.database)
+    }
+
+    @Test
+    fun `右键坐标按节点在 root 里的位置换算而不是原样透传`() {
+        // 本组是这次修的真 bug：`onRightClick` 给的是**节点局部**坐标，
+        // `DropdownMenu.offset` 要的是 **root** 坐标。原样透传的话，节点在树里第几行，
+        // 菜单就偏多少 —— 真窗口实测右键第 5 行偏上 414px，菜单压在别的节点上，
+        // 用户看着 A 点复制、剪贴板里进来的是 B。
+        val menu = TreeContextMenuState()
+        // 节点在 root 里的原点：面板内第 5 行
+        val nodeOrigin = Offset(0f, 430f)
+        // 右键点在节点内的位置：偏下一点
+        menu.show(Offset(140f, 18f), nodeOrigin, DatabaseBrowserState.TreeTarget(database = "postgres"))
+
+        assertEquals(140f, menu.offsetInRoot.x, 0.01f)
+        assertEquals(448f, menu.offsetInRoot.y, 0.01f)
+        // ⚠️ 变异点：show 里去掉换算（offsetInRoot = at）时这条必红，
+        // 且红掉的 y 会是 18 —— 正是真窗口截图里菜单跑到面板顶部的那个数。
+        assertTrue(menu.offsetInRoot.y > 400f, "菜单必须落在被右键的那一行附近，实际 y=${menu.offsetInRoot.y}")
+    }
+
+    @Test
+    fun `换算只由节点原点与节点内偏移决定不含任何宿主信息`() {
+        // 本轮踩的第二个坑，形态比第一个隐蔽：**公式看起来无懈可击**
+        // （节点原点 − 宿主原点 + 节点内偏移，教科书式正确），但 `DropdownMenu`
+        // 根本不按宿主解析 offset —— 它的基准就是 root。
+        //
+        // 真窗口实测（density 1.25，宿主原点 y=133）：减去时菜单顶边在屏幕 y≈165，
+        // 不减去时 y≈298，**差值恰好 133 = 宿主原点**。也就是说状态上「减宿主」看着
+        // 无误，屏幕上却正好偏一个宿主的高度 —— 这种错任何单测都看不出来，
+        // 因为单测只能验证公式，验证不了公式对应的屏幕位置。
+        //
+        // 这里能钉住的只有一件事：**换算的输入里没有宿主这一项**。
+        // 任何人想改回「减宿主原点」，都得先把 [TreeContextMenuState] 的 hostOrigin
+        // 字段接回来，而那一步会让下面两条断言立刻红。
+        val menu = TreeContextMenuState()
+
+        // 同一个右键点在树里的不同位置 —— 差值必须**只**来自节点原点
+        menu.show(Offset(140f, 18f), Offset(0f, 200f), DatabaseBrowserState.TreeTarget(database = "a"))
+        val near = menu.offsetInRoot
+        menu.show(Offset(140f, 18f), Offset(0f, 900f), DatabaseBrowserState.TreeTarget(database = "b"))
+        val far = menu.offsetInRoot
+
+        assertEquals(218f, near.y, 0.01f)
+        assertEquals(918f, far.y, 0.01f)
+        // 700 = 两个节点原点的差，不多不少
+        assertEquals(700f, far.y - near.y, 0.01f)
+        // x 同样只来自节点内偏移：菜单左右跟着鼠标走，不受树面板位置影响
+        assertEquals(140f, far.x, 0.01f)
+    }
+
+    @Test
+    fun `节点原点为 root 原点时退化为原样透传`() {
+        // 边界：位于 (0,0) 的节点上右键，换算必须是恒等 —— 否则公式里还藏着别的项。
+        val menu = TreeContextMenuState()
+        menu.show(Offset(12f, 34f), Offset.Zero, DatabaseBrowserState.TreeTarget(database = "d"))
+        assertEquals(12f, menu.offsetInRoot.x, 0.01f)
+        assertEquals(34f, menu.offsetInRoot.y, 0.01f)
+    }
+
+    @Test
+    fun `dismiss 只清目标不清坐标`() {
+        // 坐标留着无害（下次 show 会覆盖），但如果 dismiss 把坐标一起清了，
+        // 而布局恰好在这之间变化，下一次右键就会算在一个过期的基准上。
+        val menu = TreeContextMenuState()
+        menu.show(Offset(5f, 6f), Offset(1f, 2f), DatabaseBrowserState.TreeTarget(database = "d"))
+        menu.dismiss()
+        assertNull(menu.target)
+        assertEquals(8f, menu.offsetInRoot.y, 0.01f)
     }
 
     @Test

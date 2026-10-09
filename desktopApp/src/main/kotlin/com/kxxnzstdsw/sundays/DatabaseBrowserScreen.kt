@@ -1,6 +1,9 @@
 package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -74,6 +77,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -101,7 +105,13 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -164,6 +174,7 @@ import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.focusRing
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.WinDivider
+import com.kxxnzstdsw.sundays.ui.menuShape
 import com.kxxnzstdsw.sundays.ui.WinProgressIndicator
 import com.kxxnzstdsw.sundays.ui.WinTextButton
 import com.kxxnzstdsw.sundays.ui.WinTextField
@@ -573,8 +584,40 @@ internal const val TREE_MENU_COPY_DDL_TAG = "treeMenuCopyDdl"
  * 对象树右键菜单状态。
  *
  * 与 [com.kxxnzstdsw.sundays.ui.ContextMenuState] 分开而不是复用：那个的 `position`
- * 语义是「相对 DataTable 的偏移」，而这里需要的是「相对**树面板**的偏移」——
- * 挂在面板这一层才有一致参照系（见 [TreeContextMenu] 的 KDoc）。
+ * 语义是「相对 DataTable 的偏移」，而这里直接存「相对 root 的坐标」。
+ *
+ * ## ⚠️ [show] 的坐标换算是这里存在的全部理由
+ *
+ * 节点给的是**节点局部坐标**（[com.kxxnzstdsw.sundays.ui.onRightClick] 回调里的
+ * `PointerInputChange.position` 就是相对挂 `pointerInput` 的那个节点），
+ * 直接透传给 `DropdownMenu(offset = …)` 的后果不是「偏几个像素」，而是「偏整屏」：
+ * 节点在树里的第 N 行，它的局部 y 只有十几像素，却被当成了屏幕坐标，
+ * 于是菜单恒定弹在面板顶部附近。
+ *
+ * 真窗口实测（1152×720 窗口，density 1.25）：右键第 5 行的 `postgres`，
+ * 菜单顶边出现在 y≈145 而非 y≈559，**偏上约 414px**，且正好盖在 `examquestions`
+ * 那一行上 —— 用户盯着 `examquestions` 点「复制名称」，剪贴板里进来的是 `postgres`。
+ * 不报错、剪贴板确有内容，但**菜单与它作用的节点在视觉上对不上**，结果就是错的。
+ *
+ * ## ⚠️ `DropdownMenu.offset` 的基准既不是「调用它的节点」，也不是「菜单顶边」
+ *
+ * 这是本类最容易搞错的一处，且**文档没说**。第一版按「offset 相对宿主布局节点」实现，
+ * 写成 `at + nodeOrigin - hostOrigin` —— 真窗口实测菜单位置仍偏上，偏的量恰好等于
+ * `hostOrigin.y`（实测：减去时菜单顶边在屏幕 y≈165；不减去时 y≈298，正好差 133 = hostOrigin.y）。
+ *
+ * 结论是 Material3 的 `DropdownMenu` 把 `offset` 解析在 **root 坐标系**上，
+ * 所以换算就是最直白的那个：**右键点的 root 坐标 = 节点原点 + 节点内偏移**。
+ *
+ * 而这个结论**最后还是被整个丢掉了** —— 见 [TreeContextMenu]：再往下量才证明
+ * `DropdownMenu` 把 `offset.y` 解析成「菜单**底边**相对宿主的偏移」，
+ * 菜单位置 = `宿主y + offset.y − 菜单高`，依赖运行时才知道的菜单高度，
+ * 根本没法拿常量补。最终改用 `Popup` 自己定位：[offsetInRoot] 仍是 root 坐标，
+ * [hostOrigin] 负责把它折算成 `Popup` parent 的局部坐标 —— 宿主原点只在这一步用得上。
+ *
+ * > 这条结论来自真窗口实测而不是文档推断。**UI 测试里量不到它**：
+ * > Popup 内节点的 `getUnclippedBoundsInRoot()` 在 `runComposeUiTest` 下与真实渲染
+ * > 位置对不上（诊断值 98 / 实测 161 / 反推基准 63，既不是 0 也不是 host=106）。
+ * > 见 [TreeContextMenuUiTest] 里关于「为什么 UI 层不断言菜单位置」的说明。
  */
 @Stable
 class TreeContextMenuState {
@@ -583,12 +626,36 @@ class TreeContextMenuState {
     var target: DatabaseBrowserState.TreeTarget? by mutableStateOf(null)
         private set
 
-    /** 右键点击点，相对树面板左上角。 */
-    var offset: androidx.compose.ui.geometry.Offset by mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    /** 右键点击点，相对 **root**（窗口内容区）。 */
+    var offsetInRoot: androidx.compose.ui.geometry.Offset by
+        mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
         private set
 
-    fun show(at: androidx.compose.ui.geometry.Offset, target: DatabaseBrowserState.TreeTarget) {
-        offset = at
+    /**
+     * 菜单宿主（[TreeContextMenu] 的 `Popup` 所在的 `Column`）相对 root 的原点。
+     *
+     * `Popup` 的 `offset` 是文档写明的「相对 **parent** 左上角」，而 parent 就是这个
+     * Column；[TreeContextMenu] 在弹出时用 `offsetInRoot − hostOrigin` 换算过去。
+     * 由 [SchemaTreePanel] 在布局时写入。
+     */
+    var hostOrigin: androidx.compose.ui.geometry.Offset by
+        mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+        private set
+
+    fun updateHostOrigin(at: androidx.compose.ui.geometry.Offset) {
+        hostOrigin = at
+    }
+
+    /**
+     * @param at 右键点击点，**相对本节点**（`onRightClick` 回调的原样输出）
+     * @param nodeOriginInRoot 本节点相对 root 的原点（`onGloballyPositioned` + `positionInRoot`）
+     */
+    fun show(
+        at: androidx.compose.ui.geometry.Offset,
+        nodeOriginInRoot: androidx.compose.ui.geometry.Offset,
+        target: DatabaseBrowserState.TreeTarget,
+    ) {
+        offsetInRoot = at + nodeOriginInRoot
         this.target = target
     }
 
@@ -596,6 +663,18 @@ class TreeContextMenuState {
         target = null
     }
 }
+
+/**
+ * 记录本节点相对 root 的原点，供右键时把局部坐标换算成 root 坐标。
+ *
+ * 为什么必须是 `positionInRoot` 而不是 `positionInParent`：节点在 `LazyColumn` 里，
+ * `positionInParent` 只给出「相对那一行 item」的偏移，中间隔着 LazyColumn 的滚动偏移、
+ * 面板标题栏、缩进层级，逐级上溯既繁琐又容易漏一级。`positionInRoot` 一次到位，
+ * **节点在树里第几行、缩进多深、在不在 LazyColumn 里都不影响**。
+ */
+private fun Modifier.trackNodeCoordinates(
+    coords: MutableState<androidx.compose.ui.layout.LayoutCoordinates?>,
+): Modifier = this.onGloballyPositioned { coords.value = it }
 
 @Composable
 private fun rememberTreeContextMenuState(): TreeContextMenuState =
@@ -1803,13 +1882,25 @@ private fun SchemaTreePanel(
     // 结果就是「看一眼 SQL 回来，树又滚回顶部，得重新展开找到刚才那张表」——
     // 与本屏「每 sheet 状态互相独立、跨视图不丢失」的既有契约直接冲突。
     val listState = rememberLazyListState()
+
+    // 右键菜单状态提到 LazyColumn **外面**：菜单是**屏级**的一个浮层，
+    // 若把 `visible` 记在某个 item 的组合里，滚动时被回收的 item 会把菜单一起带走
+    // （表现是「菜单自己关掉了」），且新 item 组合时又得重建一份状态。
+    val treeMenu = rememberTreeContextMenuState()
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         // testTag：面板本身不带语义，测试量不到它的边界（里面的文字节点宽度会随表名变化）。
         // 宽度契约要断言的恰恰是**面板**，所以必须给它一个锚点。
         modifier = modifier.testTag(SCHEMA_PANEL_TAG),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        // Popup 的 parent 就是这个 Column，而 `Popup.offset` 相对 parent ——
+        // 所以菜单要把 root 坐标换算成面板内坐标，就靠这里上报的 origin。
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { treeMenu.updateHostOrigin(it.positionInRoot()) },
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1841,10 +1932,6 @@ private fun SchemaTreePanel(
                     description = "当前连接下未发现任何数据库。",
                 )
                 else -> {
-                    // 右键菜单状态提到 LazyColumn **外面**：菜单是**屏级**的一个浮层，
-                    // 若把 `visible` 记在某个 item 的组合里，滚动时被回收的 item 会把菜单一起带走
-                    // （表现是「菜单自己关掉了」），且新 item 组合时又得重建一份状态。
-                    val treeMenu = rememberTreeContextMenuState()
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -1888,11 +1975,12 @@ private fun TreeContextMenu(
 ) {
     val target = menu.target
     val density = androidx.compose.ui.platform.LocalDensity.current
+    val scheme = MaterialTheme.colorScheme
 
     /**
      * 菜单项的统一入口 —— 执行动作前**必须先关掉菜单**。
      *
-     * `DropdownMenu` 不会因为「菜单项被点了」而自动关闭：它只认 `onDismissRequest`
+     * 菜单不会因为「菜单项被点了」而自动关闭：它只认 dismiss 路径
      * （点在菜单外 / 按 Esc / 焦点丢失），菜单项的 `onClick` 是另一条路。
      * 第一版漏了 dismiss，真窗口上表现为：复制成功了、通知也弹了，
      * 但**那层菜单还杵在树上不消失**，用户接着右键别处时新菜单被压在旧 Popup 底下，
@@ -1915,40 +2003,81 @@ private fun TreeContextMenu(
         )
     }
 
-    // 菜单本体必须**一直留在组合里**（`expanded` 只切可见性），不能按 target==null
-    // 整块返回：Popup 被移出组合的那一刻，Compose 要再跑一次退出动画，
-    // 菜单项在那段时间里**仍留在语义树里** —— UI 测试里就表现为
-    // 「点了菜单项，菜单项还在」。
-    // 见 [TreeContextMenuUiTest.clickMenuItem] 的「菜单关闭」那一步。
-    DropdownMenu(
-        expanded = target != null,
-        onDismissRequest = { menu.dismiss() },
-        offset = with(density) {
-            androidx.compose.ui.unit.DpOffset(
-                x = menu.offset.x.toDp(),
-                y = menu.offset.y.toDp(),
-            )
-        },
-    ) {
-        if (target == null) return@DropdownMenu
-        item(TREE_MENU_COPY_NAME_TAG, "复制名称") { state.copyTreeText(target, quoted = false) }
-        item(
-            TREE_MENU_COPY_REF_TAG,
-            // 标签写清复制的是什么：库节点给库引用、字段节点给「表.字段」，
-            // 三种形态长得不一样，只写「复制引用名」用户得自己猜
-            if (target.column != null) "复制表.字段引用" else "复制引用名",
-        ) { state.copyTreeText(target, quoted = true) }
+    // 内容按 target==null 整块组合：Popup 没有 `expanded`，可见性就是「在不在组合里」。
+    if (target == null) return
 
-        // ⚠️ 判据必须是「表节点**且不是**字段节点」，而不是「有没有 table」——
-        // 字段目标的 `table` 也是非空的。第一版只判 `target.table != null`，
-        // 于是右键字段时菜单里也冒出「复制建表 DDL」，而 DDL 是**整张表**的，
-        // 用户在字段上点它拿到的是一张毫不相干的表的建表语句。
-        if (target.table != null && target.column == null) {
-            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            item(TREE_MENU_COPY_DDL_TAG, "复制建表 DDL") { state.copyTreeDdl(target) }
+    // 边界钳位：菜单可能比窗口还高（三个菜单项 + 贴底右键），
+    // 不钳位的话下半截直接跑出屏幕，用户点不到「复制建表 DDL」。
+    // ⚠️ 全程用 **px**：`offsetInRoot` 是指针事件的原始像素值，混进 Dp 会差一个 density。
+    val windowSize = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
+    val minWidthPx = with(density) { MENU_MIN_WIDTH.toPx() }
+    val menuHeightPx = with(density) { MENU_ESTIMATED_HEIGHT.toPx() }
+    val clampedX = menu.offsetInRoot.x
+        .coerceIn(0f, (windowSize.width - minWidthPx).coerceAtLeast(0f))
+    val clampedY = menu.offsetInRoot.y
+        .coerceIn(0f, (windowSize.height - menuHeightPx).coerceAtLeast(0f))
+
+    Popup(
+        // ⚠️ 为什么不用 `DropdownMenu` —— 见 [TreeContextMenuState] 的 KDoc。
+        // 简版：`DropdownMenu` 把 `offset.y` 解析成「菜单**底边**相对宿主的偏移」，
+        // 于是菜单位置 = `宿主y + offset.y − 菜单高度`。菜单高度是运行时才知道的，
+        // 换多少项就偏多少（真窗口实测：2 项菜单偏 +3.5，3 项菜单偏 −57.5，
+        // 差值恰好是一个菜单项 60px 加 divider 1px）。
+        // 「看起来对齐」纯属菜单高度与 offset 巧合相等 —— 加一项菜单就露馅。
+        // `Popup` 的 offset 是文档写明的「相对 parent 左上角」，可以直接定位。
+        //
+        // ⚠️ `onDismissRequest` **必须显式传**：`Popup` 的默认值是空 lambda，
+        // 漏掉的话点菜单外 / 按 Esc 只会关掉弹层而 `menu.target` 还在 ——
+        // 组合里 Popup 一直在，于是「下一次右键别的节点，弹的还是上一次的菜单」。
+        // 这正是真窗口走查时抓到的现象（点空白处后右键 postgres，弹出的仍是 biz_user 的菜单）。
+        onDismissRequest = { menu.dismiss() },
+        properties = PopupProperties(focusable = true, dismissOnBackPress = true),
+        offset = IntOffset(
+            x = (clampedX - menu.hostOrigin.x).roundToInt(),
+            y = (clampedY - menu.hostOrigin.y).roundToInt(),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                // IntrinsicSize.Max：让菜单项的 fillMaxWidth 有意义 —— 宽度取内容最宽的那项，
+                // 而不是一个撑满屏幕的巨宽菜单。
+                .width(IntrinsicSize.Max)
+                .background(scheme.surfaceContainer, menuShape())
+                .border(1.dp, scheme.outlineVariant, menuShape())
+                .shadow(8.dp, menuShape())
+                .padding(vertical = 4.dp),
+        ) {
+            item(TREE_MENU_COPY_NAME_TAG, "复制名称") { state.copyTreeText(target, quoted = false) }
+            item(
+                TREE_MENU_COPY_REF_TAG,
+                // 标签写清复制的是什么：库节点给库引用、字段节点给「表.字段」，
+                // 三种形态长得不一样，只写「复制引用名」用户得自己猜
+                if (target.column != null) "复制表.字段引用" else "复制引用名",
+            ) { state.copyTreeText(target, quoted = true) }
+
+            // ⚠️ 判据必须是「表节点**且不是**字段节点」，而不是「有没有 table」——
+            // 字段目标的 `table` 也是非空的。第一版只判 `target.table != null`，
+            // 于是右键字段时菜单里也冒出「复制建表 DDL」，而 DDL 是**整张表**的，
+            // 用户在字段上点它拿到的是一张毫不相干的表的建表语句。
+            if (target.table != null && target.column == null) {
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                item(TREE_MENU_COPY_DDL_TAG, "复制建表 DDL") { state.copyTreeDdl(target) }
+            }
         }
     }
 }
+
+/** 菜单最小宽度 —— 仅用于「贴到右边缘时往左收」的钳位计算。 */
+private val MENU_MIN_WIDTH = 160.dp
+
+/**
+ * 菜单高度的**估算值**，只用于贴底时的钳位。
+ *
+ * 为什么只能是估算：真实高度要等布局完成才知道，而钳位发生在布局之前。
+ * 偏大只是让贴底时往上多收一点（菜单不贴边），偏小才会截掉菜单项 ——
+ * 所以宁可偏大：3 项菜单 ≈ 190dp，估 220dp。
+ */
+private val MENU_ESTIMATED_HEIGHT = 220.dp
 
 @Composable
 private fun DatabaseNode(
@@ -1962,14 +2091,23 @@ private fun DatabaseNode(
     val loading = name in state.loadingTables
     val error = state.tableLoadError[name]
 
+    // 节点在 root 里的原点 —— 右键坐标是**节点局部**的，菜单要的是**root**坐标，
+    // 两者必须靠它换算（见 TreeContextMenuState.show）。
+    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .trackNodeCoordinates(nodeCoords)
                 .focusRing()
                 .onRightClick { offset ->
                     menu.show(
                         offset,
+                        // 当场读 `positionInRoot()` 而不是读缓存的 Offset：
+                        // 展开 / 滚动之后缓存值可能已经过期，而 `LayoutCoordinates`
+                        // 是个活对象，此刻读到的就是**此刻**的位置。
+                        nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
                         DatabaseBrowserState.TreeTarget(
                             database = name,
                             schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
@@ -2153,10 +2291,14 @@ private fun TableLeaf(
     columnsLoading: Boolean = false,
     columnsError: String? = null,
 ) {
+    // 节点在 root 里的原点 —— 右键坐标换算用（见 TreeContextMenuState.show）。
+    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .trackNodeCoordinates(nodeCoords)
                 .focusRing()
                 // 右键与左键**不冲突**，两者互不干扰：`clickable` 的 tap 检测只认主键，
                 // 右键是次键（`isSecondaryPressed`），压根不满足 tap 条件。
@@ -2168,6 +2310,7 @@ private fun TableLeaf(
                         Modifier.onRightClick { offset ->
                             menu.show(
                                 offset,
+                                nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
                                 DatabaseBrowserState.TreeTarget(
                                     database = database,
                                     schema = schema,
@@ -2332,12 +2475,22 @@ private fun ColumnRow(
     menu: TreeContextMenuState? = null,
     target: DatabaseBrowserState.TreeTarget? = null,
 ) {
+    // 同上：字段行的原点也要记，否则字段菜单会偏到面板顶部。
+    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .trackNodeCoordinates(nodeCoords)
             .then(
                 if (menu != null && target != null) {
-                    Modifier.onRightClick { offset -> menu.show(offset, target) }
+                    Modifier.onRightClick { offset ->
+                        menu.show(
+                            offset,
+                            nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
+                            target,
+                        )
+                    }
                 } else {
                     Modifier
                 }
