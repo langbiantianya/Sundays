@@ -14,6 +14,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
@@ -23,6 +26,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.jetbrains.skia.Image
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.client.grpc.GrpcClientConfig
 import com.kxxnzstdsw.client.grpc.GrpcEngineClient
@@ -79,6 +83,10 @@ fun main() = application {
         },
         state = windowState,
         title = "sundays",
+        // 不传时标题栏 / 任务栏是系统的默认占位图。macOS 上**单窗口不能设图标**
+        // （要在 build.gradle 的 nativeDistributions 用 iconFile 设 Dock 图标），
+        // 这里传了也不报错，只是那边不生效。
+        icon = rememberAppIconPainter(),
     ) {
         EnforceMinimumWindowSize(windowState)
         // 主题档位状态必须提升到这里（SundaysTheme 之外）：配色由 SundaysTheme 的 darkTheme
@@ -142,6 +150,56 @@ internal val DEFAULT_WINDOW_SIZE = DpSize(1152.dp, 720.dp)
  * 低于 640 高，sheet 标签条 + 工具栏 + 表格 + 分页栏四段就放不下一屏。
  */
 internal val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
+
+/**
+ * 应用图标 —— 「天天都是周末」：表格线格里嵌一颗照进每一格的太阳。
+ *
+ * ## 为什么自己读字节，不走 `painterResource`
+ *
+ * 这版 Compose（1.11.1）里两条现成路都是**废弃**的：
+ *
+ * | API | 状态 |
+ * |---|---|
+ * | `painterResource("…")` | `@Deprecated` —— 要迁到 Compose resources 库 |
+ * | `res.loadImageBitmap(stream)` | `@Deprecated` —— 同上 |
+ *
+ * 而 `org.jetbrains.compose.components:components-resources` **根本不在本项目依赖里**
+ * （`build.gradle.kts` 没有声明，Gradle 缓存里也没有该构件）——
+ * 编译输出里能看到 `generateResourceAccessors` 那些任务，只是 Compose 插件注册的钩子，
+ * 不等于库已就位。为一个图标引入一整条资源库链路不划算。
+ *
+ * 剩下唯一既**非废弃**又**零新依赖**的入口是
+ * `org.jetbrains.skia.Image.makeFromEncoded(ByteArray).toComposeImageBitmap()`
+ * （`SkiaImageAsset.skiko.kt` 里两个都是公开 API，无 `@Internal`），再包进
+ * `BitmapPainter` 喂给 [Window] 的 `icon: Painter?`。
+ *
+ * > 顺带记一笔踩过的坑：先试的 `createImageBitmap(ByteArray)` 看着就是干这个的，
+ * > 编译直接报 **`it is internal in file`** —— 它确实是 `internal`，只在
+ * > `ImageBitmap.skiko.kt` 内部给 `loadImageBitmap` 用。这类「签名公开但不可见」的
+ * > API 靠记忆最容易踩，**查 jar 源码比查文档快**。
+ *
+ * ## 为什么只用 256 一张
+ *
+ * [Window] 的 `icon` 是 **Painter** 而非多尺寸资源，Compose 会按目标平台的原生尺寸
+ * 重采样。给一份 256 的母版即可，16 / 24 / 32 / 48 / 64 / 128 的多尺寸版本是
+ * **给操作系统**用的（任务栏、标题栏、Alt-Tab），它们已经打包进
+ * `resources/icons/sundays.ico` 供原生分发使用 —— 那份不参与运行时加载。
+ *
+ * ## 加载失败不抛
+ *
+ * 返回 `null` 而不是 `requireNotNull`：图标是装饰，**缺了不该让整个应用起不来**。
+ * 退化行为与今天一致（系统默认图标）。
+ */
+@Composable
+private fun rememberAppIconPainter(): Painter? = remember {
+    val bytes = runCatching {
+        AppIconPainter::class.java.getResourceAsStream("/icons/sundays_256.png")?.use { it.readBytes() }
+    }.getOrNull()
+    bytes?.let { BitmapPainter(Image.makeFromEncoded(it).toComposeImageBitmap()) }
+}
+
+/** 只作为 [rememberAppIconPainter] 取 classpath 资源的定位器，不承载任何状态。 */
+private object AppIconPainter
 
 /** 把窗口尺寸夹到 [MIN_WINDOW_SIZE] 以上，就地生效（每次拖动窗口都会过一遍）。 */
 @Composable
