@@ -570,7 +570,8 @@ internal fun schemaTableObjectsTag(table: String) = "schemaTableObjects_$table"
 /**
  * 字段行的 tag。
  *
- * 只给**列名文本**那一行加：字段行里还有类型、`[PK]` / `[非空]` 等多个文本节点，
+ * 给**字段整行**加，而不是只给列名文本那一行 —— 字段行挂了 `clickable` 之后语义会合并，
+ * 挂在子 `Text` 上的 tag 会在合并后的语义树里消失（见 [ColumnRow] 里的说明）。
  * 不带 tag 的话测试只能靠文本匹配，于是「复制引用」拿到的是哪一行就成了运气。
  */
 internal fun schemaColumnTag(column: String) = "schemaColumn_$column"
@@ -2042,9 +2043,24 @@ private fun TreeContextMenu(
                 // IntrinsicSize.Max：让菜单项的 fillMaxWidth 有意义 —— 宽度取内容最宽的那项，
                 // 而不是一个撑满屏幕的巨宽菜单。
                 .width(IntrinsicSize.Max)
+                // ⚠️ **`shadow` 必须在 `background` 之前**，顺序反了会同时坏掉两件事：
+                //
+                // `Modifier.shadow` 造的是 graphicsLayer，**只包含它链上后续的内容**。
+                // 写成 `.background(shape).border(shape).shadow(shape)` 时：
+                //   1. 圆角背景与边框落在 layer **之外** → 阴影的轮廓按 layer **内**的
+                //      菜单项矩形生成，于是「圆角菜单 + 直角阴影」对不上；
+                //   2. layer 的 `clip`（默认 elevation > 0 时为 true）裁不到
+                //      layer 外的背景，菜单项自己那层不透明背景也照原样画 →
+                //      菜单里出现一块**直角的内嵌方块**。
+                //
+                // 真窗口实测（修复前截图）：菜单项背景 `#211F26`(surfaceContainer)
+                // 呈直角，容器边框却是圆角，右侧还挂一条 `#1D1B21` 的阴影带。
+                //
+                // Material 自己的 `Modifier.surface` 也是这个顺序
+                // （`shadow(...).background(color, shape)`）—— 不是巧合。
+                .shadow(8.dp, menuShape())
                 .background(scheme.surfaceContainer, menuShape())
                 .border(1.dp, scheme.outlineVariant, menuShape())
-                .shadow(8.dp, menuShape())
                 .padding(vertical = 4.dp),
         ) {
             item(TREE_MENU_COPY_NAME_TAG, "复制名称") { state.copyTreeText(target, quoted = false) }
@@ -2170,6 +2186,9 @@ private fun DatabaseNode(
                             database = name,
                             schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
                             menu = menu,
+                            // 字段行单击 = 复制字段引用，与右键菜单第二项同一个动作。
+                            // 与右键的判据刻意对齐：右键能复制的行，左键也能。
+                            onCopyColumn = { state.copyTreeText(it, quoted = true) },
                             onOpen = { onOpenTable(name, tbl) },
                             expanded = slot in state.expandedTableObjects,
                             onToggleObjects = { state.toggleTableObjects(name, tbl) },
@@ -2281,6 +2300,14 @@ private fun TableLeaf(
     schema: String = "",
     /** 右键菜单状态 —— 由 [SchemaTreePanel] 持有并下发（见 [TreeContextMenu]）。 */
     menu: TreeContextMenuState? = null,
+    /**
+     * 单击某个**字段行**时的动作（收到该字段的完整目标）；`null` = 字段行不可单击。
+     *
+     * 为什么由父级给而不是 `TableLeaf` 自己调 [DatabaseBrowserState]：
+     * `TableLeaf` 不持有 `state`，动作要发剪贴板 / 推通知，那些都在 state 里。
+     * 与 [TableLeaf.onOpen] 同一套「父级给动作」的写法。
+     */
+    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
     onOpen: () -> Unit,
     expanded: Boolean = false,
     onToggleObjects: (() -> Unit)? = null,
@@ -2380,6 +2407,7 @@ private fun TableLeaf(
                     loading = columnsLoading,
                     error = columnsError,
                     menu = menu,
+                    onCopyColumn = onCopyColumn,
                     target = DatabaseBrowserState.TreeTarget(
                         database = database,
                         schema = schema,
@@ -2417,6 +2445,8 @@ private fun ColumnRowGroup(
     error: String?,
     /** 字段行的右键菜单与目标（库/表信息）—— 传 null 则字段行不可右键，见 [ColumnRow]。 */
     menu: TreeContextMenuState? = null,
+    /** 字段行单击动作；`null` = 不可单击（见 [TableLeaf.onCopyColumn]）。 */
+    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
     target: DatabaseBrowserState.TreeTarget? = null,
 ) {
     Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
@@ -2451,6 +2481,7 @@ private fun ColumnRowGroup(
                     ColumnRow(
                         col = col,
                         menu = menu,
+                        onCopyColumn = onCopyColumn,
                         target = target?.copy(column = col.name),
                     )
                 }
@@ -2467,12 +2498,30 @@ private fun ColumnRowGroup(
  * `VARCHAR(64) PK` 读起来像是类型的一部分。而 `PK` / `AI` / `NOT NULL` 是**约束**，
  * 混进类型串里会让人以为「这是一种新类型」。分开写，扫一眼就能区分「这是什么」与
  * 「有什么限制」。
+ *
+ * ## 为什么字段行也必须可点击（用户报：「不知道点了哪里」）
+ *
+ * 库节点与表节点都挂了 `focusRing` + `clickable`，只有字段行两个都没有 ——
+ * 于是鼠标划过字段区时**整片没有任何反应**：没有 hover 底色、没有按下反馈，
+ * 用户既看不出自己悬停在哪一行，点下去也没有任何确认。
+ * 字段行恰恰是树里**最长、最密**的一批行（一张表几十个字段），
+ * 没有逐行反馈就完全靠读文字定位，扫视成本最高的地方反而反馈最少。
+ *
+ * 动作选「复制字段引用」，与右键菜单的第二项完全一致：
+ * 字段没有「打开预览」的语义（预览是**表**级的），复制引用是它唯一能做的事；
+ * 而且点了立刻有反馈（通知 + 剪贴板），用户知道自己点到了哪一行。
+ *
+ * `focusRing` 放在 `clickable` **之前**：焦点环靠 `padding` 让出宽度、画在容器外侧，
+ * 与「选中态」的背景区分得开 —— 两者在树里长得都是一圈高亮，不分开会误判。
  */
 @Composable
 private fun ColumnRow(
     col: DatabaseBrowserState.ColumnInfo,
     /** 非 null 时这一行可右键（复制字段引用）；null = 纯展示（表格编辑器里的同名列没有右键）。 */
     menu: TreeContextMenuState? = null,
+    /** 非 null 时这一行可单击；null = 纯展示。与 [menu] 的判据刻意一致 —— 右键能复制，
+     *  单击也该能复制同一个东西，不该出现「右键行可复制、左键行没反应」的分裂。 */
+    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
     target: DatabaseBrowserState.TreeTarget? = null,
 ) {
     // 同上：字段行的原点也要记，否则字段菜单会偏到面板顶部。
@@ -2482,6 +2531,7 @@ private fun ColumnRow(
         modifier = Modifier
             .fillMaxWidth()
             .trackNodeCoordinates(nodeCoords)
+            .focusRing()
             .then(
                 if (menu != null && target != null) {
                     Modifier.onRightClick { offset ->
@@ -2495,6 +2545,30 @@ private fun ColumnRow(
                     Modifier
                 }
             )
+            .then(
+                if (onCopyColumn != null && target != null) {
+                    Modifier.clickable(
+                        // 语义动作名：读屏用户听到的是「复制字段 USERNAME」而不是「按钮」
+                        onClickLabel = "复制字段 ${col.name}",
+                        role = Role.Button,
+                    ) { onCopyColumn(target) }
+                } else {
+                    Modifier
+                }
+            )
+            // ⚠️ tag 挂在**整行**而不是列名文本上，且这与 [TableLeaf] 一致
+            //（clickable 与 testTag 都在 Row 上）：
+            //
+            // 字段行加上 `clickable` 之后**语义会被合并**（clickable 默认
+            // `mergeDescendants = true`），原先挂在列名 `Text` 上的 tag 被吸收进 Row ——
+            // 合并后的语义树里再也查不到它，而未合并的树里还在，于是测试报的是
+            // 「could not find any node … However, the unmerged tree contains '1' node
+            // that matches」，极难看出真实原因（这次真踩过）。
+            //
+            // 挂整行对测试只会更好：`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，
+            // 正是 [ColumnRow] 上那个 `onRightClick` 挂在的地方；而 tag 名本身就含列名，
+            // 命中哪一行不存在歧义。
+            .testTag(schemaColumnTag(col.name))
             .padding(top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -2504,10 +2578,7 @@ private fun ColumnRow(
             fontWeight = if (col.primaryKey) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            // tag 挂在**列名文本**上而不是整行：整行里还有类型与 [PK] 等多个文本节点，
-            // 挂整行时 onNodeWithTag 命中的是一个「自己没有 text」的容器节点，
-            // 测试既读不出列名、也说不清右键命中的到底是哪一行。
-            modifier = Modifier.weight(1f).testTag(schemaColumnTag(col.name)),
+            modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(6.dp))
         Text(

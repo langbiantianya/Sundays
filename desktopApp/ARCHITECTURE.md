@@ -526,6 +526,90 @@ Popup(
 边界钳位用 `LocalWindowInfo.containerSize`；`MENU_ESTIMATED_HEIGHT` 是**估算值**
 （真实高度布局后才知道，而钳位发生在布局之前），宁可偏大：贴底时多收一点，而不是截掉菜单项。
 
+#### 菜单容器的阴影：`shadow` 必须写在 `background` 之前
+
+用户报「右键菜单的样式有很奇怪的阴影」。真窗口像素采样（沿 y=420 横向扫一行色值）给出了
+决定性证据：菜单本体 `#211F26`(`surfaceContainer`) 一直延到 x=266，紧跟着 x=268→286
+是一段**更暗的 `#1D1B21`**(`surfaceContainerLow`) 的宽带；放大后还能看到菜单项背景是
+**直角**、容器边框是**圆角** —— 典型的「圆角菜单里内嵌了一块方块 + 边上挂条脏色」。
+
+根因是 `Modifier.shadow` 造的是 graphicsLayer，而 **graphicsLayer 只包含它链上后续的内容**。
+原来写成 `.background(shape).border(shape).shadow(shape)` 时，圆角背景与边框都落在 layer
+**之外**，于是：
+
+1. 阴影轮廓按 layer **内**的菜单项矩形（直角）生成，和圆角容器对不上
+2. layer 的 `clip`（elevation > 0 时默认 true）裁不到 layer 外的背景，
+   菜单项自己那层不透明底色照原样画 → 菜单里出现一块**直角内嵌方块**
+
+改成 Material 自己 `Modifier.surface` 的同序写法即可：
+
+```kotlin
+.shadow(8.dp, menuShape())
+.background(scheme.surfaceContainer, menuShape())
+.border(1.dp, scheme.outlineVariant, menuShape())
+```
+
+修完再采一次同样的横向扫描：本体 `#211F26` 到 x=224，x=227 是 `#272C37`、x=230 起是面板
+`#232833` —— **突兀暗带消失，变成平滑过渡**。判据是像素采样，不是「看起来好像对了」。
+
+> 通用教训：凡是 `Modifier.shadow`，它必须在**所有负责画形状的修饰符之前**。
+> 顺序反了不会崩，只会静默地画出一个对不上的轮廓。
+
+#### 字段行也能单击：动作与右键菜单第二项一致
+
+`ColumnRow` 原来既没有 `focusRing()` 也没有 `clickable` —— 鼠标划过字段区**整片没有任何反应**，
+点下去也没有确认。字段行恰是树里最长最密的一批（一张表几十个字段），扫视成本最高的地方
+反馈反而最少，用户报「不知道点了哪里」。
+
+单击动作选**复制字段引用**，与右键菜单第二项字面一致：字段没有「打开预览」的语义
+（预览是表级的），复制是它唯一能做的事，而且点了立刻有剪贴板 + 通知 + 焦点环三重反馈。
+判据刻意与右键一致 —— 不该出现「右键能复制、左键没反应」的分裂。
+
+`focusRing()` 放在 `clickable` **之前**：焦点环靠 `padding` 让出宽度、画在容器外侧，
+与「选中态」的背景区分得开（两者在树里长得都是一圈高亮，不分开会误判）。
+
+| 位置 | 改动 |
+|---|---|
+| `TableLeaf` / `ColumnRowGroup` | 新增 `onCopyColumn: ((TreeTarget) -> Unit)? = null` 并透传 |
+| `ColumnRow` | 加 `focusRing()` 与条件 `clickable(onClickLabel = "复制字段 …", role = Role.Button)` |
+| `SchemaTreePanel` | 调 `TableLeaf` 处传 `state.copyTreeText(it, quoted = true)` |
+
+父级给动作而不是 `ColumnRow` 自己调 state —— 这两个组件都不持有 `state`，
+与既有的 `onOpen` 是同一套写法。
+
+> ⚠️ **但点下去之后、鼠标还没移开的那段时间，树里仍然没有任何底色变化。**
+> 这一版 Compose（1.11.1）在 Desktop 上 `Modifier.clickable` **不产生任何 hover
+> indication** —— 本轮实测过：悬停表节点与不悬停时，x=12/60/300/405 四处颜色**完全相同**
+> （都是面板的 `#232833`），字段行同样如此。这是**既有事实，不是本次改动引入的**
+> （`TableLeaf` / `DatabaseNode` 早就是 clickable）。
+>
+> 要补的话方案是现成的：本文件「底部状态栏」一节里的 `reportsHover`
+> （监听 `PointerEventType.Enter/Exit` @ `PointerEventPass.Initial`）
+> + 手型指针 + `surfaceVariant` 底色 + 文字转 `onSurface` 这套三重反馈。
+> 尚未决定的是**范围**：只给字段行加，还是整棵树统一加 ——
+> 只加字段行会让它与库/表节点的手感不一致，统一加则要动三个节点组件。
+> 记在这里待决，**不要**因为「字段行能点了」就以为悬停反馈也已经有了。
+
+#### 字段行的 `testTag` 挂在整行上，不能挂在列名 `Text` 上
+
+这是给字段行加 `clickable` 时**立刻踩到**的一个回归：`clickable` 默认
+`mergeDescendants = true`，语义会合并到 `Row` 上，原先挂在列名 `Text` 上的 tag 被**吸收**，
+合并后的语义树里再也查不到它。测试报的却是
+
+```
+could not find any node … However, the unmerged tree contains '1' node that matches
+```
+
+—— 信息极具误导性，看起来像「tag 打错了」，真实原因在「unmerged」三个字里。
+
+所以 tag 移到 `Row` 上（`.testTag(schemaColumnTag(col.name))` 放在 `clickable` 之后、
+`.padding` 之前）。对测试只会更好：`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，
+正是 `onRightClick` 真正挂载的地方；tag 名本身含列名，命中哪一行不存在歧义。
+`TableLeaf` 本来就是「`clickable` + `testTag` 都在 `Row` 上」，现在两者一致了。
+
+> 通用教训：给一个已经带 `testTag` 的子树**新加** `clickable` 时，
+> 要顺手确认 tag 是否还在**合并后**的语义树里 —— `onNodeWithTag` 查的是合并树。
+
 #### 菜单项的关闭用 `target == null` 表达，`Popup` 整块组合
 
 `Popup` 没有 `expanded`，可见性就是「在不在组合里」，所以直接 `if (target == null) return`。

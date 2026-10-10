@@ -2430,4 +2430,245 @@ PG 一直都认，只是拒绝**真的**跨库。
 而那恰好是唯一影响用户可见行为的一步。
 和 §9.25「工具自己骗人」、§9.27「UI 层量不到就别硬断言」同源：
 **凡是「我以为」，都要找一个能真值的地方去撞一下。**
+### 9.29 右键菜单「阴影很怪」+ 字段节点没有点击效果
 
+用户一次报了两个问题：右键菜单样式有很奇怪的阴影；树里的字段节点没有点击效果，
+不知道点了哪里。两者看似无关，实际**根因在同一层**：`ColumnRow` 一直是这棵树上
+唯一一个既没有 `focusRing` 也没有 `clickable` 的节点。
+
+#### 问题一：菜单阴影 —— 顺序反了，不是参数不对
+
+第一反应是「阴影太重，调小 elevation / 换个颜色」。这是猜的。真窗口像素采样直接给出了答案：
+沿菜单中部 y=420 横向扫一行色值。
+
+修复前：
+
+| x | 颜色 | 是什么 |
+|---|---|---|
+| …→266 | `#211F26` | 菜单本体（`surfaceContainer`） |
+| 268→286 | `#1D1B21` | **更暗的一整条宽带**（`surfaceContainerLow`） |
+| 288 起 | `#232833` | 右侧面板底色 |
+
+放大图（`m03_zoom` / `m04_zoom2`）里还有两个细节：**菜单项背景是直角，容器边框是圆角**。
+
+**「圆角菜单 + 直角阴影 + 一条突兀的暗带」** —— 这三个现象指向同一个原因：
+有东西被画在了阴影层的**外面**。
+
+`Modifier.shadow` 造的是 graphicsLayer，而 graphicsLayer **只包含它链上后续的内容**。
+原写法是：
+
+```kotlin
+.background(scheme.surfaceContainer, menuShape())   // ← 背景在 layer 之外
+.border(1.dp, scheme.outlineVariant, menuShape())   // ← 边框在 layer 之外
+.shadow(8.dp, menuShape())                          // ← layer 从这里才开始
+```
+
+于是同时坏掉两件事：
+
+1. 阴影轮廓按 layer **内**的菜单项矩形生成 —— 是**直角**，和外面的圆角容器对不上
+2. layer 的 `clip`（elevation > 0 时默认 true）**裁不到 layer 外的背景**，
+   而菜单项自己那层不透明底色照原样画 → 菜单里浮出一块**直角的内嵌方块**
+
+修法就是 Material 自己 `Modifier.surface` 的同序写法（`shadow(...).background(color, shape)`）：
+
+```kotlin
+.shadow(8.dp, menuShape())
+.background(scheme.surfaceContainer, menuShape())
+.border(1.dp, scheme.outlineVariant, menuShape())
+```
+
+修复后再采同一条扫描线：本体 `#211F26` 到 x=224，x=227 是 `#272C37`、x=230 起是面板 `#232833`
+—— **突兀的暗带没了，变成平滑过渡**；放大图（`m13_zoom_after.png`）里整个菜单均匀一片
+`#211F26`，圆角完整，内嵌方块消失。
+
+> **判据是像素采样，不是「看起来好像对了」。** 这一轮的教训和 §9.25「工具自己骗人」同源：
+> 阴影参数是可以无限调的，不测就永远在「差一点」的状态里自我说服。
+>
+> 通用结论：**`Modifier.shadow` 必须写在所有负责画形状的修饰符之前。** 顺序反了不会崩，
+> 只会静默画出一个对不上的轮廓。
+
+#### 问题二：字段行点击 —— 定位到修饰符链上的一处「空白」
+
+`TableLeaf` / `DatabaseNode` 都有 `focusRing()` + `clickable`，只有 `ColumnRow` 的修饰符链是
+
+```kotlin
+.fillMaxWidth().trackNodeCoordinates().then(onRightClick).padding(...)
+```
+
+—— 既没有 `focusRing`，也没有 `clickable`。所以鼠标划过字段区时**整片没有任何反应**：
+没有底色变化、没有按下反馈，点下去也没有任何确认。字段行恰是树里**最长、最密**的一批
+（一张表几十个字段），扫视成本最高的地方反馈反而最少。
+
+改动：
+
+| 位置 | 改动 |
+|---|---|
+| `TableLeaf` | 新增 `onCopyColumn: ((TreeTarget) -> Unit)? = null` |
+| `ColumnRowGroup` | 新增同名参数并透传 |
+| `ColumnRow` | 修饰符链加 `.focusRing()`（在 `clickable` 之前）与条件 `.clickable(...)` |
+| `SchemaTreePanel` | 调 `TableLeaf` 处传 `onCopyColumn = { state.copyTreeText(it, quoted = true) }` |
+
+三个设计取舍：
+
+- **动作选「复制字段引用」**，与右键菜单第二项字面一致。字段没有「打开预览」的语义
+  （预览是**表**级的），复制是它唯一能做的事；且点了立刻有剪贴板 + 通知 + 焦点环三重反馈。
+  判据刻意与右键相同 —— 不该出现「右键能复制、左键没反应」的分裂。
+- **`focusRing()` 放在 `clickable` 之前**：焦点环靠 `padding` 让出宽度、画在容器外侧，
+  与「选中态」的背景区分得开 —— 两者在树里长得都是一圈高亮，不分开会误判。
+- **`onCopyColumn` 由父级传入而不是 `ColumnRow` 自己调 state**：这两个组件都不持有 `state`，
+  与既有的 `onOpen` 是同一套「父级给动作」写法。
+
+真窗口验证：点击字段 `l2` → 剪贴板读回 `"examquestions"."public"."t1"."l2"`
+（含 §9.28 的三段 / 四段式），截图 `m18_click_col.png` 上 `l2` 行外出现**焦点环**。
+
+#### 顺带踩到并修掉的一个回归：`clickable` 合并语义吃掉 `testTag`
+
+加上 `clickable` 之后 `TreeContextMenuUiTest` 立刻红了，报的是：
+
+```
+could not find any node … However, the unmerged tree contains '1' node that matches
+```
+
+这句话极具误导性 —— 看起来像「tag 打错了」，而 tag 名一个字都没改。
+真实原因在 **unmerged** 三个字里：`clickable` 默认 `mergeDescendants = true`，
+语义会合并到 `Row`，原先挂在列名 `Text` 上的 tag 被**吸收**了，
+而 `onNodeWithTag` 查的是**合并后**的树。
+
+修法：tag 移到 `Row` 上（`.testTag(schemaColumnTag(col.name))` 放在 `clickable` 之后、
+`.padding` 之前），`Text` 的 modifier 简化为 `.weight(1f)`。顺带发现这样对测试**只会更好** ——
+`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，正是 `onRightClick` 真正挂载的地方；
+tag 名本身含列名，命中哪一行不存在歧义。`TableLeaf` 本来就是「`clickable` + `testTag` 都在 `Row` 上」，
+现在两者终于一致。
+
+> 通用教训：给一个已经带 `testTag` 的子树**新加** `clickable` 时，
+> 要顺手确认 tag 是否还在**合并后**的语义树里。
+
+#### 顺带确诊的既有事实：Desktop 上 `clickable` 没有任何 hover indication
+
+修完点击后去看悬停，发现**整棵树鼠标划过都不变色**。逐点采样确认这不是本轮引入的：
+
+| 位置 | 悬停时 | 未悬停时 |
+|---|---|---|
+| x=12 / 60 / 300 / 405 | `#232833` | `#232833` |
+
+表节点、字段行都一样。而 `TableLeaf` / `DatabaseNode` 早就是 `clickable` 了 —— 是这版
+Compose（1.11.1）在 Desktop 上不给 indication，不是某处写漏了。
+
+项目里已有成熟解法：`DatabaseBrowserScreen.kt` 里的 `reportsHover`
+（监听 `PointerEventType.Enter/Exit` @ `PointerEventPass.Initial`）+
+手型指针 + `surfaceVariant` 底色 + 文字转 `onSurface`，见
+`ARCHITECTURE.md`「底部状态栏：堆占用详情面板」一节的三重反馈决策。
+
+**本轮没有动它** —— 范围是个待决问题（只给字段行加会让它与库 / 表节点手感不一致，
+统一加要动三个节点组件），不该顺手替用户决定。记在 `ARCHITECTURE.md` 对应小节的警示框里。
+
+#### 第二轮全量红了 —— 红的不是上一条，是 **MySQL 连不上**
+
+按 §9.26 的教训跑第二轮，结果第二轮确实红了，但**红的地方和预期的完全无关**：
+
+| | `DialectSmokeTest` |
+|---|---|
+| 用例 | 35 项 / **5 失败** |
+| 耗时 | **652 秒**（第一轮全量整体才 3m38s，这一轮构建耗时 13m50s） |
+| 报错 | 5 条全是 `CommunicationsException: Communications link failure` —— `The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.` |
+| 分布 | S0 / S1 / S4 / S5 / S6，**全部标着 `[[MySQL]]`** |
+
+PG / H2 / SQLite / DuckDB 四路一条没红。判据链：
+
+1. 本轮改动只碰 `DatabaseBrowserScreen.kt` 的 Compose 修饰符链 —— **不碰 JDBC、不碰连接池、
+   不碰引擎**，结构上不可能让 MySQL 握手失败
+2. 失败形态是「包发出去、服务端一个字节都没回」，不是断言不符、不是超时等待语义树
+3. 失败**全集中在同一个外部服务**上，且带一条 251s 的挂死 —— 典型的服务端半死状态
+   （`max_connections` 打满 / 正在重启）
+
+所以去**真服务**上问了一句，而不是猜。连上 `192.168.1.5:3306` 直接读服务端握手包：
+
+```
+握手包 64 字节，协议版本号 = 73 0 0
+可读部分: I....8.4.9.!....|_.l&l...
+```
+
+`8.4.9` —— **MySQL 活着，而且正常回了握手包**。也就是说第二轮那一刻它坏了，跑完之后又好了。
+
+> 判据又一次来自「去真东西上量一下」，不是来自推理。这已经是连续第三次了
+> （§9.25 工具自己骗人 / §9.28 方言能不能写要去真库 / 本轮 外部服务到底活没活）。
+> 测试全量红**不等于**代码坏了，得先问「红的那一路和改动有没有关系」。
+
+#### 顺带暴露的一个既有脆弱点：`reachable()` 是**只探 TCP**的
+
+`SmokeTarget.reachable()` 的实现只有一句：
+
+```kotlin
+override fun reachable(): Boolean = runCatching {
+    Socket().use { it.connect(InetSocketAddress(host, port), 2000) }
+    true
+}.getOrDefault(false)
+```
+
+它只回答「**端口有没有人接**」，不回答「**服务能不能干活**」。
+本次实测：MySQL 坏掉的那一刻，TCP 仍然连得上（3306 有响应），
+于是 `assumeTrue(reachable())` **判定为「可达」→ 不跳过 → 照跑 → 全红**。
+
+即：**这个 skip 门只在「机器断网 / 服务没启动」时才生效；服务「活着但不可用」时完全挡不住。**
+这是既有设计问题，**本轮没有改** —— 改它要动 `SmokeTarget` 与所有 `ServerSmokeTarget`
+子类的判据（至少得做一次真实握手，或者接受「端口通但握手失败」时也 skip），
+属于测试基础设施的独立一轮，不该搭在 UI 修复上顺手带过。记在这里待处理。
+
+#### `TreeContextMenuUiTest` 的 flaky 又复现了一次 —— 这次是同一类
+
+单跑该组：5 项 / 0 失败 ✅。
+
+而在这之前的**全量并发**下，`右键字段 - 给表点字段引用且没有 DDL 项` 红了，
+报错形态和上一轮**完全一致**：`等待超时：语义树里出现库节点 …（30003ms）`。
+
+注意这两轮的失败形态是**同一个**：
+
+| 轮次 | 全量并发时报错 | 单跑 |
+|---|---|---|
+| §9.28 | `等待超时：语义树里出现库节点 treemenu_354605365927700` | ✅ 通过 |
+| 本轮 | `等待超时：语义树里出现库节点 treemenu_416757863416400` | ✅ 通过 |
+
+这**不是**本轮改动引入的回归，但也不能就此了事 —— 该类的脆弱点是已记录的：
+每条用例新建 `IdbEngine` + H2 内存库 + 建表，全量并发下这些资源是共享的，
+类 KDoc 里明写着「拆成 10 个用例时实测每轮都有 1~2 条被掐断」。
+
+#### 全量回归：三轮，**1000 项 / 0 失败 / 8 跳过**（与上一轮基线逐项相同）
+
+| 轮次 | 结果 | desktopApp 耗时 | 说明 |
+|---|---|---|---|
+| 第 1 轮 | **1000 / 0 失败 / 8 跳过** | — | 与基线完全一致 |
+| 第 2 轮 | 1000 / **5 失败** | 构建 13m50s | 5 条全是 `DialectSmokeTest [MySQL]` 连接失败（外部服务半死，见上） |
+| 第 3 轮 | **1000 / 0 失败 / 8 跳过** | 构建 1m18s | `DialectSmokeTest` 耗时从 **652s 降到 15.6s** |
+
+按模块（第一 / 第三轮相同）：
+
+| 模块 | 用例 | 变化 |
+|---|---|---|
+| desktopApp | 415 | —（本轮**没有**加用例） |
+| shared | 272 | — |
+| engine | 300 | — |
+| dialect-postgresql | 13 | — |
+
+**没有新增用例，这不是遗漏而是本轮的结论**：两个修复都在 Compose 修饰符链上，
+而菜单位置/样式与 hover indication 在这版 `runComposeUiTest` 下**量不到**
+（§9.27 已记：Popup 内节点的边界在 `runComposeUiTest` 下与真实渲染对不上）。
+硬补一条只能断言「能渲染」的用例，是给自己造一条永远绿的东西。
+本轮的判据是**真窗口像素采样 + 剪贴板读回**，已逐项写在上文。
+
+**第 2 轮那 5 条为什么判定为环境问题而不是回归**，三条独立证据：
+
+1. 改动只碰 `DatabaseBrowserScreen.kt` 的修饰符链，**不碰 JDBC / 连接池 / 引擎**
+2. 报错是「包发出去了、服务端零字节回」，不是断言不符，也不是 UI 等待超时
+3. 跑完后直连 MySQL 读到 `8.4.9` 的**完整握手包**，且第 3 轮同一批用例
+   耗时从 652s 回到 15.6s —— 服务恢复即恢复
+
+> `TreeContextMenuUiTest` 的资源脆弱点**本轮仍未解决**。三轮里它一次红都没红，
+> 但那是「这轮没踩到」，不是「已修复」。
+
+#### 本轮用到的探针
+
+- 横向扫描取色 + 放大裁剪：`.NET System.Drawing` + `Graphics.DrawImage` + `InterpolationMode.NearestNeighbor`
+- 强制置顶：`build/tmpprobe/topmost.ps1 -TargetProcessId <pid>`（`SetForegroundWindow` 会被前台锁拦）
+- 截图落在 `build/tmp/shots/`：`m02_menu`、`m03_zoom`、`m04_zoom2`（修复前）、
+  `m12_menu_fixed`、`m13_zoom_after`（修复后）、`m18_click_col`、
+  `p01_hover_table` / `m15_hover_none`（hover 采样）
