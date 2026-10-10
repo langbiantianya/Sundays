@@ -1,10 +1,13 @@
 package com.kxxnzstdsw.sundays.table
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -277,6 +280,73 @@ fun DataTable(
                     onCellEdit = onCellEdit,
                     contentWidth = contentWidth,
                 )
+                // 横向滚动条 —— 放在表体与分页栏**之间**。
+                //
+                // 为什么非有不可：`contentWidthFor` 让列一多就宽于视口，于是右侧的列
+                // **滚出屏幕外**。而 `Modifier.horizontalScroll` 默认只响应触控板横扫 /
+                // Shift+滚轮 —— 普通鼠标用户没有任何可见的提示，**根本不知道右边还有列**。
+                // 那不叫「支持横向滚动」，那叫「把数据藏起来了」。
+                //
+                // 用**可见且可拖**的滚动条是因为它同时解决两件事：
+                //   1. 溢出**可见**（拇指宽度 = 可见比例，用户一眼看出还有多少列没露出来）
+                //   2. **可达**（拖着就能到任何一列，不依赖用户知道 Shift+滚轮这回事）
+                //
+                // 与表头、表体共用 [hScroll]，所以拖它时列名与数据列一起走 —— 不会出现
+                // 「数据滑过去了、列名还停在原地」这种会读错列的状态。
+                //
+                // 不做「溢出时才出现」的条件渲染：列数会随数据加载变化（先 5 列后 23 列），
+                // 滚动条忽隐忽现会引发布局跳动，比一条不滚动时的满格轨道更糟。
+                // 满格轨道正是「当前没有溢出」的正确视觉，与 Excel 等表格一致。
+                HorizontalScrollbar(
+                    adapter = rememberScrollbarAdapter(hScroll),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(TABLE_HSCROLLBAR_TAG),
+                    // ⚠️ **必须显式给 style，不能用默认样式**。
+                    //
+                    // 默认 `ScrollbarStyle` 的 `unhoverColor` 在深色档实测是 `#1F232D`，
+                    // 而轨道背后就是表格底色 `#232833` —— 每通道只差 4，**肉眼几乎看不出**
+                    // 「这里有条滚动条」，更看不出右边还有列。那等于白加：溢出依然不可见。
+                    //
+                    // `unhoverColor` 给成实色 ⇒ 拇指**常驻可见**（而不是悬停才淡入）。
+                    // 这是刻意的取舍：自动隐藏的滚动条很「现代」，但它服务的是
+                    // 「已经知道要横滚」的人；这里要解决的是**还不知道右边有列**的人。
+                    //
+                    // ⚠️ **颜色取 `cellText.color`（墨色），不取任何「表面色」**。
+                    //
+                    // 这一点是被真窗口像素实测纠正过来的：初版取 `headerBackground`
+                    // （深色档 `#2C3240`），理由是「与表头、分页栏同色、已在主题里」。
+                    // 理由成立，**结论却是错的** —— 截图量下来拇指确实是 `#2C3240`，
+                    // 可它背后的轨道底色就是行底 `#232833`，两者每通道只差 9/10/17：
+                    //
+                    //   对比度（WCAG，相对亮度比）= **1.15 : 1**
+                    //
+                    // 1.15:1 意味着「渲染出来了」但「看不出」—— 而这个缺陷的全部要害
+                    // 恰恰是「看不出右边还有列」，所以它等于没修。
+                    //
+                    // 根子在选色**维度**选错了：`headerBackground` / `borderColor` /
+                    // `paginationBackground` 全都是**表面色**，而全部现代档的表面色都挤在
+                    // `#232833 ~ #333A48` 这一条窄带里，互相之间天然只有 1.1~1.3:1。
+                    // 从这条窄带里挑任何一个，都不可能指望它跟背景拉开距离。
+                    //
+                    // 滚动条拇指不是表面，是**控件**，控件就该用墨色（`cellText.color`）：
+                    //   - 深色档 `#CBD1DC` on `#232833` = **9.6 : 1**
+                    //   - 浅色档 `#000000` on `#FFFFFF` = **21 : 1**
+                    //
+                    // 明暗两档都远超 WCAG 对非文本 UI 部件的 3:1，且该色在每套主题里
+                    // 都有定义（现代档用常量、复古档取 `onSurface`），不必新造取值。
+                    // 代价是拇指比数据醒目 —— 但「醒目」正是此处要的效果：
+                    // 它是一个需要被看见才能被使用的控件。
+                    //
+                    // 这条对比度不是靠肉眼认的，`TableHorizontalScrollbarTest` 会
+                    // `captureToImage()` 取真实像素算 WCAG 比值并卡下限。
+                    style = ScrollbarStyle(
+                        12.dp, 8.dp, winShape(4.dp),
+                        150,
+                        theme.cellText.color,
+                        theme.cellText.color,
+                    ),
+                )
                 WinDivider(color = theme.borderColor)
                 TablePagination(
                     theme = theme,
@@ -406,6 +476,14 @@ const val TABLE_HEADER_TAG = "sundays.tableHeader"
 const val TABLE_BODY_TAG = "sundays.tableBody"
 
 /**
+ * 横向滚动条的 UI 测试 tag —— 见 `TableHorizontalScrollbarTest`。
+ *
+ * 需要它是因为「滚动条**在不在**」与「它有多长」都只能从**整体边界**量：
+ * 拇指是一条 `Box`，既没有文本也没有 testTag，从语义树里根本没有对应的节点。
+ */
+const val TABLE_HSCROLLBAR_TAG = "sundays.tableHScrollbar"
+
+/**
  * 分页底栏容器的 UI 测试 tag —— 见 `TablePaginationLayoutTest`。
  *
  * 需要它是因为「按钮标签有没有折行」这件事**只能量整体高度**：
@@ -497,16 +575,14 @@ private val PAGINATION_COMPACT_WIDTH: Dp = 560.dp
  * [hScroll] 必须由调用方创建而不是这里自己 `remember`：两处各自持有状态就是「表头能滚、
  * 表体不能滚」那个缺陷的成因。
  *
- * [contentWidth] 排在 `horizontalScroll` **外面**这件事**动过、又被证伪、退回来了** ——
- * 起因是 §9.21 走查时看到「表体 5 列清清楚楚、表头却只剩第一个列名 `id`」，
- * 猜是 `weight` 在滚动容器的无界宽度里分不到空间、把 `width` 挪到滚动层内。
+ * [contentWidth] 曾经排在 `horizontalScroll` **外面**，已挪到**内侧** ——
+ * §9.24 记着「两种顺序下表头各列的语义宽度都 > 0、真窗口里表头照样只有一个列名，
+ * 假设不成立，改动已回退」。那个结论是**错的，判据是错的**：
+ * 它量的是「宽度 > 0」，而缺陷版本里每列 44.5dp 当然 > 0。
  *
- * **实测否定**：两种顺序下表头各列的语义宽度**都 > 0**（`TableWeightedColumnMinWidthTest`
- * 量过，两种版本都绿），而真窗口里表头仍只显示第一个列名。
- * 也就是说「列宽塌成 0」这个解释**不成立**，别再往这个方向猜了。
- *
- * 那个现象的**根因尚未确证**，已记在 `desktopApp/TEST_CASES.md` §9.24。
- * 在确证之前，这里保持原样 —— 一个改不动的顺序，好过一个说不清为什么的顺序。
+ * 真正该量的是**表头与表体的逐列对齐**，而那才是坏的（43dp vs 102dp，见下方注释）。
+ * 「量了一个对现象不敏感的量」是 §9.24 自己写下的教训，
+ * 结果下一轮仍然栽在同一处 —— 这条 KDoc 留着，提醒后来人别再拿「> 0」当判据。
  */
 @Composable
 private fun TableHeader(
@@ -518,9 +594,37 @@ private fun TableHeader(
 ) {
     Row(
         modifier = Modifier
+            // ⚠️ **`horizontalScroll` 必须排在 `width` 之前** —— 顺序反了会同时坏掉两件事，
+            // 而且坏得**很安静**：不报错、不塌成 0、只是列宽悄悄变成另一个数。
+            //
+            // `Modifier.width` 是**按传入约束钳位**的（`coerceIn(minWidth, maxWidth)`），
+            // 不是「设一个绝对宽度」。排在外面时它拿到的是父 `Column` 给的
+            // `maxWidth = 视口宽`，于是 `contentWidth` 被**钳回视口宽**：
+            //
+            // ```kotlin
+            //   .width(contentWidth)        // ← 2346dp 被 coerce 成 1024dp（视口宽）
+            //   .horizontalScroll(hScroll)  // ← 视口 = 1024dp，于是 weight 在 1024 里分
+            // ```
+            //
+            // 实测（`runComposeUiTest`，23 个加权列，视口 1024dp，contentWidth 2346dp）：
+            //
+            // | | 每列间距 | 每列宽 |
+            // |---|---|---|
+            // | 表头 | **43dp** | 44.5dp（1024 ÷ 23） |
+            // | 表体 | **102dp** | 102dp（2346 ÷ 23） |
+            //
+            // 两者的 `hScroll.maxValue` 都是 1322（= 2346 − 1024），所以**滚动量是对的**，
+            // 也正因如此 §9.24 那些断言「两种顺序下都 > 0」全绿 —— 43dp 当然 > 0。
+            // **表头与表体在用两套不同的宽度基准**，于是列名与数据列整体错位，
+            // 而表头每列只剩 44.5dp（扣掉左右各 8dp 内边距后文本区仅 28dp），
+            // `maxLines = 1` + `Ellipsis` 之下 22 个长列名被省略成看不出的一小截，
+            // 只有 `id` 这种短名字还认得出 —— 即 §9.24「表头只剩第一个列名」。
+            //
+            // 挪进滚动层后 `width` 拿到的是**无界**约束，`coerceIn` 不再钳它，
+            // 表头与表体用同一个 2346dp 基准分列，两者逐列对齐。
+            .horizontalScroll(hScroll)
             .width(contentWidth)
             .background(theme.headerBackground)
-            .horizontalScroll(hScroll)
             // 供 TableColumnAlignmentTest 量「表头是否真的能横滚」与表体位移是否一致
             .testTag(TABLE_HEADER_TAG)
             .padding(horizontal = 12.dp, vertical = 10.dp),

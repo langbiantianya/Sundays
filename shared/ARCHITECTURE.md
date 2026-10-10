@@ -509,7 +509,7 @@ SQL 工作台的候选**全部来自已有状态，零额外请求**（`Database
 | **单元格可选中** | 每行包裹 `SelectionContainer`，可在单元格内拖拽选中 |
 | **右键菜单** | `@Composable (TableRow?) -> Unit` 插槽 |
 | **数据库主键承载** | `TableRow.id: Any` 承载主键（Long / String / UUID 等） |
-| **列多的横向滚动** | 表头与表体**共用同一个 `ScrollState`**（见 §3.1.1） |
+| **列多的横向滚动** | 表头与表体**共用同一个 `ScrollState`**（见 §3.1.1）；表头 `width` 排在 `horizontalScroll` **内侧**（见 §3.1.2）；常驻可见的横向滚动条（见 §3.1.3） |
 
 #### 3.1.1 表头 / 表体必须共用一个横向 `ScrollState`
 
@@ -526,6 +526,81 @@ SQL 工作台的候选**全部来自已有状态，零额外请求**（`Database
 
 `TableColumnAlignmentTest` 断言：表体存在横向滚动轴（`maxValue > 0`）且滚动后表头与表体
 `value` 相等。已做变异验证（把表体改回自己的 `ScrollState`，测试变红）。
+
+#### 3.1.2 ⚠️ 契约：`width` 必须排在 `horizontalScroll` **内侧**
+
+这是 §3.1.1 的**必要补充**，也是本项目最容易改回去的一处修饰符顺序。
+
+**规则**：`TableHeader` 的修饰符链里，`Modifier.width(contentWidth)` 必须排在
+`Modifier.horizontalScroll(hScroll)` **之后**（即更靠近内容）。
+
+```
+Column {                          // 父容器给出 maxWidth = 视口宽
+  TableHeader(
+    Modifier
+      .horizontalScroll(hScroll)   // ① 滚动层：把「无界」传给内侧
+      .width(contentWidth)        // ② 宽度层：此时拿到无界约束，2346dp 成立
+      .background(...)
+  )
+  TableBody(Modifier.horizontalScroll(hScroll))   // 行在滚动层内侧，同样拿到无界约束
+}
+```
+
+**为什么顺序不能反**：`Modifier.width` 走的是 `coerceIn(minWidth, maxWidth)` ——
+它是**按传入约束钳位**，不是「设绝对宽度」。
+
+| 顺序 | `width` 收到的 `maxWidth` | 结果 |
+|---|---|---|
+| `.width()` 在**外**（错） | 父 `Column` 的视口宽 | `contentWidth`（2346dp）被**钳回 1024dp**；`weight` 在 1024dp 里分 23 列 → 每列 44.5dp |
+| `.width()` 在**内**（对） | 滚动层的无界约束 | 2346dp 成立 → 每列 102dp |
+
+表体因为**行**在滚动层**内侧**量到无界约束，一直是对的；表头排外面，被钳成视口宽。
+于是两边用**两套不同的宽度基准**：`weight` 的间距 43dp（表头）vs 102dp（表体）——
+整体错位，且表头每列只剩 44.5 − 内边距 ≈ 28dp 的文本区，`maxLines = 1` + `Ellipsis`
+之下 22 个长列名被压没，只有 `id` 这种短名字还认得出。
+
+> **这也是 §9.24「表头只显示第一个列名」的根因**，结案记录见
+> `desktopApp/TEST_CASES.md` §9.30。
+>
+> ⚠️ §9.24 当年曾把这个方向**证伪并回退**，理由是「两种顺序下表头各列的语义宽度
+> 都 > 0」。**那个判据是错的**：缺陷版本里每列确实分到了 44.5dp，当然 > 0。
+> 量宽度 > 0 量不到「放不下列名」这件事。
+
+| 决策 | 理由 |
+|---|---|
+| 表头 `width` 排在 `horizontalScroll` **内侧** | 见上。排外面会被父约束钳死，造成两套宽度基准 |
+| 逐列对齐断言量的是**横坐标**，不是宽度 | `boundsInRoot.left` 同时反映「有没有分到宽度」与「用户看不看得见」，而 `size.width > 0` 只反映前者 —— §9.24 三次都栽在后一种量上 |
+| 表头不加 `weight`，改用 `width(contentWidth)` 后由 `Row` 内 `Modifier.weight(1f)` 分列 | 列宽基准只有一处，两边才能一致 |
+
+### 3.1.3 横向滚动条必须**常驻可见**（`HorizontalScrollbar`）
+
+列多时右边有一大截列**在视口外**。没有可见的滚动条，用户根本不知道它们存在
+—— 那是把数据藏起来了，不叫「支持横向滚动」。
+
+| 决策 | 理由 |
+|---|---|
+| 表体与分页栏**之间**放一条 `HorizontalScrollbar(rememberScrollbarAdapter(hScroll))` | 与表头、表体共用同一个 `hScroll`，拖它时列名与数据列一起走；位置与 Excel 等表格一致 |
+| **显式给 `ScrollbarStyle`**，不用默认样式 | 默认 `unhoverColor` 深色档实测 `#1F232D`，而轨道背后就是行底 `#232833` —— 每通道只差 4，肉眼几乎看不出「这里有条滚动条」 |
+| `unhoverColor` = `hoverColor` = **`theme.cellText.color`（墨色）** | 见下 |
+| **不做「溢出时才出现」的条件渲染** | 列数随数据加载变化（先 5 列后 23 列），忽隐忽现会引发布局跳动；满格轨道正是「当前没有溢出」的正确视觉，与 Excel 一致 |
+
+**⚠️ 拇指必须用墨色，不能用表面色。** 现代档的表面色全部挤在
+`#232833 ~ #333A48` 这条窄带里，互相之间只有 **1.1 ~ 1.3 : 1** 的对比度：
+
+| 拇指取色 | 深色档 | 对比度 | 结论 |
+|---|---|---|---|
+| 默认 `ScrollbarStyle` | `#1F232D` on `#232833` | ≈ 1.02 : 1 | 看不见 |
+| `theme.headerBackground` | `#2C3240` on `#232833` | **1.15 : 1** | 渲染了，等于没画 |
+| `theme.borderColor` | `#333A48` on `#232833` | 1.29 : 1 | 仍不足 |
+| **`theme.cellText.color`** | `#CBD1DC` on `#232833` | **9.62 : 1** | 看得见 |
+
+浅色档同理：`headerBackground` `#F5F5F5` on `#FFFFFF` 只有 1.09:1，
+`cellText.color` `#000000` on `#FFFFFF` 是 21:1。
+
+滚动条拇指是**控件**不是**表面** —— 控件就该用墨色。这条对比度由
+`TableHorizontalScrollbarTest` 用 `captureToImage()` 取**真实渲染像素**算 WCAG 比值
+并卡下限 **3:1**（WCAG 2.1 §1.4.11 对非文本 UI 部件的下限），明暗两档分别断言；
+已做变异验证（改回表面色，两条立刻变红并报出实际比值）。
 
 ### 3.2 高度策略（v2.9 统一）
 

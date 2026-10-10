@@ -134,16 +134,88 @@ class TableWeightedColumnMinWidthTest {
     }
 
     /**
-     * ⚠️ **这里刻意不留「表头列名可见」的断言** —— 试过两条，都不咬人：
+     * **逐列对齐** —— 表头第 i 列与表体第 i 个单元格必须在**同一个横坐标**。
      *
-     * 1. 「23 个列名的语义节点都在」—— **在缺陷上照样绿**。列宽塌成 0 时
-     *    `Text` 节点依然存在于语义树（只是宽度为 0），`fetchSemanticsNodes()` 照样查得到。
-     * 2. 「第 2~6 列的语义宽度 > 0」—— **也照样绿**。`SemanticsNode.size` 量的是
-     *    **布局尺寸**，与「是否落在视口内、用户看不看得见」无关。
+     * ## 为什么这条断言放在这个类里，而不是 `TableColumnAlignmentTest`
      *
-     * 两条都是「量了一个对现象不敏感的量」。真窗口里表头只显示第一个列名
-     * （根因未确证，记在 `TEST_CASES.md` §9.24），要钉住它得先有一个
-     * **能量到「在视口内且可见」** 的判据 —— 目前 Compose 测试这边没有现成好用的，
-     * 与其写一条骗自己的绿断言，不如把这句话留在代码里。
+     * 那边的 `weight body columns line up with the weight header columns` 量的是**同一件事**，
+     * 但它用 **5 列**：`contentWidth = maxOf(1024 视口, 5×100+28) = 1024`，**恰好不溢出**。
+     * 不溢出时 `Modifier.width(1024)` 不会被钳（见下），表头表体本来就是对齐的 ——
+     * 于是那条用例在缺陷版本上**照样绿**。换句话说：它量的场景与缺陷发生的场景不重合。
+     *
+     * 本类用 **23 列**：`contentWidth = 2346`，**溢出视口 1322** —— 正是缺陷现场。
+     *
+     * ## 缺陷机制（已确证，见 `DataTable.TableHeader` 的注释）
+     *
+     * `Modifier.width` 是**按传入约束钳位**的（`coerceIn(minWidth, maxWidth)`），不是「设绝对宽度」。
+     * 表头写 `.width(contentWidth).horizontalScroll(...)` 时，它拿到的 `maxWidth` 是父 `Column`
+     * 给的**视口宽**，于是 2346dp 被**钳回 1024dp**，`weight` 在 1024 里分 23 列（每列 44.5dp）；
+     * 而表体的行在滚动层**内侧**量到的是无界约束，2346dp 生效（每列 102dp）。
+     *
+     * 实测（修复前）表头列 x = 20 / 63 / 106 / 149，表体 x = 20 / 121 / 222 / 323 —— 完全两套。
+     * 表头每列扣掉内边距只剩 28dp 文本区，`Ellipsis` 之下 22 个长列名被压没，
+     * 只有 `id` 这种短名字还认得出 —— 即 §9.24「表头只剩第一个列名」。
+     */
+    @Test
+    fun `表头每一列都与表体对应列对齐`() = runComposeUiTest {
+        renderWeightedTable(colCount = 23)
+
+        // 取第 1、2、5、8 列：跨过首列，且分散在视口内外。
+        // 选这几个不是随手 —— 缺陷版本里第 2 列就已经差了近 60px，
+        // 用「第 8 列」能顺带证明**错位是累积的**而不是恒定偏移。
+        val probes = listOf(1, 2, 5, 8)
+        probes.forEach { i ->
+            val header = onAllNodesWithText("column_name_$i").fetchSemanticsNodes()
+                .first { it.boundsInRoot.width > 0 }
+            // ⚠️ 必须 `useUnmergedTree = true`：只读行的 `clickable` 把整行合并成一个语义节点，
+            // 合并树上按文本查到的是「整行」（x=0、宽 1024），不是某个单元格。
+            val body = onAllNodesWithText("value-1-$i", useUnmergedTree = true).fetchSemanticsNodes()
+                .first { it.boundsInRoot.width > 0 }
+
+            assertEquals(
+                body.boundsInRoot.left, header.boundsInRoot.left, 1f,
+                "第 $i 列错位：表头在 x=${header.boundsInRoot.left}、表体在 x=${body.boundsInRoot.left}。" +
+                    "按列名读数会读到隔壁那一列，对数据库工具来说这是读错数据。",
+            )
+        }
+    }
+
+    /**
+     * **表头列宽必须与表体同基准** —— 表头文本宽度不该被视口宽度摊薄。
+     *
+     * 缺陷版本里表头每列 44.5dp，扣掉左右各 8dp 内边距后文本区仅 28dp，
+     * 13 个字符的 `column_name_1` 被 `Ellipsis` 压成看不出的一小截。
+     *
+     * 这里用「表头列起点间距」而不是「文本宽度」当判据：文本宽度受字体影响、
+     * 换主题就会变；而**列起点间距**是布局量，只在基准宽度错掉时才变 ——
+     * 判据必须**对要抓的缺陷敏感、对无关变化不敏感**。
+     */
+    @Test
+    fun `表头列宽不被视口宽度摊薄`() = runComposeUiTest {
+        renderWeightedTable(colCount = 23)
+
+        val leftOf = { i: Int ->
+            onAllNodesWithText("column_name_$i").fetchSemanticsNodes()
+                .first { it.boundsInRoot.width > 0 }.boundsInRoot.left
+        }
+        val spacing = leftOf(2) - leftOf(1)
+        val viewport = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode().boundsInRoot.width
+
+        assertTrue(
+            spacing > viewport / 23,
+            "表头列起点间距只有 $spacing，而视口摊到 23 列是 ${viewport / 23} —— " +
+                "说明表头仍按**视口宽**分列，而表体按 contentWidth 分列，两者错位。",
+        )
+    }
+
+    /**
+     * ⚠️ 这里**不再**留「表头列名可见」的弱断言。
+     *
+     * §9.24 试过两条，都在缺陷版本上绿：
+     * 1. 「列名的语义节点都在」—— 列宽塌成 0 时 `Text` 仍在语义树里，查得到
+     * 2. 「列名的语义宽度 > 0」—— 缺陷版本里是 44.5dp，当然 > 0
+     *
+     * 两条都是「量了一个对现象不敏感的量」。**本类上面两条量的是横坐标**，
+     * 它会随基准宽度错掉而变化 —— 写断言前先问「这个量真的会因为我要抓的缺陷而变化吗」。
      */
 }
