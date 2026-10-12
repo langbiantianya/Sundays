@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays.table
 
+import com.kxxnzstdsw.i18n.StrKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -90,9 +91,10 @@ class TableModelsTest {
 
     @Test
     fun page_size_labels_match_expected_strings() {
-        assertEquals("10", PageSize.S10.label)
-        assertEquals("20", PageSize.S20.label)
-        assertEquals("全部", PageSize.ALL.label)
+        // 数字档没有文案键（显示的就是数字本身）；只有「全部」需要翻译
+        assertNull(PageSize.S10.labelKey)
+        assertNull(PageSize.S20.labelKey)
+        assertEquals(StrKey.PAGE_SIZE_ALL, PageSize.ALL.labelKey)
     }
 
     @Test

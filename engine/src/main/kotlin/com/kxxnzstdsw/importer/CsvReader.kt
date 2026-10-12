@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.importer
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import java.io.BufferedReader
 import java.io.Reader
 import java.util.concurrent.atomic.AtomicBoolean
@@ -55,8 +57,7 @@ class CsvReader(
             header = first ?: emptyList()
         } else {
             require(fallbackColumns.isNotEmpty()) {
-                "has_header=false 的 CSV 必须由调用方提供目标列名（fallbackColumns 为空）；" +
-                    "无表头文件本身无法确定列集合"
+                Msg.text(StrKey.CSV_NO_HEADER_NEEDS_COLUMNS)
             }
             header = fallbackColumns
             // 不消费任何记录：无表头时**每一行都是数据**
@@ -67,7 +68,7 @@ class CsvReader(
 
     override fun rows(): Iterator<Map<String, String>> {
         check(rowsCalled.compareAndSet(false, true)) {
-            "CsvReader.rows() 只能调用一次：底层 Reader 是单遍流，无法回绕"
+            Msg.text(StrKey.CSV_READER_SINGLE_USE)
         }
         // 无表头时不消费任何记录，因此这里不需要 pending 的「首行」
         return RowIterator(null)
@@ -105,7 +106,7 @@ class CsvReader(
 
         override fun next(): Map<String, String> {
             if (!computed) hasNext()
-            val value = next ?: throw NoSuchElementException("CsvReader 已读到文件末尾")
+            val value = next ?: throw NoSuchElementException(Msg.text(StrKey.CSV_READER_EOF))
             next = null
             computed = false
             return value

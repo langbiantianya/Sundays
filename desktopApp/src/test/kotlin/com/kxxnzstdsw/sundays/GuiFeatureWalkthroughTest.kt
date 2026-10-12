@@ -3,9 +3,9 @@ package com.kxxnzstdsw.sundays
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -15,19 +15,13 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -35,6 +29,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 
 /**
  * **已实现功能的 GUI 走查（鼠标 + 键盘）** —— 逐项在真实界面上过一遍。
@@ -142,15 +143,17 @@ class GuiFeatureWalkthroughTest {
             SheetDescriptor(cfg, browser, ConnectionStatus(ConnectionState.CONNECTED, "H2")),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = sheets,
-                    activeSheetId = sheets.first().connection.id,
-                    connections = listOf(cfg),
-                    onSelectSheet = {}, onCloseSheet = {}, onAddSheet = {},
-                    onConnect = {}, onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = sheets,
+                        activeSheetId = sheets.first().connection.id,
+                        connections = listOf(cfg),
+                        onSelectSheet = {}, onCloseSheet = {}, onAddSheet = {},
+                        onConnect = {}, onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
@@ -192,7 +195,7 @@ class GuiFeatureWalkthroughTest {
     @Test
     fun `execute sql with keyboard and mouse`() = runComposeUiTest(testTimeout = 3.minutes) {
         launchBrowser()
-        onNodeWithText("SQL 工作台").performClick()                    // 鼠标切工作台
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()                    // 鼠标切工作台
         browser.selectPane(BrowserPane.SQL)
         val sheet = browser.currentSqlSheet()!!
 
@@ -200,7 +203,7 @@ class GuiFeatureWalkthroughTest {
             "SELECT id, status FROM $TABLE WHERE id <= 3 ORDER BY id",
         )
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()                    // 鼠标点执行
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()                    // 鼠标点执行
         await("执行结束") { !sheet.running }
         assertNull(sheet.error, "执行不应报错：${sheet.error}")
         assertEquals(3, sheet.rows.size, "应返回 3 行")
@@ -211,7 +214,7 @@ class GuiFeatureWalkthroughTest {
     @Test
     fun `run a multi statement script from the workbench`() = runComposeUiTest(testTimeout = 3.minutes) {
         launchBrowser()
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         browser.selectPane(BrowserPane.SQL)
         val sheet = browser.currentSqlSheet()!!
 
@@ -223,7 +226,7 @@ class GuiFeatureWalkthroughTest {
             "CREATE TABLE gui_multi (id INT PRIMARY KEY); INSERT INTO gui_multi VALUES (1); INSERT INTO gui_multi VALUES (2)",
         )
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         await("多语句执行结束") { !sheet.running }
         assertNull(sheet.error, "多语句不应报错：${sheet.error}")
         assertEquals(2L, countRows("gui_multi"), "多语句应把两条 INSERT 都执行掉")
@@ -234,17 +237,17 @@ class GuiFeatureWalkthroughTest {
     @Test
     fun `dangerous sql asks for confirmation before executing`() = runComposeUiTest(testTimeout = 3.minutes) {
         launchBrowser()
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         browser.selectPane(BrowserPane.SQL)
         val sheet = browser.currentSqlSheet()!!
         browser.readOnly = false
 
         onNode(hasSetTextAction()).performTextInput("UPDATE $TABLE SET status = 'X'")
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         waitForIdle()
 
-        onNodeWithText("确认执行危险操作").assertIsDisplayed()      // 确认框应出现
+        onNodeWithText(zh(StrKey.CONFIRM_DANGEROUS_OPERATION)).assertIsDisplayed()      // 确认框应出现
         assertEquals(ROWS.toLong(), countRows(TABLE), "点确认前不应执行")
 
         onNodeWithTag(DANGEROUS_CONFIRM_BTN_TAG).performClick()   // 鼠标点「仍然执行」
@@ -272,7 +275,7 @@ class GuiFeatureWalkthroughTest {
 
         onNodeWithTag(TABLE_EXPORT_BTN_TAG).performClick()        // 鼠标点「导出」
         waitForIdle()
-        onNodeWithText("导出结果").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.EXPORT_RESULT)).assertIsDisplayed()
 
         onNodeWithTag(EXPORT_DIR_FIELD_TAG).performClick()
         onNodeWithTag(EXPORT_DIR_FIELD_TAG).performTextInput(tempHome.absolutePath)

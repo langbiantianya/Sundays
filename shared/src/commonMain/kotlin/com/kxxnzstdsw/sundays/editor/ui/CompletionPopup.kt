@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.sundays.editor.CompletionItem
+import com.kxxnzstdsw.sundays.ui.str
 
 /**
  * 弹层最高高度 —— 超过就内部滚动，别把半屏编辑器盖住。
@@ -167,17 +168,20 @@ fun CompletionPopup(
                 // 否则两坨词混排很难快速扫读
                 Box(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = item.kind.displayName,
+                        text = str(item.kind.displayKey),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
-                // 签名（`detail`）—— 光有函数名不够：`random_int` 收什么参数、
+                // 签名（`detailKey` / `detail`）—— 光有函数名不够：`random_int` 收什么参数、
                 // 返回什么，只有签名能说明。造数沙箱那批函数尤其需要。
-                if (!item.detail.isNullOrBlank()) {
+                // `detailKey` 优先：它是静态文案，要跟着界面语言走；
+                // `detail` 是调用方拼装出来的动态文案（如 `"$db · 表"`），只能原样显示。
+                val detailText = item.detailKey?.let { str(it) } ?: item.detail
+                if (!detailText.isNullOrBlank()) {
                     Text(
-                        text = item.detail,
+                        text = detailText,
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
                         maxLines = 1,

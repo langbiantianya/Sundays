@@ -9,6 +9,10 @@ version = "1.0-SNAPSHOT"
 
 dependencies {
     implementation(project(":api"))
+    // 界面语言与文案表。引擎抛出的中文错误消息会经 Response.error **原样上屏**
+    // （见 RequestDispatcher 的 catch 分支），所以引擎必须能按界面语言给出错误文案。
+    // 依赖 :i18n 而非 :shared —— :engine 看不到 :shared（那是 UI 模块）。
+    implementation(project(":i18n"))
     // 调用层契约（EngineClient 接口）+ proto 消息 / gRPC stub 由 :engine-protocol 提供。
     // api 而非 implementation：IdbEngine 实现 EngineClient，且 handler 全部以 typed proto 消息为入参出参，
     // 因此这些类型是 engine 对外的公开签名的一部分，必须传递给消费方编译类路径。

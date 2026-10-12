@@ -3,30 +3,31 @@ package com.kxxnzstdsw.sundays
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.response
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.connection.DialectType
-import kotlinx.coroutines.CoroutineScope
+import java.io.File
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import java.io.File
-import java.nio.file.Files
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * 浏览屏的**连接失败可见性**契约。
@@ -120,24 +121,26 @@ class ConnectionFailureVisibilityTest {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         browserScope = scope
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(
-                        SheetDescriptor(
-                            connection = conn,
-                            browser = DatabaseBrowserState(stubEngine, scope),
-                            status = status,
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(
+                            SheetDescriptor(
+                                connection = conn,
+                                browser = DatabaseBrowserState(stubEngine, scope),
+                                status = status,
+                            ),
                         ),
-                    ),
-                    activeSheetId = conn.id,
-                    connections = listOf(conn),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = onConnect,
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+                        activeSheetId = conn.id,
+                        connections = listOf(conn),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = onConnect,
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         waitForIdle()
@@ -148,7 +151,7 @@ class ConnectionFailureVisibilityTest {
         render(ConnectionStatus(ConnectionState.FAILED, reason))
 
         // 标签（语义主语）不省略号截断
-        onNodeWithText("连接失败").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.CONNECT_FAILED)).assertIsDisplayed()
         // 原因本身。用 substring 是因为横幅会把它压成两行（maxLines = 2），
         // 但**不能**因此只断言首句 —— 关键信息常常在末尾。
         onNodeWithText(reason, substring = true).assertIsDisplayed()
@@ -159,7 +162,7 @@ class ConnectionFailureVisibilityTest {
         var retried: ConnectionConfig? = null
         render(ConnectionStatus(ConnectionState.FAILED, reason)) { retried = it }
 
-        onNodeWithText("重试").performClick()
+        onNodeWithText(zh(StrKey.RETRY)).performClick()
         assertTrue(
             retried != null,
             "「重试」必须真的回调 onConnect —— 失败原因多半是瞬时的（网络抖了下），" +
@@ -174,7 +177,7 @@ class ConnectionFailureVisibilityTest {
         // 横幅只在 FAILED 时出现 —— 已连接时挂着一条「连接失败」比不挂更糟。
         assertEquals(
             0,
-            onAllNodesWithText("连接失败").fetchSemanticsNodes().size,
+            onAllNodesWithText(zh(StrKey.CONNECT_FAILED)).fetchSemanticsNodes().size,
             "已连接时不该出现失败横幅",
         )
     }

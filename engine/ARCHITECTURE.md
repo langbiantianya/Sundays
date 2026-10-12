@@ -504,6 +504,47 @@ Lua 脚本通过 luajava **在 JNI 里阻塞执行**，协程取消与 `Statemen
 | `properties` | `map<string,string>` | JDBC 扩展参数 / SSH 配置 |
 | `jdbc_url` | `string` | **v2.11** — 完整 JDBC URL。非空时 `PoolManager` 直接用它建池，`host`/`port`/`database` 被忽略；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`）。允许调用方仅凭 URL 初始化连接 |
 
+### 4.1.1 `RequestOptions` —— 随请求走的一次性上下文
+
+`Request.options` 是 envelope 上的横切配置，与「连哪个库」无关，只作用于这一条请求：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `trace_id` | `string` | `""` | 贯穿一帧全部响应的追踪 ID |
+| `dry_run` | `bool` | `false` | 写路径短路（见 §3 的 `writeActions` 集合） |
+| `timeout_ms` | `int32` | `0` | 单请求超时，`0` = 不限 |
+| `language` | `string` | `""` | **界面语言**（BCP-47，如 `de` / `zh-Hant`），见下 |
+
+#### `language` —— 界面语言为什么要一路带进引擎
+
+`Response.error` 的内容是**原样上屏**的（见 `RequestDispatcher` 的 catch 分支）。
+引擎抛的错误如果不带语言，德语界面里就会蹦出英文/中文报错 —— 这和界面本身漏翻译是同一种缺陷。
+
+```
+客户端
+  IdbEngine.handle() / GrpcEngineClient.handle()
+      → Request.withLanguageTag(LanguageScope.currentLanguage().persistedValue())
+引擎进程
+  RequestDispatcher.dispatch()
+      → { ... }.flowOn(EngineLanguageContext(language))
+handler 内
+  Msg.text(StrKey.EXPORT_FAILED)   // 读到的是本次请求的语言
+```
+
+四条设计约束：
+
+1. **`RequestLanguage.kt` 只收 `String`，不收 `AppLanguage`。**
+   它住在 `:engine-protocol`，如果接收 `:i18n` 的类型就会形成
+   `:i18n → :engine-protocol → :engine` 的依赖环 —— 而 `:i18n` 恰恰是 `:engine` 的依赖。
+2. **`RequestDispatcher` 只在客户端真的填了 language 时才装上下文元素**，不填就不装。
+   免得把客户端没打算指定的服务端默认语言给顶掉。
+3. **协程换线程要跟着走**，所以 `EngineLanguageContext` 实现 `ThreadContextElement`，
+   dispatcher 用 `flowOn(...)` 搬运 —— 只用 `ThreadLocal` 会在 `flow` 切线程后丢语言。
+4. **字段号 4 之前未占用**，老客户端不填时行为不变（向后兼容）。
+
+> **「是不是报错」是状态，不是文案。** 上层如果靠 `error.startsWith("导出失败")` 之类解析文案来决定错误色，
+> 翻译之后这个判断恒为 false，报错会被静默染成成功色。严重级别必须走结构化字段。
+
 ### 4.2 统一响应体 (Response Envelope)
 
 | 字段 | 类型 | 默认值 | 说明 |

@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -24,16 +25,16 @@ import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStorage
 import com.kxxnzstdsw.sundays.connection.DialectType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 
 /**
  * 连接管理流程的端到端测试 —— 真引擎（classpath 加载的方言插件 + JDBC 驱动）+ 真点击。
@@ -113,17 +114,17 @@ class ConnectionManagerFlowTest {
     @Test
     fun `quick connect to h2 builds url tests and connects through the engine`() = runComposeUiTest {
         val session = newSession()
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
-        onNodeWithText("快速连接").performClick()
+        onNodeWithText(zh(StrKey.QUICK_CONNECT)).performClick()
         onNodeWithText("H2").performClick()
 
         // 库名为空 → 折算不出 URL → 「下一步」禁用（不允许把无 URL 的配置带进流程）
-        onNodeWithText("下一步").assertIsNotEnabled()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).assertIsNotEnabled()
 
         onNode(hasSetTextAction()).performTextInput("flowtest")
         onNodeWithText("jdbc:h2:mem:flowtest", substring = true).assertExists()
-        onNodeWithText("下一步").performClick()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).performClick()
 
         // 测试连接 → **探测**：引擎建池做 `isValid` 校验，探测完把池还回去。
         //
@@ -133,11 +134,11 @@ class ConnectionManagerFlowTest {
         // 必须先手动断一次才能正常连上（见 `ConnectionSession.testConnection` 的 KDoc）。
         //
         // 正确契约：探测只回答「通不通」，不改变会话。
-        onNodeWithText("测试连接").performClick()
+        onNodeWithText(zh(StrKey.TEST_CONNECTION)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("连接成功!", substring = true).fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.CONNECT_SUCCESS), substring = true).fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("连接成功!", substring = true).assertExists()
+        onNodeWithText(zh(StrKey.CONNECT_SUCCESS), substring = true).assertExists()
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 0 }
         assertTrue(
             session.statuses.values.all { it.state == ConnectionState.DISCONNECTED },
@@ -146,20 +147,20 @@ class ConnectionManagerFlowTest {
         )
 
         // 快速连接流程最后一步「连接」→ 不落盘，直接选中并连库
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) { session.selectedConnection != null }
         assertTrue(session.connectionList.connections.isEmpty(), "快速连接不写入持久化列表")
         // 标签由 connectionStatuses 驱动：connect() 同步置 CONNECTING（标签「连接中」）、
         // 异步回填 CONNECTED（标签「已连接」）。不能只等状态 —— 直接等 UI 标签收敛，
         // 避免中间态一闪而过抓不到。
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.CONNECTED)).fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("已连接").assertExists()
+        onNodeWithText(zh(StrKey.CONNECTED)).assertExists()
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 1 }
 
         // 「断开」→ 释放引擎连接池
-        onNodeWithText("断开").performClick()
+        onNodeWithText(zh(StrKey.DISCONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 0 }
         waitUntil(timeoutMillis = 10_000) {
             session.statuses.values.all { it.state == ConnectionState.DISCONNECTED }
@@ -183,34 +184,34 @@ class ConnectionManagerFlowTest {
         DialectLoader.registerForTesting("H2", H2Dialect())
 
         val session = newSession()
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
-        onNodeWithText("快速连接").performClick()
+        onNodeWithText(zh(StrKey.QUICK_CONNECT)).performClick()
         onNodeWithText("H2").performClick()
         onNode(hasSetTextAction()).performTextInput("reconnectflow")
-        onNodeWithText("下一步").performClick()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).performClick()
 
         // 首次连接：建池 + isValid → 总览状态行「已连接」
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.CONNECTED)).fetchSemanticsNodes().isNotEmpty()
         }
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() >= 1 }
 
         // 断开：释放连接池，状态行回「未连接」
-        onNodeWithText("断开").performClick()
+        onNodeWithText(zh(StrKey.DISCONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("未连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.NOT_CONNECTED)).fetchSemanticsNodes().isNotEmpty()
         }
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() == 0 }
 
         // 重连：必须重新走完 CONNECTING → CONNECTED（修复前代次比对永久失败，结果被丢弃，
         // 界面永远停在禁用的「连接中...」）且池重建
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("已连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.CONNECTED)).fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("已连接").assertExists()
+        onNodeWithText(zh(StrKey.CONNECTED)).assertExists()
         waitUntil(timeoutMillis = 10_000) { PoolManager.activePoolCount() >= 1 }
     }
 
@@ -221,35 +222,40 @@ class ConnectionManagerFlowTest {
             ConnectionConfig(id = "legacy-1", name = "遗留 H2", dialect = DialectType.H2)
         )
         val session = newSession()
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
+        // 「遗留 H2」是上面 seed 进去的**连接名**（测试自己的数据，不是界面文案），
+        // 因此按中文字面量定位；界面语言由 ProvideTestStrings 钉死为简体中文。
         onNodeWithText("遗留 H2").performClick()
 
-        onNodeWithText("缺少 JDBC URL", substring = true).assertExists()
-        onNodeWithText("连接").assertIsNotEnabled()
+        // MISSING_JDBC_URL 的完整文案比这句长（后面还跟着修复指引），这里只取前半句做子串匹配。
+        onNodeWithText(zh(StrKey.MISSING_JDBC_URL), substring = true).assertExists()
+        onNodeWithText(zh(StrKey.CONNECT)).assertIsNotEnabled()
         assertEquals(0, PoolManager.activePoolCount())
     }
 
     @Test
     fun `normal flow keeps the typed name and persists a usable jdbc url`() = runComposeUiTest {
         val session = newSession()
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
-        onNodeWithText("新建连接").performClick()
+        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
         onNode(hasSetTextAction()).performTextClearance()
         onNode(hasSetTextAction()).performTextInput("本地 MySQL")
-        onNodeWithText("下一步").performClick()   // → 连接类型（MySQL 仅客户端-服务器）
-        onNodeWithText("客户端-服务器").assertExists()
-        onNodeWithText("下一步").performClick()   // → 连接详情
+        onNodeWithText(zh(StrKey.NEXT_STEP)).performClick()   // → 连接类型（MySQL 仅客户端-服务器）
+        onNodeWithText(zh(StrKey.MODE_CLIENT_SERVER)).assertExists()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).performClick()   // → 连接详情
         // 客户端-服务器步骤有 6 个文本框：按 label 定位「数据库名」
-        onNode(hasSetTextAction() and hasText("数据库名")).performTextInput("shop")
-        onNodeWithText("下一步").performClick()   // → 测试并保存
+        onNode(hasSetTextAction() and hasText(zh(StrKey.DATABASE_NAME))).performTextInput("shop")
+        onNodeWithText(zh(StrKey.NEXT_STEP)).performClick()   // → 测试并保存
 
         // 摘要里的名称来自 BASIC_INFO 步骤的输入（名称曾在内联 state 里丢失）
+        // 「本地 MySQL」是 seed 进去的**连接名**（测试数据，不参与翻译）；
+        // 界面语言由 ProvideTestStrings 钉死，与这个名字是不是中文无关。
         onNodeWithText("本地 MySQL").assertExists()
         onNodeWithText("jdbc:mysql://localhost:3306/shop", substring = true).assertExists()
 
-        onNodeWithText("保存").performClick()
+        onNodeWithText(zh(StrKey.SAVE)).performClick()
         waitUntil(timeoutMillis = 10_000) { session.connectionList.connections.isNotEmpty() }
 
         val saved = session.connectionList.connections.single()
@@ -281,11 +287,11 @@ class ConnectionManagerFlowTest {
             )
         )
         val session = newSession()
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
         // 普通向导：BASIC_INFO 步骤，渲染「下一步」
-        onNodeWithText("新建连接").performClick()
-        onNodeWithText("下一步").assertExists()
+        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).assertExists()
         assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.BASIC_INFO, session.wizard.step)
         assertNotNull(session.wizard.editingConnection)
 
@@ -294,18 +300,18 @@ class ConnectionManagerFlowTest {
         assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.IDLE, session.wizard.step)
         assertEquals(null, session.wizard.editingConnection)
         // 总览面板上才有的「连接」按钮出现，向导的「下一步」按钮消失
-        onNodeWithText("连接").assertExists()
-        onNodeWithText("下一步").assertDoesNotExist()
+        onNodeWithText(zh(StrKey.CONNECT)).assertExists()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).assertDoesNotExist()
 
         // 快速连接向导同样适用 —— 列表头的快速连接按钮是 Icon(contentDescription = "快速连接")
-        onNodeWithContentDescription("快速连接").performClick()
+        onNodeWithContentDescription(zh(StrKey.QUICK_CONNECT)).performClick()
         // QUICK_CONNECT 步骤选方言 → 直接跳到 CREDENTIALS，才有「下一步」
         onNodeWithText("H2").performClick()
-        onNodeWithText("下一步").assertExists()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).assertExists()
         assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.CREDENTIALS, session.wizard.step)
         onNodeWithText("本地 H2").performClick()
         assertEquals(com.kxxnzstdsw.sundays.connection.WizardStep.IDLE, session.wizard.step)
-        onNodeWithText("连接").assertExists()
-        onNodeWithText("下一步").assertDoesNotExist()
+        onNodeWithText(zh(StrKey.CONNECT)).assertExists()
+        onNodeWithText(zh(StrKey.NEXT_STEP)).assertDoesNotExist()
     }
 }

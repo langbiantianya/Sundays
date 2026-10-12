@@ -42,14 +42,14 @@ class UiTokensTest {
                 assertEquals(
                     palette == ThemePalette.WIN_2000 || palette == ThemePalette.WIN_XP,
                     tokens.isClassic,
-                    "${palette.label}/dark=$dark 的 chrome 档位应与是否经典主题一致",
+                    "${palette.labelKey}/dark=$dark 的 chrome 档位应与是否经典主题一致",
                 )
                 // 经典档必须有真实斜面；现代档必须彻底关掉。两者由 chrome 档位统一派生，
                 // 不允许出现「classic 但斜面关闭」这种自相矛盾的组合。
                 assertEquals(
                     tokens.isClassic,
                     tokens.bevel.enabled,
-                    "${palette.label}/dark=$dark 的斜面开关应与 chrome 档位一致",
+                    "${palette.labelKey}/dark=$dark 的斜面开关应与 chrome 档位一致",
                 )
             }
         }
@@ -67,15 +67,15 @@ class UiTokensTest {
         listOf(ThemePalette.WIN_2000, ThemePalette.WIN_XP).forEach { palette ->
             brightness.forEach { dark ->
                 val t = palette.uiTokens(dark)
-                assertEquals(ChromeMode.CLASSIC, t.chrome, "${palette.label} 应为经典档")
-                assertEquals(ButtonFace.WINDOW, t.buttonFace, "${palette.label} 按钮应取窗口面")
-                assertEquals(FieldFace.SURFACE_VARIANT, t.fieldFace, "${palette.label} 输入框应取灰面")
-                assertEquals(SelectionMode.INVERTED, t.selection, "${palette.label} 选中态应反色")
-                assertEquals(DividerMode.ETCHED, t.divider, "${palette.label} 分割线应蚀刻")
-                assertEquals(PanelBorder.BEVEL, t.panelBorder, "${palette.label} 面板应走斜面")
-                assertFalse(t.zebraRows, "${palette.label} 不应有斑马纹（经典 Win 列表没有隔行底色）")
-                assertTrue(t.disabledInk != Color.Unspecified, "${palette.label} 应显式给出禁用文字色")
-                assertTrue(t.bevel.width > 0.dp, "${palette.label} 斜面线宽应为正")
+                assertEquals(ChromeMode.CLASSIC, t.chrome, "${palette.labelKey} 应为经典档")
+                assertEquals(ButtonFace.WINDOW, t.buttonFace, "${palette.labelKey} 按钮应取窗口面")
+                assertEquals(FieldFace.SURFACE_VARIANT, t.fieldFace, "${palette.labelKey} 输入框应取灰面")
+                assertEquals(SelectionMode.INVERTED, t.selection, "${palette.labelKey} 选中态应反色")
+                assertEquals(DividerMode.ETCHED, t.divider, "${palette.labelKey} 分割线应蚀刻")
+                assertEquals(PanelBorder.BEVEL, t.panelBorder, "${palette.labelKey} 面板应走斜面")
+                assertFalse(t.zebraRows, "${palette.labelKey} 不应有斑马纹（经典 Win 列表没有隔行底色）")
+                assertTrue(t.disabledInk != Color.Unspecified, "${palette.labelKey} 应显式给出禁用文字色")
+                assertTrue(t.bevel.width > 0.dp, "${palette.labelKey} 斜面线宽应为正")
             }
         }
     }
@@ -86,15 +86,15 @@ class UiTokensTest {
         listOf(ThemePalette.BLUE_GRAY, ThemePalette.CYBERPUNK, ThemePalette.BILI_PINK).forEach { palette ->
             brightness.forEach { dark ->
                 val t = palette.uiTokens(dark)
-                assertEquals(ChromeMode.MODERN, t.chrome, "${palette.label} 应为现代档")
-                assertEquals(BevelStyle.NONE, t.bevel, "${palette.label} 不应有斜面")
-                assertEquals(ButtonFace.PRIMARY, t.buttonFace, "${palette.label} 按钮应取 primary")
-                assertEquals(FieldFace.SURFACE, t.fieldFace, "${palette.label} 输入框应取 surface")
-                assertEquals(SelectionMode.TINTED, t.selection, "${palette.label} 选中态应为淡色底")
-                assertEquals(DividerMode.FLAT, t.divider, "${palette.label} 分割线应为实线")
-                assertEquals(PanelBorder.LINE, t.panelBorder, "${palette.label} 面板应为单色描边")
-                assertTrue(t.zebraRows, "${palette.label} 应保留斑马纹")
-                assertEquals(Color.Unspecified, t.disabledInk, "${palette.label} 禁用色应交回 M3 计算")
+                assertEquals(ChromeMode.MODERN, t.chrome, "${palette.labelKey} 应为现代档")
+                assertEquals(BevelStyle.NONE, t.bevel, "${palette.labelKey} 不应有斜面")
+                assertEquals(ButtonFace.PRIMARY, t.buttonFace, "${palette.labelKey} 按钮应取 primary")
+                assertEquals(FieldFace.SURFACE, t.fieldFace, "${palette.labelKey} 输入框应取 surface")
+                assertEquals(SelectionMode.TINTED, t.selection, "${palette.labelKey} 选中态应为淡色底")
+                assertEquals(DividerMode.FLAT, t.divider, "${palette.labelKey} 分割线应为实线")
+                assertEquals(PanelBorder.LINE, t.panelBorder, "${palette.labelKey} 面板应为单色描边")
+                assertTrue(t.zebraRows, "${palette.labelKey} 应保留斑马纹")
+                assertEquals(Color.Unspecified, t.disabledInk, "${palette.labelKey} 禁用色应交回 M3 计算")
             }
         }
     }
@@ -121,7 +121,7 @@ class UiTokensTest {
                 assertEquals(
                     RoundedCornerShape(tokens.bevel.bevelRadius),
                     shapeFor(tokens, corner),
-                    "${palette.label} 的 shapeFor($corner) 应抹平为 ${tokens.bevel.bevelRadius}",
+                    "${palette.labelKey} 的 shapeFor($corner) 应抹平为 ${tokens.bevel.bevelRadius}",
                 )
             }
         }
@@ -138,11 +138,11 @@ class UiTokensTest {
             brightness.forEach { dark ->
                 val scheme = palette.schemeFor(dark)
                 val (bg, fg) = selectionColorsFor(palette.uiTokens(dark), scheme, selected = true)
-                assertEquals(scheme.primary, bg, "${palette.label}/dark=$dark 选中底色应为 primary 反色")
-                assertEquals(scheme.onPrimary, fg, "${palette.label}/dark=$dark 选中文字色应为 onPrimary")
+                assertEquals(scheme.primary, bg, "${palette.labelKey}/dark=$dark 选中底色应为 primary 反色")
+                assertEquals(scheme.onPrimary, fg, "${palette.labelKey}/dark=$dark 选中文字色应为 onPrimary")
                 assertTrue(
                     contrastRatio(fg, bg) >= 4.5,
-                    "${palette.label}/dark=$dark 反色选中行对比度低于 AA 4.5:1",
+                    "${palette.labelKey}/dark=$dark 反色选中行对比度低于 AA 4.5:1",
                 )
             }
         }
@@ -157,7 +157,7 @@ class UiTokensTest {
             val (bg, _) = selectionColorsFor(
                 palette.uiTokens(useDark = false), scheme, selected = false, unselected = custom,
             )
-            assertEquals(custom, bg, "${palette.label} 未选中底色应原样返回调用方传入值")
+            assertEquals(custom, bg, "${palette.labelKey} 未选中底色应原样返回调用方传入值")
         }
     }
 
@@ -181,11 +181,11 @@ class UiTokensTest {
                     val faceLum = luminance(face)
                     assertTrue(
                         luminance(bevel.light) > faceLum,
-                        "${palette.label}/dark=$dark 斜面亮边没有比 $faceName 更亮，画不出凸起",
+                        "${palette.labelKey}/dark=$dark 斜面亮边没有比 $faceName 更亮，画不出凸起",
                     )
                     assertTrue(
                         luminance(bevel.dark) < faceLum,
-                        "${palette.label}/dark=$dark 斜面暗边没有比 $faceName 更暗，画不出凹陷",
+                        "${palette.labelKey}/dark=$dark 斜面暗边没有比 $faceName 更暗，画不出凹陷",
                     )
                 }
                 assertTrue(luminance(bevel.light) != luminance(bevel.dark), "斜面亮暗同色等于一条平边")

@@ -65,11 +65,16 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinMenuItem
 import com.kxxnzstdsw.sundays.ui.onRightClick
+import com.kxxnzstdsw.sundays.ui.plural
+import com.kxxnzstdsw.sundays.ui.str
 import com.kxxnzstdsw.sundays.ui.winShape
 
 /**
@@ -668,7 +673,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
                 .padding(32.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text("暂无数据", style = MaterialTheme.typography.bodyMedium)
+            Text(str(StrKey.EMPTY_DATA), style = MaterialTheme.typography.bodyMedium)
         }
         return
     }
@@ -720,10 +725,9 @@ data class CellEdit(
     val newValue: String,
 ) {
     init {
-        require(columnKey.isNotBlank()) { "CellEdit.columnKey 不能为空 —— 不知道改哪一列" }
+        require(columnKey.isNotBlank()) { Msg.text(StrKey.CELL_EDIT_NO_COLUMN_KEY) }
         require(newValue != oldValue) {
-            "CellEdit 的新旧值相同（'$oldValue'）—— 组件层已拦掉这种情况，" +
-                "走到这里说明有别的调用方绕过了它"
+            Msg.format(StrKey.CELL_EDIT_SAME_VALUE, oldValue)
         }
     }
 }
@@ -1030,7 +1034,7 @@ private fun TablePagination(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "每页",
+                    text = str(StrKey.PER_PAGE),
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.headerText.color,
                     modifier = Modifier.padding(end = 8.dp),
@@ -1040,7 +1044,7 @@ private fun TablePagination(
                 Box {
                     AssistChip(
                         onClick = { pageSizeExpanded = true },
-                        label = { Text(pageSize.label, maxLines = 1, softWrap = false) },
+                        label = { Text(pageSize.labelText(), maxLines = 1, softWrap = false) },
                         modifier = Modifier.testTag(TABLE_PAGE_SIZE_CHIP_TAG),
                     )
                     DropdownMenu(
@@ -1051,7 +1055,7 @@ private fun TablePagination(
                             WinMenuItem(
                                 // 菜单项不获取焦点，只能靠 tag 定位
                                 modifier = Modifier.testTag(TABLE_PAGE_SIZE_ITEM_TAG + size.name),
-                                text = { Text(size.label) },
+                                text = { Text(size.labelText()) },
                                 onClick = {
                                     onPageSizeChange(size)
                                     pageSizeExpanded = false
@@ -1063,7 +1067,7 @@ private fun TablePagination(
                 if (!compact) {
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "共 $totalCount 条",
+                        text = plural(PluralStrKey.TOTAL_RECORDS, totalCount, totalCount),
                         style = MaterialTheme.typography.bodySmall,
                         color = theme.headerText.color,
                         maxLines = 1,
@@ -1074,12 +1078,12 @@ private fun TablePagination(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!compact) {
-                    NavButton("首页", enabled = currentPage > 1, tag = TABLE_NAV_FIRST_TAG) {
+                    NavButton(str(StrKey.FIRST_PAGE), enabled = currentPage > 1, tag = TABLE_NAV_FIRST_TAG) {
                         onPageChange(1)
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                 }
-                NavButton("上一页", enabled = currentPage > 1, tag = TABLE_NAV_PREV_TAG) {
+                NavButton(str(StrKey.PREV_PAGE), enabled = currentPage > 1, tag = TABLE_NAV_PREV_TAG) {
                     onPageChange(currentPage - 1)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1092,12 +1096,12 @@ private fun TablePagination(
                     modifier = Modifier.testTag(TABLE_PAGE_INDICATOR_TAG),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                NavButton("下一页", enabled = currentPage < totalPages, tag = TABLE_NAV_NEXT_TAG) {
+                NavButton(str(StrKey.NEXT_PAGE), enabled = currentPage < totalPages, tag = TABLE_NAV_NEXT_TAG) {
                     onPageChange(currentPage + 1)
                 }
                 if (!compact) {
                     Spacer(modifier = Modifier.width(4.dp))
-                    NavButton("末页", enabled = currentPage < totalPages, tag = TABLE_NAV_LAST_TAG) {
+                    NavButton(str(StrKey.LAST_PAGE), enabled = currentPage < totalPages, tag = TABLE_NAV_LAST_TAG) {
                         onPageChange(totalPages)
                     }
                 }
@@ -1164,7 +1168,7 @@ fun DefaultDetailPanel(
             .padding(16.dp),
     ) {
         Text(
-            text = "详情",
+            text = str(StrKey.DETAIL),
             style = theme.headerText,
             modifier = Modifier.padding(bottom = 8.dp),
         )
@@ -1175,7 +1179,7 @@ fun DefaultDetailPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "← 点击左侧行查看详情",
+                    text = str(StrKey.DETAIL_HINT),
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.headerText.color.copy(alpha = 0.6f),
                 )
@@ -1187,7 +1191,7 @@ fun DefaultDetailPanel(
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    DetailField("主键", row.id.toString(), theme)
+                    DetailField(str(StrKey.PRIMARY_KEY), row.id.toString(), theme)
                     WinDivider(color = theme.borderColor, modifier = Modifier.padding(vertical = 4.dp))
                     columns.forEach { column ->
                         DetailField(column.header, row.formatted(column), theme)

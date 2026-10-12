@@ -6,7 +6,9 @@ import com.kxxnzstdsw.grpc.ConnectionConfig
 import com.kxxnzstdsw.grpc.Request
 import com.kxxnzstdsw.grpc.Response
 import com.kxxnzstdsw.grpc.SystemTestConnectionResponse
+import com.kxxnzstdsw.grpc.withLanguageTag
 import com.kxxnzstdsw.handlers.SystemHandler
+import com.kxxnzstdsw.i18n.LanguageScope
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.loader.DriverLoader
 import com.kxxnzstdsw.pool.PoolManager
@@ -73,8 +75,15 @@ class IdbEngine(
      *   返回 N 条 Response，最后一条 `end=true`
      *
      * [EngineClient.invoke] / `testConnection` / `disconnect` 的默认实现或本地直连实现见下方。
+     *
+     * 这里在交给 dispatcher **之前**盖上当前界面语言：UI 与引擎虽在同一 JVM，但 dispatcher
+     * 一进 `Dispatchers.IO` 就换了线程，UI 线程上的 `LanguageScope` ThreadLocal 到不了
+     * handler 那里。走 proto 这条路与 gRPC 模式共用同一个载体（见 `RequestLanguage.kt`），
+     * 免得两条路径的语言规则各写一遍、慢慢分叉。
      */
-    override fun handle(request: Request): Flow<Response> = RequestDispatcher.dispatch(request)
+    override fun handle(request: Request): Flow<Response> = RequestDispatcher.dispatch(
+        request.withLanguageTag(LanguageScope.currentLanguage().persistedValue())
+    )
 
     /**
      * 断开连接 —— 关闭 [config] 对应的 HikariCP 连接池（含该配置下各 schema 维度的池），

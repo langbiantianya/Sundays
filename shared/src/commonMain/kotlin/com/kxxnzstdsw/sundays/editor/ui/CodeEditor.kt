@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.editor.CodeLanguage
 import com.kxxnzstdsw.sundays.editor.CodeLanguageRegistry
 import com.kxxnzstdsw.sundays.editor.CompletionItem
@@ -73,6 +74,7 @@ import com.kxxnzstdsw.sundays.editor.wordPrefixBefore
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinButton
 import com.kxxnzstdsw.sundays.ui.onRightClick
+import com.kxxnzstdsw.sundays.ui.str
 import com.kxxnzstdsw.sundays.ui.winShape
 
 /**
@@ -722,7 +724,7 @@ private fun EditorToolbar(
             enabled = hasFormatter,
             shape = SundaysPalette.buttonShape,
         ) {
-            Text("格式化")
+            Text(str(StrKey.FORMAT_CODE))
         }
         // 调用方注入的自定义按钮 — 渲染在内置按钮之后
         actions()

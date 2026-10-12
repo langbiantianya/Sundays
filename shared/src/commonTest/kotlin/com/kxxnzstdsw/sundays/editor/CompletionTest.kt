@@ -320,8 +320,16 @@ class CompletionTest {
         assertTrue(names.count { it.startsWith("random_") } == 11, "random_* 应为 11 个，实际=$names")
         // 清单不得有重名 —— 重名会让同一函数在弹层里出现两次
         assertEquals(names.size, names.toSet().size, "宿主函数清单有重名：$names")
-        // 每个候选都要有签名：只有函数名的话用户无从判断该传什么参数
-        assertTrue(GenerateHelpers.completions.all { !it.detail.isNullOrBlank() }, "存在缺签名的候选")
+        // 每个候选都要有签名：只有函数名的话用户无从判断该传什么参数。
+        //
+        // 签名现在有**两条**来源（见 GenerateHelpers.completions 的 KDoc）：带中文的走
+        // `detailKey`（静态、可翻译），纯 ASCII 的走 `detail`。所以判据必须是「任一路径
+        // 拿到非空签名」—— 沿用只看 `detail` 的旧判据，会把走了 `detailKey` 的那批
+        // 误判成「缺签名」，于是每次给宿主函数补签名都先要来这里改一次断言。
+        assertTrue(
+            GenerateHelpers.completions.all { !it.detail.isNullOrBlank() || it.detailKey != null },
+            "存在缺签名的候选",
+        )
     }
 
     @Test

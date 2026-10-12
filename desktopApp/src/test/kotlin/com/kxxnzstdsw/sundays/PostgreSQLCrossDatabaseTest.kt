@@ -23,7 +23,7 @@ import kotlin.test.assertTrue
  * 缺陷：**PostgreSQL 上从左侧树选的库根本没生效** —— 连上之后无论点哪个库，
  * 读到的都是连接配置里那个 bootstrap 库的内容。
  *
- * 真窗口走查（探针 PG `192.168.1.5:5432`，连接配置里库 = `postgres`）：
+ * 真窗口走查（探针 PG `192.168.1.5:5433`，连接配置里库 = `postgres`）：
  * 点开 `sundays_smoke` 与 `examquestions`，两者都显示 `(空)`。
  *
  * ## 根因
@@ -36,7 +36,7 @@ import kotlin.test.assertTrue
  * 那个判断只覆盖了「连接配置的库就是唯一要用的库」这一种情形，漏掉了 sundays 的实际用法：
  * **一个连接浏览多个库**（PG 方言 `supportsCrossDatabase = true`）。
  *
- * 于是建池用的 URL 始终是 `jdbc:postgresql://host:5432/postgres`，
+ * 于是建池用的 URL 始终是 `jdbc:postgresql://host:5433/postgres`，
  * 用户点 `sundays_smoke` 时 `information_schema` 查的仍是 `postgres` 库 ——
  * 静默读到错的库，比报错危险得多。
  *

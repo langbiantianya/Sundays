@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.ui.focusRing
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +38,7 @@ import com.kxxnzstdsw.sundays.ui.WinIconButton
 import com.kxxnzstdsw.sundays.ui.winShape
 import com.kxxnzstdsw.sundays.ui.selectionContainerColor
 import com.kxxnzstdsw.sundays.ui.selectionContentColor
+import com.kxxnzstdsw.sundays.ui.str
 import kotlinx.coroutines.launch
 
 /**
@@ -257,21 +259,20 @@ private fun DeleteConnectionConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("删除连接") },
+        title = { Text(str(StrKey.DELETE_CONNECTION)) },
         text = {
             Column {
-                Text("确定要删除连接「${connection.name}」吗？")
+                Text(str(StrKey.CONFIRM_DELETE_CONNECTION, connection.name))
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "将删除的是本地连接配置（含保存的口令），无法撤销。\n" +
-                        "不会断开数据库，也不会删除库中的任何数据。",
+                    text = str(StrKey.DELETE_CONNECTION_WARNING) + str(StrKey.DELETE_CONNECTION_NOTE),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         dismissButton = {
-            WinTextButton(onClick = onDismiss) { Text("取消") }
+            WinTextButton(onClick = onDismiss) { Text(str(StrKey.CANCEL)) }
         },
         confirmButton = {
             WinButton(
@@ -281,7 +282,7 @@ private fun DeleteConnectionConfirmDialog(
                     contentColor = MaterialTheme.colorScheme.onError,
                 ),
                 shape = SundaysPalette.buttonShape,
-            ) { Text("删除") }
+            ) { Text(str(StrKey.DELETE)) }
         },
     )
 }
@@ -359,15 +360,15 @@ private fun ConnectionListPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "连接列表",
+                text = str(StrKey.CONNECTION_LIST),
                 style = MaterialTheme.typography.titleMedium,
             )
             Row {
                 WinIconButton(onClick = onQuickConnect) {
-                    Icon(Icons.Default.Bolt, contentDescription = "快速连接")
+                    Icon(Icons.Default.Bolt, contentDescription = str(StrKey.QUICK_CONNECT))
                 }
                 WinIconButton(onClick = onNewConnection) {
-                    Icon(Icons.Default.Add, contentDescription = "新建连接")
+                    Icon(Icons.Default.Add, contentDescription = str(StrKey.NEW_CONNECTION))
                 }
                 // 只留设置入口（⚙）。日夜切换**已从本屏移除** —— 明暗改到设置页的
                 // 「个性化 → 明暗档位」单选组里，标题行不再放应用级外观按钮。
@@ -389,7 +390,7 @@ private fun ConnectionListPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "暂无保存的连接",
+                    text = str(StrKey.NO_SAVED_CONNECTIONS),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -479,7 +480,7 @@ private fun ConnectionListItem(
                     )
                 }
                 Text(
-                    text = "${connection.dialect.name} • ${connection.connectionString()}",
+                    text = "${connection.dialect.name} • ${connection.connectionString(str(StrKey.NO_FILE_SPECIFIED), str(StrKey.IN_MEMORY_DB_LABEL))}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -489,14 +490,14 @@ private fun ConnectionListItem(
 
             Box {
                 WinIconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                    Icon(Icons.Default.MoreVert, contentDescription = str(StrKey.MORE_ACTIONS))
                 }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
                     WinMenuItem(
-                        text = { Text("编辑") },
+                        text = { Text(str(StrKey.EDIT)) },
                         onClick = {
                             showMenu = false
                             onEdit()
@@ -504,7 +505,7 @@ private fun ConnectionListItem(
                         leadingIcon = { Icon(Icons.Default.Edit, null) },
                     )
                     WinMenuItem(
-                        text = { Text("删除") },
+                        text = { Text(str(StrKey.DELETE)) },
                         onClick = {
                             showMenu = false
                             onDelete()
@@ -535,12 +536,17 @@ private fun connectionStateColor(state: ConnectionState) = when (state) {
     ConnectionState.FAILED -> MaterialTheme.colorScheme.error
 }
 
-/** 连接状态文案 */
-private fun connectionStateLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.DISCONNECTED -> "未连接"
-    ConnectionState.CONNECTING -> "连接中"
-    ConnectionState.CONNECTED -> "已连接"
-    ConnectionState.FAILED -> "连接失败"
+/**
+ * 连接状态文案 —— **返回键而不是成品串**。
+ *
+ * `str()` 是 `@Composable`，而这里是普通函数（`when` 只做映射，不该有副作用），
+ * 因此把「取文案」留给渲染处：`str(connectionStateLabel(status.state))`。
+ */
+private fun connectionStateLabel(state: ConnectionState): StrKey = when (state) {
+    ConnectionState.DISCONNECTED -> StrKey.NOT_CONNECTED
+    ConnectionState.CONNECTING -> StrKey.CONNECTING
+    ConnectionState.CONNECTED -> StrKey.CONNECTED
+    ConnectionState.FAILED -> StrKey.CONNECT_FAILED
 }
 
 /**
@@ -768,13 +774,13 @@ private fun ConnectionOverviewPanel(
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("连接状态", style = MaterialTheme.typography.labelLarge)
+                Text(str(StrKey.CONNECTION_STATUS), style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ConnectionStatusDot(status.state)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = connectionStateLabel(status.state),
+                        text = str(connectionStateLabel(status.state)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (status.state == ConnectionState.FAILED) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurface,
@@ -792,7 +798,7 @@ private fun ConnectionOverviewPanel(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text("连接信息", style = MaterialTheme.typography.labelLarge)
+                Text(str(StrKey.CONNECTION_INFO), style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 ConnectionSummary(connection)
             }
@@ -807,24 +813,24 @@ private fun ConnectionOverviewPanel(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            WinTextButton(onClick = onDelete, shape = SundaysPalette.buttonShape) { Text("删除") }
+            WinTextButton(onClick = onDelete, shape = SundaysPalette.buttonShape) { Text(str(StrKey.DELETE)) }
             Spacer(modifier = Modifier.width(8.dp))
             WinOutlinedButton(onClick = onEdit, shape = SundaysPalette.buttonShape) {
                 Icon(Icons.Default.Edit, null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("编辑")
+                Text(str(StrKey.EDIT))
             }
             Spacer(modifier = Modifier.width(8.dp))
             when (status.state) {
                 ConnectionState.CONNECTED -> WinOutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
                     Icon(Icons.Default.LinkOff, null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("断开")
+                    Text(str(StrKey.DISCONNECT))
                 }
                 ConnectionState.CONNECTING -> WinButton(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
                     WinProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("连接中...")
+                    Text(str(StrKey.CONNECTING_ELLIPSIS))
                 }
                 ConnectionState.DISCONNECTED, ConnectionState.FAILED -> Column(
                     horizontalAlignment = Alignment.End,
@@ -832,12 +838,12 @@ private fun ConnectionOverviewPanel(
                     WinButton(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
                         Icon(Icons.Default.Bolt, null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("连接")
+                        Text(str(StrKey.CONNECT))
                     }
                     if (!connectable) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "缺少 JDBC URL —— 请先「编辑」补全连接信息",
+                            text = str(StrKey.MISSING_JDBC_URL),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -867,12 +873,12 @@ internal fun IdlePanel(
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "数据库连接管理",
+            text = str(StrKey.CONNECTION_MANAGER_TITLE),
             style = MaterialTheme.typography.headlineSmall,
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "创建新连接或从列表选择一个进行编辑",
+            text = str(StrKey.CONNECTION_MANAGER_HINT),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -880,13 +886,13 @@ internal fun IdlePanel(
         WinButton(onClick = onQuickConnect, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Bolt, null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("快速连接")
+            Text(str(StrKey.QUICK_CONNECT))
         }
         Spacer(modifier = Modifier.height(12.dp))
         WinOutlinedButton(onClick = onNewConnection, shape = SundaysPalette.buttonShape) {
             Icon(Icons.Default.Add, null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("新建连接")
+            Text(str(StrKey.NEW_CONNECTION))
         }
     }
 }
@@ -901,13 +907,13 @@ private fun QuickConnectStep(
     onCancel: () -> Unit,
 ) {
     StepLayout(
-        title = "快速连接",
+        title = str(StrKey.QUICK_CONNECT),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
     ) {
         Text(
-            text = "选择数据库类型，快速创建连接",
+            text = str(StrKey.QUICK_CONNECT_HINT),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -918,35 +924,35 @@ private fun QuickConnectStep(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickConnectCard(
                 title = "MySQL",
-                description = "客户端-服务器模式",
+                description = str(StrKey.CONN_TYPE_CLIENT_SERVER),
                 port = 3306,
                 icon = Icons.Default.Storage,
                 onClick = { onSelectDialect(DialectType.MYSQL) },
             )
             QuickConnectCard(
                 title = "PostgreSQL",
-                description = "客户端-服务器模式",
+                description = str(StrKey.CONN_TYPE_CLIENT_SERVER),
                 port = 5432,
                 icon = Icons.Default.Storage,
                 onClick = { onSelectDialect(DialectType.POSTGRESQL) },
             )
             QuickConnectCard(
                 title = "H2",
-                description = "内存数据库",
+                description = str(StrKey.CONN_TYPE_IN_MEMORY),
                 port = null,
                 icon = Icons.Default.Memory,
                 onClick = { onSelectDialect(DialectType.H2) },
             )
             QuickConnectCard(
                 title = "DuckDB",
-                description = "嵌入式 OLAP",
+                description = str(StrKey.CONN_TYPE_EMBEDDED_OLAP),
                 port = null,
                 icon = Icons.Default.Analytics,
                 onClick = { onSelectDialect(DialectType.DUCKDB) },
             )
             QuickConnectCard(
                 title = "SQLite",
-                description = "文件数据库",
+                description = str(StrKey.CONN_TYPE_FILE),
                 port = null,
                 icon = Icons.Default.FolderOpen,
                 onClick = { onSelectDialect(DialectType.SQLITE) },
@@ -959,7 +965,7 @@ private fun QuickConnectStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Start,
         ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("← 返回") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.BACK_WITH_ARROW)) }
         }
     }
 }
@@ -1039,7 +1045,7 @@ private fun BasicInfoStep(
     onCancel: () -> Unit,
 ) {
     StepLayout(
-        title = "基础信息",
+        title = str(StrKey.BASIC_INFO),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
@@ -1047,15 +1053,15 @@ private fun BasicInfoStep(
         WinTextField(
             value = editingConnection.name,
             onValueChange = onNameChange,
-            label = { Text("连接名称") },
-            placeholder = { Text("例如: 测试环境 MySQL") },
+            label = { Text(str(StrKey.CONNECTION_NAME)) },
+            placeholder = { Text(str(StrKey.CONNECTION_NAME_HINT)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("数据库方言", style = MaterialTheme.typography.labelLarge)
+        Text(str(StrKey.DIALECT), style = MaterialTheme.typography.labelLarge)
         Spacer(modifier = Modifier.height(8.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1074,14 +1080,14 @@ private fun BasicInfoStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            WinTextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text("取消") }
+            WinTextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CANCEL)) }
             Spacer(modifier = Modifier.width(8.dp))
             WinButton(
                 onClick = onNext,
                 enabled = editingConnection.name.isNotBlank(),
                 shape = SundaysPalette.buttonShape,
             ) {
-                Text("下一步")
+                Text(str(StrKey.NEXT_STEP))
                 Icon(Icons.Default.ArrowForward, null)
             }
         }
@@ -1146,11 +1152,11 @@ private fun DialectOption(
     SelectableOptionRow(
         title = dialect.name,
         description = when (dialect) {
-            DialectType.MYSQL -> "MySQL 客户端-服务器模式"
-            DialectType.POSTGRESQL -> "PostgreSQL 客户端-服务器模式"
-            DialectType.H2 -> "H2 内存/嵌入式数据库"
-            DialectType.DUCKDB -> "DuckDB 嵌入式 OLAP"
-            DialectType.SQLITE -> "SQLite 文件数据库"
+            DialectType.MYSQL -> str(StrKey.DIALECT_MYSQL_DESC)
+            DialectType.POSTGRESQL -> str(StrKey.DIALECT_POSTGRESQL_DESC)
+            DialectType.H2 -> str(StrKey.DIALECT_H2_DESC)
+            DialectType.DUCKDB -> str(StrKey.DIALECT_DUCKDB_DESC)
+            DialectType.SQLITE -> str(StrKey.DIALECT_SQLITE_DESC)
             DialectType.UNKNOWN -> ""
         },
         isSelected = isSelected,
@@ -1172,12 +1178,12 @@ private fun ConnectionTypeStep(
     val availableTypes = editingConnection.dialect.supportedConnectionTypes
 
     StepLayout(
-        title = "连接类型",
+        title = str(StrKey.CONNECTION_TYPE),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
     ) {
-        Text("选择连接模式", style = MaterialTheme.typography.labelLarge)
+        Text(str(StrKey.SELECT_CONNECTION_MODE), style = MaterialTheme.typography.labelLarge)
         Spacer(modifier = Modifier.height(8.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1196,10 +1202,10 @@ private fun ConnectionTypeStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
             Spacer(modifier = Modifier.width(8.dp))
             WinButton(onClick = onNext, shape = SundaysPalette.buttonShape) {
-                Text("下一步")
+                Text(str(StrKey.NEXT_STEP))
                 Icon(Icons.Default.ArrowForward, null)
             }
         }
@@ -1215,17 +1221,17 @@ private fun ConnectionTypeOption(
 ) {
     SelectableOptionRow(
         title = when (connectionType) {
-            ConnectionType.CLIENT_SERVER -> "客户端-服务器"
-            ConnectionType.EMBEDDED -> "嵌入式"
-            ConnectionType.IN_MEMORY -> "内存数据库"
-            ConnectionType.FILE_BASED -> "文件数据库"
-            ConnectionType.UNKNOWN -> "未知"
+            ConnectionType.CLIENT_SERVER -> str(StrKey.MODE_CLIENT_SERVER)
+            ConnectionType.EMBEDDED -> str(StrKey.MODE_EMBEDDED)
+            ConnectionType.IN_MEMORY -> str(StrKey.CONN_TYPE_IN_MEMORY)
+            ConnectionType.FILE_BASED -> str(StrKey.CONN_TYPE_FILE)
+            ConnectionType.UNKNOWN -> str(StrKey.MODE_UNKNOWN)
         },
         description = when (connectionType) {
-            ConnectionType.CLIENT_SERVER -> "需要主机地址和端口"
-            ConnectionType.EMBEDDED -> "数据库文件嵌入在应用中"
-            ConnectionType.IN_MEMORY -> "数据存储在内存中，重启后消失"
-            ConnectionType.FILE_BASED -> "数据存储在单个文件中"
+            ConnectionType.CLIENT_SERVER -> str(StrKey.DESC_NEEDS_HOST_PORT)
+            ConnectionType.EMBEDDED -> str(StrKey.DESC_EMBEDDED_IN_APP)
+            ConnectionType.IN_MEMORY -> str(StrKey.DESC_IN_MEMORY_VOLATILE)
+            ConnectionType.FILE_BASED -> str(StrKey.DESC_SINGLE_FILE)
             ConnectionType.UNKNOWN -> ""
         },
         isSelected = isSelected,
@@ -1273,7 +1279,7 @@ private fun CredentialsStep(
     }
 
     StepLayout(
-        title = "连接详情",
+        title = str(StrKey.CONNECTION_DETAILS),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
@@ -1283,8 +1289,8 @@ private fun CredentialsStep(
                 WinTextField(
                     value = editingConnection.host,
                     onValueChange = { apply(editingConnection.copy(host = it)) },
-                    label = { Text("主机地址") },
-                    placeholder = { Text("例如: localhost 或 192.168.1.100") },
+                    label = { Text(str(StrKey.HOST)) },
+                    placeholder = { Text(str(StrKey.HOST_HINT)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Wifi, null) },
@@ -1295,7 +1301,7 @@ private fun CredentialsStep(
                 WinTextField(
                     value = editingConnection.port?.takeIf { it > 0 }?.toString() ?: "",
                     onValueChange = { apply(editingConnection.copy(port = it.filter(Char::isDigit).toIntOrNull())) },
-                    label = { Text("端口") },
+                    label = { Text(str(StrKey.PORT)) },
                     placeholder = { Text(editingConnection.displayPort.toString()) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1306,8 +1312,8 @@ private fun CredentialsStep(
                 WinTextField(
                     value = editingConnection.database,
                     onValueChange = { apply(editingConnection.copy(database = it)) },
-                    label = { Text("数据库名") },
-                    placeholder = { Text("例如: testdb") },
+                    label = { Text(str(StrKey.DATABASE_NAME)) },
+                    placeholder = { Text(str(StrKey.DATABASE_NAME_HINT)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Storage, null) },
@@ -1318,7 +1324,7 @@ private fun CredentialsStep(
                 WinTextField(
                     value = editingConnection.username,
                     onValueChange = { apply(editingConnection.copy(username = it)) },
-                    label = { Text("用户名") },
+                    label = { Text(str(StrKey.USERNAME)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Person, null) },
@@ -1329,7 +1335,7 @@ private fun CredentialsStep(
                 WinTextField(
                     value = editingConnection.password,
                     onValueChange = { apply(editingConnection.copy(password = it)) },
-                    label = { Text("密码") },
+                    label = { Text(str(StrKey.PASSWORD)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Lock, null) },
@@ -1352,13 +1358,13 @@ private fun CredentialsStep(
             }
 
             ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED -> {
-                val (label, placeholder, icon) = embeddedFieldSpec(editingConnection)
+                val (labelKey, placeholderKey, icon) = embeddedFieldSpec(editingConnection)
 
                 WinTextField(
                     value = editingConnection.database,
                     onValueChange = { apply(editingConnection.copy(database = it)) },
-                    label = { Text(label) },
-                    placeholder = { Text(placeholder) },
+                    label = { Text(labelKey?.let { str(it) } ?: DATABASE_NAME_LABEL_UNTRANSLATED) },
+                    placeholder = { Text(str(placeholderKey)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     leadingIcon = { Icon(icon, null) },
@@ -1366,7 +1372,7 @@ private fun CredentialsStep(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text("JDBC URL（由上方字段折算）", style = MaterialTheme.typography.labelMedium)
+                Text(str(StrKey.JDBC_URL_DERIVED), style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -1374,7 +1380,7 @@ private fun CredentialsStep(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     Text(
-                        text = editingConnection.jdbcUrl.ifBlank { "（待补齐字段）" },
+                        text = editingConnection.jdbcUrl.ifBlank { str(StrKey.FIELDS_PENDING) },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(10.dp),
@@ -1388,7 +1394,7 @@ private fun CredentialsStep(
         if (!canProceed) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "请补齐必填字段 —— 连接必须能折算出一条合法的 JDBC URL",
+                text = str(StrKey.REQUIRED_FIELDS_HINT),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -1400,36 +1406,48 @@ private fun CredentialsStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
             Spacer(modifier = Modifier.width(8.dp))
             WinButton(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
-                Text("下一步")
+                Text(str(StrKey.NEXT_STEP))
                 Icon(Icons.Default.ArrowForward, null)
             }
         }
     }
 }
 
-/** 嵌入式 / 内存 / 文件型连接的单个目标字段描述（label / placeholder / 图标） */
+/**
+ * H2 内存库的字段名 —— **尚未收录进文案表**（表里有 `DATABASE`＝「数据库」，
+ * 但没有完全对应的「数据库名称」）。键补齐后删掉本常量与 [embeddedFieldSpec] 的 null 分支。
+ */
+private const val DATABASE_NAME_LABEL_UNTRANSLATED = "数据库名称"
+
+/**
+ * 嵌入式 / 内存 / 文件型连接的单个目标字段描述（label / placeholder / 图标）。
+ *
+ * label / placeholder 以**键**返回：本函数是普通 Kotlin 代码，`str()` 是 `@Composable`
+ * 拿不到，由调用处（[CredentialsStep]）取文案后再交给 `WinTextField`。
+ * label 为 `null` 表示该分支还没有对应键（见 [DATABASE_NAME_LABEL_UNTRANSLATED]）。
+ */
 private fun embeddedFieldSpec(
     connection: ConnectionConfig,
-): Triple<String, String, androidx.compose.ui.graphics.vector.ImageVector> = when (connection.dialect) {
+): Triple<StrKey?, StrKey, androidx.compose.ui.graphics.vector.ImageVector> = when (connection.dialect) {
     DialectType.H2 -> if (connection.connectionType == ConnectionType.FILE_BASED) {
-        Triple("数据库文件路径", "例如: /path/to/data（H2 自动补 .mv.db）", Icons.Default.FolderOpen)
+        Triple(StrKey.DATABASE_FILE_PATH, StrKey.DATABASE_FILE_PATH_HINT_H2, Icons.Default.FolderOpen)
     } else {
-        Triple("数据库名称", "例如: testdb", Icons.Default.Storage)
+        Triple(null, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
     }
     DialectType.DUCKDB -> Triple(
-        "数据库文件路径（留空 = 内存库）",
-        "例如: /path/to/data.duckdb",
+        StrKey.DATABASE_FILE_PATH_LABEL,
+        StrKey.DATABASE_FILE_PATH_HINT_DUCKDB,
         Icons.Default.FolderOpen,
     )
     DialectType.SQLITE -> Triple(
-        "数据库文件路径（留空 = 内存库）",
-        "例如: /path/to/data.db",
+        StrKey.DATABASE_FILE_PATH_LABEL,
+        StrKey.DATABASE_FILE_PATH_HINT_SQLITE,
         Icons.Default.FolderOpen,
     )
-    else -> Triple("数据库", "例如: testdb", Icons.Default.Storage)
+    else -> Triple(StrKey.DATABASE, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
 }
 
 /** 测试 & 保存步骤 (普通流程 4 / 快速连接 3) */
@@ -1446,7 +1464,7 @@ private fun TestSaveStep(
     onCancel: () -> Unit,
 ) {
     val isQuickConnect = wizardFlow == WizardFlow.QUICK_CONNECT
-    val confirmLabel = if (isQuickConnect) "连接" else "保存"
+    val confirmLabel = if (isQuickConnect) str(StrKey.CONNECT) else str(StrKey.SAVE)
     val onConfirm: (ConnectionConfig) -> Unit =
         if (isQuickConnect) onQuickConnectDirect else onSave
     val canConfirm = buildJdbcUrl(editingConnection).isNotBlank()
@@ -1455,7 +1473,7 @@ private fun TestSaveStep(
     var isTesting by remember { mutableStateOf(false) }
 
     StepLayout(
-        title = "测试并保存",
+        title = str(StrKey.TEST_AND_SAVE),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
@@ -1467,7 +1485,7 @@ private fun TestSaveStep(
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("连接信息摘要", style = MaterialTheme.typography.labelLarge)
+                Text(str(StrKey.CONNECTION_SUMMARY), style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 ConnectionSummary(connection = editingConnection)
             }
@@ -1502,11 +1520,11 @@ private fun TestSaveStep(
                         strokeWidth = 2.dp,
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("测试中...")
+                    Text(str(StrKey.TESTING))
                 } else {
                     Icon(Icons.Default.NetworkCheck, null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("测试连接")
+                    Text(str(StrKey.TEST_CONNECTION))
                 }
             }
         }
@@ -1532,8 +1550,8 @@ private fun TestSaveStep(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (result.success) "连接成功!"
-                               else "连接失败: ${result.message}",
+                        text = if (result.success) str(StrKey.CONNECT_SUCCESS)
+                               else str(StrKey.CONNECT_FAILED_WITH_REASON, result.message),
                         color = if (result.success) MaterialTheme.colorScheme.onPrimaryContainer
                                 else MaterialTheme.colorScheme.onErrorContainer,
                     )
@@ -1547,7 +1565,7 @@ private fun TestSaveStep(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text("上一步") }
+            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
             Spacer(modifier = Modifier.width(8.dp))
             WinButton(
                 onClick = { onConfirm(editingConnection) },
@@ -1569,18 +1587,22 @@ private fun TestSaveStep(
 @Composable
 private fun ConnectionSummary(connection: ConnectionConfig) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SummaryRow("名称", connection.name)
-        SummaryRow("方言", connection.dialect.name)
-        SummaryRow("类型", connection.connectionType.name)
+        SummaryRow(str(StrKey.NAME), connection.name)
+        SummaryRow(str(StrKey.DIALECT_SUMMARY), connection.dialect.name)
+        SummaryRow(str(StrKey.TYPE_LABEL), connection.connectionType.name)
         if (connection.connectionType == ConnectionType.CLIENT_SERVER) {
-            SummaryRow("主机", connection.host)
-            SummaryRow("端口", connection.displayPort.toString())
+            SummaryRow(str(StrKey.HOST_SUMMARY), connection.host)
+            SummaryRow(str(StrKey.PORT), connection.displayPort.toString())
             if (connection.database.isNotBlank()) {
-                SummaryRow("数据库", connection.database)
+                SummaryRow(str(StrKey.DATABASE), connection.database)
             }
-            SummaryRow("用户", connection.username)
+            SummaryRow(str(StrKey.USER), connection.username)
         } else if (connection.database.isNotBlank()) {
-            SummaryRow(if (connection.connectionType == ConnectionType.IN_MEMORY) "数据库" else "目标", connection.database)
+            SummaryRow(
+                if (connection.connectionType == ConnectionType.IN_MEMORY) str(StrKey.DATABASE)
+                else str(StrKey.TARGET),
+                connection.database,
+            )
         }
         if (connection.jdbcUrl.isNotBlank()) {
             SummaryRow("JDBC URL", connection.jdbcUrl)
@@ -1628,13 +1650,13 @@ private fun StepLayout(
                     style = MaterialTheme.typography.headlineSmall,
                 )
                 Text(
-                    text = "第 $step / $totalSteps 步",
+                    text = str(StrKey.WIZARD_STEP, step, totalSteps),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             WinIconButton(onClick = onCancel) {
-                Icon(Icons.Default.Close, contentDescription = "关闭")
+                Icon(Icons.Default.Close, contentDescription = str(StrKey.CLOSE))
             }
         }
 

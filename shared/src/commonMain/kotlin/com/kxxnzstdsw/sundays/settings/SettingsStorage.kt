@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays.settings
 
+import com.kxxnzstdsw.i18n.AppLanguage
 import com.kxxnzstdsw.sundays.ui.SystemInfoRefresh
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemePalette
@@ -68,6 +69,13 @@ object SettingsStorage {
                 systemInfoRefresh = parsed.systemInfoRefresh.toEnumOrDefault(SystemInfoRefresh.OFF),
                 compactMode = parsed.compactMode,
                 onboardingCompleted = parsed.onboardingCompleted,
+                // 非法语言值**回落默认**而不是保留原值：语言字段非法时，
+                // 保留一份读不出来的字符串只会让界面拿不到任何文案。
+                // 这里与 palette 等字段一致 —— 「认不出来就退回默认」，
+                // 而不是像 AppLanguage.fromTagOrNull 那样返回 null 把判断权交出去：
+                // 那是**入口**（需要区分「没选过」与「选错了」），
+                // 这里是**出口**（已经确定要一个能用的语言）。
+                language = AppLanguage.fromTagOrNull(parsed.language) ?: AppLanguage.DEFAULT,
             )
         } catch (_: Exception) {
             // 解析失败：重写为默认值，让文件恢复成合法 JSON，避免每次启动都走降级分支
@@ -93,6 +101,7 @@ object SettingsStorage {
                         systemInfoRefresh = settings.systemInfoRefresh.name,
                         compactMode = settings.compactMode,
                         onboardingCompleted = settings.onboardingCompleted,
+                        language = settings.language.persistedValue(),
                     ),
                 ),
             )
@@ -134,6 +143,22 @@ data class AppSettings(
      * 每次升级都会被拦一次。故真正的判据是 [SettingsStorage.exists]（见其 KDoc）。
      */
     val onboardingCompleted: Boolean = false,
+    /**
+     * 界面语言。
+     *
+     * 默认 [AppLanguage.DEFAULT]（简体中文）**不是**「首启按系统语言」的实现方式 ——
+     * 那是 `main.kt` 在**设置文件尚不存在**时的一次性探测（判据同 [SettingsStorage.exists]）。
+     * 落到本字段上，就已经是「用户确认过的选择」了。
+     *
+     * 分成两层是因为二者语义不同：系统语言是**猜测**（用户从没表达过意愿），
+     * 落盘值是**决定**。把猜测直接写成默认值，就再也无法区分「他就是要中文」与
+     * 「我们猜他是中文」—— 而后者在系统语言受支持时是错的。
+     *
+     * ⚠️ 老版本用户升级上来时该字段缺失 → 得到简体中文。这是刻意的：他们已经完成过
+     * 引导，不会再被引导页拦下，因此没有「按系统语言重设」的机会；给一个明确的、
+     * 随时能在设置里改的起点，好过偷偷按机器 locale 猜。
+     */
+    val language: AppLanguage = AppLanguage.DEFAULT,
 )
 
 /**
@@ -150,6 +175,8 @@ private data class PersistedSettings(
     val systemInfoRefresh: String = SystemInfoRefresh.OFF.name,
     val compactMode: Boolean = false,
     val onboardingCompleted: Boolean = false,
+    /** 语言存 [AppLanguage.persistedValue]（BCP-47 标签），不是枚举名 —— 换枚举名不该弄丢用户设置。 */
+    val language: String = AppLanguage.DEFAULT.persistedValue(),
 )
 
 /** 字符串 → 枚举；未知值（手改文件 / 降级安装）一律回落 [fallback]。 */

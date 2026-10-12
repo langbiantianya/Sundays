@@ -2,14 +2,14 @@ package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -18,22 +18,13 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
 import com.kxxnzstdsw.sundays.table.TableRow
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.runBlocking
-import org.jetbrains.skia.Image
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -42,6 +33,17 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
+import org.jetbrains.skia.Image
+import org.junit.After
+import org.junit.Before
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+import org.junit.Test
 
 /**
  * **已实现功能的真机走查** —— 在 **H2 与 SQLite 两个方言**上，把最近落地的五项功能
@@ -216,19 +218,19 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
             val errKey = "$db::${kind.name}"
             val errorText = errors[errKey]
             if (kind.name in target.supportsDatabaseObjects) {
-                assertNull(errorText, "[${target.name}] 支持${kind.label}，不应报错：$errorText")
+                assertNull(errorText, "[${target.name}] 支持${Msg.text(kind.labelKey)}，不应报错：$errorText")
                 assertTrue(
                     kind in objects,
-                    "[${target.name}] ${kind.label} 应出现在对象分组里（key 集合=${objects.keys}）",
+                    "[${target.name}] ${Msg.text(kind.labelKey)} 应出现在对象分组里（key 集合=${objects.keys}）",
                 )
             } else {
                 // 不支持的一侧：**要么**明确报错、**要么**给出空列表；两者都行，
                 // 但绝不能是「永远 loading」也不能是「把支持的种类一起弄没了」。
                 assertTrue(
                     errorText != null || objects[kind].isNullOrEmpty(),
-                    "[${target.name}] ${kind.label} 不受支持，应报错或为空，实际 objects=${objects[kind]} errors=$errors",
+                    "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，应报错或为空，实际 objects=${objects[kind]} errors=$errors",
                 )
-                println("  · ${kind.label} 不受支持 → error=${errorText ?: "(空列表)"}")
+                println("  · ${Msg.text(kind.labelKey)} 不受支持 → error=${errorText ?: "(空列表)"}")
             }
         }
 
@@ -243,7 +245,7 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
         //
         // ⚠️ 树是 **LazyColumn**，而对象分组排在所有表**之后**（见渲染处的注释：
         //「用户 90% 的时间在找表，把表放前面」）。树不高时那些行在折叠线以下 ——
-        // 离屏的 lazy item **没有语义节点**，于是 `onNodeWithText("视图")` 直接找不到。
+        // 离屏的 lazy item **没有语义节点**，于是 `onNodeWithText(zh(StrKey.VIEWS))` 直接找不到。
         // 第一版就是这么误判成「界面没渲染」的。必须先滚到它。
         //
         // ⚠️ 也不能用 `onNode(hasScrollAction())`：整屏有多个可滚动节点，而 `onNode` 要求
@@ -270,11 +272,11 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
                 onAllNodes(hasScrollAction())[idx]
                     // ⚠️ `substring = true` 不能省：分组行的文本是 `"视图："`（带全角冒号），
                     // 而 `hasText` 默认要求**完全相等**，写成 "视图" 就永远匹配不上。
-                    .performScrollToNode(hasText("视图", substring = true))
+                    .performScrollToNode(hasText(zh(StrKey.VIEWS), substring = true))
             }.isSuccess
         }
         assertTrue(scrolled, "应在左侧某个纵向滚动节点里找到「视图」分组（试了 ${candidates.size} 个）")
-        onAllNodesWithText("视图", substring = true).fetchSemanticsNodes().let {
+        onAllNodesWithText(zh(StrKey.VIEWS), substring = true).fetchSemanticsNodes().let {
             assertTrue(it.isNotEmpty(), "树上应出现「视图」分组")
         }
 
@@ -295,8 +297,8 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
         for (kind in DatabaseBrowserState.DatabaseObjectKind.entries) {
             if (kind.name !in target.supportsDatabaseObjects) {
                 assertTrue(
-                    text.contains(kind.label) && (errors["$db::${kind.name}"]?.let { text.contains(it.take(12)) } ?: true),
-                    "[${target.name}] ${kind.label} 不受支持，界面上应有它自己的说明；文本=$text",
+                    text.contains(Msg.text(kind.labelKey)) && (errors["$db::${kind.name}"]?.let { text.contains(it.take(12)) } ?: true),
+                    "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，界面上应有它自己的说明；文本=$text",
                 )
             }
         }
@@ -594,18 +596,20 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
             SheetDescriptor(conn, browser, ConnectionStatus(ConnectionState.CONNECTED, target.name)),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = sheets,
-                    activeSheetId = sheets.first().connection.id,
-                    connections = listOf(conn),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = sheets,
+                        activeSheetId = sheets.first().connection.id,
+                        connections = listOf(conn),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }

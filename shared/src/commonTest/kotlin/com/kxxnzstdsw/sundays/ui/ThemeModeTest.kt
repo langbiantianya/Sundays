@@ -1,5 +1,6 @@
 package com.kxxnzstdsw.sundays.ui
 
+import com.kxxnzstdsw.i18n.StrKey
 import kotlin.math.pow
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,7 +17,7 @@ import kotlin.test.assertTrue
  *
  * ## 为什么 [ThemeMode.next] 的顺序要钉住
  *
- * 按钮图标取的是 `next`，文案取的是 `label()` —— 两者都从同一个「下一档」推导。
+ * 按钮图标取的是 `next`，文案取的是 `labelKey` —— 两者都从同一个「下一档」推导。
  * 顺序若被改成 `SYSTEM → DARK`，图标就会与文案不一致：跟随系统时显示月亮、
  * 文案却说「切换为深色」，而实际结果是浅色。这属于「界面说了一套、代码做了一套」，
  * 只有把映射写死才能被测到。
@@ -118,11 +119,11 @@ class ThemeModeTest {
             val dark = palette.schemeFor(useDark = true)
             assertTrue(
                 luminance(light.background) > 0.5,
-                "${palette.label} 的浅色变体底色不够亮：${light.background}",
+                "${palette.labelKey} 的浅色变体底色不够亮：${light.background}",
             )
             assertTrue(
                 luminance(dark.background) < 0.2,
-                "${palette.label} 的深色变体底色不够暗：${dark.background}",
+                "${palette.labelKey} 的深色变体底色不够暗：${dark.background}",
             )
         }
     }
@@ -157,15 +158,24 @@ class ThemeModeTest {
     fun refresh_interval_options_cover_required_steps() {
         // 需求指定的四档 + 关闭；OFF 之外都必须给出有效周期
         assertEquals(
-            listOf("关闭", "10 秒", "5 秒", "2 秒", "1 秒"),
-            SystemInfoRefresh.entries.map { it.label },
+            listOf(
+                StrKey.AUTO_REFRESH_OFF,
+                StrKey.AUTO_REFRESH_10S,
+                StrKey.AUTO_REFRESH_5S,
+                StrKey.AUTO_REFRESH_2S,
+                StrKey.AUTO_REFRESH_1S,
+            ),
+            // 断言文案**键**而不是中文文案：档位集合与顺序是这轮真正要钉的东西，
+            // 中文文案一变（改译或切默认语言）就红是假失败。键同时把「档位 ↔ 文案」的
+            // 对应关系钉死 —— 换成别的键（比如 S2 指向 5 秒那条）照样能被发现。
+            SystemInfoRefresh.entries.map { it.labelKey },
         )
         assertEquals(null, SystemInfoRefresh.OFF.interval, "OFF 不应有周期")
         assertFalse(SystemInfoRefresh.OFF.enabled)
         for (refresh in SystemInfoRefresh.entries.filter { it.enabled }) {
             assertTrue(
                 (refresh.interval?.inWholeSeconds ?: 0) > 0,
-                "${refresh.label} 应给出正周期",
+                "${refresh.labelKey} 应给出正周期",
             )
         }
         assertEquals(1L, SystemInfoRefresh.S1.interval?.inWholeSeconds)

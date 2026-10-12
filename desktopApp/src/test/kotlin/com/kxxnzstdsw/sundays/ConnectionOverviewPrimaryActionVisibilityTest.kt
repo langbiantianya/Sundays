@@ -8,7 +8,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
@@ -16,11 +15,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
-import org.junit.Test
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.CONNECT_OVERVIEW_ACTIONS_TAG
 import com.kxxnzstdsw.sundays.connection.CONNECT_OVERVIEW_CARD_TAG
 import com.kxxnzstdsw.sundays.connection.CONNECT_OVERVIEW_PANEL_TAG
@@ -32,6 +32,7 @@ import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.WizardFlow
 import com.kxxnzstdsw.sundays.connection.WizardStep
 import kotlin.test.assertTrue
+import org.junit.Test
 
 /**
  * 连接总览面板的**首屏可用性** —— 「连接 / 编辑 / 删除」必须开屏就看得见。
@@ -101,38 +102,40 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
      */
     private fun androidx.compose.ui.test.ComposeUiTest.renderOverview(heightDp: Int) {
         setContent {
-            // density=1 让测试场景的 1024×768px 直接等于 1024×768dp ——
-            // 于是可以把「最小窗口的内容高度」用一个固定高度的 Box 精确框出来。
-            CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                MaterialTheme {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .size(1024.dp, heightDp.dp)
-                                .testTag(VIEWPORT_TAG),
-                        ) {
-                            ConnectionManagerScreen(
-                                connections = listOf(conn),
-                                selectedConnection = conn,
-                                editingConnection = null,
-                                wizardStep = WizardStep.IDLE,
-                                wizardFlow = WizardFlow.NORMAL,
-                                onSelectConnection = {},
-                                onNewConnection = {},
-                                onQuickConnect = {},
-                                onEditConnection = {},
-                                onSaveConnection = {},
-                                onQuickConnectDirect = {},
-                                onDeleteConnection = {},
-                                onCancelEdit = {},
-                                onWizardNext = {},
-                                onWizardBack = {},
-                                onUpdateEditingConnection = {},
-                                connectionStatuses = mapOf(
-                                    conn.id to ConnectionStatus(ConnectionState.DISCONNECTED),
-                                ),
-                                modifier = Modifier.fillMaxSize(),
-                            )
+            ProvideTestStrings {
+                // density=1 让测试场景的 1024×768px 直接等于 1024×768dp ——
+                // 于是可以把「最小窗口的内容高度」用一个固定高度的 Box 精确框出来。
+                CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                    MaterialTheme {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(1024.dp, heightDp.dp)
+                                    .testTag(VIEWPORT_TAG),
+                            ) {
+                                ConnectionManagerScreen(
+                                    connections = listOf(conn),
+                                    selectedConnection = conn,
+                                    editingConnection = null,
+                                    wizardStep = WizardStep.IDLE,
+                                    wizardFlow = WizardFlow.NORMAL,
+                                    onSelectConnection = {},
+                                    onNewConnection = {},
+                                    onQuickConnect = {},
+                                    onEditConnection = {},
+                                    onSaveConnection = {},
+                                    onQuickConnectDirect = {},
+                                    onDeleteConnection = {},
+                                    onCancelEdit = {},
+                                    onWizardNext = {},
+                                    onWizardBack = {},
+                                    onUpdateEditingConnection = {},
+                                    connectionStatuses = mapOf(
+                                        conn.id to ConnectionStatus(ConnectionState.DISCONNECTED),
+                                    ),
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
                 }
@@ -200,7 +203,7 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
             )
             // 语义树里它还得在 —— 可达性不能靠「渲染出来」证明，键盘/读屏走的是语义树
             assertTrue(
-                onAllNodes(hasText("连接")).fetchSemanticsNodes().size == 1,
+                onAllNodes(hasText(zh(StrKey.CONNECT))).fetchSemanticsNodes().size == 1,
                 "按钮即使在界外也必须留在语义树里",
             )
             // 滚动能把它带进视野 —— 这是「被顶下去」与「彻底够不着」的分界

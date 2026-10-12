@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.kxxnzstdsw.client.EngineClient
 import com.kxxnzstdsw.grpc.connectionConfig
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
@@ -250,7 +252,7 @@ class ConnectionSession(
                     if (response.ok) {
                         ConnectionStatus(ConnectionState.CONNECTED, response.driver)
                     } else {
-                        ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { "连接失败" })
+                        ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
                     }
                 },
                 onFailure = { ConnectionStatus(ConnectionState.FAILED, it.message ?: "Unknown error") },
@@ -310,7 +312,7 @@ class ConnectionSession(
         // 但仍要先把用户在途的操作代次作废，否则它晚到的结果会把探测结论覆盖掉。
         bumpStatusGeneration(config.id)
         statuses = statuses + (config.id to when {
-            !response.ok -> ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { "连接失败" })
+            !response.ok -> ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
             wasConnected -> ConnectionStatus(ConnectionState.CONNECTED, response.driver)
             else -> ConnectionStatus()
         })
@@ -319,7 +321,7 @@ class ConnectionSession(
 
     private fun newDraft(): ConnectionConfig =
         // withDialect 套用方言默认值（host/port + 折算 JDBC URL），保证进入凭据步骤即有合法 URL
-        ConnectionConfig(id = UUID.randomUUID().toString(), name = "新连接")
+        ConnectionConfig(id = UUID.randomUUID().toString(), name = Msg.text(StrKey.NEW_CONNECTION_LABEL))
             .withDialect(DialectType.MYSQL)
 }
 

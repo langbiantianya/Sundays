@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.dialect
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -140,7 +142,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun createSchema(conn: Connection, name: String, options: Map<String, String>, ifNotExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(name, "schema name")
+        val safeName = sanitizeIdentifier(name, StrKey.IDENT_KIND_SCHEMA)
         val ifClause = if (ifNotExists) "IF NOT EXISTS " else ""
         conn.createStatement().use { stmt ->
             stmt.execute("CREATE SCHEMA ${ifClause}${quoteIdentifier(safeName)}")
@@ -149,7 +151,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun deleteSchema(conn: Connection, name: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(name, "schema name")
+        val safeName = sanitizeIdentifier(name, StrKey.IDENT_KIND_SCHEMA)
         val ifClause = if (ifExists) "IF EXISTS " else ""
         conn.createStatement().use { stmt ->
             stmt.execute("DROP SCHEMA ${ifClause}${quoteIdentifier(safeName)}")
@@ -252,19 +254,19 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun createUser(conn: Connection, user: String, password: String, host: String): Boolean {
-        throw UnsupportedOperationException("Duckdb 不支持用户管理")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_USER_MANAGEMENT))
     }
 
     override suspend fun deleteUser(conn: Connection, user: String, host: String): Boolean {
-        throw UnsupportedOperationException("Duckdb 不支持用户管理")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_USER_MANAGEMENT))
     }
 
     override suspend fun updatePassword(conn: Connection, user: String, password: String, host: String): Boolean {
-        throw UnsupportedOperationException("Duckdb 不支持用户管理")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_USER_MANAGEMENT))
     }
 
     override suspend fun listUsers(conn: Connection): List<Map<String, String>> {
-        throw UnsupportedOperationException("Duckdb 不支持用户列表")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_USER_LIST))
     }
 
     override suspend fun updatePrivileges(
@@ -276,15 +278,15 @@ class DuckDBDialect : DatabaseDialect {
         tableName: String?,
         withGrantOption: Boolean
     ): Boolean {
-        throw UnsupportedOperationException("Duckdb 不支持权限管理")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PRIVILEGE_MANAGEMENT))
     }
 
     override suspend fun listPrivileges(conn: Connection, user: String, host: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("Duckdb 不支持权限查询")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PRIVILEGE_QUERY))
     }
 
     override suspend fun listAllGrants(conn: Connection, user: String, host: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("Duckdb 不支持权限查询")
+        throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PRIVILEGE_QUERY))
     }
 
     // endregion
@@ -381,7 +383,7 @@ class DuckDBDialect : DatabaseDialect {
             }
             !nullable -> "ALTER TABLE $table ALTER COLUMN $col SET NOT NULL"
             nullable -> "ALTER TABLE $table ALTER COLUMN $col DROP NOT NULL"
-            else -> throw IllegalArgumentException("MODIFY_COLUMN 调用缺少任何修改属性")
+            else -> throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_MODIFY_NO_PROPERTY))
         }
     }
 
@@ -389,7 +391,7 @@ class DuckDBDialect : DatabaseDialect {
      * DuckDB 1.5.x 不支持 `SHOW CREATE TABLE`。从 information_schema.columns + 约束信息手工重建。
      */
     override suspend fun getCreateTableDDL(conn: Connection, tableName: String): String = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
         // 1. 列定义
         val colDefs = mutableListOf<String>()
         var tableExists = false
@@ -410,7 +412,7 @@ class DuckDBDialect : DatabaseDialect {
                 }
             }
         }
-        if (!tableExists) throw IllegalArgumentException("未找到表 '$safeTable'")
+        if (!tableExists) throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_TABLE_NOT_FOUND, safeTable))
 
         // 2. 主键约束
         val pkCols = mutableListOf<String>()
@@ -561,7 +563,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun getRoutineDDL(conn: Connection, routineName: String, schema: String): String = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(routineName, "routine name")
+        val safeName = sanitizeIdentifier(routineName, StrKey.IDENT_KIND_ROUTINE)
         try {
             // DuckDB 1.x：duckdb_functions() 中 MACRO 的定义字段是 macro_definition（非 definition / description）
             // 同时通过 schema_name + function_name 精确定位，避免与同名 built-in 函数混淆
@@ -582,7 +584,7 @@ class DuckDBDialect : DatabaseDialect {
         } catch (e: Exception) {
             logger.debug("查询 MACRO DDL 失败: ${e.message}")
         }
-        throw IllegalArgumentException("未找到函数/宏 '$safeName'")
+        throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_ROUTINE_NOT_FOUND, safeName))
     }
 
     override suspend fun createRoutine(conn: Connection, ddl: String): Boolean = withContext(Dispatchers.IO) {
@@ -599,12 +601,12 @@ class DuckDBDialect : DatabaseDialect {
         ifExists: Boolean,
         cascade: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(routineName, "routine name")
+        val safeName = sanitizeIdentifier(routineName, StrKey.IDENT_KIND_ROUTINE)
         val ifClause = if (ifExists) "IF EXISTS " else ""
         val sql = when (routineType.uppercase()) {
             "FUNCTION", "MACRO" -> "DROP MACRO $ifClause${quoteIdentifier(safeName)}"
-            "PROCEDURE" -> throw UnsupportedOperationException("Duckdb 不支持存储过程")
-            else -> throw IllegalArgumentException("不支持的 routine 类型: $routineType")
+            "PROCEDURE" -> throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PROCEDURE))
+            else -> throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_UNSUPPORTED_ROUTINE_TYPE, routineType))
         }
         conn.createStatement().use { stmt -> stmt.execute(sql) }
         true
@@ -617,11 +619,11 @@ class DuckDBDialect : DatabaseDialect {
         schema: String,
         args: List<String?>
     ): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(routineName, "routine name")
+        val safeName = sanitizeIdentifier(routineName, StrKey.IDENT_KIND_ROUTINE)
         val placeholders = args.joinToString(", ") { "?" }
         // DuckDB 没有 PROCEDURE；MACRO / FUNCTION 都通过 SELECT 模拟
         if (routineType.equals("PROCEDURE", ignoreCase = true)) {
-            throw UnsupportedOperationException("Duckdb 不支持存储过程调用")
+            throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PROCEDURE_CALL))
         }
         val sql = "SELECT ${quoteIdentifier(safeName)}($placeholders) AS result"
         conn.prepareStatement(sql).use { stmt ->
@@ -645,7 +647,7 @@ class DuckDBDialect : DatabaseDialect {
 
     override suspend fun getRoutineInfo(conn: Connection, routineName: String, schema: String): Map<String, String> = withContext(Dispatchers.IO) {
         val targetSchema = schema.ifBlank { "main" }
-        val safeName = sanitizeIdentifier(routineName, "routine name")
+        val safeName = sanitizeIdentifier(routineName, StrKey.IDENT_KIND_ROUTINE)
         try {
             conn.prepareStatement(
                 "SELECT function_name, function_type, parameters, description, return_type " +
@@ -676,12 +678,12 @@ class DuckDBDialect : DatabaseDialect {
                 }
             }
         } catch (_: Exception) {}
-        throw IllegalArgumentException("未找到函数/宏 '$safeName'")
+        throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_ROUTINE_NOT_FOUND, safeName))
     }
 
     override suspend fun debugRoutine(conn: Connection, routineName: String, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
         val targetSchema = schema.ifBlank { "main" }
-        val safeName = sanitizeIdentifier(routineName, "routine name")
+        val safeName = sanitizeIdentifier(routineName, StrKey.IDENT_KIND_ROUTINE)
         val results = mutableListOf<Map<String, String>>()
         // INFO
         try {
@@ -689,22 +691,22 @@ class DuckDBDialect : DatabaseDialect {
             results.add(mapOf(
                 "type" to "INFO",
                 "output" to buildString {
-                    appendLine("Name: ${info["name"]}")
-                    appendLine("Schema: ${info["schema"]}")
-                    appendLine("Type: ${info["routine_type"]}")
-                    appendLine("Language: ${info["language"]}")
-                    appendLine("Return: ${info["return_type"]}")
+                    appendLine(Msg.format(StrKey.DUCKDB_DEBUG_NAME, info["name"]))
+                    appendLine(Msg.format(StrKey.DUCKDB_DEBUG_SCHEMA, info["schema"]))
+                    appendLine(Msg.format(StrKey.DUCKDB_DEBUG_TYPE, info["routine_type"]))
+                    appendLine(Msg.format(StrKey.DUCKDB_DEBUG_LANGUAGE, info["language"]))
+                    appendLine(Msg.format(StrKey.DUCKDB_DEBUG_RETURN_TYPE, info["return_type"]))
                 }
             ))
         } catch (e: Exception) {
-            results.add(mapOf("type" to "INFO", "output" to "(not found: ${e.message})"))
+            results.add(mapOf("type" to "INFO", "output" to Msg.format(StrKey.DUCKDB_DEBUG_NOT_FOUND, e.message)))
         }
         // DDL
         try {
             val ddl = getRoutineDDL(conn, safeName, targetSchema)
             results.add(mapOf("type" to "DDL", "output" to ddl))
         } catch (e: Exception) {
-            results.add(mapOf("type" to "DDL", "output" to "(no DDL: ${e.message})"))
+            results.add(mapOf("type" to "DDL", "output" to Msg.format(StrKey.DUCKDB_DEBUG_NO_DDL, e.message)))
         }
         results
     }
@@ -714,16 +716,16 @@ class DuckDBDialect : DatabaseDialect {
      */
     override suspend fun validateRoutineDDL(conn: Connection, ddl: String): Boolean = withContext(Dispatchers.IO) {
         val trimmed = ddl.trim().trimEnd(';')
-        if (trimmed.contains(';')) throw IllegalArgumentException("DDL 不允许包含多条语句（分号）")
+        if (trimmed.contains(';')) throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_DDL_MULTI_STATEMENT))
         // 拒绝 PG 风格 $$ ... $$ 块（PG 函数体在 DuckDB 中会执行但不解析）
         if (trimmed.contains("""$$""")) {
-            throw IllegalArgumentException("Duckdb 不支持 PostgreSQL 风格 '$$ ... $$' 函数体，请使用 DuckDB MACRO 语法")
+            throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_NO_POSTGRESQL_BODY))
         }
         val normalized = trimmed.replace(Regex("""[`"]"""), "")
         val match = Regex("""(?i)CREATE\s+(?:OR\s+REPLACE\s+)?(MACRO|FUNCTION|PROCEDURE)\s+(\w+)(?:\.(\w+))?""").find(normalized)
-            ?: throw IllegalArgumentException("无法从 DDL 中解析对象类型/名称")
+            ?: throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_DDL_UNPARSABLE))
         val objType = match.groupValues[1].uppercase()
-        if (objType == "PROCEDURE") throw UnsupportedOperationException("Duckdb 不支持存储过程 (PROCEDURE)")
+        if (objType == "PROCEDURE") throw UnsupportedOperationException(Msg.text(StrKey.DUCKDB_NO_PROCEDURE_KEYWORD))
         true
     }
 
@@ -752,8 +754,8 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun createView(conn: Connection, viewName: String, definition: String): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(viewName, "view name")
-        if (definition.contains(';')) throw IllegalArgumentException("视图定义不允许包含分号")
+        val safeName = sanitizeIdentifier(viewName, StrKey.IDENT_KIND_VIEW)
+        if (definition.contains(';')) throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_VIEW_DEF_SEMICOLON))
         conn.createStatement().use { stmt ->
             stmt.execute("CREATE VIEW ${quoteIdentifier(safeName)} AS $definition")
         }
@@ -761,7 +763,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun dropView(conn: Connection, viewName: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(viewName, "view name")
+        val safeName = sanitizeIdentifier(viewName, StrKey.IDENT_KIND_VIEW)
         val ifClause = if (ifExists) "IF EXISTS " else ""
         conn.createStatement().use { stmt ->
             stmt.execute("DROP VIEW ${ifClause}${quoteIdentifier(safeName)}")
@@ -773,7 +775,7 @@ class DuckDBDialect : DatabaseDialect {
      * DuckDB 1.5.x 不支持 `SHOW CREATE VIEW`。从 information_schema.views.view_definition 重建。
      */
     override suspend fun getViewDDL(conn: Connection, viewName: String, schema: String): String = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(viewName, "view name")
+        val safeName = sanitizeIdentifier(viewName, StrKey.IDENT_KIND_VIEW)
         conn.prepareStatement(
             "SELECT view_definition FROM information_schema.views WHERE table_name = ? LIMIT 1"
         ).use { stmt ->
@@ -781,12 +783,12 @@ class DuckDBDialect : DatabaseDialect {
             stmt.executeQuery().use { rs ->
                 if (rs.next()) {
                     val def = rs.getString("view_definition")
-                        ?: throw IllegalArgumentException("视图 '$safeName' 无可用的定义")
+                        ?: throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_VIEW_NO_DEFINITION, safeName))
                     return@withContext "CREATE VIEW ${quoteIdentifier(safeName)} AS $def"
                 }
             }
         }
-        throw IllegalArgumentException("未找到视图 '$safeName'")
+        throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_VIEW_NOT_FOUND, safeName))
     }
 
     // endregion
@@ -794,7 +796,7 @@ class DuckDBDialect : DatabaseDialect {
     // region Indexes
 
     override suspend fun listIndexes(conn: Connection, tableName: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
         val indexes = mutableListOf<Map<String, String>>()
         try {
             conn.prepareStatement(
@@ -841,8 +843,8 @@ class DuckDBDialect : DatabaseDialect {
         unique: Boolean,
         ifNotExists: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeIndex = sanitizeIdentifier(indexName, "index name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
+        val safeIndex = sanitizeIdentifier(indexName, StrKey.IDENT_KIND_INDEX)
         val safeCols = columns.joinToString(", ") { quoteIdentifier(it) }
         val sql = buildString {
             if (unique) append("CREATE UNIQUE INDEX ")
@@ -856,7 +858,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun dropIndex(conn: Connection, indexName: String, tableName: String?, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeIndex = sanitizeIdentifier(indexName, "index name")
+        val safeIndex = sanitizeIdentifier(indexName, StrKey.IDENT_KIND_INDEX)
         val ifClause = if (ifExists) "IF EXISTS " else ""
         conn.createStatement().use { stmt ->
             stmt.execute("DROP INDEX ${ifClause}${quoteIdentifier(safeIndex)}")
@@ -869,7 +871,7 @@ class DuckDBDialect : DatabaseDialect {
     // region Foreign Keys
 
     override suspend fun listForeignKeys(conn: Connection, tableName: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
         val fks = mutableListOf<Map<String, String>>()
         try {
             // DuckDB 提供 duckdb_constraints() 一次性返回所有约束信息
@@ -932,8 +934,8 @@ class DuckDBDialect : DatabaseDialect {
         onDelete: String?,
         onUpdate: String?
     ): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeFk = sanitizeIdentifier(fkName, "foreign key name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
+        val safeFk = sanitizeIdentifier(fkName, StrKey.IDENT_KIND_FOREIGN_KEY)
         val cols = columns.joinToString(", ") { quoteIdentifier(it) }
         val refCols = refColumns.joinToString(", ") { quoteIdentifier(it) }
         // DuckDB 不支持 ON UPDATE CASCADE —— 强制改写为 NO ACTION 并日志 warn
@@ -961,8 +963,8 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun dropForeignKey(conn: Connection, tableName: String, fkName: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeFk = sanitizeIdentifier(fkName, "foreign key name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
+        val safeFk = sanitizeIdentifier(fkName, StrKey.IDENT_KIND_FOREIGN_KEY)
         // 1) 先按用户给出的名称精确查找
         var actualFkName = safeFk
         var exists = conn.prepareStatement(
@@ -989,10 +991,10 @@ class DuckDBDialect : DatabaseDialect {
                     logger.warn("Duckdb 忽略了用户给定的 FK 约束名 '$safeFk'，实际约束名为 '$actualFkName'，已按唯一匹配兜底删除")
                 }
                 fkList.isEmpty() -> {
-                    if (!ifExists) throw IllegalArgumentException("外键 '$safeFk' 不存在")
+                    if (!ifExists) throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_FK_NOT_FOUND, safeFk))
                     return@withContext true
                 }
-                else -> throw IllegalArgumentException("外键 '$safeFk' 不存在且表上有多个 FK (${fkList.joinToString()})，无法确定目标")
+                else -> throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_FK_AMBIGUOUS, safeFk, fkList.joinToString()))
             }
         }
         rebuildTableExcludingConstraint(conn, safeTable, constraintName = actualFkName)
@@ -1151,8 +1153,8 @@ class DuckDBDialect : DatabaseDialect {
     // region Table Operations
 
     override suspend fun renameTable(conn: Connection, oldName: String, newName: String): Boolean = withContext(Dispatchers.IO) {
-        val safeOld = sanitizeIdentifier(oldName, "table name")
-        val safeNew = sanitizeIdentifier(newName, "table name")
+        val safeOld = sanitizeIdentifier(oldName, StrKey.IDENT_KIND_TABLE)
+        val safeNew = sanitizeIdentifier(newName, StrKey.IDENT_KIND_TABLE)
         conn.createStatement().use { stmt ->
             stmt.execute("ALTER TABLE ${quoteIdentifier(safeOld)} RENAME TO ${quoteIdentifier(safeNew)}")
         }
@@ -1160,7 +1162,7 @@ class DuckDBDialect : DatabaseDialect {
     }
 
     override suspend fun truncateTable(conn: Connection, tableName: String): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
+        val safeTable = sanitizeIdentifier(tableName, StrKey.IDENT_KIND_TABLE)
         conn.createStatement().use { stmt ->
             stmt.execute("TRUNCATE TABLE ${quoteIdentifier(safeTable)}")
         }
@@ -1172,7 +1174,7 @@ class DuckDBDialect : DatabaseDialect {
     // region SQL — EXPLAIN
 
     override suspend fun explainSQL(conn: Connection, sql: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        if (sql.contains(';')) throw IllegalArgumentException("EXPLAIN 不允许包含分号")
+        if (sql.contains(';')) throw IllegalArgumentException(Msg.text(StrKey.DUCKDB_EXPLAIN_SEMICOLON))
         val rows = mutableListOf<Map<String, String>>()
         conn.createStatement().use { stmt ->
             // 用 EXPLAIN 而非 EXPLAIN ANALYZE，避免真正执行副作用
@@ -1211,12 +1213,20 @@ class DuckDBDialect : DatabaseDialect {
 
     // region 工具方法
 
-    private fun sanitizeIdentifier(name: String, label: String): String {
-        if (name.isBlank()) throw IllegalArgumentException("$label cannot be empty")
-        if (name.contains(' ')) throw IllegalArgumentException("$label contains null byte")
-        if (name.contains('\'')) throw IllegalArgumentException("$label contains single quote")
-        if (name.contains('\\')) throw IllegalArgumentException("$label contains backslash")
-        if (name.contains(';')) throw IllegalArgumentException("$label contains semicolon")
+    /**
+     * 标识符白名单校验。
+     *
+     * `kind` 传的是**名词键**而不是英文短语：这些报错经引擎 `Response.error` 原样上屏，
+     * 参数里夹一句 `table name` 就会在非英语界面上漏出英文。名词与失败原因分列入表，
+     * 德语 / 俄语才能各自决定名词的性数格，而不是被 `"$label contains ..."` 焊死语序。
+     */
+    private fun sanitizeIdentifier(name: String, kind: StrKey): String {
+        val label = Msg.text(kind)
+        if (name.isBlank()) throw IllegalArgumentException(Msg.format(StrKey.IDENT_EMPTY, label))
+        if (name.contains(' ')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_NULL_BYTE, label))
+        if (name.contains('\'')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_SINGLE_QUOTE, label))
+        if (name.contains('\\')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_BACKSLASH, label))
+        if (name.contains(';')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_SEMICOLON, label))
         return name
     }
 

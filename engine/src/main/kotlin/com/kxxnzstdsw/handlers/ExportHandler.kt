@@ -15,6 +15,8 @@ import com.kxxnzstdsw.grpc.exportHubResponse
 import com.kxxnzstdsw.grpc.exportResponse
 import com.kxxnzstdsw.grpc.exportStopResponse
 import com.kxxnzstdsw.grpc.response
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -140,7 +142,7 @@ object ExportHandler {
                 response {
                     this.id = id
                     success = false
-                    error = "导出子进程通道未就绪（ExportHub 未连接），导出没有启动"
+                    error = Msg.text(StrKey.EXPORT_HUB_NOT_READY)
                 }
             )
             return@flow
@@ -181,7 +183,7 @@ object ExportHandler {
                 response {
                     this.id = id
                     success = false
-                    error = "导出已结束但没有收到完成帧（子进程可能中途退出）"
+                    error = Msg.text(StrKey.EXPORT_NO_COMPLETION_FRAME)
                 }
             )
         }
@@ -260,7 +262,7 @@ object ExportHandler {
                 // 父进程 `collectResponses(id)` 永远等不到东西，界面上「点了导出，什么也没发生」。
                 if (!result.success) {
                     logWarn("导出失败（引擎已返回失败结果）: id=$id error=${result.error}")
-                    frames.trySend(failure(result.error ?: "导出失败"))
+                    frames.trySend(failure(result.error ?: Msg.text(StrKey.EXPORT_FAILED)))
                 } else {
                     log("导出完成: id=$id rows=${result.exportedRows} file=${result.filePath}")
                 }
@@ -330,15 +332,15 @@ object ExportHandler {
      * 解析 typed `ExportRunRequest` → ExportRequest
      */
     private fun parseExportRequest(runReq: ExportRunRequest): ExportRequest {
-        val sql = runReq.sql.ifBlank { throw IllegalArgumentException("缺少参数 'sql'") }
-        val outputDir = runReq.outputDir.ifBlank { throw IllegalArgumentException("缺少参数 'outputDir'") }
-        val fileName = runReq.fileName.ifBlank { throw IllegalArgumentException("缺少参数 'fileName'") }
-        val formatStr = runReq.format.ifBlank { throw IllegalArgumentException("缺少参数 'format'") }.uppercase()
+        val sql = runReq.sql.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_SQL)) }
+        val outputDir = runReq.outputDir.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_OUTPUT_DIR)) }
+        val fileName = runReq.fileName.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_FILE_NAME)) }
+        val formatStr = runReq.format.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_FORMAT)) }.uppercase()
         val format = try {
             ExportFormat.valueOf(formatStr)
         } catch (e: Exception) {
             throw IllegalArgumentException(
-                "不支持的格式: $formatStr，支持: CSV, JSON_LINES, SQL_INSERT, EXCEL, PARQUET"
+                Msg.format(StrKey.UNSUPPORTED_FORMAT, formatStr)
             )
         }
         val tableName = runReq.tableName.ifBlank { null }

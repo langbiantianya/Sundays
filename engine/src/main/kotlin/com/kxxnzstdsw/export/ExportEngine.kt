@@ -1,7 +1,9 @@
 package com.kxxnzstdsw.export
 
-import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.grpc.ConnectionConfig
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
+import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -120,7 +122,7 @@ object ExportEngine {
                 ExportFormat.JSON_LINES -> JsonLinesWriter(outputFile)
                 ExportFormat.SQL_INSERT -> SqlInsertWriter(
                     outputFile,
-                    request.tableName ?: throw IllegalArgumentException("SQL INSERT 格式需要指定 tableName")
+                    request.tableName ?: throw IllegalArgumentException(Msg.text(StrKey.EXPORT_SQL_INSERT_NEEDS_TABLE))
                 )
                 ExportFormat.EXCEL -> ExcelWriter(outputFile)
                 ExportFormat.PARQUET -> {
@@ -203,7 +205,7 @@ object ExportEngine {
             logger.error("导出失败", e)
             ExportResult(
                 success = false,
-                error = e.message ?: "导出失败"
+                error = e.message ?: Msg.text(StrKey.EXPORT_FAILED)
             )
         } finally {
             // 清理资源

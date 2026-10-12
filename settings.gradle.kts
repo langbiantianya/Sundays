@@ -36,6 +36,7 @@ plugins {
 
 include(":desktopApp")
 include(":shared")
+include(":i18n")
 include("dialect-mysql")
 include("dialect-postgresql")
 include("dialect-h2")

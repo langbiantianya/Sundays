@@ -10,9 +10,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.ui.LocalUiTokens
 import com.kxxnzstdsw.sundays.ui.SelectionMode
 import com.kxxnzstdsw.sundays.ui.isDarkMode
+import com.kxxnzstdsw.sundays.ui.str
 
 // ============================================================================
 // 列定义 (TableColumn)
@@ -102,16 +104,20 @@ data class TableRow(
  *
  * ## 默认
  * - [DEFAULT] = [S20]
+ *
+ * ## 显示文案
+ * 数字档（`labelKey == null`）显示的就是数字本身；只有 [ALL] 的「全部」是需要翻译的词，
+ * 因此挂在 [StrKey] 上而不是硬编码在枚举里。渲染方一律用 [labelText]。
  */
-enum class PageSize(val value: Int, val label: String) {
-    S10(10, "10"),
-    S20(20, "20"),
-    S50(50, "50"),
-    S100(100, "100"),
-    S200(200, "200"),
-    S300(300, "300"),
-    S500(500, "500"),
-    ALL(0, "全部"),
+enum class PageSize(val value: Int, val labelKey: StrKey?) {
+    S10(10, null),
+    S20(20, null),
+    S50(50, null),
+    S100(100, null),
+    S200(200, null),
+    S300(300, null),
+    S500(500, null),
+    ALL(0, StrKey.PAGE_SIZE_ALL),
     ;
 
     /** 是否为「全部」模式（不分页）。 */
@@ -123,6 +129,15 @@ enum class PageSize(val value: Int, val label: String) {
         val ALL_VALUES: List<PageSize> = entries.toList()
     }
 }
+
+/**
+ * 分页大小的显示文案 —— [PageSize.labelKey] 为 `null` 时直接显示数字（`10` / `20` / …）。
+ *
+ * 之所以是 `@Composable` 而不是枚举上的普通属性：枚举自己不知道当前语言，
+ * 取文案必须经 [str] 读组合里的文案表。
+ */
+@Composable
+fun PageSize.labelText(): String = labelKey?.let { str(it) } ?: value.toString()
 
 // ============================================================================
 // 右键菜单状态 (ContextMenuState) —— 表格专用别名

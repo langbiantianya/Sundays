@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.sundays.editor
 
+import com.kxxnzstdsw.i18n.StrKey
+
 /**
  * 补全候选 —— 编辑器「提示」功能的数据模型。
  *
@@ -19,10 +21,10 @@ package com.kxxnzstdsw.sundays.editor
  */
 
 /** 候选类别 —— 决定弹层里的图标与配色。 */
-enum class CompletionKind(val displayName: String) {
-    KEYWORD("关键字"),
-    TYPE("类型"),
-    BUILTIN("函数"),
+enum class CompletionKind(val displayKey: StrKey) {
+    KEYWORD(StrKey.COMPLETION_KEYWORD),
+    TYPE(StrKey.TYPE_LABEL),
+    BUILTIN(StrKey.COMPLETION_FUNCTION),
 
     /**
      * 数据库（catalog / schema）—— 由调用方从**实际连接**注入，见 [CompletionItem]。
@@ -30,9 +32,9 @@ enum class CompletionKind(val displayName: String) {
      * 下面三个必须**追加在末尾**：[buildCompletionPool] 用 `kind.ordinal` 当类别排序键，
      * 插在中间会打乱既有语言词表的「关键字 → 类型 → 函数」次序。
      */
-    DATABASE("库"),
-    TABLE("表"),
-    COLUMN("字段"),
+    DATABASE(StrKey.CATALOG),
+    TABLE(StrKey.TABLE),
+    COLUMN(StrKey.COLUMN),
 }
 
 /**
@@ -40,12 +42,16 @@ enum class CompletionKind(val displayName: String) {
  *
  * @param label 插入文本的**规范形式**（SQL 为大写、Lua 为小写），接受后原样替换光标前的词
  * @param kind 类别，决定弹层展示
- * @param detail 补充说明（可空）—— 弹层宽度有限，非空时才显示
+ * @param detail 补充说明（可空）—— 弹层宽度有限，非空时才显示。
+ *   **只放拼装出来的动态文案**（如浏览屏的 `"$db · 表"`），静态文案请走 [detailKey]。
+ * @param detailKey 补充说明的**可翻译**形式。弹层在渲染时才取译文，所以换语言时
+ *   签名会跟着变，不需要重新构造候选列表。
  */
 data class CompletionItem(
     val label: String,
     val kind: CompletionKind,
     val detail: String? = null,
+    val detailKey: StrKey? = null,
 )
 
 /** 默认最多同时展示的候选条数。 */

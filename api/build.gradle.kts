@@ -2,6 +2,12 @@ plugins {
     kotlin("jvm")
 }
 
+dependencies {
+    // 「$driverName 不支持 XXX」这批界面可见报错由文案表统一提供语言。
+    // :i18n 是纯 Kotlin + JDK 模块（无 project 依赖），不会与 :api 形成环。
+    implementation(project(":i18n"))
+}
+
 group = "com.kxxnzstdsw"
 version = "0.1.0"
 

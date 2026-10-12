@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
 /**
  * 缺陷：**PostgreSQL 用户库里，导航树把整个系统目录当成用户的表列出来**。
  *
- * 真窗口走查（探针 PG `192.168.1.5:5432`，库 `sundays_smoke`）展开该库时看到的第一屏是
+ * 真窗口走查（探针 PG `192.168.1.5:5433`，库 `sundays_smoke`）展开该库时看到的第一屏是
  *
  * ```
  * pg_aggregate / pg_aio s / pg_am / pg_amop / pg_attrdef / pg_attribute /

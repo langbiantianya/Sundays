@@ -17,9 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinTextButton
+import com.kxxnzstdsw.sundays.ui.str
 
 /**
  * 「添加数据库连接」弹窗 —— 在已有界面（例如 [DatabaseBrowserScreen] 的「＋」按钮）调用，
@@ -86,10 +88,10 @@ fun AddConnectionDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "添加数据库连接",
+                        text = str(StrKey.ADD_CONNECTION_DIALOG_TITLE),
                         style = MaterialTheme.typography.titleLarge,
                     )
-                    WinTextButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("关闭") }
+                    WinTextButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CLOSE)) }
                 }
 
                 WinDivider(color = MaterialTheme.colorScheme.outlineVariant)

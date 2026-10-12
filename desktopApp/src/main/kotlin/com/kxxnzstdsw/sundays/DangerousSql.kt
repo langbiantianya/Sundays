@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.sundays
 
+import com.kxxnzstdsw.i18n.StrKey
+
 /**
  * **危险写操作**的识别 —— 只读模式之外的第二道防线。
  *
@@ -26,12 +28,16 @@ internal object DangerousSql {
         /** 命中的那一句（去掉分号与首尾空白），用于在确认框里回显。 */
         val statement: String,
     ) {
-        enum class Kind(val label: String) {
-            DROP("删除表 / 视图 / 索引"),
-            TRUNCATE("清空表"),
-            DELETE_WITHOUT_WHERE("无 WHERE 的 DELETE"),
-            UPDATE_WITHOUT_WHERE("无 WHERE 的 UPDATE"),
-            GRANT("授权"),
+        /**
+         * 类别对应的文案**键**而非文案本身 —— 本文件不含 `@Composable`（[scan] 可能被
+         * 非组合上下文调用），渲染方在自己的组合作用域里 `str(kind.labelKey)` 取译文。
+         */
+        enum class Kind(val labelKey: StrKey) {
+            DROP(StrKey.RISK_DROP),
+            TRUNCATE(StrKey.RISK_TRUNCATE),
+            DELETE_WITHOUT_WHERE(StrKey.RISK_DELETE_NO_WHERE),
+            UPDATE_WITHOUT_WHERE(StrKey.RISK_UPDATE_NO_WHERE),
+            GRANT(StrKey.RISK_GRANT),
         }
     }
 

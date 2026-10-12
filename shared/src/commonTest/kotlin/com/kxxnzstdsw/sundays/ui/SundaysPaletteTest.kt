@@ -2,6 +2,8 @@ package com.kxxnzstdsw.sundays.ui
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import com.kxxnzstdsw.i18n.AppLanguage
+import com.kxxnzstdsw.i18n.StringsRegistry
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -103,11 +105,11 @@ class SundaysPaletteTest {
         ThemePalette.entries.forEach { palette ->
             assertTrue(
                 luminance(palette.light.background) > 0.5,
-                "${palette.label} 浅色变体底色不是亮色：${palette.light.background}",
+                "${palette.labelKey} 浅色变体底色不是亮色：${palette.light.background}",
             )
             assertTrue(
                 luminance(palette.dark.background) < 0.2,
-                "${palette.label} 深色变体底色不是暗色：${palette.dark.background}",
+                "${palette.labelKey} 深色变体底色不是暗色：${palette.dark.background}",
             )
         }
     }
@@ -121,12 +123,12 @@ class SundaysPaletteTest {
             assertEquals(
                 Color.Transparent,
                 palette.schemeFor(useDark = false).surfaceTint,
-                "${palette.label} 浅色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
+                "${palette.labelKey} 浅色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
             )
             assertEquals(
                 Color.Transparent,
                 palette.schemeFor(useDark = true).surfaceTint,
-                "${palette.label} 深色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
+                "${palette.labelKey} 深色变体的 surfaceTint 应为透明（禁用 tonal 叠色）",
             )
         }
     }

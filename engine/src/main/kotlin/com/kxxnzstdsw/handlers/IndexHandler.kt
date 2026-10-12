@@ -11,6 +11,8 @@ import com.kxxnzstdsw.grpc.indexCreateResponse
 import com.kxxnzstdsw.grpc.indexDeleteResponse
 import com.kxxnzstdsw.grpc.indexListItem
 import com.kxxnzstdsw.grpc.indexListResponse
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +24,7 @@ object IndexHandler {
      * LIST — 列出表的所有索引
      */
     suspend fun list(config: ConnectionConfig, req: IndexListRequest): IndexListResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("缺少参数 'tableName'")
+        if (req.tableName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_TABLE_NAME))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)
@@ -50,9 +52,9 @@ object IndexHandler {
      * CREATE — 创建索引
      */
     suspend fun create(config: ConnectionConfig, req: IndexCreateRequest): IndexCreateResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("缺少参数 'tableName'")
-        if (req.indexName.isBlank()) throw IllegalArgumentException("缺少参数 'indexName'")
-        if (req.columnsList.isEmpty()) throw IllegalArgumentException("缺少参数 'columns'")
+        if (req.tableName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_TABLE_NAME))
+        if (req.indexName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_INDEX_NAME))
+        if (req.columnsList.isEmpty()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_COLUMNS))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)
@@ -71,7 +73,7 @@ object IndexHandler {
      * DELETE — 删除索引
      */
     suspend fun delete(config: ConnectionConfig, req: IndexDeleteRequest): IndexDeleteResponse = withContext(Dispatchers.IO) {
-        if (req.indexName.isBlank()) throw IllegalArgumentException("缺少参数 'indexName'")
+        if (req.indexName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_INDEX_NAME))
         val tableName = req.tableName.ifBlank { null }
         val schema = req.schema
 

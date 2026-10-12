@@ -2,22 +2,22 @@ package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.ComposeUiTest
-import androidx.compose.ui.test.MainTestClock
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.MainTestClock
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -26,11 +26,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -38,21 +40,21 @@ import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.Dispatchers
-import org.jetbrains.skia.Image
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withTimeoutOrNull
+import org.jetbrains.skia.Image
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 
 /**
  * 用**真实 H2 数据库**把浏览屏的主流程在 GUI 里走一遍，并在关键节点截图落盘。
@@ -263,18 +265,20 @@ class H2GuiWalkthroughTest {
         SheetDescriptor(conn, browser, ConnectionStatus(ConnectionState.CONNECTED, "H2"))
     )) {
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = sheets,
-                    activeSheetId = sheets.first().connection.id,
-                    connections = listOf(conn),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = sheets,
+                        activeSheetId = sheets.first().connection.id,
+                        connections = listOf(conn),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
@@ -664,9 +668,13 @@ class H2GuiWalkthroughTest {
         //    紧凑档（< 560dp）里，总条数按设计会被隐藏（见 `PAGINATION_COMPACT_WIDTH`）。
         //    断一个随档位可见的装饰性文本，等于把这个测试焊死在某个窗口宽度上。
         //    档位本身的契约由 `TablePaginationLayoutTest` 单独钉住。
+        // 界面上没有「页码」这一条独立文案，它只是分页摘要（PluralStrKey.PAGINATION_SUMMARY
+        // 「共 {0} 行 · 第 {1} 页 · 每页 {2}」）中的一截。单独造一个 StrKey 只为这句子串
+        // 不值得 —— 摘要里三个占位符的取值随窗口宽度与页大小变，硬拼反而更容易对不上。
+        // 界面语言仍由 ProvideTestStrings 钉死为简体中文。
         onNodeWithText("第 1 页", substring = true).assertExists()
-        onNodeWithText("下一页").assertIsEnabled()
-        onNodeWithText("下一页").performClick()
+        onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsEnabled()
+        onNodeWithText(zh(StrKey.NEXT_PAGE)).performClick()
         // 等状态机的页码落定，而不是等语义树里出现「第 2 页」——见 [awaitState] 的说明
         val tab = browser.tabs.single()
         awaitState("翻到第 2 页", browser) { tab.page == 2 && !tab.loading }
@@ -691,7 +699,7 @@ class H2GuiWalkthroughTest {
 
         // 进入 SQL 工作台
         clickWorkbench(browser, "SQL 工作台", BrowserPane.SQL)
-        onNodeWithText("返回表预览").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).assertIsDisplayed()
         shot("05-sql-workbench.png")
 
         // **真实打字**敲 `SELECT * FROM us` —— 补全应在最后一个字符后就弹出
@@ -768,18 +776,18 @@ class H2GuiWalkthroughTest {
         browser.currentSqlSheet()!!.editor.setText("SELECT id, amount, status FROM orders ORDER BY id")
         waitForIdle()
         log("已填 SQL：${browser.currentSqlSheet()!!.editor.text}")
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         val sheet = browser.currentSqlSheet()!!
         // 等 `running` 落定（有明确的状态字段），再验界面画出了什么
         awaitState("SQL 执行完成（$dbName）", browser) { !sheet.running }
         awaitUi("界面已画出查询结果")
-        onAllNodesWithText("查询结果 · 2 行").assertCountEquals(1)
+        onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).assertCountEquals(1)
         onAllNodesWithText("PAID").assertCountEquals(1)
         shot("08-sql-executed.png")
 
         // ---- 造数
         clickWorkbench(browser, "造数工作台", BrowserPane.GENERATE)
-        onNodeWithText("返回表预览").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).assertIsDisplayed()
         val script = browser.currentGenerateScript()!!
         script.editor.setText("")
         waitForIdle()
@@ -790,10 +798,10 @@ class H2GuiWalkthroughTest {
             "for i = 1, 3 do insert('gen_target', {id = i, label = 'row_'..i}) end"
         )
         waitForIdle()
-        onNodeWithText("执行造数").performClick()
+        onNodeWithText(zh(StrKey.RUN_GENERATE)).performClick()
         awaitState("造数完成（$dbName）", browser) { !browser.generateRunning }
         awaitUi("界面已画出造数统计")
-        onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").assertCountEquals(1)
+        onAllNodesWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).assertCountEquals(1)
         shot("09-generate-done.png")
 
         // 引擎真的写进去了

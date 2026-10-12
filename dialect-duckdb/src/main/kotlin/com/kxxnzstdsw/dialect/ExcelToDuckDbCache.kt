@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.dialect
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -70,7 +72,7 @@ object ExcelToDuckDbCache {
 
     private fun convert(excelPath: String): File {
         val src = File(excelPath)
-        require(src.exists()) { "Excel 文件不存在: $excelPath" }
+        require(src.exists()) { Msg.format(StrKey.EXCEL_FILE_NOT_FOUND, excelPath) }
         val tempDir = Files.createTempDirectory("duckdb-excel-").toFile().apply { deleteOnExit() }
         tempDirs.add(tempDir)
 

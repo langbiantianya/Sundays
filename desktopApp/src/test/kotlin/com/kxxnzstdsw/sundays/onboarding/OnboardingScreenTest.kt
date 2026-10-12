@@ -3,10 +3,10 @@ package com.kxxnzstdsw.sundays.onboarding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
@@ -15,13 +15,16 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import com.kxxnzstdsw.i18n.StrKey
+import com.kxxnzstdsw.sundays.ProvideTestStrings
 import com.kxxnzstdsw.sundays.ui.AppearanceState
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemePalette
-import kotlin.test.Test
+import com.kxxnzstdsw.sundays.zh
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.Test
 
 /**
  * 首次启动引导页的行为契约（在 `:desktopApp` 跑 —— `:shared/commonTest` 没有 Compose 测试依赖）。
@@ -40,22 +43,26 @@ class OnboardingScreenTest {
         onFinish: () -> Unit = {},
     ) {
         setContent {
-            SundaysTheme(
-                darkTheme = dark,
-                palette = state.palette,
-                compact = state.compactMode,
-            ) {
-                OnboardingScreen(
+            ProvideTestStrings {
+                SundaysTheme(
+                    darkTheme = dark,
                     palette = state.palette,
-                    onPaletteChange = state::selectPalette,
-                    themeMode = state.mode,
-                    onThemeModeChange = state::selectMode,
-                    dark = dark,
-                    compactMode = state.compactMode,
-                    onCompactModeChange = state::selectCompactMode,
-                    onFinish = onFinish,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    compact = state.compactMode,
+                ) {
+                    OnboardingScreen(
+                        palette = state.palette,
+                        onPaletteChange = state::selectPalette,
+                        themeMode = state.mode,
+                        onThemeModeChange = state::selectMode,
+                        dark = dark,
+                        compactMode = state.compactMode,
+                        onCompactModeChange = state::selectCompactMode,
+                        language = state.language,
+                        onLanguageChange = state::selectLanguage,
+                        onFinish = onFinish,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         waitForIdle()
@@ -69,7 +76,7 @@ class OnboardingScreenTest {
     fun `every palette is offered`() = runComposeUiTest {
         render(AppearanceState())
         ThemePalette.entries.forEach {
-            onNodeWithText(it.label).assertIsDisplayed()
+            onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
         }
     }
 
@@ -78,16 +85,16 @@ class OnboardingScreenTest {
         render(AppearanceState())
         // 紧凑模式下这一组在初始档，看得见；万一将来布局再变，至少先证明它渲染过
         ThemeMode.entries.forEach {
-            onNodeWithText(it.label).assertIsDisplayed()
+            onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
         }
     }
 
     @Test
     fun `the three sections are labelled`() = runComposeUiTest {
         render(AppearanceState())
-        onNodeWithText("配色主题").assertIsDisplayed()
-        onNodeWithText("明暗模式").assertIsDisplayed()
-        onNodeWithText("界面密度").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
     }
 
     // =========================================================================
@@ -100,7 +107,7 @@ class OnboardingScreenTest {
         render(state)
         assertEquals(ThemePalette.BLUE_GRAY, state.palette)
 
-        onNodeWithText(ThemePalette.CYBERPUNK.label).performClick()
+        onNodeWithText(zh(ThemePalette.CYBERPUNK.labelKey)).performClick()
         waitForIdle()
 
         // 断言的是**外部状态**变了，不是页内显示变了
@@ -113,11 +120,11 @@ class OnboardingScreenTest {
         render(state)
         assertEquals(ThemeMode.SYSTEM, state.mode)
 
-        onNodeWithText(ThemeMode.DARK.label).performClick()
+        onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
         waitForIdle()
         assertEquals(ThemeMode.DARK, state.mode)
 
-        onNodeWithText(ThemeMode.LIGHT.label).performClick()
+        onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
         waitForIdle()
         assertEquals(ThemeMode.LIGHT, state.mode)
     }
@@ -128,7 +135,10 @@ class OnboardingScreenTest {
         render(state)
         onNode(isToggleable()).assertIsOff()
 
-        onNode(isToggleable()).performClick()
+        // 必须先滚到视口内再点：引导页顶部新增了语言分组，整页内容比默认测试窗口高，
+        // 紧凑开关被挤到了折叠线以下。不滚动时 performClick 把坐标发到窗口外，
+        // 点击落空 —— 报出来的却是「开关没回写状态」，把原因指错了方向。
+        onNode(isToggleable()).performScrollTo().performClick()
         waitForIdle()
         assertTrue(state.compactMode, "拨开关应回写外部状态（进而缩放 LocalDensity）")
         onNode(isToggleable()).assertIsOn()
@@ -147,10 +157,12 @@ class OnboardingScreenTest {
 
         onNode(isToggleable()).assertIsOn()
         assertEquals(
-            2,
+            3,
             onAllNodes(isSelectable()).fetchSemanticsNodes()
                 .count { it.config[SemanticsProperties.Selected] == true },
-            "5 张配色卡 + 3 个明暗单选里，应恰好选中 1 个配色 + 1 个明暗档位",
+            "5 张配色卡 + 3 个明暗单选 + 6 个语言 chip 里，" +
+                "应恰好选中 1 个配色 + 1 个明暗档位 + 1 种语言（语言 chip 用 selectable + " +
+                "Role.RadioButton，导盲要读出选中态，所以也算进来）",
         )
     }
 
@@ -170,7 +182,7 @@ class OnboardingScreenTest {
             val dark = option.schemeFor(useDark = true)
             assertTrue(
                 light.surface != dark.surface || light.primary != dark.primary,
-                "${option.label} 的浅色 / 深色取色不应完全相同 —— 否则色卡无法反映明暗档位",
+                "${option.labelKey} 的浅色 / 深色取色不应完全相同 —— 否则色卡无法反映明暗档位",
             )
         }
     }
@@ -187,7 +199,7 @@ class OnboardingScreenTest {
 
         // 刻意**不**调 performScrollTo：收尾条固定在滚动区外面，任何窗口高度下都应直接可点。
         // 若哪天按钮被挪回滚动区里、用户在 1024×768 下够不着，这条会直接红。
-        onNodeWithText("开始使用").performClick()
+        onNodeWithText(zh(StrKey.START_USING)).performClick()
         waitForIdle()
 
         assertTrue(finished, "「开始使用」必须触发完成回调，否则下次启动引导页会重新出现")
@@ -199,7 +211,7 @@ class OnboardingScreenTest {
         // 首次渲染时它的语义 bounds 是 Rect(0,0,0,0) —— 唯一的出口完全在视口外，
         // 用户必须先意识到「下面还有东西」才够得着。固定到底部后必须**直接可点**。
         render(AppearanceState())
-        onNodeWithText("开始使用").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
     }
 
     @Test
@@ -207,7 +219,7 @@ class OnboardingScreenTest {
         // 紧凑档把整棵树缩到 85%，理论上更容易放下。但反过来，**将来**若有人把收尾条
         // 挪回滚动区内，这条会比普通档更早暴露问题 —— 两档都断言更保险。
         render(AppearanceState(initialCompactMode = true))
-        onNodeWithText("开始使用").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
     }
 
     @Test
@@ -215,8 +227,8 @@ class OnboardingScreenTest {
         // 引导是「一眼看完」的设计：顶部说明与底部出口应当**同屏可见**，
         // 而不是让人先滚到底才知道还有下一步。
         render(AppearanceState())
-        val header = onNodeWithText("欢迎使用 sundays").fetchSemanticsNode().boundsInRoot
-        val finish = onNodeWithText("开始使用").fetchSemanticsNode().boundsInRoot
+        val header = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
+        val finish = onNodeWithText(zh(StrKey.START_USING)).fetchSemanticsNode().boundsInRoot
         val root = onRoot().fetchSemanticsNode().boundsInRoot
 
         assertTrue(
@@ -232,8 +244,11 @@ class OnboardingScreenTest {
         // 默认值本身就是一份合法答案，「开始使用」已兼任跳过。
         // 单列一个「跳过」反而会让「跳过到底跳到哪」变模糊 —— 而它们的行为其实完全一样。
         render(AppearanceState())
+        // 文案表里没有「跳过」这个键（这正是本测试要守住的事实之一），所以只能按中文字面量
+        // 断言它**不存在**。这条是负向断言：无论界面切到什么语言、按钮叫什么，
+        // 「没有单独的跳过按钮」都必须成立 —— 与界面语言无关。
         onAllNodesWithText("跳过").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
-        onNodeWithText("开始使用").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
     }
 
     @Test
@@ -247,8 +262,8 @@ class OnboardingScreenTest {
         for (compact in listOf(false, true)) {
             render(AppearanceState(initialCompactMode = compact))
             val root = onRoot().fetchSemanticsNode().boundsInRoot
-            val section = onNodeWithText("界面密度").fetchSemanticsNode().boundsInRoot
-            val title = onNodeWithText("欢迎使用 sundays").fetchSemanticsNode().boundsInRoot
+            val section = onNodeWithText(zh(StrKey.UI_DENSITY)).fetchSemanticsNode().boundsInRoot
+            val title = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
 
             assertEquals(
                 root.center.x, section.center.x, absoluteTolerance = 1f,
@@ -267,9 +282,9 @@ class OnboardingScreenTest {
         val state = AppearanceState(initialOnboardingCompleted = false)
         render(state, onFinish = state::completeOnboarding)
 
-        onNodeWithText(ThemePalette.BILI_PINK.label).performClick()
-        onNodeWithText(ThemeMode.DARK.label).performClick()
-        onNodeWithText("开始使用").performClick()
+        onNodeWithText(zh(ThemePalette.BILI_PINK.labelKey)).performClick()
+        onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
+        onNodeWithText(zh(StrKey.START_USING)).performClick()
         waitForIdle()
 
         assertEquals(ThemePalette.BILI_PINK, state.palette)
@@ -286,19 +301,23 @@ class OnboardingScreenTest {
         onFinish: () -> Unit = {},
     ) {
         setContent {
-            SundaysTheme(darkTheme = false, palette = state.palette, compact = state.compactMode) {
-                OnboardingScreen(
-                    palette = state.palette,
-                    onPaletteChange = state::selectPalette,
-                    themeMode = state.mode,
-                    onThemeModeChange = state::selectMode,
-                    dark = false,
-                    compactMode = state.compactMode,
-                    onCompactModeChange = state::selectCompactMode,
-                    onFinish = onFinish,
-                    firstRun = false,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                SundaysTheme(darkTheme = false, palette = state.palette, compact = state.compactMode) {
+                    OnboardingScreen(
+                        palette = state.palette,
+                        onPaletteChange = state::selectPalette,
+                        themeMode = state.mode,
+                        onThemeModeChange = state::selectMode,
+                        dark = false,
+                        compactMode = state.compactMode,
+                        onCompactModeChange = state::selectCompactMode,
+                        language = state.language,
+                        onLanguageChange = state::selectLanguage,
+                        onFinish = onFinish,
+                        firstRun = false,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         waitForIdle()
@@ -309,8 +328,8 @@ class OnboardingScreenTest {
         // 用户在设置里主动点「重新打开引导」时若还看到「欢迎使用 sundays」，
         // 会以为应用被重置了 —— 首启话术只属于首启。
         renderReplay(AppearanceState())
-        onNodeWithText("外观引导").assertIsDisplayed()
-        onAllNodesWithText("欢迎使用 sundays").fetchSemanticsNodes().let {
+        onNodeWithText(zh(StrKey.APPEARANCE_ONBOARDING)).assertIsDisplayed()
+        onAllNodesWithText(zh(StrKey.WELCOME)).fetchSemanticsNodes().let {
             assertTrue(it.isEmpty(), "重进引导不应再自称「欢迎使用」")
         }
     }
@@ -319,8 +338,8 @@ class OnboardingScreenTest {
     fun `the replay finishes with a neutral label`() = runComposeUiTest {
         // 已经在主界面里了，再说「开始使用」语义不对
         renderReplay(AppearanceState())
-        onNodeWithText("完成").assertIsDisplayed()
-        onAllNodesWithText("开始使用").fetchSemanticsNodes().let {
+        onNodeWithText(zh(StrKey.DONE)).assertIsDisplayed()
+        onAllNodesWithText(zh(StrKey.START_USING)).fetchSemanticsNodes().let {
             assertTrue(it.isEmpty(), "重进引导的收尾按钮不应叫「开始使用」")
         }
     }
@@ -333,13 +352,13 @@ class OnboardingScreenTest {
         val state = AppearanceState(initialOnboardingCompleted = true)
         renderReplay(state, onFinish = { finished = true })
 
-        onNodeWithText(ThemePalette.WIN_2000.label).performClick()
-        onNodeWithText(ThemeMode.LIGHT.label).performClick()
+        onNodeWithText(zh(ThemePalette.WIN_2000.labelKey)).performClick()
+        onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
         waitForIdle()
         assertEquals(ThemePalette.WIN_2000, state.palette)
         assertEquals(ThemeMode.LIGHT, state.mode)
 
-        onNodeWithText("完成").performClick()
+        onNodeWithText(zh(StrKey.DONE)).performClick()
         waitForIdle()
         assertTrue(finished, "「完成」应收起浮层")
         // 重进**不**改 onboardingCompleted —— 它早就是 true
@@ -351,9 +370,9 @@ class OnboardingScreenTest {
         // 「重新打开引导」应当等价于首启那一页；若某组控件被条件编译 / 漏传，
         // 用户会觉得重进了个简化版
         renderReplay(AppearanceState())
-        onNodeWithText("配色主题").assertIsDisplayed()
-        onNodeWithText("明暗模式").assertIsDisplayed()
-        onNodeWithText("界面密度").assertIsDisplayed()
-        ThemePalette.entries.forEach { onNodeWithText(it.label).assertIsDisplayed() }
+        onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
+        ThemePalette.entries.forEach { onNodeWithText(zh(it.labelKey)).assertIsDisplayed() }
     }
 }

@@ -7,6 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import com.kxxnzstdsw.i18n.AppLanguage
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.settings.AppSettings
 import com.kxxnzstdsw.sundays.settings.SettingsStorage
 
@@ -19,11 +22,16 @@ import com.kxxnzstdsw.sundays.settings.SettingsStorage
  *
  * 与 [ThemePalette] 正交：`BLUE_GRAY + DARK` 与 `CYBERPUNK + DARK` 是两套完全不同的配色，
  * 都合法。
+ *
+ * ## 为什么存 [StrKey] 而不是文案本身
+ *
+ * 构造参数里写死中文时，切语言换不掉它 —— 翻译只改 Composable 里的字面量，
+ * 这里是数据，翻译器碰不到。枚举只存键、渲染时查表，所有入口才真正跟着语言走。
  */
-enum class ThemeMode(val label: String, val description: String) {
-    SYSTEM("跟随系统", "由操作系统的明暗设置决定"),
-    LIGHT("浅色", "始终使用浅色配色"),
-    DARK("深色", "始终使用深色配色"),
+enum class ThemeMode(val labelKey: StrKey, val descriptionKey: StrKey) {
+    SYSTEM(StrKey.THEME_FOLLOW_SYSTEM, StrKey.THEME_FOLLOW_SYSTEM_DESC),
+    LIGHT(StrKey.THEME_LIGHT, StrKey.THEME_LIGHT_DESC),
+    DARK(StrKey.THEME_DARK, StrKey.THEME_DARK_DESC),
     ;
 
     /** 下一档 —— 按钮单击走这条路径。 */
@@ -80,6 +88,7 @@ class AppearanceState(
     initialSystemInfoRefresh: SystemInfoRefresh = SystemInfoRefresh.OFF,
     initialCompactMode: Boolean = false,
     initialOnboardingCompleted: Boolean = true,
+    initialLanguage: AppLanguage = AppLanguage.DEFAULT,
     private val onChange: (AppearanceState) -> Unit = {},
 ) {
 
@@ -119,6 +128,22 @@ class AppearanceState(
      * 与本类 KDoc 里「新增入口自动继承落盘」的设计意图一致。
      */
     var onboardingCompleted: Boolean by mutableStateOf(initialOnboardingCompleted)
+        private set
+
+    /**
+     * 当前界面语言。
+     *
+     * ## 为什么语言也住在这个叫「外观」的类里
+     *
+     * 因为真正的约束是 [persist] 的写入载荷是**整份** `AppSettings`：语言若由 `main.kt`
+     * 单独持有，`AppearanceState` 每改一次配色就会用一份**没有语言**的 `AppSettings`
+     * 覆盖磁盘，把用户的语言选择悄悄抹掉 —— 与本类 KDoc 里 `onboardingCompleted`
+     * 踩过的坑是**同一个**。放进本类后载荷自然带上它。
+     *
+     * 至于「外观」这个名字不再精确：那只是命名上的妥协，换来的是「所有落盘状态只有
+     * 一个写入点」这条真正的设计约束不被破坏。
+     */
+    var language: AppLanguage by mutableStateOf(initialLanguage)
         private set
 
     private fun persist() = onChange(this)
@@ -171,6 +196,18 @@ class AppearanceState(
         persist()
     }
 
+    /**
+     * 切换界面语言 —— 引导页与设置页共用这一个写入点。
+     *
+     * 立刻生效：语言只被 [ProvideStrings] 消费，而后者在组合最外层，
+     * 改它等于让整棵树重组，不需要重建任何屏幕（浏览屏的 sheet 与滚动位置都不丢）。
+     */
+    fun selectLanguage(target: AppLanguage) {
+        if (target == language) return
+        language = target
+        persist()
+    }
+
     /** 当前应生效的配色 —— 明暗由 [resolvedDark] 决定。 */    fun colorScheme(resolvedDark: Boolean) = palette.schemeFor(resolvedDark)
 
     /**
@@ -199,6 +236,27 @@ internal fun resolveOnboardingCompleted(settings: AppSettings, fileExists: Boole
     settings.onboardingCompleted || fileExists
 
 /**
+ * 首次启动的界面语言 —— 「系统语言探测」与「读设置」的分叉点。
+ *
+ * ## 判据与 [resolveOnboardingCompleted] 完全一致：看**文件是否存在**，不看字段
+ *
+ * 老版本用户升级上来时设置文件里没有 `language` 字段，反序列化成默认值
+ * （简体中文）。若只看字段，德语系统上的老用户**每次升级**都会被悄悄改成中文界面。
+ * 而他们恰恰是最该留在德语的那批人 —— 是升级**逼**他们回到中文的，这不合理。
+ *
+ * 反过来，真正的新装机器上文件不存在，系统语言探测的结果才是对的。
+ *
+ * @param systemLanguage 系统区域设置探测结果。抽成参数而非就地调
+ *   [AppLanguage.detectSystemLanguage]，是为了让这条规则能脱离运行环境被测试 ——
+ *   否则测试只会在「这台机器恰好是什么语言」时通过。
+ */
+internal fun resolveInitialLanguage(
+    settings: AppSettings,
+    fileExists: Boolean,
+    systemLanguage: AppLanguage,
+): AppLanguage = if (fileExists) settings.language else systemLanguage
+
+/**
  * [AppearanceState] 的**完整落盘载荷**。
  *
  * 与 [rememberPersistentAppearanceState] 的 `onChange` 共用同一个构造点 ——
@@ -212,6 +270,7 @@ internal fun AppearanceState.toAppSettings(): AppSettings = AppSettings(
     systemInfoRefresh = systemInfoRefresh,
     compactMode = compactMode,
     onboardingCompleted = onboardingCompleted,
+    language = language,
 )
 
 /** 创建并 [remember] 一个 [AppearanceState]（不落盘，供测试与预览）。 */
@@ -227,6 +286,9 @@ fun rememberAppearanceState(): AppearanceState = remember { AppearanceState() }
 @Composable
 fun rememberPersistentAppearanceState(): AppearanceState {
     val settings = remember { SettingsStorage.load() }
+    // 文件是否存在要在**读设置之前**问一次：它决定「这是不是首启」，
+    // 而首启决定语言是探测来的还是读来的（见 resolveInitialLanguage）。
+    val fileExists = remember { SettingsStorage.exists() }
     return remember {
         AppearanceState(
             initialPalette = settings.palette,
@@ -235,7 +297,12 @@ fun rememberPersistentAppearanceState(): AppearanceState {
             initialCompactMode = settings.compactMode,
             // 判据见 resolveOnboardingCompleted：老用户升级上来时字段必然缺失，
             // 只看字段会让每次升级都被引导页拦一次。
-            initialOnboardingCompleted = resolveOnboardingCompleted(settings, SettingsStorage.exists()),
+            initialOnboardingCompleted = resolveOnboardingCompleted(settings, fileExists),
+            initialLanguage = resolveInitialLanguage(
+                settings = settings,
+                fileExists = fileExists,
+                systemLanguage = AppLanguage.detectSystemLanguage(),
+            ),
             onChange = { state -> SettingsStorage.save(state.toAppSettings()) },
         )
     }

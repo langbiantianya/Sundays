@@ -4,29 +4,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.doubleClick
-import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
-import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
-import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.swipeUp
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
@@ -34,16 +36,16 @@ import com.kxxnzstdsw.sundays.connection.ConnectionState
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 
 /**
  * [DatabaseBrowserScreen] 的 Compose UI 端到端测试 —— 真引擎 + 真点击（H2 内存库）。
@@ -115,18 +117,20 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
@@ -185,28 +189,30 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
         // 初始是表预览态 —— 工具栏按钮显示「SQL 工作台」（未进入工作台）
-        onNodeWithText("SQL 工作台").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).assertIsDisplayed()
 
         // 点工具栏按钮 → 切到 SQL 工作台（按钮变为「返回表预览」，工具条出现 schema 提示）
-        onNodeWithText("SQL 工作台").performClick()
-        onNodeWithText("返回表预览").assertIsDisplayed()
-        onNodeWithText("SQL 工作台", substring = true).assertExists()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH), substring = true).assertExists()
         assertEquals(BrowserPane.SQL, browser.activePane, "工具栏点击后应切到 SQL pane")
 
         // 输入 SQL —— 直接写状态机字段（CodeEditor 的输入通道需要 focus + IME，
@@ -215,8 +221,8 @@ class DatabaseBrowserUiTest {
         waitForIdle()
 
         // 「执行 SQL」按钮此时可用（connected + 文本非空 + 未在执行）
-        onNodeWithText("执行 SQL").assertIsDisplayed()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
 
         // 结果表渲染出引擎真实返回的行 —— 证明 SQL.EXECUTE 流式链路打通
         waitUntil(timeoutMillis = 10_000) {
@@ -224,7 +230,7 @@ class DatabaseBrowserUiTest {
         }
         onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
         // 结果区标题标明行数
-        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+        onNodeWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).assertIsDisplayed()
     }
 
     /**
@@ -242,35 +248,37 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         // 第一个 sheet：跑 users 查询
         val first = browser.currentSqlSheet()!!
         first.editor.setText("SELECT id, name FROM users ORDER BY id")
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).fetchSemanticsNodes().isNotEmpty()
         }
 
         // 「＋」新建第二个 sheet —— 标签条多出「SQL 2」并被选中，编辑器为空
-        onNodeWithContentDescription("新建 SQL sheet").performClick()
+        onNodeWithContentDescription(zh(StrKey.NEW_SQL_SHEET)).performClick()
         waitForIdle()
         assertEquals(2, browser.sqlSheets.size, "点「＋」应新增一个 SQL sheet")
         assertEquals("SQL 2", browser.currentSqlSheet()!!.title, "新建后应选中新 sheet")
@@ -281,9 +289,9 @@ class DatabaseBrowserUiTest {
         val second = browser.currentSqlSheet()!!
         second.editor.setText("SELECT id FROM big")
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 250, 250)).fetchSemanticsNodes().isNotEmpty()
         }
 
         // 切回第一个 sheet —— 编辑器与结果都回到它自己那一份，不串显第二个 sheet 的
@@ -291,11 +299,11 @@ class DatabaseBrowserUiTest {
         waitForIdle()
         assertTrue(browser.selectedSqlIndex == 0, "点标签应切回第一个 sheet")
         onNode(hasSetTextAction()).assertTextEquals("SELECT id, name FROM users ORDER BY id")
-        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
-        assertEquals(0, onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().size)
+        onNodeWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).assertIsDisplayed()
+        assertEquals(0, onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 250, 250)).fetchSemanticsNodes().size)
 
         // 「×」关闭第二个 sheet —— 只剩一个时不再渲染关闭按钮，选中回退到第一个
-        onAllNodesWithContentDescription("关闭 SQL sheet")[1].performClick()
+        onAllNodesWithContentDescription(zh(StrKey.CLOSE_SQL_SHEET))[1].performClick()
         waitForIdle()
         assertEquals(1, browser.sqlSheets.size, "点「×」应删除该 SQL sheet")
         assertEquals(0, browser.selectedSqlIndex, "删除后选中项应回退")
@@ -317,46 +325,49 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         // 点「✎」→ 弹窗出现，输入框预填当前标签名
-        onNodeWithContentDescription("重命名当前标签").performClick()
+        onNodeWithContentDescription(zh(StrKey.RENAME_CURRENT_TAB)).performClick()
         waitForIdle()
-        onNodeWithText("重命名标签").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.RENAME_TAB)).assertIsDisplayed()
         // 输入框预填当前标签名
         onNode(hasSetTextAction() and hasText("SQL 1")).assertExists()
         // 用「名称」label 定位弹窗输入框（值本身会变，label 不变），整段替换后确认
-        onNode(hasSetTextAction() and hasText("名称")).performTextReplacement("用户查询")
+        onNode(hasSetTextAction() and hasText(zh(StrKey.NAME))).performTextReplacement("用户查询")
         waitForIdle()
-        onNodeWithText("确定").performClick()
+        onNodeWithText(zh(StrKey.CONFIRM)).performClick()
         waitForIdle()
 
         assertEquals("用户查询", browser.currentSqlSheet()!!.title, "「确定」应提交重命名")
+        // 「用户查询」是**测试自己敲进重命名框的标题**，不是界面文案，按中文字面量定位。
         onNodeWithText("用户查询").assertIsDisplayed()
         onNodeWithText("SQL 1").assertDoesNotExist()
 
         // 再来一次 → 改名后点「取消」，名字应保持不变
-        onNodeWithContentDescription("重命名当前标签").performClick()
+        onNodeWithContentDescription(zh(StrKey.RENAME_CURRENT_TAB)).performClick()
         waitForIdle()
-        onNode(hasSetTextAction() and hasText("名称")).performTextReplacement("临时名字")
+        onNode(hasSetTextAction() and hasText(zh(StrKey.NAME))).performTextReplacement("临时名字")
         waitForIdle()
-        onNodeWithText("取消").performClick()
+        onNodeWithText(zh(StrKey.CANCEL)).performClick()
         waitForIdle()
 
         assertEquals("用户查询", browser.currentSqlSheet()!!.title, "「取消」应放弃重命名")
@@ -377,22 +388,24 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         // 加到 15 个 sheet —— 总宽远超右栏（每标签至少 90dp），末尾标签初始在可视区外
@@ -438,33 +451,35 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
         // 连接是 H2 → 标题条显示 H2 档位（连接名是 UIH2、状态条是「已连接 · H2」，精确匹配不会撞上）
         onNodeWithText("H2").assertIsDisplayed()
-        onNodeWithText("格式化").assertIsEnabled()
+        onNodeWithText(zh(StrKey.FORMAT_CODE)).assertIsEnabled()
 
         // 换成 SQLite 方言的连接 → 档位标签随之切换
         browser.bindConnection(connection.copy(id = "ui-sqlite", dialect = DialectType.SQLITE))
         waitForIdle()
         onNodeWithText("SQLite").assertIsDisplayed()
         onNodeWithText("H2").assertDoesNotExist()
-        onNodeWithText("格式化").assertIsEnabled()
+        onNodeWithText(zh(StrKey.FORMAT_CODE)).assertIsEnabled()
     }
 
     /**
@@ -483,21 +498,23 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         // 编辑器内的 BasicTextField 是唯一可编辑节点
@@ -548,22 +565,24 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         val editor = onNode(hasSetTextAction())
         editor.performClick()
         waitForIdle()
@@ -571,22 +590,22 @@ class DatabaseBrowserUiTest {
         editor.performTextInput(sql)
         waitForIdle()
 
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).fetchSemanticsNodes().isNotEmpty()
         }
 
         // 切回表预览：工作台内容应离开语义树
-        onNodeWithText("返回表预览").performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).performClick()
         waitForIdle()
         assertEquals(BrowserPane.TABLE, browser.activePane)
-        assertEquals(0, onAllNodesWithText("查询结果 · 2 行").fetchSemanticsNodes().size)
+        assertEquals(0, onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).fetchSemanticsNodes().size)
 
         // 再切回工作台 —— SQL 文本与查询结果都应原样恢复
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
         assertEquals(sql, browser.currentSqlSheet()!!.editor.text, "切回工作台后 SQL 文本应保持不变")
-        onNodeWithText("查询结果 · 2 行").assertIsDisplayed()
+        onNodeWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 2, 2)).assertIsDisplayed()
         onAllNodesWithText("Alice", substring = true).assertCountEquals(1)
         onAllNodesWithText("Bob", substring = true).assertCountEquals(1)
         onNode(hasSetTextAction()).assertTextEquals(sql)
@@ -615,32 +634,34 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         val resultSheet = browser.currentSqlSheet()!!
         resultSheet.editor.setText("SELECT id FROM big")
         waitForIdle()
-        onNodeWithText("执行 SQL").performClick()
+        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("查询结果 · 250 行").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(PluralStrKey.QUERY_RESULT_ROWS, 250, 250)).fetchSemanticsNodes().isNotEmpty()
         }
 
         // 翻到第 2 页（每页 100 → 3 页），并选中该页首行
-        onNodeWithText("下一页").performClick()
+        onNodeWithText(zh(StrKey.NEXT_PAGE)).performClick()
         waitForIdle()
         onNodeWithText("2 / 3").assertExists()
         onAllNodesWithText("101")[0].performClick()
@@ -651,9 +672,9 @@ class DatabaseBrowserUiTest {
         assertTrue(selectedRowNodesBefore > 1, "选中行应在单元格与详情面板中同时可见")
 
         // 切走再切回
-        onNodeWithText("返回表预览").performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).performClick()
         waitForIdle()
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         onNodeWithText("2 / 3").assertExists()
@@ -678,22 +699,24 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         val scrollSheet = browser.currentSqlSheet()!!
         scrollSheet.editor.setText((1..200).joinToString("\n") { "SELECT $it" })
         waitForIdle()
@@ -704,9 +727,9 @@ class DatabaseBrowserUiTest {
         val scrolled = scrollSheet.editor.scrollState.value
         assertTrue(scrolled > 0, "200 行 SQL 超出可视区应能滚动（实测 offset=$scrolled）")
 
-        onNodeWithText("返回表预览").performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).performClick()
         waitForIdle()
-        onNodeWithText("SQL 工作台").performClick()
+        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
         waitForIdle()
 
         assertEquals(scrolled, scrollSheet.editor.scrollState.value, "切回工作台后滚动位置应保持不变")
@@ -727,24 +750,26 @@ class DatabaseBrowserUiTest {
             status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
         )
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = listOf(sheet),
-                    activeSheetId = connection.id,
-                    connections = listOf(connection),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = listOf(sheet),
+                        activeSheetId = connection.id,
+                        connections = listOf(connection),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
         // 工具栏进入造数工作台（此时 SQL 与造数两个入口都可见）
-        onNodeWithText("造数工作台").performClick()
-        onNodeWithText("返回表预览").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.GENERATE_WORKBENCH)).performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).assertIsDisplayed()
         assertEquals(BrowserPane.GENERATE, browser.activePane, "工具栏点击后应切到造数 pane")
 
         val script = browser.currentGenerateScript()!!
@@ -756,9 +781,9 @@ class DatabaseBrowserUiTest {
         editor.performTextInput("for i = 1, 3 do insert('gen_target', {id = i, label = 'row_'..i}) end")
         waitForIdle()
 
-        onNodeWithText("执行造数").performClick()
+        onNodeWithText(zh(StrKey.RUN_GENERATE)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).fetchSemanticsNodes().isNotEmpty()
         }
         // 结果表出现目标表列 —— 编辑器文本里也含同名串，故要求整串相等，只命中单元格
         onNodeWithText("gen_target", substring = false).assertIsDisplayed()
@@ -772,20 +797,20 @@ class DatabaseBrowserUiTest {
         assertEquals(3, rows, "gen_target 应有脚本插入的 3 行")
 
         // 切到表预览再切回：脚本文本、光标位置、造数统计都应原样恢复
-        onNodeWithText("返回表预览").performClick()
+        onNodeWithText(zh(StrKey.BACK_TO_PREVIEW)).performClick()
         waitForIdle()
         assertEquals(BrowserPane.TABLE, browser.activePane)
         assertEquals(
             0,
-            onAllNodesWithText("造数完成 · 共 3 行 · 处理 1 个脚本").fetchSemanticsNodes().size,
+            onAllNodesWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).fetchSemanticsNodes().size,
             "工作台离开组合后结果面板不应留在表预览上",
         )
 
-        onNodeWithText("造数工作台").performClick()
+        onNodeWithText(zh(StrKey.GENERATE_WORKBENCH)).performClick()
         waitForIdle()
         onNode(hasSetTextAction()).assertTextEquals(script.editor.text)
         assertEquals(3L, browser.generateTotalInserted, "切回后插入行数应保留")
-        onNodeWithText("造数完成 · 共 3 行 · 处理 1 个脚本").assertIsDisplayed()
+        onNodeWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).assertIsDisplayed()
 
         // 光标仍在文末 —— 继续输入应追加到脚本末尾，而不是插到开头
         onNode(hasSetTextAction()).performTextInput("\n-- done")

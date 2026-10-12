@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.sundays
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -62,8 +64,8 @@ object NativePathPicker {
             val chosen = choose(
                 start = dir,
                 fileName = initialName,
-                title = "选择导出文件",
-                approveText = "保存",
+                title = Msg.text(StrKey.PICK_EXPORT_FILE),
+                approveText = Msg.text(StrKey.SAVE),
                 saveMode = true,
             ) { it.fileSelectionMode = JFileChooser.FILES_ONLY } ?: return@withContext null
             val f = File(chosen)
@@ -83,8 +85,8 @@ object NativePathPicker {
             val chosen = choose(
                 start = start,
                 fileName = initialName,
-                title = "选择输出目录",
-                approveText = "选择",
+                title = Msg.text(StrKey.PICK_OUTPUT_DIR),
+                approveText = Msg.text(StrKey.CHOOSE),
                 saveMode = false,
             ) { it.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY } ?: return@withContext null
             Picked(dir = File(chosen).absolutePath, name = initialName)

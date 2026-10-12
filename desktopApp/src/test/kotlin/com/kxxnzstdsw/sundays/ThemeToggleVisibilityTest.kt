@@ -2,12 +2,13 @@ package com.kxxnzstdsw.sundays
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.remember
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import com.kxxnzstdsw.i18n.StrKey
 import java.io.File
 import java.nio.file.Files
 import org.junit.After
@@ -66,7 +67,7 @@ class ThemeToggleVisibilityTest {
 
     @Test
     fun `first screen has no theme toggle`() = runComposeUiTest {
-        setContent { MaterialTheme { MainScreen(engine, com.kxxnzstdsw.sundays.ui.rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, com.kxxnzstdsw.sundays.ui.rememberAppearanceState()) } } }
 
         // 首屏（连接管理）标题行只剩 ⚙ 设置入口，不应有日夜切换
         toggleDescriptions.forEach { desc ->
@@ -77,12 +78,14 @@ class ThemeToggleVisibilityTest {
     @Test
     fun `browser screen and dialogs have no theme toggle`() = runComposeUiTest {
         ConnectionStorageTestSupport.seedH2("sheet-toggle", "切换测试 H2")
-        setContent { MaterialTheme { MainScreen(engine, com.kxxnzstdsw.sundays.ui.rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, com.kxxnzstdsw.sundays.ui.rememberAppearanceState()) } } }
 
+        // 「切换测试 H2」是上面 seedH2 进去的**连接名**（测试数据，不参与翻译）；
+        // 界面语言由 ProvideTestStrings 钉死，与这个名字是不是中文无关。
         onAllNodesWithText("切换测试 H2")[0].performClick()
-        onAllNodesWithText("连接")[0].performClick()
+        onAllNodesWithText(zh(StrKey.CONNECT))[0].performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION)).fetchSemanticsNodes().isNotEmpty()
         }
         // 切到第二屏（数据库浏览）后仍不应出现
         toggleDescriptions.forEach { desc ->
@@ -90,9 +93,9 @@ class ThemeToggleVisibilityTest {
         }
 
         // AddConnectionDialog 开着时同样不应出现
-        onAllNodesWithContentDescription("添加连接")[0].performClick()
+        onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION))[0].performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("添加数据库连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithText(zh(StrKey.ADD_CONNECTION_DIALOG_TITLE)).fetchSemanticsNodes().isNotEmpty()
         }
         toggleDescriptions.forEach { desc ->
             onAllNodesWithContentDescription(desc).assertCountEquals(0)

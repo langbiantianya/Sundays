@@ -109,6 +109,9 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 底部状态栏：JVM 堆占用 + 点击展开详情面板 | `EngineMemoryStatusBar` |
 | **外观** | 5 套配色（现代 3 / Win2000 直角 / WinXP Luna 圆角） | `SundaysPalette` |
 | | 明暗主题（跟随系统 / 手动）+ 紧凑模式（缩放 density） | `ThemeMode` / `CompactMode` |
+| **语言** | 6 种语言：简体中文 / 繁體中文 / English / Русский / 日本語 / Deutsch | `:i18n` + `str()` / `plural()` |
+| | 首启在**引导页**按系统语言预选（不支持则落中文），引导页与设置页均可改 | `LanguagePicker` |
+| | 引擎报错跟随界面语言（语言随请求过 proto 传到引擎进程） | `RequestOptions.language` |
 | **工程** | Windows / macOS / Linux 原生安装包（`.msi` / `.dmg` / `.deb`） | `compose.desktop` |
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
 
@@ -306,4 +309,5 @@ end
 | [`../engine/README.md`](../engine/README.md) | 引擎能力全集（含尚未被 UI 使用的部分） |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎架构：路由、方言 SPI、连接池、事务 |
 | [`../shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) | 共享 UI 层：`CodeEditor` / `DataTable` / 主题 |
+| [`../i18n/README.md`](../i18n/README.md) | 六语言文案：键枚举 / 译文表 / 简繁判定 / 复数规则 / 语言传递链路 |
 | [`../README.md`](../README.md) | 仓库总览、构建运行、架构升级历史 |

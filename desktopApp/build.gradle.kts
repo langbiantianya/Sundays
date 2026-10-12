@@ -15,6 +15,12 @@ dependencies {
     // 选择逻辑见 main.kt 的 createEngineClient()。
     implementation(project(":engine"))
     implementation(project(":engine-grpc-client"))
+    // 界面语言与文案表注册表。main.kt 要把用户选定的语言同时喂给
+    // ①界面（ProvideStrings）②同 JVM 内的引擎（LanguageScope.setProcessLanguage，
+    // Direct 模式）③出站请求（Request.options.language，gRPC 模式）。
+    // :shared 与 :engine 都依赖它，本模块直接引用而不是绕道 :shared，
+    // 是为了不让「装配点依赖某个实现模块的传递依赖」这种写法扩散。
+    implementation(project(":i18n"))
 
     // 方言插件 + JDBC 驱动随应用类路径加载（Direct 模式不依赖外部 dialects/ drivers/ 目录）：
     // DialectLoader.loadFromDir 会先扫一遍应用类路径上的 SPI（ServiceLoader），再让 dialects/ 目录覆盖同名方言。

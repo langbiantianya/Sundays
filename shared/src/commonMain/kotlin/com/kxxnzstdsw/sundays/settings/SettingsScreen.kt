@@ -43,6 +43,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.i18n.AppLanguage
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
+import com.kxxnzstdsw.i18n.Strings
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.SystemInfoRefresh
 import com.kxxnzstdsw.sundays.ui.ThemeMode
@@ -54,6 +58,10 @@ import com.kxxnzstdsw.sundays.ui.WinSwitch
 import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
 import com.kxxnzstdsw.sundays.ui.selectionContentColor
 import com.kxxnzstdsw.sundays.ui.selectionContainerColor
+import com.kxxnzstdsw.sundays.ui.LanguagePicker
+import com.kxxnzstdsw.sundays.ui.LocalStrings
+import com.kxxnzstdsw.sundays.ui.plural
+import com.kxxnzstdsw.sundays.ui.str
 import com.kxxnzstdsw.sundays.ui.WinDivider
 import com.kxxnzstdsw.sundays.ui.WinTextButton
 import com.kxxnzstdsw.sundays.ui.WinIconButton
@@ -106,6 +114,8 @@ fun SettingsScreen(
     compactMode: Boolean = false,
     onCompactModeChange: (Boolean) -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
+    language: AppLanguage = AppLanguage.DEFAULT,
+    onLanguageChange: (AppLanguage) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var category by remember { mutableStateOf(SettingsCategory.PERSONALIZATION) }
@@ -138,11 +148,11 @@ fun SettingsScreen(
                 WinIconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
+                        contentDescription = str(StrKey.BACK),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(text = "设置", style = MaterialTheme.typography.titleMedium)
+                Text(text = str(StrKey.SETTINGS_TITLE), style = MaterialTheme.typography.titleMedium)
             }
             Spacer(Modifier.height(4.dp))
 
@@ -175,6 +185,8 @@ fun SettingsScreen(
                     compactMode = compactMode,
                     onCompactModeChange = onCompactModeChange,
                     onOpenOnboarding = onOpenOnboarding,
+                    language = language,
+                    onLanguageChange = onLanguageChange,
                 )
                 SettingsCategory.SYSTEM_INFO -> SystemInfoPane(
                     state = systemInfo,
@@ -216,7 +228,7 @@ private fun SettingsCategoryRow(
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = category.label,
+                text = str(category.labelKey),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 color = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
@@ -246,6 +258,8 @@ private fun PersonalizationPane(
     compactMode: Boolean,
     onCompactModeChange: (Boolean) -> Unit,
     onOpenOnboarding: () -> Unit,
+    language: AppLanguage,
+    onLanguageChange: (AppLanguage) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -253,21 +267,41 @@ private fun PersonalizationPane(
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
     ) {
-        Text(text = "个性化", style = MaterialTheme.typography.titleLarge)
+        Text(text = str(StrKey.PERSONALIZATION), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "外观设置立即生效，并在下次启动时保留。",
+            text = str(StrKey.APPEARANCE_HINT),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
 
-        Text(text = "配色主题", style = MaterialTheme.typography.titleSmall)
+        // ---- 语言 ----
+        // 放在最前，与引导页一致：语言决定下面每一行说明能不能读懂。
+        Text(text = str(StrKey.LANGUAGE), style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = str(StrKey.LANGUAGE_HINT_SETTINGS),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        LanguagePicker(
+            selected = language,
+            onSelect = onLanguageChange,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(24.dp))
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(16.dp))
+
+        Text(text = str(StrKey.COLOR_THEME), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))
         ThemePalette.entries.forEach { option ->
             ChoiceRow(
-                title = option.label,
-                description = option.description,
+                title = str(option.labelKey),
+                description = str(option.descriptionKey),
                 selected = option == palette,
                 onClick = { onPaletteChange(option) },
             )
@@ -277,12 +311,12 @@ private fun PersonalizationPane(
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(16.dp))
 
-        Text(text = "明暗模式", style = MaterialTheme.typography.titleSmall)
+        Text(text = str(StrKey.THEME_MODE), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))
         ThemeMode.entries.forEach { option ->
             ChoiceRow(
-                title = option.label,
-                description = option.description,
+                title = str(option.labelKey),
+                description = str(option.descriptionKey),
                 selected = option == themeMode,
                 onClick = { onThemeModeChange(option) },
             )
@@ -295,7 +329,7 @@ private fun PersonalizationPane(
         // 快捷切换（明暗三档循环）—— 面板标题行的按钮已移除，这里是**唯一**的切换入口
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "快速切换明暗",
+                text = str(StrKey.QUICK_TOGGLE_THEME),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -303,7 +337,7 @@ private fun PersonalizationPane(
             ThemeModeToggleButton(mode = themeMode, onCycle = { onThemeModeChange(themeMode.next) })
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "下一档：${themeMode.next.label}",
+                text = str(StrKey.NEXT_THEME_LEVEL, str(themeMode.next.labelKey)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -313,13 +347,13 @@ private fun PersonalizationPane(
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(16.dp))
 
-        Text(text = "界面密度", style = MaterialTheme.typography.titleSmall)
+        Text(text = str(StrKey.UI_DENSITY), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))
         // 立即生效：AppearanceState 变更 → SundaysTheme 的 compact 参数 → LocalDensity 覆盖，
         // 整棵树重组，**不需要**重启或重建当前屏幕。
         SwitchRow(
-            title = "紧凑模式",
-            description = "缩小控件与行距，同屏显示更多内容。",
+            title = str(StrKey.COMPACT_MODE),
+            description = str(StrKey.COMPACT_HINT),
             checked = compactMode,
             onCheckedChange = onCompactModeChange,
         )
@@ -330,10 +364,10 @@ private fun PersonalizationPane(
 
         // 重进引导。放在「个性化」底部而不是另开一个分类：引导页做的正是这三组事，
         // 放到系统信息那边会让入口与它要配置的东西失去关联。
-        Text(text = "外观引导", style = MaterialTheme.typography.titleSmall)
+        Text(text = str(StrKey.APPEARANCE_ONBOARDING), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "重新打开首次启动时那一页，把配色、明暗、界面密度一次挑完。",
+            text = str(StrKey.REOPEN_ONBOARDING_HINT),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -348,7 +382,7 @@ private fun PersonalizationPane(
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(6.dp))
-            Text("重新打开引导")
+            Text(str(StrKey.REOPEN_ONBOARDING))
         }
     }
 }
@@ -405,24 +439,24 @@ private fun SystemInfoPane(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "系统信息", style = MaterialTheme.typography.titleLarge)
-            WinTextButton(onClick = onRefreshNow, shape = SundaysPalette.buttonShape) { Text("刷新") }
+            Text(text = str(StrKey.SYSTEM_INFO), style = MaterialTheme.typography.titleLarge)
+            WinTextButton(onClick = onRefreshNow, shape = SundaysPalette.buttonShape) { Text(str(StrKey.REFRESH)) }
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "来自引擎的运行时信息（SYSTEM.INFO）",
+            text = str(StrKey.SYSTEM_INFO_HINT),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(Modifier.height(16.dp))
-        Text(text = "自动刷新", style = MaterialTheme.typography.titleSmall)
+        Text(text = str(StrKey.AUTO_REFRESH), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))
         // 间隔档位用横向一组 chip：竖排 5 项会把数据挤到屏幕外，且这是一次性选择
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SystemInfoRefresh.entries.forEach { option ->
                 RefreshOptionChip(
-                    label = option.label,
+                    label = str(option.labelKey),
                     selected = option == refresh,
                     onClick = { onRefreshChange(option) },
                 )
@@ -433,7 +467,7 @@ private fun SystemInfoPane(
         // 按 sealed 子类型分派而非「取字段再判空」：sealed interface 的属性无法 smart-cast。
         when (val s = state) {
             SystemInfoState.Idle -> Text(
-                text = "（尚未加载）",
+                text = str(StrKey.NOT_LOADED_YET),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -446,7 +480,7 @@ private fun SystemInfoPane(
                     WinProgressIndicator()
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "读取系统信息…",
+                        text = str(StrKey.LOADING_SYSTEM_INFO),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -454,37 +488,37 @@ private fun SystemInfoPane(
             }
 
             is SystemInfoState.Failed -> Text(
-                text = "读取失败：${s.message}",
+                text = str(StrKey.LOAD_SYSTEM_INFO_FAILED, s.message),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
 
             is SystemInfoState.Loaded -> {
                 val info = s.info
-                InfoRow("JVM 版本", info.jvmVersion)
-                InfoRow("JVM 供应商", info.jvmVendor)
-                InfoRow("JVM 名称", info.jvmName)
+                InfoRow(str(StrKey.JVM_VERSION), info.jvmVersion)
+                InfoRow(str(StrKey.JVM_VENDOR), info.jvmVendor)
+                InfoRow(str(StrKey.JVM_NAME), info.jvmName)
                 WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                InfoRow("操作系统", "${info.osName} ${info.osVersion}".trim())
-                InfoRow("系统架构", info.osArch)
-                InfoRow("可用处理器", "${info.availableProcessors} 个")
+                InfoRow(str(StrKey.OPERATING_SYSTEM), "${info.osName} ${info.osVersion}".trim())
+                InfoRow(str(StrKey.SYSTEM_ARCH), info.osArch)
+                InfoRow(str(StrKey.AVAILABLE_PROCESSORS), plural(PluralStrKey.AVAILABLE_PROCESSORS_COUNT, info.availableProcessors, info.availableProcessors))
                 WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                InfoRow("JVM 堆已用", formatBytes(info.memoryUsed))
-                InfoRow("JVM 堆已分配", formatBytes(info.memoryTotal))
-                InfoRow("JVM 堆上限", formatBytes(info.memoryMax))
-                InfoRow("JVM 堆空闲", formatBytes(info.memoryFree))
+                InfoRow(str(StrKey.JVM_HEAP_USED), formatBytes(info.memoryUsed))
+                InfoRow(str(StrKey.JVM_HEAP_ALLOCATED), formatBytes(info.memoryTotal))
+                InfoRow(str(StrKey.JVM_HEAP_MAX), formatBytes(info.memoryMax))
+                InfoRow(str(StrKey.JVM_HEAP_FREE), formatBytes(info.memoryFree))
                 WinDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
-                InfoRow("运行时长", formatDuration(info.uptimeMillis))
-                InfoRow("进程 PID", "${info.pid}")
+                InfoRow(str(StrKey.UPTIME), formatDuration(info.uptimeMillis))
+                InfoRow(str(StrKey.PROCESS_PID), "${info.pid}")
             }
         }
     }
@@ -573,15 +607,34 @@ fun formatBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-/** 毫秒 → `3 天 4 小时 5 分`（只到分，秒级噪声对运行时长没意义）。 */
-internal fun formatDuration(millis: Long): String {
+/**
+ * 毫秒 → `3 天 4 小时 5 分`（只到分，秒级噪声对运行时长没意义）。
+ *
+ * ## 为什么原来是「尾随空格拼接」，现在改成 joinToString
+ *
+ * 原实现靠 `append("3 天 ")` 的**尾随空格**把三段拼起来。那在中文里成立，
+ * 但有两个问题：
+ *
+ * 1. **空格成了译文的一部分。** 键的值以空格结尾，任何译者（或后续维护者）
+ *    在编辑器里顺手删掉那个尾随空格，界面上就变成 `3 天4 小时5 分`，而且**编译与
+ *    测试都不会报错**。空格本该是调用方拼的，不该由文案承担。
+ * 2. **数词要变格。** 俄语里「1 день / 3 дня / 5 дней」、英语里「1 day / 3 days」
+ *    是三条不同的文案，而不是同一个模板配不同数字。故这三段改走
+ *    [PluralStrKey] 的复数变体，由 [plural] 按数量选档。
+ *
+ * @param strings 当前语言的文案表 —— [plural] 是 composable 函数，取文案需要组合上下文。
+ */
+@Composable
+internal fun formatDuration(millis: Long, strings: Strings = LocalStrings.current): String {
     val totalMinutes = millis / 60_000
     val days = totalMinutes / (60 * 24)
     val hours = (totalMinutes % (60 * 24)) / 60
     val minutes = totalMinutes % 60
-    return buildString {
-        if (days > 0) append("${days} 天 ")
-        if (days > 0 || hours > 0) append("${hours} 小时 ")
-        append("${minutes} 分")
-    }
+    return buildList {
+        if (days > 0) add(strings.plural(PluralStrKey.UPTIME_DAYS, days.toInt(), days))
+        if (days > 0 || hours > 0) {
+            add(strings.plural(PluralStrKey.UPTIME_HOURS, hours.toInt(), hours))
+        }
+        add(strings.plural(PluralStrKey.UPTIME_MINUTES, minutes.toInt(), minutes))
+    }.joinToString(" ")
 }

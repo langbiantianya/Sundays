@@ -8,6 +8,8 @@ import com.kxxnzstdsw.grpc.TriggerListResponse
 import com.kxxnzstdsw.grpc.triggerGetDdlResponse
 import com.kxxnzstdsw.grpc.triggerListItem
 import com.kxxnzstdsw.grpc.triggerListResponse
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +49,7 @@ object TriggerHandler {
      * GET_DDL — 获取触发器 DDL
      */
     suspend fun getDDL(config: ConnectionConfig, req: TriggerGetDdlRequest): TriggerGetDdlResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException("缺少参数 'name'")
+        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)

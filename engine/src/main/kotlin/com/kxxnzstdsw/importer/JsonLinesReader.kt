@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.importer
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -62,7 +64,7 @@ class JsonLinesReader(source: Reader) : ImportSource {
 
     override fun rows(): Iterator<Map<String, String>> {
         check(rowsCalled.compareAndSet(false, true)) {
-            "JsonLinesReader.rows() 只能调用一次：底层 Reader 是单遍流，无法回绕"
+            Msg.text(StrKey.JSONL_READER_SINGLE_USE)
         }
         return RowIterator()
     }
@@ -87,7 +89,7 @@ class JsonLinesReader(source: Reader) : ImportSource {
 
         override fun next(): Map<String, String> {
             if (!computed) hasNext()
-            val value = next ?: throw NoSuchElementException("JsonLinesReader 已读到文件末尾")
+            val value = next ?: throw NoSuchElementException(Msg.text(StrKey.JSONL_READER_EOF))
             next = null
             computed = false
             return value
@@ -121,13 +123,18 @@ class JsonLinesReader(source: Reader) : ImportSource {
             json.parseToJsonElement(line)
         } catch (e: SerializationException) {
             throw IllegalStateException(
-                "JSON Lines 第 $lineNo 行不是合法 JSON: ${e.message ?: e::class.simpleName}; 内容: ${line.snippet()}",
+                Msg.format(
+                    StrKey.JSONL_INVALID_JSON,
+                    lineNo,
+                    e.message ?: e::class.simpleName,
+                    line.snippet()
+                ),
                 e
             )
         }
         if (element !is JsonObject) {
             throw IllegalStateException(
-                "JSON Lines 第 $lineNo 行必须是 JSON 对象，实际是 ${element.typeLabel()}: ${line.snippet()}"
+                Msg.format(StrKey.JSONL_NOT_OBJECT, lineNo, element.typeLabel(), line.snippet())
             )
         }
         return element
@@ -151,9 +158,9 @@ class JsonLinesReader(source: Reader) : ImportSource {
 
     private fun JsonElement.typeLabel(): String = when (this) {
         is JsonNull -> "null"
-        is JsonPrimitive -> if (isString) "字符串" else "标量"
+        is JsonPrimitive -> if (isString) Msg.text(StrKey.JSON_TYPE_STRING) else Msg.text(StrKey.JSON_TYPE_SCALAR)
         is JsonObject -> "对象"
-        is JsonArray -> "数组"
+        is JsonArray -> Msg.text(StrKey.ARRAY)
     }
 
     /** 报错时只带有限长度的内容，避免超长单行把日志刷爆 */

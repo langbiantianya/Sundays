@@ -469,6 +469,17 @@ message RequestOptions {
   string trace_id   = 1;
   bool   dry_run    = 2;
   int32  timeout_ms = 3;
+
+  // 界面语言（BCP-47，如 "de" / "zh-Hant"）。引擎用它挑选**会显示到界面上的**
+  // 错误消息语言 —— `Response.error` 的内容是原样上屏的（见 RequestDispatcher 的
+  // catch 分支），所以界面的语言必须一路带到引擎，否则德语界面里会蹦出中文报错。
+  //
+  // 为什么放在 RequestOptions 而不是 ConnectionConfig：它与「连哪个库」毫无关系，
+  // 是纯粹随请求走的一次性上下文，正是 RequestOptions 的职责。
+  //
+  // 留空 = 引擎按自身的 `Locale.getDefault()` 推断（见 LanguageScope）。
+  // 字段号 4 之前未占用，向后兼容：老客户端不填时行为不变。
+  string language   = 4;
 }
 
 // ============================================================================

@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -15,26 +15,27 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.WizardStep
 import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import org.junit.After
-import org.junit.Assume.assumeTrue
-import org.junit.Before
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.junit.After
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+import org.junit.Test
 
 /**
  * **鼠标 + 键盘协同走完连接向导** —— 真引擎、真点击、真打字。
@@ -74,7 +75,7 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
          * 只跑**填了字段也能往前走**的方言。
          *
          * H2 被排除，原因具体且已知：H2 的凭据步「数据库名」是空白的，
-         * 而 `onNode(hasSetTextAction() and hasText("数据库名")).performTextInput(...)`
+         * 而 `onNode(hasSetTextAction() and hasText(zh(StrKey.DATABASE_NAME))).performTextInput(...)`
          * 在本屏**稳定失败**（`Failed to perform text input`）—— 于是「下一步」永远
          * disabled，停在 CREDENTIALS。SQLite / DuckDB / MySQL / PostgreSQL 的
          * 那一格有预填值，不点也能往前走，所以能走到 TEST_SAVE。
@@ -157,7 +158,7 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
      *
      * ## 为什么不去填带 label 的字段
      *
-     * `onNode(hasSetTextAction() and hasText("数据库名")).performTextInput(...)` 在本屏
+     * `onNode(hasSetTextAction() and hasText(zh(StrKey.DATABASE_NAME))).performTextInput(...)` 在本屏
      * **稳定失败**（`Failed to perform text input`），5 个方言、6 轮、一次都没成功 ——
      * 而不带 label 的 `onNode(hasSetTextAction())` 是好的（`ConnectionManagerFlowTest`
      * 靠它打字）。这本身值得记：要么这些字段的语义节点不是可编辑的那个，要么
@@ -176,10 +177,10 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
     fun `wizard can be walked forward with the mouse`() = runComposeUiTest(testTimeout = 3.minutes) {
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
         val session = ConnectionSession(engine, s)
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
         // ---- ① 鼠标点「新建连接」
-        onNodeWithText("新建连接").performClick()
+        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
         waitForIdle()
         assertEquals(WizardStep.BASIC_INFO, session.wizard.step, "点「新建连接」应进第 1 步")
 
@@ -198,7 +199,7 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
         var stuck = false
         repeat(8) { round ->
             val before = session.wizard.step
-            runCatching { onNodeWithText("下一步").performClick() }
+            runCatching { onNodeWithText(zh(StrKey.NEXT_STEP)).performClick() }
             waitForIdle()
             val after = session.wizard.step
             trail += "$before → $after"
@@ -212,7 +213,7 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
         )
 
         // ---- ④ 到了测试步，「测试连接」按钮必须在（点得到 = enabled）
-        onNodeWithText("测试连接").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.TEST_CONNECTION)).assertIsDisplayed()
         println("RESULT WIZ [${target.label}] 鼠标点着走完向导：${trail.joinToString(" → ")}")
     }
 

@@ -11,6 +11,18 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // 国际化文案表 —— 本模块**唯一**的 project 依赖。
+            //
+            // 为什么打破「:shared 零 project 依赖」：文案表必须同时喂给 `:engine`
+            // （引擎报错会上屏，见 i18n/README），而 `:engine` 看不到 `:shared`。
+            // 文案表因此下沉成独立的 `:i18n` 模块，两边都依赖它 —— 而不是把它留在
+            // 这里、再让引擎反向依赖 UI 模块。
+            //
+            // `:i18n` 是 plain kotlin-jvm，本模块的 `jvm()` target 消费它没有问题；
+            // 反过来若将来给 `:shared` 加真正的移动端 target，需要给 `:i18n` 也补上
+            // 对应 target（文案表本身没有任何 JVM 专有 API，迁移成本很低）。
+            implementation(project(":i18n"))
+
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)

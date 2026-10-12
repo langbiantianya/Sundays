@@ -423,13 +423,13 @@ object MySqlSmoke : ServerSmokeTarget("192.168.1.5", 3306, "root", "666666", "my
 }
 
 /** PostgreSQL —— 默认用户名按 `postgres` 处理。 */
-object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5432, "postgres", "666666", "postgres") {
+object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5433, "postgres", "666666", "postgres") {
     override val label = "PostgreSQL"
     override val dialectType = DialectType.POSTGRESQL
 
     override fun registerDialect() = DialectLoader.registerForTesting("Postgresql", PostgreSQLDialect())
 
-    override fun urlFor(database: String) = "jdbc:postgresql://192.168.1.5:5432/$database"
+    override fun urlFor(database: String) = "jdbc:postgresql://192.168.1.5:5433/$database"
 
     override fun quoteIdent(name: String) = "\"$name\""
 
@@ -481,7 +481,7 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5432, "postgres", "66666
         val (u, p) = creds()
         return ConnectionConfig(
             id = "smoke-postgres", name = "SmokePG", dialect = DialectType.POSTGRESQL,
-            host = "192.168.1.5", port = 5432, username = u, password = p,
+            host = "192.168.1.5", port = 5433, username = u, password = p,
             database = workspace, connectionType = ConnectionType.CLIENT_SERVER,
             jdbcUrl = urlFor(workspace),
         )

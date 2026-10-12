@@ -39,11 +39,20 @@ data class ConnectionConfig(
     val isEmbedded: Boolean
         get() = connectionType == ConnectionType.EMBEDDED || connectionType == ConnectionType.IN_MEMORY || connectionType == ConnectionType.FILE_BASED
 
-    /** 生成连接字符串 (用于显示) */
-    fun connectionString(): String = when (connectionType) {
+    /**
+     * 生成连接字符串 (用于显示)
+     *
+     * [noFileSpecified] / [inMemoryLabel] 是**占位文案**而非本模块能自取的常量：本函数是纯
+     * Kotlin，拿不到 Compose 注入的文案表（`Msg.text` 读的是线程语言，而界面读的是
+     * `LocalStrings`，两者未必一致）。因此由 Composable 侧先 `str(...)` 取好再传进来。
+     */
+    fun connectionString(
+        noFileSpecified: String,
+        inMemoryLabel: String,
+    ): String = when (connectionType) {
         ConnectionType.CLIENT_SERVER -> "$host:$displayPort/$database"
-        ConnectionType.FILE_BASED -> database.ifBlank { "(未指定文件)" }
-        ConnectionType.EMBEDDED -> database.ifBlank { "(内存库)" }
+        ConnectionType.FILE_BASED -> database.ifBlank { noFileSpecified }
+        ConnectionType.EMBEDDED -> database.ifBlank { inMemoryLabel }
         ConnectionType.IN_MEMORY -> "mem:$database"
         ConnectionType.UNKNOWN -> ""
     }

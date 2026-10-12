@@ -1,5 +1,8 @@
 package com.kxxnzstdsw.importer
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
+
 /**
  * 导入文件格式 —— 取值来自 proto 字段 `ImportRunRequest.format`（字符串）。
  *
@@ -30,7 +33,7 @@ enum class ImportFormat {
             val key = raw.trim().uppercase()
             return entries.firstOrNull { it.name == key }
                 ?: throw IllegalArgumentException(
-                    "不支持的导入格式: '$raw'，支持的格式: ${supported.joinToString(", ")}"
+                    Msg.format(StrKey.UNSUPPORTED_IMPORT_FORMAT, raw, supported.joinToString(", "))
                 )
         }
     }

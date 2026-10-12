@@ -11,13 +11,16 @@
 
 引擎支持 **5 个** 可插拔方言：**MySQL** / **PostgreSQL** / **H2** / **DuckDB**（本地嵌入式 OLAP，v2.7） / **SQLite**（本地嵌入式关系型，v2.8）。
 
+界面支持 **6 种语言**：**简体中文 / 繁體中文 / English / Русский / 日本語 / Deutsch**。
+首启在引导页按系统语言预选（系统语言不支持时默认中文），随时可在设置里改；引擎的错误消息也跟随界面语言。
+
 > **当前版本：v2.23**
 >
 > 📖 **功能文档：[`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md)** —— 这个工具现在能干什么、
 > 引擎已实现但前端尚未接线的部分、以及与 **DataGrip / Navicat** 的逐项差距矩阵（含按投入产出比
 > 排序的路线建议）。想快速了解「sundays 和主流数据库工具有什么区别」，从那篇开始。
 >
-> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，调用层契约见 [`engine-protocol/README.md`](./engine-protocol/README.md)，引擎 README 见 [`engine/README.md`](./engine/README.md)。
+> 详细架构设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，调用层契约见 [`engine-protocol/README.md`](./engine-protocol/README.md)，引擎 README 见 [`engine/README.md`](./engine/README.md)，六语言文案见 [`i18n/README.md`](./i18n/README.md)。
 
 ---
 
@@ -52,13 +55,20 @@ sundays/
 │   └── src/main/kotlin/com/kxxnzstdsw/client/grpc/
 │       ├── GrpcEngineClient.kt  经 gRPC stub 实现 EngineClient
 │       └── GrpcClientConfig.kt  端点配置（TCP / UDS / 命名管道）+ ChannelBuilder
+├── i18n/                 六语言文案模块：StrKey 枚举 + 六份译文表 + 简繁判定 + 复数规则
+│   └── src/main/kotlin/com/kxxnzstdsw/i18n/
+│       ├── AppLanguage.kt   6 种语言（tag / 母语名 / 系统 Locale 判定 / 简繁判定）
+│       ├── StrKey.kt        438 个文案键（按语义分区）
+│       ├── Strings.kt       取值 + {0} 占位符替换 + 六表懒加载 + 降级链
+│       ├── LanguageScope.kt 线程级 → 进程级 → 系统探测 三级语言上下文 + Msg
+│       └── tables/          六语言 × 文本/复数，各一份独立文件
 ├── shared/               KMP 共享代码（commonMain / jvmMain）
 │   ├── commonMain/       KMP 共享逻辑（与平台无关）—— 含 UI 组件（编辑器 / 表格 / 右键菜单）
 │   │   ├── editor/       CodeEditor：可扩展代码编辑器（语法高亮 + 行号 + 工具栏 + 右键菜单 + 格式化 + 补全提示)
 │   │   ├── table/        DataTable：虚拟滚动数据表格（分页 + 详情面板 + 右键菜单）
 │   │   ├── connection/   ConnectionManagerScreen：连接管理（左侧连接列表 + 右侧 4 步向导，JSON 持久化到 ~/.config/sundays/connection.json）
 │   │   ├── navigation/   AppDestination：顶层导航目标枚举（平台无关，v2.14 自 desktopApp 上移）
-│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier、SundaysTheme 应用主题 + SundaysPalette 蓝灰 IDE 配色）
+│   │   └── ui/           通用 UI 工具（ContextMenuState、onRightClick modifier、SundaysTheme 应用主题 + SundaysPalette 蓝灰 IDE 配色 + LocalStrings/LanguagePicker 国际化）
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  依赖 :engine（本地实现）与 :engine-grpc-client（gRPC 实现）
@@ -514,6 +524,7 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 | [`engine-grpc-client/README.md`](./engine-grpc-client/README.md) | **gRPC 调用模块** —— `GrpcEngineClient` 跨进程实现、端点格式、端到端测试 |
 | [`engine/README.md`](./engine/README.md) | 引擎模块详细 README —— CLI、构建运行、handler 路由矩阵、API 参考 |
 | [`shared/src/`](./shared/src) | KMP 共享代码 —— `commonMain/`（平台无关）/ `jvmMain/`（JVM 特定） |
+| [`i18n/README.md`](./i18n/README.md) | **六语言文案** —— 键枚举 / 译文表 / 简繁判定 / 复数规则 / 语言传递链路 / 完整性测试 |
 | [`engine-protocol/src/main/proto/idb_engine.proto`](./engine-protocol/src/main/proto/idb_engine.proto) | gRPC service 定义 + 全部 typed message schemas |
 
 ---

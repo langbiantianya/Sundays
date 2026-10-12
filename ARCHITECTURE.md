@@ -67,7 +67,67 @@ gRPC 模式（跨进程 / 跨语言）:
 
 ---
 
-## 3. 模块结构
+## 3. 国际化（i18n）
+
+支持 **简体中文 / 繁體中文 / English / Русский / 日本語 / Deutsch** 六种语言，文案表集中在零依赖的 `:i18n` 模块。
+
+**为什么要单独建模块**：文案要同时喂给 `:shared`（UI 渲染）和 `:engine`（错误消息上屏），而这两个模块互相看不见。
+`:i18n` 是它们唯一的交集，做成叶子模块后谁都能无环依赖。详见 [`i18n/README.md`](./i18n/README.md)。
+
+### 取文案
+
+```kotlin
+// Composable 上下文
+str(StrKey.CANCEL)                                  // shared/.../ui/LocalStrings.kt
+str(StrKey.CONFIRM_DELETE_CONNECTION, name)         // 占位符 {0}
+plural(PluralStrKey.ROWS_COUNT, n, n)
+
+// 非组合上下文（引擎 / 方言 / 日志）
+Msg.text(StrKey.EXPORT_FAILED)                      // i18n/LanguageScope.kt
+Msg.format(StrKey.DUCKDB_NO_ON_DELETE, table, ref)
+```
+
+键是**枚举**而非字符串，拼错编译期即报；`Texts.kt` 的 `when` 没有 `else`，加语言时编译器会报不完整。
+六份译文表拆成六个独立文件，六种语言互不干扰 diff，五个翻译任务可以并行各写各的。
+
+### 语言优先级链
+
+```
+线程级 (ThreadLocal)  →  进程级 (AtomicReference)  →  系统 Locale 探测
+```
+
+### 跨进程传递
+
+界面语言要跟着请求走到引擎进程，否则引擎抛的英文报错会在德语界面里上屏：
+
+```
+proto: RequestOptions.language = 4     (BCP-47 tag)
+  ↓ IdbEngine.handle() / GrpcEngineClient.handle() → Request.withLanguageTag(...)
+  ↓ RequestDispatcher.dispatch() → .flowOn(EngineLanguageContext(language))
+  ↓ handler 里 Msg.* 读到的已经是本次请求的语言
+```
+
+`RequestDispatcher` **只在客户端真的填了 language 时才装**上下文元素，不填就不装。
+
+### 语言选择
+
+- **引导页**第一分组就是语言（语言决定其余说明能不能读懂），
+  首次启动按系统 Locale 预选，系统语言不支持时落 `ZH_HANS`。
+- **设置页 → 个性化**里可随时改，走同一个 `LanguagePicker` 组件。
+- 判定「是不是首启」看**设置文件是否存在**，而不是某个字段的值 —— 与既有的 `resolveOnboardingCompleted` 同构。
+  老用户升级后拿到中文而不是系统语言，这是刻意取舍：他们已经不会被引导页拦下，没有「按系统语言重设」的机会。
+- 语言存放在 `AppearanceState` 里（尽管名字是「外观」）：因为 `persist()` 写的是整份 `AppSettings`，
+  语言如果由 `main.kt` 单独持有，用户改一次配色就会用「没有语言」的设置覆盖磁盘。
+
+### 一条约束
+
+**「这句话是不是报错」是状态，不是文案。** 严重级别必须走结构化字段，
+不许用 `notice.startsWith("导出失败")` 这类解析文案的判断 —— 翻译之后这个判断恒为 false，
+导出失败会被静默染成成功色（`TablePreviewTab.noticeIsError` / `SqlSheet.noticeIsError` 就是为此加的）。
+
+---
+
+## 4. 模块结构
 
 ```
 sundays/
@@ -82,6 +142,7 @@ sundays/
 │                              v2.16：`engine/StatementRegistry`（查询取消）+ `engine/SqlScriptSplitter`（多语句）
 │                              `pool/TransactionManager`（事务会话）+ `importer/`（CSV / JSON Lines 导入阅读器）
 ├── engine-grpc-client/       gRPC 调用模块（GrpcEngineClient 跨进程实现，v2.15 新增）
+├── i18n/                     六语言文案模块（StrKey 枚举 + 六份译文表 + 复数规则，零 project 依赖）
 ├── shared/                   KMP 共享 UI 组件（CodeEditor / DataTable / 右键菜单 / 顶层导航 / 应用主题）
 └── desktopApp/               KMP Compose Desktop 应用（KMP 工程结构 / 顶层导航 + 数据库浏览第二屏）
 ```
@@ -94,6 +155,7 @@ sundays/
 | **engine/** | [`engine/README.md`](./engine/README.md) | [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) | gRPC 协议 / 14 个 handler 路由 / 强类型 envelope / 表驱动 Dispatcher / 流式响应 / 连接池 / IPC Transport SPI / `IdbEngine` 实现 / 导出子进程隔离 / v2.16 查询取消 + 事务会话 + 数据导入 |
 | **engine-grpc-client/** | [`engine-grpc-client/README.md`](./engine-grpc-client/README.md) | — | `GrpcEngineClient` 跨进程实现 / 端点配置（TCP / UDS / pipe）/ 端到端测试 |
 | **api/** | [`api/README.md`](./api/README.md) | — | DatabaseDialect SPI 接口定义 / ConnectionType / DialectCapability / 扩展自定义方言流程 |
+| **i18n/** | [`i18n/README.md`](./i18n/README.md) | — | 六语言文案（StrKey 枚举 / 六份译文表 / 简繁判定 / 复数规则 / 占位符 / 降级链 / 完整性测试） |
 | **dialect-mysql/** | [`dialect-mysql/README.md`](./dialect-mysql/README.md) | — | MySQL 方言特性 / SQL 危险关键词 / 已知约束 |
 | **dialect-postgresql/** | [`dialect-postgresql/README.md`](./dialect-postgresql/README.md) | — | PostgreSQL 方言特性 / search_path / DDL 事务 / 已知约束 |
 | **dialect-h2/** | [`dialect-h2/README.md`](./dialect-h2/README.md) | — | H2 嵌入式 / 集成测试 fixture / 已知约束 |
@@ -104,7 +166,7 @@ sundays/
 
 ---
 
-## 4. 方言矩阵（5 个方言能力对比）
+## 5. 方言矩阵（5 个方言能力对比）
 
 | 能力 / 方言 | MySQL | PostgreSQL | H2 | DuckDB | SQLite |
 |---|---|---|---|---|---|
@@ -127,7 +189,7 @@ sundays/
 
 ---
 
-## 5. 快速运行
+## 6. 快速运行
 
 ```bash
 # 运行 KMP Desktop 应用（Direct 模式，构造即 bootstrap 引擎 + 所有方言）
@@ -151,7 +213,7 @@ java -jar idb-engine.jar --mode direct
 
 ---
 
-## 6. 技术栈（简表）
+## 7. 技术栈（简表）
 
 - **Kotlin 2.4.20 / JDK 25**
 - **KMP + Compose Multiplatform Desktop**（仅 `jvmMain` 单平台目标）
@@ -167,7 +229,7 @@ java -jar idb-engine.jar --mode direct
 
 ---
 
-## 7. 架构升级历史（简表）
+## 8. 架构升级历史（简表）
 
 | 版本 | 主要变化 | 详情 |
 |---|---|---|

@@ -14,6 +14,8 @@ import com.kxxnzstdsw.grpc.viewDeleteResponse
 import com.kxxnzstdsw.grpc.viewGetDdlResponse
 import com.kxxnzstdsw.grpc.viewListItem
 import com.kxxnzstdsw.grpc.viewListResponse
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +51,8 @@ object ViewHandler {
      * CREATE — 创建视图
      */
     suspend fun create(config: ConnectionConfig, req: ViewCreateRequest): ViewCreateResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException("缺少参数 'name'")
-        if (req.definition.isBlank()) throw IllegalArgumentException("缺少参数 'definition'")
+        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+        if (req.definition.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_DEFINITION))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)
@@ -65,7 +67,7 @@ object ViewHandler {
      * DELETE — 删除视图
      */
     suspend fun delete(config: ConnectionConfig, req: ViewDeleteRequest): ViewDeleteResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException("缺少参数 'name'")
+        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)
@@ -80,7 +82,7 @@ object ViewHandler {
      * GET_DDL — 获取视图完整定义
      */
     suspend fun getDDL(config: ConnectionConfig, req: ViewGetDdlRequest): ViewGetDdlResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException("缺少参数 'name'")
+        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
         val schema = req.schema
 
         val connection = PoolManager.getConnection(config, schema)

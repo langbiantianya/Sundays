@@ -3,6 +3,7 @@ package com.kxxnzstdsw.sundays.ui
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.ui.graphics.Shape
+import com.kxxnzstdsw.i18n.StrKey
 
 /**
  * 配色主题轴 —— 与 [ThemeMode]（明暗轴）**正交**的两个维度之一。
@@ -16,25 +17,31 @@ import androidx.compose.ui.graphics.Shape
  * 单选组 —— 用户心里想的是「换个配色」和「要不要跟着系统变暗」这两件正交的事。
  *
  * 新增配色只需加一个枚举项并实现 [light] / [dark]，[SettingsScreen] 的单选组自动出现。
+ *
+ * ## 为什么存 [StrKey] 而不是文案本身
+ *
+ * 与 [ThemeMode] 同一理由：构造参数里写死中文时，翻译器根本碰不到它，
+ * 切语言换不掉。`Win2000` / `WinXP` 是**产品名**，各语言原样保留，但它们在
+ * [StrKey] 里仍占位（见那两个键的 KDoc），以保持字段类型统一。
  */
 enum class ThemePalette(
-    val label: String,
-    val description: String,
+    val labelKey: StrKey,
+    val descriptionKey: StrKey,
 ) {
     /** 蓝灰专业 IDE 风格 —— 默认，低饱和、长时间看不累。 */
-    BLUE_GRAY("蓝灰 IDE", "低饱和靛蓝配色，办公环境下的默认选择"),
+    BLUE_GRAY(StrKey.PALETTE_BLUE_GRAY, StrKey.PALETTE_BLUE_GRAY_DESC),
 
     /** 赛博朋克 —— 近黑紫底 + 霓虹青 / 品红 / 荧光绿。 */
-    CYBERPUNK("赛博朋克", "近黑紫底配霓虹青 / 品红 / 荧光绿"),
+    CYBERPUNK(StrKey.PALETTE_CYBERPUNK, StrKey.PALETTE_CYBERPUNK_DESC),
 
     /** 哔哩粉 —— 暖玫瑰粉主色；浅色档必须压深成酒红，不能直接用品牌粉。 */
-    BILI_PINK("哔哩粉", "暖玫瑰粉配色，品牌粉在浅色档已压深成酒红"),
+    BILI_PINK(StrKey.PALETTE_BILI_PINK, StrKey.PALETTE_BILI_PINK_DESC),
 
     /** Win2000 —— 经典银灰控件面 `#C0C0C0` + 深蓝选区色，黑字银灰的高对比复古配色。 */
-    WIN_2000("Win2000", "经典银灰控件面配深蓝选区色，黑底银字为复古暗色档"),
+    WIN_2000(StrKey.PALETTE_WIN2000, StrKey.PALETTE_WIN2000_DESC),
 
     /** WinXP —— Luna 奶油底 `#ECE9D8` + 蓝灰 chrome，选区蓝用 `#255EA1` 才够对比度。 */
-    WIN_XP("WinXP", "Luna 奶油底配蓝灰 chrome，选区蓝已从 #316AC5 换成 #255EA1");
+    WIN_XP(StrKey.PALETTE_WINXP, StrKey.PALETTE_WINXP_DESC);
 
     /** 该主题的浅色配色。 */
     val light: ColorScheme

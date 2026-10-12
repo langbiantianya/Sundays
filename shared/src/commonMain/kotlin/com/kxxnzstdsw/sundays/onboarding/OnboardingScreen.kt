@@ -36,6 +36,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kxxnzstdsw.i18n.AppLanguage
+import com.kxxnzstdsw.i18n.StrKey
+import com.kxxnzstdsw.sundays.ui.LanguagePicker
 import com.kxxnzstdsw.sundays.ui.SundaysPalette
 import com.kxxnzstdsw.sundays.ui.ThemeMode
 import com.kxxnzstdsw.sundays.ui.ThemePalette
@@ -45,6 +48,7 @@ import com.kxxnzstdsw.sundays.ui.WinSwitch
 import com.kxxnzstdsw.sundays.ui.selectionContainerColor
 import com.kxxnzstdsw.sundays.ui.selectionContentColor
 import com.kxxnzstdsw.sundays.ui.selectionIndicatorColors
+import com.kxxnzstdsw.sundays.ui.str
 import com.kxxnzstdsw.sundays.ui.winShape
 
 /**
@@ -61,10 +65,14 @@ import com.kxxnzstdsw.sundays.ui.winShape
  * 它渲染在 `SundaysTheme` **内部**，因此每一次点选都会立刻重绘整页 —— 配色、明暗、控件尺寸
  * 全部即时生效。不需要做「预览图」「应用」按钮那套东西，本页自己就是预览。
  *
- * ## 三组控件为什么是这个顺序
+ * ## 四组控件为什么是这个顺序
  *
- * 配色 → 明暗 → 密度，与设置页一致，也与「视觉冲击由强到弱」一致：
- * 换配色整屏变色（最显眼），换明暗次之，密度只缩 15%（最不易察觉，放最后当收尾）。
+ * **语言 → 配色 → 明暗 → 密度**，与设置页一致，也与「影响面由大到小」一致：
+ * 语言决定**所有文字**能不能读（看不懂就等于没法用），配色换的是整屏色相（最显眼），
+ * 明暗次之，密度只缩 15%（最不易察觉，放最后当收尾）。
+ *
+ * 语言排在最前还有一层原因：它必须在**任何其他文案之前**确定，否则用户看到的是
+ * 一屏读不懂的说明、却没法从说明里找到切换语言的入口。
  *
  * @param palette 当前配色主题
  * @param onPaletteChange 配色变更（立即生效并落盘）
@@ -73,6 +81,9 @@ import com.kxxnzstdsw.sundays.ui.winShape
  * @param dark 当前**实际生效**的明暗（供色卡取对应明暗档的配色，见 [PaletteCard]）
  * @param compactMode 紧凑模式
  * @param onCompactModeChange 紧凑模式变更
+ * @param language 当前界面语言。首启时由调用方按**系统区域设置**探测填入
+ *   （系统语言不受支持时回落简体中文，见 `AppLanguage.fromLocale`）
+ * @param onLanguageChange 语言变更（立即生效并落盘）
  * @param onFinish 「开始使用」—— 首次启动时同时把引导标记为已完成并落盘
  * @param firstRun 是否为**首次启动**。默认 `true`；由设置页主动重进时传 `false` ——
  *   「欢迎使用 / 先挑一套顺手的界面」是**首启**的话术，用户在设置里点「重新打开引导」时
@@ -88,6 +99,8 @@ fun OnboardingScreen(
     dark: Boolean,
     compactMode: Boolean,
     onCompactModeChange: (Boolean) -> Unit,
+    language: AppLanguage,
+    onLanguageChange: (AppLanguage) -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
     firstRun: Boolean = true,
@@ -132,16 +145,16 @@ fun OnboardingScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = if (firstRun) "欢迎使用 sundays" else "外观引导",
+                        text = if (firstRun) str(StrKey.WELCOME) else str(StrKey.APPEARANCE_ONBOARDING),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = if (firstRun) {
-                            "先挑一套顺手的界面。每一项都立即生效，之后可在「设置 → 个性化」随时改。"
+                            str(StrKey.ONBOARDING_HINT)
                         } else {
-                            "和首次启动时一样，改动立即生效并落盘。改完点「完成」回到设置页。"
+                            str(StrKey.ONBOARDING_SETTINGS_HINT)
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -149,11 +162,31 @@ fun OnboardingScreen(
 
                     Spacer(Modifier.height(24.dp))
 
-                    // ---- 配色主题 ----
-                    SectionTitle("配色主题")
+                    // ---- 界面语言 ----
+                    // 放在最前：语言决定其余三组说明文字能不能读懂。
+                    SectionTitle(str(StrKey.LANGUAGE))
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "色卡是各主题在当前明暗下的真实取色。",
+                        text = str(StrKey.LANGUAGE_HINT_ONBOARDING),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LanguagePicker(
+                        selected = language,
+                        onSelect = onLanguageChange,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Spacer(Modifier.height(24.dp))
+                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(Modifier.height(18.dp))
+
+                    // ---- 配色主题 ----
+                    SectionTitle(str(StrKey.COLOR_THEME))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = str(StrKey.PALETTE_CARD_HINT),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -178,7 +211,7 @@ fun OnboardingScreen(
                     Spacer(Modifier.height(18.dp))
 
                     // ---- 明暗模式 ----
-                    SectionTitle("明暗模式")
+                    SectionTitle(str(StrKey.THEME_MODE))
                     Spacer(Modifier.height(10.dp))
                     ThemeMode.entries.forEach { option ->
                         ModeOption(
@@ -193,7 +226,7 @@ fun OnboardingScreen(
                     Spacer(Modifier.height(18.dp))
 
                     // ---- 界面密度 ----
-                    SectionTitle("界面密度")
+                    SectionTitle(str(StrKey.UI_DENSITY))
                     Spacer(Modifier.height(4.dp))
                     Row(
                         modifier = Modifier
@@ -205,11 +238,11 @@ fun OnboardingScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "紧凑模式",
+                                text = str(StrKey.COMPACT_MODE),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Text(
-                                text = "缩小控件与行距，同屏显示更多内容。开关拨动后本页也会跟着缩放。",
+                                text = str(StrKey.COMPACT_HINT_ONBOARDING),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -241,7 +274,7 @@ fun OnboardingScreen(
                         .fillMaxWidth(),
                 ) {
                     Text(
-                        text = if (firstRun) "开始使用" else "完成",
+                        text = if (firstRun) str(StrKey.START_USING) else str(StrKey.DONE),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -322,7 +355,7 @@ private fun PaletteCard(
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = option.label,
+                text = str(option.labelKey),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 color = selectionContentColor(selected, MaterialTheme.colorScheme.onSurface),
@@ -343,7 +376,7 @@ private fun PaletteCard(
         }
         Spacer(Modifier.height(2.dp))
         Text(
-            text = option.description,
+            text = str(option.descriptionKey),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             // 2 行封顶：说明文字再长也不该把色卡撑得高低不齐
@@ -379,12 +412,12 @@ private fun ModeOption(
         Spacer(Modifier.width(8.dp))
         Column {
             Text(
-                text = option.label,
+                text = str(option.labelKey),
                 style = MaterialTheme.typography.bodyMedium,
                 color = selectionContentColor(selected, MaterialTheme.colorScheme.onSurface),
             )
             Text(
-                text = option.description,
+                text = str(option.descriptionKey),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

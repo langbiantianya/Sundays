@@ -1,9 +1,9 @@
 package com.kxxnzstdsw.sundays
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -12,20 +12,21 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.pool.PoolManager
 import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionStorage
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.ui.rememberAppearanceState
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 
 /**
  * DatabaseBrowser 多 sheet 行为 + 「＋」入口 → AddConnectionDialog 的端到端契约。
@@ -70,23 +71,26 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
 
         // 首屏可见，无 sheet —— 顶部 nav 不渲染（连接管理首屏无 chip）
+        // 「未连接 H2」是本测试 seed 进去的**连接名**，属于测试数据而非界面文案 ——
+        // 它不会被翻译，也不需要：界面上它就是用户给的名字。界面语言另由
+        // ProvideTestStrings 钉死为简体中文，两者是各自独立的一件事。
         onNodeWithText("未连接 H2").assertIsDisplayed()
-        onAllNodesWithText("数据库浏览").assertCountEquals(0)
+        onAllNodesWithText(zh(StrKey.NAV_DATABASE)).assertCountEquals(0)
 
         // 选中 + 点连接 → 切到第二屏 + sheet 打开
         onNodeWithText("未连接 H2").performClick()
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION)).fetchSemanticsNodes().isNotEmpty()
         }
 
         // 现在第二屏渲染：sheet tab + ＋ 入口按钮
-        onNodeWithContentDescription("添加连接").assertIsDisplayed()
+        onNodeWithContentDescription(zh(StrKey.ADD_CONNECTION)).assertIsDisplayed()
         // TopNavBar 上现在只有「数据库浏览」chip
-        onAllNodesWithText("连接管理").assertCountEquals(0)
+        onAllNodesWithText(zh(StrKey.NAV_CONNECTIONS)).assertCountEquals(0)
     }
 
     @Test
@@ -101,18 +105,18 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
 
         // 首屏可见该连接
         onNodeWithText("我的 H2").performClick()
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
 
         // 切到第二屏后：sheet tab + ＋ 入口按钮
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION)).fetchSemanticsNodes().isNotEmpty()
         }
         // ＋ 入口按钮
-        onNodeWithContentDescription("添加连接").assertIsDisplayed()
+        onNodeWithContentDescription(zh(StrKey.ADD_CONNECTION)).assertIsDisplayed()
         // sheet tab 显示连接名（ConnectionBar 也显示同一名字，所以 size >= 2）
         assert(
             onAllNodesWithText("我的 H2").fetchSemanticsNodes().size >= 1
@@ -139,13 +143,13 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
 
         // 第一个 sheet 打开
         onNodeWithText("现有 H2").performClick()
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION)).fetchSemanticsNodes().isNotEmpty()
         }
         // sheet tab 显示「现有 H2」（仅一处 —— AlertDialog 此时尚未打开）
         assert(
@@ -153,8 +157,8 @@ class DatabaseBrowserSheetsTest {
         ) { "sheet tab should display existing connection name" }
 
         // 点 ＋ → 弹窗
-        onNodeWithContentDescription("添加连接").performClick()
-        onNodeWithText("添加数据库连接").assertIsDisplayed()
+        onNodeWithContentDescription(zh(StrKey.ADD_CONNECTION)).performClick()
+        onNodeWithText(zh(StrKey.ADD_CONNECTION_DIALOG_TITLE)).assertIsDisplayed()
         // 弹窗内 ConnectionManagerScreen 渲染：左侧列表 + 右侧 ConnectionOverviewPanel
         // 都可能展示「现有 H2」；断言至少 2（sheet tab + 弹窗左侧）
         assert(
@@ -162,10 +166,10 @@ class DatabaseBrowserSheetsTest {
         ) { "弹窗与 sheet tab 均展示已保存连接名" }
 
         // 弹窗内能看到「连接列表」标题（首屏左侧列表标题）—— 证明首屏布局已嵌入
-        onNodeWithText("连接列表").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.CONNECTION_LIST)).assertIsDisplayed()
 
         // 点击弹窗左侧的「快速连接」按钮 → 进入向导 QUICK_CONNECT 步骤
-        onNodeWithContentDescription("快速连接").performClick()
+        onNodeWithContentDescription(zh(StrKey.QUICK_CONNECT)).performClick()
         // QuickConnectStep 渲染方言卡片 —— 断言向导在弹窗内仍能渲染（证明与首屏同源）
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("MySQL").fetchSemanticsNodes().isNotEmpty()
@@ -183,36 +187,38 @@ class DatabaseBrowserSheetsTest {
     @Test
     fun `AddConnectionDialog fills the whole window width`() = runComposeUiTest {
         setContent {
-            MaterialTheme {
-                AddConnectionDialog(
-                    connections = emptyList(),
-                    selectedConnection = null,
-                    editingConnection = null,
-                    wizardStep = com.kxxnzstdsw.sundays.connection.WizardStep.IDLE,
-                    wizardFlow = com.kxxnzstdsw.sundays.connection.WizardFlow.NORMAL,
-                    connectionStatuses = emptyMap(),
-                    onSelectConnection = {},
-                    onNewConnection = {},
-                    onQuickConnect = {},
-                    onEditConnection = {},
-                    onSaveConnection = {},
-                    onQuickConnectDirect = {},
-                    onDeleteConnection = {},
-                    onCancelEdit = {},
-                    onWizardNext = {},
-                    onWizardBack = {},
-                    onUpdateEditingConnection = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    onTestConnection = null,
-                    onDismiss = {},
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    AddConnectionDialog(
+                        connections = emptyList(),
+                        selectedConnection = null,
+                        editingConnection = null,
+                        wizardStep = com.kxxnzstdsw.sundays.connection.WizardStep.IDLE,
+                        wizardFlow = com.kxxnzstdsw.sundays.connection.WizardFlow.NORMAL,
+                        connectionStatuses = emptyMap(),
+                        onSelectConnection = {},
+                        onNewConnection = {},
+                        onQuickConnect = {},
+                        onEditConnection = {},
+                        onSaveConnection = {},
+                        onQuickConnectDirect = {},
+                        onDeleteConnection = {},
+                        onCancelEdit = {},
+                        onWizardNext = {},
+                        onWizardBack = {},
+                        onUpdateEditingConnection = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        onTestConnection = null,
+                        onDismiss = {},
+                    )
+                }
             }
         }
 
         // 弹窗层的 root 始终按窗口尺寸布局，取所有 root 的宽度即窗口宽度
         val windowWidth = onAllNodes(isRoot()).fetchSemanticsNodes().maxOf { it.size.width }
-        val closeRight = onNodeWithText("关闭").fetchSemanticsNode().boundsInRoot.right
+        val closeRight = onNodeWithText(zh(StrKey.CLOSE)).fetchSemanticsNode().boundsInRoot.right
 
         assertTrue(
             windowWidth - closeRight <= windowWidth * 0.1f,
@@ -289,17 +295,17 @@ class DatabaseBrowserSheetsTest {
                 jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE",
             )
         )
-        setContent { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } }
+        setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
 
         onNodeWithText("关闭测试 H2").performClick()
-        onNodeWithText("连接").performClick()
+        onNodeWithText(zh(StrKey.CONNECT)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("关闭 sheet").fetchSemanticsNodes().isNotEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.CLOSE_SHEET)).fetchSemanticsNodes().isNotEmpty()
         }
         // 关闭唯一的 sheet
-        onNodeWithContentDescription("关闭 sheet").performClick()
+        onNodeWithContentDescription(zh(StrKey.CLOSE_SHEET)).performClick()
         waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithContentDescription("添加连接").fetchSemanticsNodes().isEmpty()
+            onAllNodesWithContentDescription(zh(StrKey.ADD_CONNECTION)).fetchSemanticsNodes().isEmpty()
         }
         println("closed last sheet without crash")
     }

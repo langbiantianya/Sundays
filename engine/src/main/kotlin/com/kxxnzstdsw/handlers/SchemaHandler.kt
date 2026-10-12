@@ -10,6 +10,8 @@ import com.kxxnzstdsw.grpc.SchemaListResponse
 import com.kxxnzstdsw.grpc.schemaCreateResponse
 import com.kxxnzstdsw.grpc.schemaDeleteResponse
 import com.kxxnzstdsw.grpc.schemaListResponse
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +40,7 @@ object SchemaHandler {
                 "schema" -> {
                     val database = req.database.ifBlank {
                         throw IllegalArgumentException(
-                            "列出 schema 必须先指定 database — " +
-                            "调用方应先调用 listDatabases 选定 database 后再调用本接口"
+                            Msg.text(StrKey.SCHEMA_LIST_REQUIRES_DATABASE)
                         )
                     }
                     val items = dialect.listSchemas(conn, database)
@@ -50,7 +51,7 @@ object SchemaHandler {
                     }
                 }
                 else -> throw IllegalArgumentException(
-                    "Unsupported SCHEMA LIST level: '$level' — 必须是 'database' 或 'schema'"
+                    Msg.format(StrKey.UNSUPPORTED_SCHEMA_LEVEL, level)
                 )
             }
         }

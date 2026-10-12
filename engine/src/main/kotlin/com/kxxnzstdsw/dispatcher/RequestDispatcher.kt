@@ -1,7 +1,9 @@
 package com.kxxnzstdsw.dispatcher
 
 import com.google.protobuf.Message
+import com.kxxnzstdsw.engine.EngineLanguageContext
 import com.kxxnzstdsw.engine.StatementRegistry
+import com.kxxnzstdsw.engine.requestLanguageOrNull
 import com.kxxnzstdsw.grpc.Action
 import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.ColumnDef
@@ -83,6 +85,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
@@ -357,8 +360,12 @@ object RequestDispatcher {
      * - [RequestOptions.traceId] → SLF4J MDC（自动出现在每条日志行）
      * - [RequestOptions.dryRun] + write action → 短路，返回 success 响应；不调用 handler
      * - [RequestOptions.timeoutMs] → 协程超时（0 = 不限）；超时时返回 success=false, error="timeout"
+     * - [RequestOptions.language] → [EngineLanguageContext]，让 handler 抛出的错误消息
+     *   用界面语言书写（`Response.error` 是原样上屏的，见下方 catch 分支）
      */
-    fun dispatch(request: Request): Flow<Response> = flow {
+    fun dispatch(request: Request): Flow<Response> {
+        val language = if (request.hasOptions()) requestLanguageOrNull(request.options) else null
+        val upstream = flow {
         val traceId = if (request.hasOptions() && request.options.traceId.isNotBlank())
             request.options.traceId else null
         if (traceId != null) MDC.put("traceId", traceId)
@@ -472,6 +479,15 @@ object RequestDispatcher {
                 .setError(e.message ?: "Unknown error")
                 .build()
         )
+    }
+        // `flowOn(EngineLanguageContext)` 而不是把 ThreadLocal 设了再恢复：handler 会在
+        // `Dispatchers.IO` 上跑（见 StatementRegistry 的存在意义），裸 ThreadLocal 在那里
+        // 读不到。`flowOn` 装的是 `ThreadContextElement`，会随协程跨越任何
+        // `withContext` 边界，并在协程结束时精确还原线程上的旧值。
+        //
+        // 客户端没填 language 时**不装**元素 —— 让 LanguageScope 保持未设置，
+        // 按引擎自己所在机器的 locale 探测（见 requestLanguageOrNull 的 KDoc）。
+        return if (language == null) upstream else upstream.flowOn(EngineLanguageContext(language))
     }
 
     /**

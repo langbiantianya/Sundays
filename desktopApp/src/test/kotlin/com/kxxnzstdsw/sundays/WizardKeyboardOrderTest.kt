@@ -3,8 +3,8 @@ package com.kxxnzstdsw.sundays
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -13,18 +13,19 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import com.kxxnzstdsw.dialect.H2Dialect
 import com.kxxnzstdsw.engine.IdbEngine
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.loader.DialectLoader
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.WizardStep
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import org.junit.Before
-import org.junit.Test
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.junit.Before
+import org.junit.Test
 
 /**
  * **探针要用的事实：连接向导里「下一步」是第几个 Tab 停靠点。**
@@ -87,9 +88,9 @@ class WizardKeyboardOrderTest {
     @Test
     fun `print how many tabs reach the next button`() = runComposeUiTest {
         val session = ConnectionSession(engine, CoroutineScope(Dispatchers.Default))
-        setContent { MaterialTheme { Screen(session) } }
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
-        onNodeWithText("新建连接").performClick()
+        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
         waitForIdle()
         // 名称默认「新连接」非空，「下一步」是 enabled
         assertEquals(WizardStep.BASIC_INFO, session.wizard.step)
@@ -117,8 +118,8 @@ class WizardKeyboardOrderTest {
     @Test
     fun `dialect group is reachable by tab and enter selects it`() = runComposeUiTest {
         val session = ConnectionSession(engine, CoroutineScope(Dispatchers.Default))
-        setContent { MaterialTheme { Screen(session) } }
-        onNodeWithText("新建连接").performClick()
+        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
+        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
         waitForIdle()
         val before = session.wizard.editingConnection?.dialect
 
@@ -149,5 +150,5 @@ class WizardKeyboardOrderTest {
     }
 
     private fun androidx.compose.ui.test.ComposeUiTest.onRootFocus() =
-        onNodeWithText("第 1 / 4 步", substring = true)
+        onNodeWithText(zh(StrKey.WIZARD_STEP, 1, 4), substring = true)
 }

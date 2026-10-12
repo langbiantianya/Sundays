@@ -9,8 +9,10 @@ import com.kxxnzstdsw.grpc.Request
 import com.kxxnzstdsw.grpc.Response
 import com.kxxnzstdsw.grpc.SystemTestConnectionResponse
 import com.kxxnzstdsw.grpc.response
+import com.kxxnzstdsw.grpc.withLanguageTag
 import com.kxxnzstdsw.grpc.systemRequest
 import com.kxxnzstdsw.grpc.systemTestConnectionResponse
+import com.kxxnzstdsw.i18n.LanguageScope
 import io.grpc.ManagedChannel
 import io.grpc.StatusException
 import io.grpc.StatusRuntimeException
@@ -62,7 +64,10 @@ class GrpcEngineClient private constructor(
      * 因此像同进程实现一样可以反复调用；取消 collect 会取消底层 RPC。
      */
     override fun handle(request: Request): Flow<Response> = flow {
-        stub.handle(request).collect { emit(it) }
+        // 盖上当前界面语言再发 —— gRPC 模式下引擎是**独立进程**，ThreadLocal 跨不过去，
+        // 语言只能走 `Request.options.language`（proto 字段 4）。详见 `RequestLanguage.kt`。
+        stub.handle(request.withLanguageTag(LanguageScope.currentLanguage().persistedValue()))
+            .collect { emit(it) }
     }.catch { e ->
         // 传输层故障 → 与 RequestDispatcher 相同的错误帧约定
         if (e is StatusException || e is StatusRuntimeException) {

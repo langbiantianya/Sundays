@@ -10,6 +10,8 @@ import com.kxxnzstdsw.grpc.PayloadAdapter
 import com.kxxnzstdsw.grpc.Response
 import com.kxxnzstdsw.grpc.ExportProgressFrame
 import com.kxxnzstdsw.grpc.ExportResponse
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import io.grpc.stub.StreamObserver
@@ -352,7 +354,7 @@ object ExportProcessManager {
                 //
                 // 子进程在启动阶段就崩掉（classpath 缺驱动等）是最容易触发它的场景：
                 // 连 ExportHub 都没起来，自然一帧都发不出来。
-                failPendingExports("导出子进程已退出（code=$code），导出中止")
+                failPendingExports(Msg.format(StrKey.EXPORT_SUBPROCESS_EXITED, code))
                 stop()
             }
 
@@ -492,7 +494,7 @@ object ExportProcessManager {
         }
         if (!ready) {
             managerLog("[export] 等待 hub 端口 $hubPort 就绪超时（${timeoutMs}ms，observer=${commandObserver != null}）")
-            failPendingExports("导出子进程在 ${timeoutMs / 1000} 秒内没有就绪")
+            failPendingExports(Msg.format(StrKey.EXPORT_SUBPROCESS_NOT_READY, timeoutMs / 1000))
             return
         }
         managerLog("[export] hub 端口 $hubPort 已就绪，建立流")
@@ -520,7 +522,7 @@ object ExportProcessManager {
                 channel = null
                 // 流断了 ⇒ 这一局里所有在等的导出都不可能再有回帧。
                 // 不补失败帧的话，上游就是无限等待（§9.15 的老毛病）。
-                failPendingExports("导出通道断开：${t.message ?: t::class.java.simpleName}")
+                failPendingExports(Msg.format(StrKey.EXPORT_CHANNEL_BROKEN, t.message ?: t::class.java.simpleName))
             }
 
             override fun onCompleted() {
@@ -528,7 +530,7 @@ object ExportProcessManager {
                 commandObserver = null
                 runCatching { channel?.shutdownNow() }
                 channel = null
-                failPendingExports("导出通道已关闭")
+                failPendingExports(Msg.text(StrKey.EXPORT_CHANNEL_CLOSED))
             }
         }
         // 换流的同时换锁：新流不去抢旧流正在持有的锁

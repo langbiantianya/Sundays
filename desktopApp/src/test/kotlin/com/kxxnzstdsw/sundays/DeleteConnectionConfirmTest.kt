@@ -4,13 +4,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.connection.ConnectionConfig
 import com.kxxnzstdsw.sundays.connection.ConnectionList
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
@@ -20,10 +21,10 @@ import com.kxxnzstdsw.sundays.connection.ConnectionType
 import com.kxxnzstdsw.sundays.connection.DialectType
 import com.kxxnzstdsw.sundays.connection.WizardFlow
 import com.kxxnzstdsw.sundays.connection.WizardStep
-import org.junit.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.minutes
+import org.junit.Test
 
 /**
  * **删除连接必须先过一道确认框** —— 真窗口走查发现，键盘 Tab 到「删除」按一下回车，
@@ -69,44 +70,46 @@ class DeleteConnectionConfirmTest {
             val deleted = mutableListOf<String>()
 
             setContent {
-                MaterialTheme {
-                    ConnectionManagerScreen(
-                        connections = list.value.connections,
-                        selectedConnection = config,
-                        editingConnection = null,
-                        wizardStep = WizardStep.IDLE,
-                        wizardFlow = WizardFlow.NORMAL,
-                        connectionStatuses = mapOf(config.id to ConnectionStatus(ConnectionState.DISCONNECTED)),
-                        onSelectConnection = {},
-                        onNewConnection = {},
-                        onQuickConnect = {},
-                        onEditConnection = {},
-                        onSaveConnection = {},
-                        onQuickConnectDirect = {},
-                        // 真删除只由确认框点「删除」才走到；这里记录被删的 id 即可
-                        onDeleteConnection = { id -> deleted += id },
-                        onCancelEdit = {},
-                        onWizardNext = {},
-                        onWizardBack = {},
-                        onUpdateEditingConnection = {},
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                ProvideTestStrings {
+                    MaterialTheme {
+                        ConnectionManagerScreen(
+                            connections = list.value.connections,
+                            selectedConnection = config,
+                            editingConnection = null,
+                            wizardStep = WizardStep.IDLE,
+                            wizardFlow = WizardFlow.NORMAL,
+                            connectionStatuses = mapOf(config.id to ConnectionStatus(ConnectionState.DISCONNECTED)),
+                            onSelectConnection = {},
+                            onNewConnection = {},
+                            onQuickConnect = {},
+                            onEditConnection = {},
+                            onSaveConnection = {},
+                            onQuickConnectDirect = {},
+                            // 真删除只由确认框点「删除」才走到；这里记录被删的 id 即可
+                            onDeleteConnection = { id -> deleted += id },
+                            onCancelEdit = {},
+                            onWizardNext = {},
+                            onWizardBack = {},
+                            onUpdateEditingConnection = {},
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
 
             // ---- ① 点总览面板的「删除」：应当只弹框，不删
-            onNodeWithText("删除").performClick()
+            onNodeWithText(zh(StrKey.DELETE)).performClick()
             waitForIdle()
             assertEquals(
                 emptyList(), deleted,
                 "点「删除」还没确认时**绝不能**真的删 —— 这正是走查里按一下回车连接就没了的原因",
             )
-            onNodeWithText("确定要删除连接「要删的连接」吗？").assertIsDisplayed()
+            onNodeWithText(zh(StrKey.CONFIRM_DELETE_CONNECTION, "要删的连接")).assertIsDisplayed()
 
             // ---- ② 取消：框消失，什么都没发生
-            onNodeWithText("取消").performClick()
+            onNodeWithText(zh(StrKey.CANCEL)).performClick()
             waitForIdle()
-            onNodeWithText("确定要删除连接「要删的连接」吗？").assertDoesNotExist()
+            onNodeWithText(zh(StrKey.CONFIRM_DELETE_CONNECTION, "要删的连接")).assertDoesNotExist()
             assertEquals(emptyList(), deleted, "取消不应触发删除")
             assertEquals(1, list.value.connections.size, "取消后连接应仍在列表里")
         }
@@ -118,47 +121,49 @@ class DeleteConnectionConfirmTest {
             val deleted = mutableListOf<String>()
 
             setContent {
-                MaterialTheme {
-                    ConnectionManagerScreen(
-                        connections = list.value.connections,
-                        selectedConnection = config,
-                        editingConnection = null,
-                        wizardStep = WizardStep.IDLE,
-                        wizardFlow = WizardFlow.NORMAL,
-                        connectionStatuses = emptyMap(),
-                        onSelectConnection = {},
-                        onNewConnection = {},
-                        onQuickConnect = {},
-                        onEditConnection = {},
-                        onSaveConnection = {},
-                        onQuickConnectDirect = {},
-                        onDeleteConnection = { id ->
-                            deleted += id
-                            list.value = list.value.copy(
-                                connections = list.value.connections.filterNot { it.id == id },
-                            )
-                        },
-                        onCancelEdit = {},
-                        onWizardNext = {},
-                        onWizardBack = {},
-                        onUpdateEditingConnection = {},
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                ProvideTestStrings {
+                    MaterialTheme {
+                        ConnectionManagerScreen(
+                            connections = list.value.connections,
+                            selectedConnection = config,
+                            editingConnection = null,
+                            wizardStep = WizardStep.IDLE,
+                            wizardFlow = WizardFlow.NORMAL,
+                            connectionStatuses = emptyMap(),
+                            onSelectConnection = {},
+                            onNewConnection = {},
+                            onQuickConnect = {},
+                            onEditConnection = {},
+                            onSaveConnection = {},
+                            onQuickConnectDirect = {},
+                            onDeleteConnection = { id ->
+                                deleted += id
+                                list.value = list.value.copy(
+                                    connections = list.value.connections.filterNot { it.id == id },
+                                )
+                            },
+                            onCancelEdit = {},
+                            onWizardNext = {},
+                            onWizardBack = {},
+                            onUpdateEditingConnection = {},
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
 
-            onNodeWithText("删除").performClick()
+            onNodeWithText(zh(StrKey.DELETE)).performClick()
             waitForIdle()
 
             // 确认框里也有一个「删除」—— 断言此刻**同时**存在两个入口，
             // 再点第二个（框内那个）。这样点的是框内按钮，不靠「哪个先渲染」去猜。
-            val deleteLabels = onAllNodesWithText("删除").fetchSemanticsNodes()
+            val deleteLabels = onAllNodesWithText(zh(StrKey.DELETE)).fetchSemanticsNodes()
             assertEquals(
                 2, deleteLabels.size,
                 "确认框打开时应同时存在面板的「删除」与框内的「删除」两个入口",
             )
 
-            onAllNodesWithText("删除")[1].performClick()
+            onAllNodesWithText(zh(StrKey.DELETE))[1].performClick()
             waitForIdle()
             assertEquals(listOf(config.id), deleted, "确认后才应真的删，且只删这一个")
             assertEquals(0, list.value.connections.size, "列表应已移除该连接")
@@ -171,43 +176,45 @@ class DeleteConnectionConfirmTest {
             val deleted = mutableListOf<String>()
 
             setContent {
-                MaterialTheme {
-                    ConnectionManagerScreen(
-                        connections = list.value.connections,
-                        // **不选中连接** —— 于是右栏是空闲入口页、**没有**「删除」按钮，
-                        // 页面上的「删除」只剩 ⋮ 菜单里那一个，选择器不会有歧义。
-                        // （选中时两个同名按钮并存，靠序号点很容易点错入口而「看起来通过」。）
-                        selectedConnection = null,
-                        editingConnection = null,
-                        wizardStep = WizardStep.IDLE,
-                        wizardFlow = WizardFlow.NORMAL,
-                        connectionStatuses = emptyMap(),
-                        onSelectConnection = {},
-                        onNewConnection = {},
-                        onQuickConnect = {},
-                        onEditConnection = {},
-                        onSaveConnection = {},
-                        onQuickConnectDirect = {},
-                        onDeleteConnection = { id -> deleted += id },
-                        onCancelEdit = {},
-                        onWizardNext = {},
-                        onWizardBack = {},
-                        onUpdateEditingConnection = {},
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                ProvideTestStrings {
+                    MaterialTheme {
+                        ConnectionManagerScreen(
+                            connections = list.value.connections,
+                            // **不选中连接** —— 于是右栏是空闲入口页、**没有**「删除」按钮，
+                            // 页面上的「删除」只剩 ⋮ 菜单里那一个，选择器不会有歧义。
+                            // （选中时两个同名按钮并存，靠序号点很容易点错入口而「看起来通过」。）
+                            selectedConnection = null,
+                            editingConnection = null,
+                            wizardStep = WizardStep.IDLE,
+                            wizardFlow = WizardFlow.NORMAL,
+                            connectionStatuses = emptyMap(),
+                            onSelectConnection = {},
+                            onNewConnection = {},
+                            onQuickConnect = {},
+                            onEditConnection = {},
+                            onSaveConnection = {},
+                            onQuickConnectDirect = {},
+                            onDeleteConnection = { id -> deleted += id },
+                            onCancelEdit = {},
+                            onWizardNext = {},
+                            onWizardBack = {},
+                            onUpdateEditingConnection = {},
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
 
             // ⋮ 菜单里的「删除」
-            onNodeWithContentDescription("更多操作").performClick()
+            onNodeWithContentDescription(zh(StrKey.MORE_ACTIONS)).performClick()
             waitForIdle()
-            onAllNodesWithText("删除")[0].performClick()
+            onAllNodesWithText(zh(StrKey.DELETE))[0].performClick()
             waitForIdle()
 
             assertEquals(
                 emptyList(), deleted,
                 "⋮ 菜单的「删除」同样必须先确认 —— 它是同一个收口，不该有例外",
             )
-            onNodeWithText("确定要删除连接「要删的连接」吗？").assertIsDisplayed()
+            onNodeWithText(zh(StrKey.CONFIRM_DELETE_CONNECTION, "要删的连接")).assertIsDisplayed()
         }
 }

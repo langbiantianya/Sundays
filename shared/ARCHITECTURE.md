@@ -1580,6 +1580,49 @@ DragHandle(
 （对照：树本身的展开 / 滚动 / 已加载表仍由每 sheet 的 `DatabaseBrowserState` 持有，
 那是真正的 per-sheet 状态，两回事。）
 
+### 6.5 `LocalStrings` / `LanguagePicker` —— 界面语言
+
+文案表在 `:i18n` 模块（零 project 依赖），本模块只提供两个 Composable 侧入口。
+详细设计见 [`../i18n/README.md`](../i18n/README.md)。
+
+#### `LocalStrings`（`ui/LocalStrings.kt`）
+
+```kotlin
+val LocalStrings = staticCompositionLocalOf { StringsRegistry.systemDefault() }
+
+@Composable fun str(key: StrKey): String
+@Composable fun str(key: StrKey, vararg args: Any?): String
+@Composable fun plural(key: PluralStrKey, count: Int, vararg args: Any?): String
+@Composable fun ProvideStrings(language: AppLanguage, content: @Composable () -> Unit)
+```
+
+用 `staticCompositionLocalOf` 而不是 `compositionLocalOf`：文案表**整张换**，
+不需要结构相等性追踪（后者会在每次重组时对值做 `equals`），切换语言时只重组读它的节点。
+
+#### `LanguagePicker`（`ui/LanguagePicker.kt`）
+
+引导页与设置页**共用**这一个组件，签名是 `selected` / `onSelect` / `modifier`。
+
+三条刻意选择：
+
+- **语言名恒显母语名**（`简体中文` / `English` / `Deutsch`）。语言选择器是**元语言界面**，
+  在这里翻译语言名会让最需要它的人找不到。
+- **用 FlowRow + chip，不用单选按钮组**：六种语言横排时按钮组会撑破 1024dp 的最小窗口宽度
+  （chip 加文字约 120dp × 6 已经接近上限，再加外边距就换行）。横排 chip + 自动换行在任何宽度下都成立。
+- **语言排在引导页和设置页的第一位**：语言决定其余说明能不能读懂。
+  引导页第二屏的其他内容在看不懂的界面里等于没有。
+
+#### 与 `AppearanceState` 的关系
+
+语言状态**放在 `AppearanceState`**（`ui/ThemeMode.kt`）里，尽管那个类型名字是「外观」。
+
+原因很实际：`AppearanceState.persist()` 写的是**整份 `AppSettings`**。
+语言如果由 `main.kt` 单独持有，用户改一次配色就会用「没有 language 字段」的设置对象覆盖磁盘，
+把已选语言抹掉。语言必须和配色共享同一条持久化路径。
+
+首启判定用 `resolveInitialLanguage(settings, fileExists, systemLanguage)`，
+判据是**设置文件是否存在**而不是某个字段 —— 与既有的 `resolveOnboardingCompleted` 同构。
+
 ---
 
 ## 7. 设计原则

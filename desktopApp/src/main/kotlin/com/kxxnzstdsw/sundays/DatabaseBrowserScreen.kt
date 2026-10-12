@@ -60,6 +60,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
+import com.kxxnzstdsw.sundays.ui.plural
+import com.kxxnzstdsw.sundays.ui.str
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.RadioButton
@@ -735,7 +740,7 @@ private fun SheetTabRow(
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "添加连接",
+                contentDescription = str(StrKey.ADD_CONNECTION),
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
@@ -765,7 +770,7 @@ private fun SheetTabRow(
                             Spacer(Modifier.width(4.dp))
                             Icon(
                                 imageVector = Icons.Filled.Close,
-                                contentDescription = "关闭 sheet",
+                                contentDescription = str(StrKey.CLOSE_SHEET),
                                 modifier = Modifier
                                     .size(16.dp)
                                     .testTag(sheetTabCloseTag(sheet.connection.id))
@@ -807,13 +812,13 @@ private fun EmptySheetsHint(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "尚未打开任何连接",
+                text = str(StrKey.NO_OPEN_CONNECTION),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "点击「添加连接」配置一个新连接，或在首屏选中已有连接后点「连接」。",
+                text = str(StrKey.EMPTY_CONNECTION_HINT),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -821,7 +826,7 @@ private fun EmptySheetsHint(
             WinButton(onClick = onAddSheet, shape = SundaysPalette.buttonShape) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("添加连接")
+                Text(str(StrKey.ADD_CONNECTION))
             }
         }
     }
@@ -913,7 +918,7 @@ private fun EngineMemoryStatusBar(
             horizontalArrangement = Arrangement.End,
         ) {
             Text(
-                text = "堆内存",
+                text = str(StrKey.HEAP_MEMORY),
                 style = MaterialTheme.typography.labelSmall,
                 color = ink,
             )
@@ -963,14 +968,15 @@ private fun NotificationBell(
             .background(
                 if (open) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
             )
-            .clickable(onClickLabel = if (open) "关闭通知中心" else "打开通知中心", onClick = onToggle)
+            .clickable(onClickLabel = if (open) str(StrKey.CLOSE_NOTIFICATION_CENTER) else str(StrKey.OPEN_NOTIFICATION_CENTER),
+            onClick = onToggle,)
             .testTag(NOTIFICATION_BELL_TAG)
             .padding(horizontal = 8.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = Icons.Filled.Notifications,
-            contentDescription = "通知中心",
+            contentDescription = str(StrKey.NOTIFICATION_CENTER),
             tint = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(15.dp),
         )
@@ -1012,7 +1018,7 @@ private fun NotificationCenterPanel(
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "通知",
+                    text = str(StrKey.NOTIFICATIONS_TITLE),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -1020,8 +1026,10 @@ private fun NotificationCenterPanel(
                 val errors = center.notifications.count { it.severity == AppNotification.Severity.ERROR }
                 Text(
                     text = buildString {
-                        append("${center.notifications.size} 条")
-                        if (errors > 0) append(" · $errors 条失败")
+                        append(plural(PluralStrKey.NOTIFICATIONS_COUNT, center.notifications.size, center.notifications.size))
+                        if (errors > 0) {
+                            append(plural(PluralStrKey.NOTIFICATIONS_FAILED_COUNT, errors, errors))
+                        }
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1034,7 +1042,7 @@ private fun NotificationCenterPanel(
                 ) {
                     Icon(Icons.Filled.Done, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("全部已读")
+                    Text(str(StrKey.MARK_ALL_READ))
                 }
                 Spacer(Modifier.width(6.dp))
                 WinOutlinedButton(
@@ -1045,13 +1053,13 @@ private fun NotificationCenterPanel(
                 ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("清空")
+                    Text(str(StrKey.CLEAR_NOTIFICATIONS))
                 }
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             if (center.notifications.isEmpty()) {
                 Text(
-                    text = "暂无通知。任务成败与各处报错都会出现在这里。",
+                    text = str(StrKey.NO_NOTIFICATIONS_HINT),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 12.dp),
@@ -1165,23 +1173,23 @@ internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSourc
             add(
                 ErrorSource(
                     keyOf("conn:" + s.connection.id, s.status.message),
-                    "连接失败 · " + s.connection.name,
+                    Msg.format(StrKey.CONNECT_FAILED_PREFIX, s.connection.name),
                     s.status.message,
                 ),
             )
         }
         b.errorMessage?.takeIf { it.isNotBlank() }?.let {
-            add(ErrorSource(keyOf("dbs:" + s.connection.id, it), "加载数据库失败", it))
+            add(ErrorSource(keyOf("dbs:" + s.connection.id, it), Msg.text(StrKey.LOAD_DATABASES_FAILED), it))
         }
         b.generateError?.takeIf { it.isNotBlank() }?.let {
-            add(ErrorSource(keyOf("gen:" + s.connection.id, it), "造数失败", it))
+            add(ErrorSource(keyOf("gen:" + s.connection.id, it), Msg.text(StrKey.GENERATE_FAILED), it))
         }
         b.tabs.forEach { t ->
             t.error?.takeIf { it.isNotBlank() }?.let {
                 add(
                     ErrorSource(
                         keyOf("tab:" + t.key, it),
-                        "读取 ${t.tableName} 失败",
+                        Msg.format(StrKey.READ_TABLE_FAILED, t.tableName),
                         it,
                     ),
                 )
@@ -1189,7 +1197,7 @@ internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSourc
         }
         b.sqlSheets.forEach { q ->
             q.error?.takeIf { it.isNotBlank() }?.let {
-                add(ErrorSource(keyOf("sql:" + s.connection.id + ":" + q.title, it), "SQL 执行失败", it))
+                add(ErrorSource(keyOf("sql:" + s.connection.id + ":" + q.title, it), Msg.text(StrKey.SQL_EXECUTION_FAILED), it))
             }
         }
     }
@@ -1276,33 +1284,33 @@ private fun EngineMemoryDetailPanel(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "JVM 内存", style = MaterialTheme.typography.titleSmall)
+                Text(text = str(StrKey.JVM_MEMORY), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.width(6.dp))
                 // 显式关闭按钮：自动关闭只在「指针移开」时触发，指针停在面板上时
                 // 用户仍需要一个明确的关闭手段
                 WinIconButton(onClick = onDismiss, modifier = Modifier.size(20.dp)) {
                     Icon(
                         imageVector = Icons.Filled.Close,
-                        contentDescription = "关闭内存详情",
+                        contentDescription = str(StrKey.CLOSE_MEMORY_DETAIL),
                         modifier = Modifier.size(12.dp),
                     )
                 }
             }
             Text(
-                text = "引擎 SYSTEM.INFO",
+                text = str(StrKey.ENGINE_SYSTEM_INFO),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(6.dp))
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            MemoryInfoRow("堆已用", memory?.let { formatBytes(it.usedBytes) })
-            MemoryInfoRow("堆已分配", memory?.let { formatBytes(it.totalBytes) })
-            MemoryInfoRow("堆上限", memory?.let { formatBytes(it.maxBytes) })
-            MemoryInfoRow("堆空闲", memory?.let { formatBytes(it.freeBytes) })
+            MemoryInfoRow(str(StrKey.HEAP_USED), memory?.let { formatBytes(it.usedBytes) })
+            MemoryInfoRow(str(StrKey.HEAP_ALLOCATED), memory?.let { formatBytes(it.totalBytes) })
+            MemoryInfoRow(str(StrKey.HEAP_MAX), memory?.let { formatBytes(it.maxBytes) })
+            MemoryInfoRow(str(StrKey.HEAP_FREE), memory?.let { formatBytes(it.freeBytes) })
             Spacer(Modifier.height(2.dp))
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Text(
-                text = "占用 " + (memory?.let { "${(it.ratio * 100).toInt()}%" } ?: "—"),
+                text = str(StrKey.MEMORY_USAGE, memory?.let { "${(it.ratio * 100).toInt()}%" } ?: "—"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1463,13 +1471,18 @@ private fun BackgroundTaskPanel(
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "后台任务",
+                    text = str(StrKey.BACKGROUND_TASKS),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "${tasks.count { it.isRunning }} 个进行中 / 共 ${tasks.size} 个",
+                    text = plural(
+            PluralStrKey.BACKGROUND_TASKS_PROGRESS,
+            tasks.count { it.isRunning },
+            tasks.count { it.isRunning },
+            tasks.size,
+        ),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1483,13 +1496,13 @@ private fun BackgroundTaskPanel(
                 ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("清除已完成")
+                    Text(str(StrKey.CLEAR_FINISHED))
                 }
             }
             Spacer(Modifier.height(6.dp))
             if (tasks.isEmpty()) {
                 Text(
-                    text = "暂无后台任务。导出、导入这类耗时操作会出现在这里。",
+                    text = str(StrKey.NO_BACKGROUND_TASKS_HINT),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1514,14 +1527,14 @@ private fun BackgroundTaskRow(task: DatabaseBrowserState.BackgroundTask) {
             DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED ->
                 Icon(
                     Icons.Filled.Check,
-                    contentDescription = "完成",
+                    contentDescription = str(StrKey.DONE),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp),
                 )
             DatabaseBrowserState.BackgroundTask.Status.FAILED ->
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = "失败",
+                    contentDescription = str(StrKey.FAILED),
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(14.dp),
                 )
@@ -1592,7 +1605,7 @@ private fun BrowserToolBar(
             PaneToggleButton(
                 pane = BrowserPane.SQL,
                 activePane = activePane,
-                label = "SQL 工作台",
+                label = str(StrKey.SQL_WORKBENCH),
                 icon = Icons.Filled.PlayArrow,
                 enabled = connected,
                 onSelect = onSelectPane,
@@ -1600,14 +1613,14 @@ private fun BrowserToolBar(
             PaneToggleButton(
                 pane = BrowserPane.GENERATE,
                 activePane = activePane,
-                label = "造数工作台",
+                label = str(StrKey.GENERATE_WORKBENCH),
                 icon = Icons.Filled.Bolt,
                 enabled = connected,
                 onSelect = onSelectPane,
             )
             if (!connected) {
                 Text(
-                    text = "（未连接，工作台不可用）",
+                    text = str(StrKey.WORKBENCH_NOT_CONNECTED),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1632,7 +1645,7 @@ private fun BrowserToolBar(
                     modifier = Modifier.size(16.dp),
                 )
                 Spacer(Modifier.width(4.dp))
-                Text("任务", maxLines = 1, softWrap = false)
+                Text(str(StrKey.TASK), maxLines = 1, softWrap = false)
                 if (runningTaskCount > 0) {
                     Spacer(Modifier.width(4.dp))
                     Text(
@@ -1680,7 +1693,7 @@ private fun PaneToggleButton(
             contentDescription = null,
         )
         Spacer(Modifier.width(6.dp))
-        Text(if (isActive) "返回表预览" else label)
+        Text(if (isActive) str(StrKey.BACK_TO_PREVIEW) else label)
     }
 }
 
@@ -1838,13 +1851,13 @@ private fun ConnectionFailureBanner(message: String, onRetry: () -> Unit) {
         ) {
             // 标签「连接失败」不省略号截断 —— 它是这句横幅在语义上的主语
             Text(
-                text = "连接失败",
+                text = str(StrKey.CONNECT_FAILED),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = message.ifBlank { "引擎未给出原因" },
+                text = message.ifBlank { str(StrKey.NO_REASON_FROM_ENGINE) },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 maxLines = 2,
@@ -1860,7 +1873,7 @@ private fun ConnectionFailureBanner(message: String, onRetry: () -> Unit) {
             // 按钮宽度由 MinWidth 与内容决定，外层 padding 不会让它变窄。按默认尺寸即可，
             // 顺带满足 48dp 的点击区。
             WinButton(onClick = onRetry, shape = SundaysPalette.buttonShape) {
-                Text("重试", maxLines = 1, softWrap = false)
+                Text(str(StrKey.RETRY), maxLines = 1, softWrap = false)
             }
         }
     }
@@ -1911,7 +1924,7 @@ private fun SchemaTreePanel(
                 Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "数据库 / 表",
+                    text = str(StrKey.BROWSER_TITLE),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -1920,17 +1933,17 @@ private fun SchemaTreePanel(
 
             when {
                 !connected -> EmptyHint(
-                    title = "未连接",
-                    description = "请先在「连接管理」建立连接并返回此页。",
+                    title = str(StrKey.NOT_CONNECTED),
+                    description = str(StrKey.NOT_CONNECTED_HINT),
                 )
-                state.loadingDatabases -> EmptyHint(title = "加载数据库中…", description = null)
+                state.loadingDatabases -> EmptyHint(title = str(StrKey.LOADING_DATABASES), description = null)
                 state.errorMessage != null -> EmptyHint(
-                    title = "加载失败",
+                    title = str(StrKey.LOAD_FAILED),
                     description = state.errorMessage,
                 )
                 state.databases.isEmpty() -> EmptyHint(
-                    title = "无数据库",
-                    description = "当前连接下未发现任何数据库。",
+                    title = str(StrKey.NO_DATABASES),
+                    description = str(StrKey.NO_DATABASES_HINT),
                 )
                 else -> {
                     LazyColumn(
@@ -2063,12 +2076,12 @@ private fun TreeContextMenu(
                 .border(1.dp, scheme.outlineVariant, menuShape())
                 .padding(vertical = 4.dp),
         ) {
-            item(TREE_MENU_COPY_NAME_TAG, "复制名称") { state.copyTreeText(target, quoted = false) }
+            item(TREE_MENU_COPY_NAME_TAG, str(StrKey.COPY_NAME)) { state.copyTreeText(target, quoted = false) }
             item(
                 TREE_MENU_COPY_REF_TAG,
                 // 标签写清复制的是什么：库节点给库引用、字段节点给「表.字段」，
                 // 三种形态长得不一样，只写「复制引用名」用户得自己猜
-                if (target.column != null) "复制表.字段引用" else "复制引用名",
+                if (target.column != null) str(StrKey.COPY_COLUMN_REF) else str(StrKey.COPY_REF_NAME),
             ) { state.copyTreeText(target, quoted = true) }
 
             // ⚠️ 判据必须是「表节点**且不是**字段节点」，而不是「有没有 table」——
@@ -2077,7 +2090,7 @@ private fun TreeContextMenu(
             // 用户在字段上点它拿到的是一张毫不相干的表的建表语句。
             if (target.table != null && target.column == null) {
                 WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                item(TREE_MENU_COPY_DDL_TAG, "复制建表 DDL") { state.copyTreeDdl(target) }
+                item(TREE_MENU_COPY_DDL_TAG, str(StrKey.COPY_CREATE_TABLE_DDL)) { state.copyTreeDdl(target) }
             }
         }
     }
@@ -2161,19 +2174,19 @@ private fun DatabaseNode(
         if (expanded) {
             when {
                 error != null -> Text(
-                    text = "  加载失败: $error",
+                    text = str(StrKey.TREE_LOAD_FAILED, error),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
                 )
                 tables == null -> Text(
-                    text = "  加载中…",
+                    text = str(StrKey.TREE_LOADING),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
                 )
                 tables.isEmpty() -> Text(
-                    text = "  (空)",
+                    text = str(StrKey.TREE_EMPTY),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
@@ -2218,7 +2231,7 @@ private fun DatabaseNode(
                     val objs = state.objectsByDatabase[name]
                     if (objs == null && objBusy) {
                         Text(
-                            text = "  对象 加载中…",
+                            text = str(StrKey.TREE_OBJECTS_LOADING),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
@@ -2226,7 +2239,7 @@ private fun DatabaseNode(
                     } else {
                         Column(modifier = Modifier.padding(start = 24.dp)) {
                             Text(
-                                text = "对象",
+                                text = str(StrKey.OBJECT),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -2234,14 +2247,14 @@ private fun DatabaseNode(
                                 val err = state.objectLoadError["$name::${kind.name}"]
                                 if (err != null) {
                                     Text(
-                                        text = "${kind.label}：$err",
+                                        text = str(StrKey.OBJECT_LOAD_ERROR_PREFIX, str(kind.labelKey), err),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
                                     )
                                 } else {
                                     ObjectGroupRow(
-                                        label = kind.label,
+                                        label = str(kind.labelKey),
                                         items = objs?.get(kind).orEmpty(),
                                     )
                                 }
@@ -2269,7 +2282,7 @@ private fun ObjectGroupRow(label: String, items: List<String>) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = if (items.isEmpty()) "(无)" else items.joinToString(", "),
+            text = if (items.isEmpty()) str(StrKey.NONE_PAREN) else items.joinToString(", "),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 2,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -2352,7 +2365,7 @@ private fun TableLeaf(
                     }
                 )
                 .clickable(
-                    onClickLabel = "打开表 $tableName",
+                    onClickLabel = str(StrKey.OPEN_TABLE, tableName),
                     role = Role.Button,
                     onClick = onOpen,
                 )
@@ -2370,9 +2383,9 @@ private fun TableLeaf(
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
                     contentDescription = if (expanded) {
-                        "收起 $tableName 的字段、索引与外键"
+                        str(StrKey.COLLAPSE_TABLE_DETAIL, tableName)
                     } else {
-                        "展开 $tableName 的字段、索引与外键"
+                        str(StrKey.EXPAND_TABLE_DETAIL, tableName)
                     },
                     modifier = Modifier
                         .size(16.dp)
@@ -2402,7 +2415,7 @@ private fun TableLeaf(
                 // 字段**排在最前**：用户展开一张表，八成是想知道它有哪些列、都是什么类型，
                 // 而不是先看索引。
                 ColumnRowGroup(
-                    label = "字段",
+                    label = str(StrKey.COLUMN),
                     columns = columns,
                     loading = columnsLoading,
                     error = columnsError,
@@ -2414,8 +2427,8 @@ private fun TableLeaf(
                         table = tableName,
                     ),
                 )
-                ObjectGroupRow("索引", indexNames)
-                ObjectGroupRow("外键", foreignKeyNames)
+                ObjectGroupRow(str(StrKey.INDEX), indexNames)
+                ObjectGroupRow(str(StrKey.FOREIGN_KEY), foreignKeyNames)
             }
         }
     }
@@ -2471,7 +2484,7 @@ private fun ColumnRowGroup(
             // 加载中也显示「(无)」的话，用户会以为这张表没有字段，而那只是一瞬间的假象。
             loading -> Unit
             columns.isNullOrEmpty() -> Text(
-                text = "(无)",
+                text = str(StrKey.NONE_PAREN),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 12.dp, top = 1.dp),
@@ -2549,7 +2562,7 @@ private fun ColumnRow(
                 if (onCopyColumn != null && target != null) {
                     Modifier.clickable(
                         // 语义动作名：读屏用户听到的是「复制字段 USERNAME」而不是「按钮」
-                        onClickLabel = "复制字段 ${col.name}",
+                        onClickLabel = str(StrKey.COPY_COLUMN, col.name),
                         role = Role.Button,
                     ) { onCopyColumn(target) }
                 } else {
@@ -2594,7 +2607,7 @@ private fun ColumnRow(
             if (col.primaryKey) ColumnBadge("PK")
             if (col.autoIncrement) ColumnBadge("AI")
             // 只在**不可空**时标记：「可空」是绝大多数列的默认，写出来全是噪音
-            if (!col.nullable) ColumnBadge("非空")
+            if (!col.nullable) ColumnBadge(str(StrKey.NOT_NULL))
         }
     }
 }
@@ -2689,8 +2702,8 @@ private fun PreviewTabArea(
     Column(modifier = modifier) {
         if (state.tabs.isEmpty()) {
             EmptyHint(
-                title = "尚无打开的表",
-                description = "在左侧双击表名即可在此预览数据。",
+                title = str(StrKey.NO_OPEN_TABLE),
+                description = str(StrKey.NO_OPEN_TABLE_HINT),
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -2724,11 +2737,15 @@ private fun PreviewTabArea(
                             trackedTaskId = state.startExport(sql, fmt, dir, name, tbl) { result ->
                                 // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
                                 // 后者会把表格换成「读取失败」面板，导出成功不该长那样
+                                // 回调跑在引擎协程里、已经离开了组合作用域，所以这里取文案走 `Msg` 而不是 `str`
                                 val notice = result.fold(
-                                    onSuccess = { "已导出 ${it.rowsWritten} 行 → ${it.file}" },
-                                    onFailure = { "导出失败：${it.message}" },
+                                    onSuccess = { Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, it.rowsWritten.toInt(), it.rowsWritten, it.file) },
+                                    onFailure = { Msg.format(StrKey.EXPORT_FAILED_WITH_REASON, it.message) },
                                 )
                                 current.notice = notice
+                                // 严重级别与文案分开写：渲染方据 [TablePreviewTab.noticeIsError]
+                                // 上色，不去解析 notice 的文字。
+                                current.noticeIsError = result.isFailure
                             }
                         },
                     )
@@ -2803,7 +2820,7 @@ private fun TabStrip(
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Filled.Close,
-                            contentDescription = "关闭标签页",
+                            contentDescription = str(StrKey.CLOSE_TAB),
                             modifier = Modifier
                                 .size(16.dp)
                                 .clickable { onClose(index) },
@@ -2851,7 +2868,7 @@ private fun TableFilterBar(
         OutlinedTextField(
             value = searchDraft,
             onValueChange = { searchDraft = it },
-            label = { Text("搜索") },
+            label = { Text(str(StrKey.SEARCH)) },
             singleLine = true,
             modifier = Modifier
                 .width(200.dp)
@@ -2865,7 +2882,7 @@ private fun TableFilterBar(
             enabled = !tab.loading && searchDraft != tab.searchTerm,
             shape = SundaysPalette.buttonShape,
             modifier = Modifier.testTag(TABLE_SEARCH_BTN_TAG),
-        ) { Text("搜索") }
+        ) { Text(str(StrKey.SEARCH)) }
         Spacer(Modifier.width(8.dp))
         // 「清除」只在有条件时出现：没有条件时摆一个按不动的按钮是噪音
         if (tab.whereClause.isNotBlank() || tab.searchTerm.isNotEmpty() || tab.orderByClause.isNotBlank()) {
@@ -2879,7 +2896,7 @@ private fun TableFilterBar(
                 },
                 shape = SundaysPalette.buttonShape,
                 modifier = Modifier.testTag(TABLE_CLEAR_BTN_TAG),
-            ) { Text("清除") }
+            ) { Text(str(StrKey.CLEAR_FILTER)) }
             Spacer(Modifier.width(8.dp))
         }
         // 排序预设 —— 覆盖绝大多数「我想按 X 看」的需求
@@ -2891,7 +2908,7 @@ private fun TableFilterBar(
                 modifier = Modifier.testTag(TABLE_ORDER_BTN_TAG),
             ) {
                 Text(
-                    if (tab.orderByClause.isBlank()) "排序" else "排序：${tab.orderByClause}",
+                    if (tab.orderByClause.isBlank()) str(StrKey.SORT) else str(StrKey.SORT_WITH_CLAUSE, tab.orderByClause),
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -2916,7 +2933,7 @@ private fun TableFilterBar(
             onClick = { filterOpen = !filterOpen },
             shape = SundaysPalette.buttonShape,
             modifier = Modifier.testTag(TABLE_FILTER_BTN_TAG),
-        ) { Text(if (filterOpen) "隐藏过滤" else "过滤") }
+        ) { Text(if (filterOpen) str(StrKey.HIDE_FILTER) else str(StrKey.FILTER)) }
         if (onExport != null) {
             Spacer(Modifier.width(8.dp))
             WinButton(
@@ -2930,7 +2947,7 @@ private fun TableFilterBar(
             ) {
                 Icon(Icons.Filled.SaveAlt, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
-                Text("导出")
+                Text(str(StrKey.EXPORT))
             }
         }
     }
@@ -2939,7 +2956,7 @@ private fun TableFilterBar(
         OutlinedTextField(
             value = whereDraft,
             onValueChange = { whereDraft = it },
-            label = { Text("WHERE 条件（不含 WHERE 关键字）") },
+            label = { Text(str(StrKey.WHERE_CONDITION_HINT)) },
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
@@ -2953,13 +2970,13 @@ private fun TableFilterBar(
                 onClick = { onFilterChange(whereDraft) },
                 enabled = !tab.loading && whereDraft != tab.whereClause,
                 shape = SundaysPalette.buttonShape,
-            ) { Text("应用") }
+            ) { Text(str(StrKey.APPLY)) }
             Spacer(Modifier.width(8.dp))
             Text(
                 // 错误一定要就地显示：引擎回的 `ORA-00933` 之类不在这里，
                 // 用户只会看到「刷新后表格空了」，完全无从判断是自己写错了还是引擎挂了
                 text = tab.error?.takeIf { it.isNotBlank() && whereDraft != tab.whereClause }
-                    ?.let { "条件有误：$it" } ?: "",
+                    ?.let { str(StrKey.INVALID_CONDITION, it) } ?: "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 maxLines = 1,
@@ -2972,9 +2989,9 @@ private fun TableFilterBar(
 
 /** 排序预设 —— `(标签, ORDER BY 子句)`。空子句表示「不排序」。 */
 private val ORDER_PRESETS: List<Pair<String, String>> = listOf(
-    "不排序" to "",
-    "第一列升序" to "1 ASC",
-    "第一列降序" to "1 DESC",
+    Msg.text(StrKey.NO_SORT) to "",
+    Msg.text(StrKey.SORT_FIRST_COL_ASC) to "1 ASC",
+    Msg.text(StrKey.SORT_FIRST_COL_DESC) to "1 DESC",
 )
 
 /**
@@ -2993,18 +3010,18 @@ private fun DangerousSqlConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("确认执行危险操作") },
+        title = { Text(str(StrKey.CONFIRM_DANGEROUS_OPERATION)) },
         text = {
             Column {
                 Text(
-                    text = "接下来的执行包含 ${findings.size} 条不可撤销的写操作：" +
-                        "一旦执行，数据库里没有撤销点。",
+                    text = plural(PluralStrKey.DANGEROUS_SUMMARY, findings.size, findings.size) +
+                        str(StrKey.DANGEROUS_NO_UNDO),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(8.dp))
                 findings.forEach { f ->
                     Text(
-                        text = "· ${f.kind.label}：${f.statement}",
+                        text = "· ${str(f.kind.labelKey)}：${f.statement}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 3,
@@ -3023,10 +3040,10 @@ private fun DangerousSqlConfirmDialog(
                     contentColor = MaterialTheme.colorScheme.onError,
                 ),
                 modifier = Modifier.testTag(DANGEROUS_CONFIRM_BTN_TAG),
-            ) { Text("仍然执行") }
+            ) { Text(str(StrKey.EXECUTE_ANYWAY)) }
         },
         dismissButton = {
-            WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
+            WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CANCEL)) }
         },
     )
 }
@@ -3214,7 +3231,7 @@ private fun ExportDialog(
             if (gen != previewGen) return@launch   // 迟到的响应直接丢
             result
                 .onSuccess { preview = it; previewError = null }
-                .onFailure { preview = null; previewError = it.message ?: "预览失败" }
+                .onFailure { preview = null; previewError = it.message ?: Msg.text(StrKey.PREVIEW_FAILED) }
             previewing = false
         }
     }
@@ -3232,14 +3249,19 @@ private fun ExportDialog(
                 // ---- 标题行 ----
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "导出结果",
+                        text = str(StrKey.EXPORT_RESULT),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.width(12.dp))
                     if (statementCount > 1) {
                         Text(
-                            text = "$statementCount 条语句将导出为 $statementCount 个文件",
+                            text = plural(
+                PluralStrKey.EXPORT_STATEMENTS_TO_FILES,
+                statementCount,
+                statementCount,
+                statementCount,
+            ),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -3252,7 +3274,7 @@ private fun ExportDialog(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 ) {
                     // ---- 格式 ----
-                    Text("格式", style = MaterialTheme.typography.labelMedium)
+                    Text(str(StrKey.FORMAT), style = MaterialTheme.typography.labelMedium)
                     // 横向排布：竖排五个单选会把对话框撑到需要滚动才看得到路径输入框
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3263,7 +3285,7 @@ private fun ExportDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = format == f, onClick = { format = f })
                                 Text(
-                                    f.label,
+                                    str(f.labelKey),
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.testTag("exportFormat_${f.name}"),
                                 )
@@ -3279,7 +3301,7 @@ private fun ExportDialog(
                         OutlinedTextField(
                             value = dir,
                             onValueChange = { dir = it },
-                            label = { Text("输出目录（绝对路径）") },
+                            label = { Text(str(StrKey.OUTPUT_DIR_ABSOLUTE)) },
                             singleLine = true,
                             modifier = Modifier.weight(1f).testTag(EXPORT_DIR_FIELD_TAG),
                         )
@@ -3291,14 +3313,14 @@ private fun ExportDialog(
                         ) {
                             Icon(Icons.Default.FolderOpen, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("浏览")
+                            Text(str(StrKey.BROWSE))
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
-                            label = { Text("文件名") },
+                            label = { Text(str(StrKey.FILE_NAME)) },
                             singleLine = true,
                             modifier = Modifier.weight(1f).testTag(EXPORT_NAME_FIELD_TAG),
                         )
@@ -3311,14 +3333,14 @@ private fun ExportDialog(
                         ) {
                             Icon(Icons.Default.SaveAlt, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("选文件")
+                            Text(str(StrKey.CHOOSE_FILE))
                         }
                     }
                     if (needsTable) {
                         OutlinedTextField(
                             value = tableName,
                             onValueChange = { tableName = it },
-                            label = { Text("目标表名（INSERT INTO …）") },
+                            label = { Text(str(StrKey.TARGET_TABLE_NAME)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag(EXPORT_TABLE_FIELD_TAG),
                         )
@@ -3329,10 +3351,10 @@ private fun ExportDialog(
 
                     // ---- SQL（可编辑）----
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("导出 SQL（可编辑）", style = MaterialTheme.typography.labelMedium)
+                        Text(str(StrKey.EXPORT_SQL_EDITABLE), style = MaterialTheme.typography.labelMedium)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "起手值已带上当前预览的过滤与排序",
+                            text = str(StrKey.EXPORT_SQL_PREFILLED_HINT),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -3359,7 +3381,7 @@ private fun ExportDialog(
                     // ---- 预览 ----
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("预览", style = MaterialTheme.typography.labelMedium)
+                        Text(str(StrKey.PREVIEW), style = MaterialTheme.typography.labelMedium)
                         Spacer(Modifier.width(8.dp))
                         WinButton(
                             onClick = runPreview,
@@ -3369,12 +3391,12 @@ private fun ExportDialog(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
-                            Text(if (previewing) "预览中…" else "预览前 100 行")
+                            Text(if (previewing) str(StrKey.PREVIEWING) else str(StrKey.PREVIEW_FIRST_100_ROWS))
                         }
                         if (!previewable) {
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "仅 SELECT / WITH 可预览（写操作请用「执行 SQL」）",
+                                text = str(StrKey.PREVIEW_SELECT_ONLY_HINT),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
@@ -3388,7 +3410,7 @@ private fun ExportDialog(
                             color = MaterialTheme.colorScheme.error,
                         )
                         preview == null -> Text(
-                            text = "点上方按钮把这条 SQL 跑一次，先看看会导出什么。",
+                            text = str(StrKey.PREVIEW_EMPTY_HINT),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -3404,14 +3426,14 @@ private fun ExportDialog(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text("取消") }
+                    WinButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CANCEL)) }
                     Spacer(Modifier.width(8.dp))
                     WinButton(
                         onClick = { onConfirm(format, sql, dir, name, tableName) },
                         enabled = canSubmit,
                         shape = SundaysPalette.buttonShape,
                         modifier = Modifier.testTag(EXPORT_CONFIRM_BTN_TAG),
-                    ) { Text("开始导出") }
+                    ) { Text(str(StrKey.START_EXPORT)) }
                 }
             }
         }
@@ -3465,7 +3487,7 @@ private fun SqlPreviewTable(preview: SqlPreviewRows) {
         }
         if (preview.rows.isEmpty()) {
             Text(
-                text = "（0 行）",
+                text = str(StrKey.ZERO_ROWS),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(8.dp),
@@ -3491,8 +3513,10 @@ private fun SqlPreviewTable(preview: SqlPreviewRows) {
             }
         }
         Text(
-            text = "共 ${preview.rows.size} 行" +
-                if (preview.truncated) "（已截断到 ${preview.rows.size} 行）" else "",
+            text = plural(PluralStrKey.ROWS_COUNT, preview.rows.size, preview.rows.size) +
+                if (preview.truncated) {
+                    plural(PluralStrKey.ROWS_TRUNCATED, preview.rows.size, preview.rows.size)
+                } else "",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(8.dp),
@@ -3531,7 +3555,7 @@ private fun ExportProgressDialog(
     AlertDialog(
         // 「关掉」只是藏起窗口，导出继续 —— 不能让用户以为点 X 就取消了导出
         onDismissRequest = onBackground,
-        title = { Text("正在导出") },
+        title = { Text(str(StrKey.EXPORTING)) },
         text = {
             Column {
                 Text(
@@ -3556,7 +3580,11 @@ private fun ExportProgressDialog(
                 Text(
                     // 还没收到第一帧时显示「正在连接…」而不是「0 行」——
                     // 「0 行」会被读成「导出失败」，那正是我们要避免的误读
-                    text = if (rowsWritten > 0) "已导出 $rowsWritten 行…" else "正在连接引擎…",
+                    text = if (rowsWritten > 0) {
+                        plural(PluralStrKey.EXPORTED_ROWS_PROGRESS, rowsWritten.toInt(), rowsWritten)
+                    } else {
+                        str(StrKey.CONNECTING_ENGINE)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag(EXPORT_PROGRESS_ROWS_TAG),
@@ -3568,7 +3596,7 @@ private fun ExportProgressDialog(
                 onClick = onBackground,
                 shape = SundaysPalette.buttonShape,
                 modifier = Modifier.testTag(EXPORT_PROGRESS_BACKGROUND_BTN_TAG),
-            ) { Text("后台运行") }
+            ) { Text(str(StrKey.RUN_IN_BACKGROUND)) }
         },
     )
 }
@@ -3634,10 +3662,10 @@ private fun PreviewTabContent(
                     tab.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
                         WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("加载中…", style = MaterialTheme.typography.labelMedium)
+                        Text(str(StrKey.LOADING), style = MaterialTheme.typography.labelMedium)
                     }
                     tab.error != null -> Text(
-                        text = "错误: ${tab.error}",
+                        text = str(StrKey.ERROR_PREFIX, tab.error),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                         // **必须限一行**：这一行与下方 `fillMaxSize()` 的 DataTable 同处一个
@@ -3648,7 +3676,13 @@ private fun PreviewTabContent(
                         overflow = TextOverflow.Ellipsis,
                     )
                     else -> Text(
-                        text = "共 ${tab.total} 行 · 第 ${tab.page} 页 · 每页 ${tab.pageSize}",
+                        text = plural(
+                            PluralStrKey.PAGINATION_SUMMARY,
+                            tab.total.toInt(),
+                            tab.total,
+                            tab.page,
+                            tab.pageSize,
+                        ),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -3665,7 +3699,10 @@ private fun PreviewTabContent(
                     Text(
                         text = notice,
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (notice.startsWith("导出失败"))
+                        // 原来这里是 `notice.startsWith("导出失败")`。改成读
+                        // [TablePreviewTab.noticeIsError]：中文前缀判定在任何非中文界面下
+                        // 恒为 false，导出失败会被静默染成成功色 —— 见该字段的 KDoc。
+                        color = if (tab.noticeIsError)
                             MaterialTheme.colorScheme.error
                         else
                             MaterialTheme.colorScheme.primary,
@@ -3689,7 +3726,7 @@ private fun PreviewTabContent(
             // 若按「有列就画表格」的顺序判断，用户看到的是一张有表头但零行的空表，
             // 真正的失败原因只在上方那一行被省略号截断的提示里。
             tab.error != null -> EmptyHint(
-                title = "读取失败",
+                title = str(StrKey.READ_FAILED),
                 description = tab.error,
                 centerContent = false,
                 modifier = Modifier.fillMaxSize(),
@@ -3714,8 +3751,8 @@ private fun PreviewTabContent(
                 cellEditable = cellEditable,
             )
             !tab.loading && tab.error == null -> EmptyHint(
-                title = "无数据",
-                description = "表为空或无法读取列元数据。",
+                title = str(StrKey.NO_DATA),
+                description = str(StrKey.NO_DATA_HINT),
                 modifier = Modifier.fillMaxSize(),
             )
             else -> Spacer(Modifier.fillMaxSize())
@@ -3781,7 +3818,7 @@ private fun SqlWorkbenchPane(
                     tint = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = "SQL 工作台",
+                    text = str(StrKey.SQL_WORKBENCH),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -3794,7 +3831,7 @@ private fun SqlWorkbenchPane(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (schema.isNotBlank()) "schema: $schema" else "默认 catalog",
+                    text = if (schema.isNotBlank()) str(StrKey.SCHEMA_LABEL, schema) else str(StrKey.DEFAULT_CATALOG),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -3806,9 +3843,9 @@ private fun SqlWorkbenchPane(
             leadingLabel = "SQL",
             titles = state.sqlSheets.map { it.title },
             selectedIndex = state.selectedSqlIndex,
-            addDescription = "新建 SQL sheet",
-            renameDescription = "重命名当前标签",
-            removeDescription = "关闭 SQL sheet",
+            addDescription = str(StrKey.NEW_SQL_SHEET),
+            renameDescription = str(StrKey.RENAME_CURRENT_TAB),
+            removeDescription = str(StrKey.CLOSE_SQL_SHEET),
             onSelect = state::selectSqlSheet,
             onAdd = state::addSqlSheet,
             onRemove = state::removeSqlSheet,
@@ -3877,13 +3914,21 @@ private fun SqlWorkbenchPane(
                                     failed.isEmpty() -> null
                                     // 只报第一条失败的原文，其余只带计数 —— 一屏塞十条
                                     // 异常既读不下去，也会把「哪条错了」淹没掉
-                                    else -> "导出失败 ${failed.size}/${stmts.size} 条：" +
+                                    // 这里在协程里（导出已开跑），不是组合上下文，走 Msg
+                                    else -> Msg.plural(
+                                        PluralStrKey.EXPORT_FAILED_STATEMENTS,
+                                        failed.size,
+                                        failed.size,
+                                        stmts.size,
+                                    ) +
                                         failed.first().exceptionOrNull()?.message
                                 }
                                 if (ok.isNotEmpty()) {
                                     s.notice = buildString {
-                                        append("已导出 ${ok.size} 个文件")
-                                        if (stmts.size > 1) append("（共 ${stmts.size} 条语句）")
+                                        append(Msg.plural(PluralStrKey.EXPORTED_FILES_COUNT, ok.size, ok.size))
+                                        if (stmts.size > 1) {
+                                            append(Msg.plural(PluralStrKey.STATEMENTS_TOTAL, stmts.size, stmts.size))
+                                        }
                                         append("：")
                                         append(
                                             ok.joinToString("；") {
@@ -3891,6 +3936,10 @@ private fun SqlWorkbenchPane(
                                             },
                                         )
                                     }
+                                    // 「部分成功」也算失败色：只要有语句没导出来，
+                                    // 用户就该看见这一条不是纯成功播报。判定依据是
+                                    // `failed` 集合本身，不是那句文案长什么样。
+                                    s.noticeIsError = failed.isNotEmpty()
                                 }
                             }
                         }
@@ -3908,7 +3957,12 @@ private fun SqlWorkbenchPane(
         if (anyRunning) {
             ExportProgressDialog(
                 fileName = if (trackedTasks.size > 1) {
-                    "${trackedTasks.count { it.isRunning }}/${trackedTasks.size} 条语句"
+                    plural(
+                        PluralStrKey.STATEMENTS_PROGRESS,
+                        trackedTasks.size,
+                        trackedTasks.count { it.isRunning },
+                        trackedTasks.size,
+                    )
                 } else {
                     trackedTasks.firstOrNull()?.title ?: "export"
                 },
@@ -3921,8 +3975,8 @@ private fun SqlWorkbenchPane(
         Column(modifier = Modifier.fillMaxSize()) {
             if (sheet == null) {
                 EmptyHint(
-                    title = "没有可编辑的 SQL sheet",
-                    description = "点上方「＋」新建一个 SQL sheet。",
+                    title = str(StrKey.NO_EDITABLE_SQL_SHEET),
+                    description = str(StrKey.NO_EDITABLE_SQL_SHEET_HINT),
                     // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
                     modifier = Modifier
                         .weight(1f)
@@ -3948,7 +4002,7 @@ private fun SqlWorkbenchPane(
                             selected = state.readOnly,
                             onClick = { state.readOnly = !state.readOnly },
                             enabled = !sheet.running,
-                            label = { Text("只读", maxLines = 1, softWrap = false) },
+                            label = { Text(str(StrKey.READ_ONLY), maxLines = 1, softWrap = false) },
                             modifier = Modifier.testTag(SQL_READONLY_CHIP_TAG),
                         )
                         Spacer(Modifier.width(4.dp))
@@ -3963,7 +4017,7 @@ private fun SqlWorkbenchPane(
                             selected = sheet.multiStatement,
                             onClick = { sheet.multiStatement = !sheet.multiStatement },
                             enabled = !sheet.running,
-                            label = { Text("多语句", maxLines = 1, softWrap = false) },
+                            label = { Text(str(StrKey.MULTI_STATEMENT), maxLines = 1, softWrap = false) },
                             modifier = Modifier.testTag(SQL_MULTI_STATEMENT_CHIP_TAG),
                         )
                         Spacer(Modifier.width(4.dp))
@@ -3982,7 +4036,7 @@ private fun SqlWorkbenchPane(
                             ) {
                                 Icon(Icons.Filled.Check, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
-                                Text("提交")
+                                Text(str(StrKey.COMMIT))
                             }
                             Spacer(Modifier.width(4.dp))
                             WinButton(
@@ -4000,7 +4054,7 @@ private fun SqlWorkbenchPane(
                             ) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
-                                Text("回滚")
+                                Text(str(StrKey.ROLLBACK))
                             }
                             Spacer(Modifier.width(4.dp))
                         } else {
@@ -4017,7 +4071,7 @@ private fun SqlWorkbenchPane(
                             ) {
                                 Icon(Icons.Filled.Lock, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
-                                Text("事务")
+                                Text(str(StrKey.TRANSACTION))
                             }
                             Spacer(Modifier.width(4.dp))
                         }
@@ -4038,7 +4092,7 @@ private fun SqlWorkbenchPane(
                             ) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
-                                Text("停止")
+                                Text(str(StrKey.STOP))
                             }
                         } else {
                             WinButton(
@@ -4057,7 +4111,7 @@ private fun SqlWorkbenchPane(
                             ) {
                                 Icon(Icons.Filled.PlayArrow, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (sheet.running) "执行中…" else "执行 SQL")
+                                Text(if (sheet.running) str(StrKey.EXECUTING) else str(StrKey.EXECUTE_SQL))
                             }
                         }
                         Spacer(Modifier.width(4.dp))
@@ -4075,7 +4129,7 @@ private fun SqlWorkbenchPane(
                         ) {
                             Icon(Icons.Filled.SaveAlt, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
-                            Text("导出")
+                            Text(str(StrKey.EXPORT))
                         }
                     },
                     modifier = Modifier
@@ -4257,14 +4311,14 @@ private fun TabRenameDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = "重命名标签",
+                    text = str(StrKey.RENAME_TAB),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 WinTextField(
                     value = value,
                     onValueChange = { value = it },
                     singleLine = true,
-                    label = { Text("名称") },
+                    label = { Text(str(StrKey.NAME)) },
                     modifier = Modifier
                         .width(280.dp)
                         .onPreviewKeyEvent { event ->
@@ -4282,8 +4336,8 @@ private fun TabRenameDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    WinTextButton(onClick = onDismiss) { Text("取消") }
-                    WinTextButton(onClick = { onConfirm(value) }) { Text("确定") }
+                    WinTextButton(onClick = onDismiss) { Text(str(StrKey.CANCEL)) }
+                    WinTextButton(onClick = { onConfirm(value) }) { Text(str(StrKey.CONFIRM)) }
                 }
             }
         }
@@ -4344,7 +4398,17 @@ private fun SqlResultArea(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(
+                        // 失败时整条染错误色 —— 由 [SqlSheet.noticeIsError] 决定，
+                        // **不再**靠 `notice.startsWith("导出失败")` 那种中文前缀判定：
+                        // 一旦界面语言不是中文，那个判断恒为 false，所有失败提示都会
+                        // 静默变回成功色。这是从数据模型上修，不是从文案上绕。
+                        if (sheet.noticeIsError) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    )
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -4367,8 +4431,8 @@ private fun SqlResultArea(
             // 「已导出 2 个文件」并排，读起来像自相矛盾（导出明明已经发生过了）。
             // 此时只留顶部那行提示，不占满整块区域。
             sheet == null -> EmptyHint(
-                title = "尚未执行 SQL",
-                description = "在上方编辑器输入 SQL，点「执行 SQL」即在此查看结果。",
+                title = str(StrKey.NO_SQL_EXECUTED),
+                description = str(StrKey.NO_SQL_EXECUTED_HINT),
                 modifier = Modifier.fillMaxSize(),
             )
             sheet.notice != null && sheet.error == null &&
@@ -4382,11 +4446,11 @@ private fun SqlResultArea(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("执行中…", style = MaterialTheme.typography.labelMedium)
+                    Text(str(StrKey.EXECUTING), style = MaterialTheme.typography.labelMedium)
                 }
             }
             sheet.error != null -> EmptyHint(
-                title = "执行失败",
+                title = str(StrKey.EXECUTE_FAILED),
                 description = sheet.error,
                 // 报错顶对齐、从上往下读
                 centerContent = false,
@@ -4396,7 +4460,9 @@ private fun SqlResultArea(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
             ) {
                 Text(
-                    text = "已影响 ${sheet.affectedRows} 行（非 SELECT 语句）",
+                    // `affectedRows` 是 `by mutableStateOf` 的委托属性，编译器不给智能转换，
+                    // 所以这里显式兜底 —— 外层 `affectedRows != null` 分支已经保证了它非空
+                    text = plural(PluralStrKey.AFFECTED_ROWS, sheet.affectedRows ?: 0, sheet.affectedRows ?: 0),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -4409,7 +4475,7 @@ private fun SqlResultArea(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "查询结果 · ${sheet.rowCount} 行",
+                        text = plural(PluralStrKey.QUERY_RESULT_ROWS, sheet.rowCount, sheet.rowCount),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -4419,7 +4485,7 @@ private fun SqlResultArea(
                     if (sheet.rowsTruncated) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "已截断：只保留前 $SQL_RESULT_MAX_ROWS 行",
+                            text = plural(PluralStrKey.TRUNCATED_MAX_ROWS, SQL_RESULT_MAX_ROWS, SQL_RESULT_MAX_ROWS),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -4440,8 +4506,8 @@ private fun SqlResultArea(
                 )
             }
             else -> EmptyHint(
-                title = "尚未执行 SQL",
-                description = "在上方编辑器输入 SQL，点「执行 SQL」即在此查看结果。",
+                title = str(StrKey.NO_SQL_EXECUTED),
+                description = str(StrKey.NO_SQL_EXECUTED_HINT),
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -4499,13 +4565,13 @@ private fun GenerateWorkbenchPane(
                     tint = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = "造数工作台",
+                    text = str(StrKey.GENERATE_WORKBENCH),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (schema.isNotBlank()) "schema: $schema" else "默认 catalog",
+                    text = if (schema.isNotBlank()) str(StrKey.SCHEMA_LABEL, schema) else str(StrKey.DEFAULT_CATALOG),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -4514,12 +4580,12 @@ private fun GenerateWorkbenchPane(
         WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         WorkbenchTabStrip(
-            leadingLabel = "脚本",
+            leadingLabel = str(StrKey.SCRIPT),
             titles = state.generateScripts.map { it.title },
             selectedIndex = state.selectedGenerateIndex,
-            addDescription = "新建造数脚本",
-            renameDescription = "重命名当前标签",
-            removeDescription = "关闭脚本",
+            addDescription = str(StrKey.NEW_GENERATE_SCRIPT),
+            renameDescription = str(StrKey.RENAME_CURRENT_TAB),
+            removeDescription = str(StrKey.CLOSE_SCRIPT),
             onSelect = state::selectGenerateScript,
             onAdd = state::addGenerateScript,
             onRemove = state::removeGenerateScript,
@@ -4534,7 +4600,7 @@ private fun GenerateWorkbenchPane(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "Lua 版本",
+                text = str(StrKey.LUA_VERSION),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -4560,8 +4626,8 @@ private fun GenerateWorkbenchPane(
         Column(modifier = Modifier.fillMaxSize()) {
             if (script == null) {
                 EmptyHint(
-                    title = "没有可编辑的脚本",
-                    description = "点上方「＋」新建一个 Lua 造数脚本。",
+                    title = str(StrKey.NO_EDITABLE_SCRIPT),
+                    description = str(StrKey.NO_EDITABLE_SCRIPT_HINT),
                     // 用 weight 而非 fillMaxSize —— 与下方两个 weighted 子项共存时不会互相挤掉
                     modifier = Modifier
                         .weight(1f)
@@ -4588,7 +4654,7 @@ private fun GenerateWorkbenchPane(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text(if (state.generateRunning) "造数中…" else "执行造数")
+                            Text(if (state.generateRunning) str(StrKey.GENERATING) else str(StrKey.RUN_GENERATE))
                         }
                     },
                     modifier = Modifier
@@ -4632,12 +4698,16 @@ private fun GenerateResultArea(
             ) {
                 WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                 Text(
-                    text = "造数中… 已插入 ${state.generateTotalInserted} 行",
+                    text = plural(
+                PluralStrKey.GENERATING_INSERTED,
+                state.generateTotalInserted.toInt(),
+                state.generateTotalInserted,
+            ),
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
             state.generateError != null -> EmptyHint(
-                title = "造数失败",
+                title = str(StrKey.GENERATE_FAILED),
                 description = state.generateError,
                 centerContent = false,
                 modifier = Modifier.fillMaxSize(),
@@ -4650,7 +4720,12 @@ private fun GenerateResultArea(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "造数完成 · 共 ${state.generateTotalInserted} 行 · 处理 ${state.generateTablesProcessed} 个脚本",
+                        text = plural(
+                PluralStrKey.GENERATE_COMPLETE_SUMMARY,
+                state.generateTotalInserted.toInt(),
+                state.generateTotalInserted,
+                state.generateTablesProcessed,
+            ),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -4670,8 +4745,8 @@ private fun GenerateResultArea(
                 )
             }
             else -> EmptyHint(
-                title = "尚未执行造数",
-                description = "在上方编写 Lua 脚本（insert(表名, {列 = 值}) 逐条写库），点「执行造数」即在此查看逐脚本统计。",
+                title = str(StrKey.NO_GENERATE_EXECUTED),
+                description = str(StrKey.NO_GENERATE_EXECUTED_HINT),
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -4680,9 +4755,9 @@ private fun GenerateResultArea(
 
 /** 造数结果表列定义（脚本 / 目标表 / 插入行数）。 */
 private val GENERATE_RESULT_COLUMNS = listOf(
-    TableColumn(key = "script", header = "脚本"),
-    TableColumn(key = "table", header = "目标表"),
-    TableColumn(key = "inserted", header = "插入行数"),
+    TableColumn(key = "script", header = Msg.text(StrKey.SCRIPT)),
+    TableColumn(key = "table", header = Msg.text(StrKey.TARGET_TABLE)),
+    TableColumn(key = "inserted", header = Msg.text(StrKey.INSERTED_ROWS)),
 )
 
 /**
@@ -4736,6 +4811,23 @@ class TablePreviewTab(
      * 导成功了报「读取失败」、导失败了数据还好好的，两种都是骗用户。
      */
     var notice: String? by mutableStateOf(null)
+
+    /**
+     * [notice] 是**成**还是**败** —— 与文案内容无关的独立事实。
+     *
+     * ## 为什么不能靠解析 [notice] 的文字来判断
+     *
+     * 原实现是 `notice.startsWith("导出失败")`。那在中文界面下能工作，一旦界面语言
+     * 不是中文就**恒为 false** —— 所有导出失败提示都会被渲染成成功色，而界面上
+     * 没有任何报错。���是国际化里最典型的「静默失效」：不崩、不报错、只是说错话。
+     *
+     * 更根本地说，「这句话是不是报错」是**状态**，不属于文案。把状态编码进文案
+     * （靠前缀、靠关键词、靠括号）就等于让每一处渲染都要重新解析一遍人类语言 ——
+     * 换语言、加语种、改措辞，都会让它悄无声息地失准。
+     *
+     * 故严重级别由写入方显式声明，渲染方只读不猜。
+     */
+    var noticeIsError: Boolean by mutableStateOf(false)
     var total: Long by mutableStateOf(0L)
     var page: Int by mutableStateOf(1)
     var pageSize: Int by mutableStateOf(100)
@@ -4964,10 +5056,10 @@ class DatabaseBrowserState(
      * 用户能看表却看不到视图和触发器，而这两类恰恰是排查「数据从哪来 / 会不会被改」时
      * 最先要看的东西。
      */
-    enum class DatabaseObjectKind(val label: String) {
-        VIEW("视图"),
-        TRIGGER("触发器"),
-        FUNCTION("过程 / 函数"),
+    enum class DatabaseObjectKind(val labelKey: StrKey) {
+        VIEW(StrKey.VIEWS),
+        TRIGGER(StrKey.TRIGGERS),
+        FUNCTION(StrKey.ROUTINES),
     }
 
     /** database → 该类对象名列表（来自各自的 `*ListRequest`）。 */
@@ -4984,12 +5076,12 @@ class DatabaseBrowserState(
     val objectLoadError: Map<String, String> get() = _objectLoadError
 
     /** 表级对象的三种：**字段 / 索引 / 外键**（引擎侧要 `table_name`，所以挂表节点下）。 */
-    enum class TableObjectKind(val label: String) {
+    enum class TableObjectKind(val labelKey: StrKey) {
         /** 字段 —— 走 `TABLE.LIST`（`tableColumnListRequest`），值结构化，存 [_tableColumns]。 */
-        COLUMNS("字段"),
+        COLUMNS(StrKey.COLUMN),
 
-        INDEX("索引"),
-        FOREIGN_KEY("外键"),
+        INDEX(StrKey.INDEX),
+        FOREIGN_KEY(StrKey.FOREIGN_KEY),
     }
 
     /**
@@ -5156,7 +5248,7 @@ class DatabaseBrowserState(
         val center = notifications ?: return
         center.push(
             if (ok) AppNotification.Severity.SUCCESS else AppNotification.Severity.ERROR,
-            if (ok) "已复制${what}" else "复制${what}失败",
+            if (ok) Msg.format(StrKey.COPIED, what) else Msg.format(StrKey.COPY_FAILED, what),
             detail,
         )
     }
@@ -5172,7 +5264,7 @@ class DatabaseBrowserState(
      * 用户至少知道是**这一步**失败了，而不是应用卡了。
      */
     fun copyTreeText(target: TreeTarget, quoted: Boolean) {
-        val what = if (quoted) "引用名" else "名称"
+        val what = if (quoted) Msg.text(StrKey.REFERENCE_NAME) else Msg.text(StrKey.NAME)
         val text = if (quoted) treeReferenceText(target) else treePlainName(target)
         notifyCopied(what, text, clipboard(text))
     }
@@ -5223,10 +5315,14 @@ class DatabaseBrowserState(
                 // 失败原因**用引擎原文**：本项目里「请求成功但结果为空」比「请求失败」
                 // 更难察觉，而 DDL 为空几乎总是因为 schema / 表名对不上 ——
                 // 用户看到「复制失败」是没法排查的，看到原文才行。
-                val reason = resp?.error?.takeIf { it.isNotBlank() } ?: "引擎未返回建表语句"
-                notifyCopied("建表 DDL", reason, ok = false)
+                val reason = resp?.error?.takeIf { it.isNotBlank() } ?: Msg.text(StrKey.ENGINE_NO_DDL)
+                notifyCopied(Msg.text(StrKey.CREATE_TABLE_DDL), reason, ok = false)
             } else {
-                notifyCopied("建表 DDL", "${table}（${ddl.length} 字符）", clipboard(ddl))
+                notifyCopied(
+            Msg.text(StrKey.CREATE_TABLE_DDL),
+            Msg.plural(PluralStrKey.DDL_WITH_LENGTH, ddl.length, table, ddl.length),
+            clipboard(ddl),
+        )
             }
         }
     }
@@ -5348,6 +5444,14 @@ class DatabaseBrowserState(
          */
         var notice: String? by mutableStateOf(null)
 
+        /**
+         * [notice] 是成还是败 —— 理由与写法见 [TablePreviewTab.noticeIsError]。
+         *
+         * 多语句导出有「部分成功」这一档（`EXPORT_PARTIAL_FILES`），它既不是纯成功
+         * 也不是纯失败。这里染错误色：用户要知道有东西没导出来。
+         */
+        var noticeIsError: Boolean by mutableStateOf(false)
+
         /** 结果区视图状态（分页 / 选中行）—— 每次重新执行归位。 */
         var resultPage: Int by mutableStateOf(1)
         var resultPageSize: PageSize by mutableStateOf(PageSize.S100)
@@ -5441,12 +5545,15 @@ class DatabaseBrowserState(
         val out = ArrayList<CompletionItem>()
 
         for (db in databases) {
-            if (db.isNotBlank()) out.add(CompletionItem(db, CompletionKind.DATABASE, "库"))
+            if (db.isNotBlank()) out.add(CompletionItem(db, CompletionKind.DATABASE, detailKey = StrKey.CATALOG))
         }
+        // 「表」这个片段含运行时值（库名），拼装后才成句 —— 造键会把库名焊死，
+        // 所以静态那半边取译文再拼，`detail` 而不是 `detailKey`。
+        val tableWord = Msg.text(StrKey.TABLE)
         for ((db, tables) in tablesByDatabase) {
-            val tableHint = if (db.isBlank()) "表" else "$db · 表"
+            val tableHint = if (db.isBlank()) tableWord else "$db · $tableWord"
             for (t in tables) {
-                if (t.isNotBlank()) out.add(CompletionItem(t, CompletionKind.TABLE, tableHint))
+                if (t.isNotBlank()) out.add(CompletionItem(t, CompletionKind.TABLE, detail = tableHint))
             }
         }
         for (tab in tabs) {
@@ -5487,7 +5594,7 @@ class DatabaseBrowserState(
             return
         }
         if (sql.isEmpty()) {
-            sheet.error = "SQL 为空"
+            sheet.error = Msg.text(StrKey.SQL_EMPTY)
             sheet.columns = emptyList()
             sheet.rows = emptyList()
             sheet.rowCount = 0
@@ -5551,7 +5658,7 @@ class DatabaseBrowserState(
             if (gen != sheet.generation) return@launch  // 用户已重新执行 —— 丢弃过期响应
             val flow = result.getOrNull()
             if (flow == null) {
-                sheet.error = result.exceptionOrNull()?.message ?: "执行失败"
+                sheet.error = result.exceptionOrNull()?.message ?: Msg.text(StrKey.EXECUTE_FAILED)
                 sheet.running = false
                 sheet.runningRequestId = null
                 return@launch
@@ -5570,7 +5677,7 @@ class DatabaseBrowserState(
                         return@collect
                     }
                     if (!resp.success) {
-                        sheet.error = resp.error.ifBlank { "SQL 执行失败" }
+                        sheet.error = resp.error.ifBlank { Msg.text(StrKey.SQL_EXECUTION_FAILED) }
                     } else if (resp.hasSqlRowFrame()) {
                         // 攒够上限就停：**继续收只会在堆里再压一份同样的数据**，
                         // 引擎侧仍会推完（已发的帧收不回来），但我们不再留。
@@ -5612,7 +5719,7 @@ class DatabaseBrowserState(
                 sheet.rowCount = frames.size
                 sheet.rowsTruncated = truncated
             } else if (sheet.affectedRows == null && sheet.error == null) {
-                sheet.error = "无返回结果"
+                sheet.error = Msg.text(StrKey.NO_RETURN_RESULT)
             }
             sheet.running = false
             sheet.runningRequestId = null
@@ -5648,9 +5755,9 @@ class DatabaseBrowserState(
             // 那不是错误，那正是「已经跑完了」。真正失败（gRPC 断了等）才写 error。
             val cancelResp = resp.getOrNull()?.system?.cancel
             if (resp.isFailure) {
-                sheet.error = "无法停止：${resp.exceptionOrNull()?.message ?: "未知错误"}"
+                sheet.error = Msg.format(StrKey.CANNOT_STOP, resp.exceptionOrNull()?.message ?: Msg.text(StrKey.UNKNOWN_ERROR))
             } else if (cancelResp != null && !cancelResp.cancelled && cancelResp.error.isNotBlank()) {
-                sheet.error = "无法停止：${cancelResp.error}"
+                sheet.error = Msg.format(StrKey.CANNOT_STOP, cancelResp.error)
             }
         }
     }
@@ -5688,12 +5795,12 @@ class DatabaseBrowserState(
     // ------------------------------------------------------------------------
 
     /** 导出格式 —— 与 `ExportRunRequest.format` 一一对应。 */
-    enum class ExportFormat(val label: String, val protoValue: String, val extension: String) {
-        CSV("CSV", "CSV", "csv"),
-        JSON_LINES("JSON Lines", "JSON_LINES", "jsonl"),
-        SQL_INSERT("SQL INSERT 语句", "SQL_INSERT", "sql"),
-        EXCEL("Excel 工作簿", "EXCEL", "xlsx"),
-        PARQUET("Parquet 列存", "PARQUET", "parquet"),
+    enum class ExportFormat(val labelKey: StrKey, val protoValue: String, val extension: String) {
+        CSV(StrKey.FORMAT_CSV, "CSV", "csv"),
+        JSON_LINES(StrKey.FORMAT_JSON_LINES, "JSON_LINES", "jsonl"),
+        SQL_INSERT(StrKey.FORMAT_SQL_INSERT, "SQL_INSERT", "sql"),
+        EXCEL(StrKey.FORMAT_EXCEL, "EXCEL", "xlsx"),
+        PARQUET(StrKey.FORMAT_PARQUET, "PARQUET", "parquet"),
     }
 
     /** 导出结果 —— 引擎终止帧回的实际文件路径。 */
@@ -5759,9 +5866,12 @@ class DatabaseBrowserState(
          */
         val statusLine: String
             get() = when (status) {
-                Status.RUNNING -> progress?.let { "正在导出 · 已写出 $it 行" } ?: "正在连接引擎…"
-                Status.SUCCEEDED -> detail?.let { "完成 · $it" } ?: "完成"
-                Status.FAILED -> detail?.let { "失败 · $it" } ?: "失败"
+                Status.RUNNING -> progress?.let { Msg.plural(PluralStrKey.EXPORT_PROGRESS_ROWS, it.toInt(), it) }
+            ?: Msg.text(StrKey.CONNECTING_ENGINE)
+                Status.SUCCEEDED -> detail?.let { Msg.format(StrKey.TASK_DONE_DETAIL, it) }
+            ?: Msg.text(StrKey.DONE)
+                Status.FAILED -> detail?.let { Msg.format(StrKey.TASK_FAILED_DETAIL, it) }
+            ?: Msg.text(StrKey.FAILED)
             }
     }
 
@@ -5815,7 +5925,7 @@ class DatabaseBrowserState(
                 id = taskId,
                 kind = DatabaseBrowserState.BackgroundTask.Kind.EXPORT,
                 title = fileName,
-                subtitle = "$outputDir · ${format.label}",
+                subtitle = "$outputDir · ${Msg.text(format.labelKey)}",
                 status = DatabaseBrowserState.BackgroundTask.Status.RUNNING,
                 startedAt = System.currentTimeMillis(),
             ),
@@ -5834,21 +5944,21 @@ class DatabaseBrowserState(
                     }
                     notifications?.push(
                         AppNotification.Severity.SUCCESS,
-                        "导出完成 · $fileName",
-                        "已导出 ${r.rowsWritten} 行 → ${r.file}",
+                        Msg.format(StrKey.EXPORT_COMPLETE_FILE, fileName),
+                        Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, r.rowsWritten.toInt(), r.rowsWritten, r.file),
                     )
                 }
                 .onFailure { e ->
                     updateTask(taskId) {
                         it.copy(
                             status = DatabaseBrowserState.BackgroundTask.Status.FAILED,
-                            detail = e.message ?: "导出失败",
+                            detail = e.message ?: Msg.text(StrKey.EXPORT_FAILED),
                         )
                     }
                     notifications?.push(
                         AppNotification.Severity.ERROR,
-                        "导出失败 · $fileName",
-                        e.message ?: "导出失败",
+                        Msg.format(StrKey.EXPORT_FAILED_FILE, fileName),
+                        e.message ?: Msg.text(StrKey.EXPORT_FAILED),
                     )
                 }
                 .also { onComplete(it) }
@@ -5905,7 +6015,7 @@ class DatabaseBrowserState(
                             },
                             detail = result.getOrNull()?.file
                                 ?: result.exceptionOrNull()?.message
-                                ?: "导出失败",
+                                ?: Msg.text(StrKey.EXPORT_FAILED),
                         )
                     }
                 }
@@ -5919,22 +6029,22 @@ class DatabaseBrowserState(
                 when {
                     failed.isEmpty() -> nc.push(
                         AppNotification.Severity.SUCCESS,
-                        "导出完成 · ${results.size} 个文件",
-                        okCount.toString() + " 个文件已写出：" +
+                        Msg.plural(PluralStrKey.EXPORT_COMPLETE_FILES, results.size, results.size),
+                        Msg.plural(PluralStrKey.FILES_WRITTEN, okCount, okCount) +
                             results.mapNotNull { it.getOrNull()?.file }
                                 .joinToString("；") { File(it).name },
                     )
                     // 部分失败必须**说清楚是部分**：只报成功数会让用户以为全好了
                     okCount == 0 -> nc.push(
                         AppNotification.Severity.ERROR,
-                        "导出失败 · 0/${results.size} 个文件",
-                        failed.first().exceptionOrNull()?.message ?: "导出失败",
+                        Msg.plural(PluralStrKey.EXPORT_FAILED_ALL_FILES, results.size, results.size),
+                        failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.EXPORT_FAILED),
                     )
                     else -> nc.push(
                         AppNotification.Severity.ERROR,
-                        "导出部分失败 · ${okCount}/${results.size} 个文件",
-                        "成功 ${okCount} 个，失败 ${failed.size} 个：" +
-                            (failed.first().exceptionOrNull()?.message ?: "未知原因"),
+                        Msg.plural(PluralStrKey.EXPORT_PARTIAL_FILES, results.size, okCount, results.size),
+                        Msg.plural(PluralStrKey.EXPORT_SUCCESS_FAILURE_COUNTS, okCount, okCount, failed.size) +
+                            (failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.UNKNOWN_REASON)),
                     )
                 }
             }
@@ -5952,7 +6062,7 @@ class DatabaseBrowserState(
                 id = id,
                 kind = DatabaseBrowserState.BackgroundTask.Kind.EXPORT,
                 title = fileName,
-                subtitle = "$outputDir · ${format.label}",
+                subtitle = "$outputDir · ${Msg.text(format.labelKey)}",
                 status = DatabaseBrowserState.BackgroundTask.Status.RUNNING,
                 startedAt = System.currentTimeMillis(),
             ),
@@ -6013,11 +6123,15 @@ class DatabaseBrowserState(
     ): Result<ExportResult> {
         // 参数先在**前端**校验：让引擎那边才报错的话，用户看到的是一句 JDBC 异常，
         // 还要在对话框里猜是自己哪里填错了
-        if (sql.isBlank()) return Result.failure(IllegalArgumentException("SQL 为空"))
-        if (outputDir.isBlank()) return Result.failure(IllegalArgumentException("未选择输出目录"))
-        if (fileName.isBlank()) return Result.failure(IllegalArgumentException("请填写文件名"))
+        if (sql.isBlank()) return Result.failure(IllegalArgumentException(Msg.text(StrKey.SQL_EMPTY)))
+        if (outputDir.isBlank()) {
+            return Result.failure(IllegalArgumentException(Msg.text(StrKey.OUTPUT_DIR_REQUIRED)))
+        }
+        if (fileName.isBlank()) {
+            return Result.failure(IllegalArgumentException(Msg.text(StrKey.FILE_NAME_REQUIRED)))
+        }
         if (format == ExportFormat.SQL_INSERT && tableName.isBlank()) {
-            return Result.failure(IllegalArgumentException("导出 SQL INSERT 必须给出目标表名"))
+            return Result.failure(IllegalArgumentException(Msg.text(StrKey.EXPORT_TABLE_NAME_REQUIRED)))
         }
         val schema = currentSchema()
         activeDatabases.add(schema)
@@ -6047,7 +6161,7 @@ class DatabaseBrowserState(
             // 文件没有，界面上一个字都没有（实测，见 TEST_CASES.md §9.13）。
             val finished = withTimeoutOrNull(exportTimeoutMs) {
                 engine.handle(req).collect { resp ->
-                    if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "导出失败" })
+                    if (!resp.success) throw IllegalStateException(resp.error.ifBlank { Msg.text(StrKey.EXPORT_FAILED) })
                     val p = resp.export.progress
                     rows = p.exportedRows
                     // 进度要**逐帧**往外抛，而不是只留最后一帧：
@@ -6061,9 +6175,9 @@ class DatabaseBrowserState(
                 true
             }
             if (finished != true) {
-                throw IllegalStateException("导出超过 ${exportTimeoutMs / 1000} 秒仍未返回，已中止")
+                throw IllegalStateException(Msg.format(StrKey.EXPORT_TIMEOUT, exportTimeoutMs / 1000))
             }
-            if (file.isBlank()) throw IllegalStateException("导出已结束但引擎没有回报文件路径")
+            if (file.isBlank()) throw IllegalStateException(Msg.text(StrKey.EXPORT_NO_FILE_REPORTED))
             ExportResult(file = file, rowsWritten = rows)
         }
     }
@@ -6077,9 +6191,9 @@ class DatabaseBrowserState(
      * 「无条件更新」，等于改写整张表。
      */
     suspend fun updateCell(tab: TablePreviewTab, edit: CellEdit): String? {
-        val pk = tab.primaryKeyColumn ?: return "该表没有可用主键，编辑已禁用"
-        val row = tab.rows.firstOrNull { it.id == edit.rowId } ?: return "目标行已不在当前页"
-        val old = row.cells[pk]?.toString() ?: return "主键 $pk 不在行数据里"
+        val pk = tab.primaryKeyColumn ?: return Msg.text(StrKey.NO_PRIMARY_KEY_EDIT_DISABLED)
+        val row = tab.rows.firstOrNull { it.id == edit.rowId } ?: return Msg.text(StrKey.ROW_NOT_ON_PAGE)
+        val old = row.cells[pk]?.toString() ?: return Msg.format(StrKey.PRIMARY_KEY_NOT_IN_ROW, pk)
 
         val catalog = tab.schema.ifBlank { currentSchema() }
         activeDatabases.add(catalog)
@@ -6110,8 +6224,8 @@ class DatabaseBrowserState(
                 dataRequest = dataRequest { update = updateReq }
             }
         }
-        val resp = result.getOrNull() ?: return result.exceptionOrNull()?.message ?: "更新失败"
-        if (!resp.success) return resp.error.ifBlank { "更新失败" }
+        val resp = result.getOrNull() ?: return result.exceptionOrNull()?.message ?: Msg.text(StrKey.UPDATE_FAILED)
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.UPDATE_FAILED) }
         // 本地也改一份：否则用户改完看到还是旧值，会以为没生效而再改一次。
         tab.rows = tab.rows.map { r ->
             if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
@@ -6139,7 +6253,7 @@ class DatabaseBrowserState(
         if (!readOnly) return null
         val writes = DangerousSql.scan(sql)
         if (writes.isEmpty()) return null
-        return "只读模式下不允许写操作，已拦下：${writes.joinToString("；") { it.statement }}"
+        return Msg.format(StrKey.READ_ONLY_WRITE_BLOCKED, writes.joinToString("；") { it.statement })
     }
 
     /**
@@ -6163,10 +6277,10 @@ class DatabaseBrowserState(
         limit: Int = 100,
     ): Result<SqlPreviewRows> {
         val statement = sql.trim()
-        if (statement.isEmpty()) return Result.failure(IllegalArgumentException("SQL 为空"))
+        if (statement.isEmpty()) return Result.failure(IllegalArgumentException(Msg.text(StrKey.SQL_EMPTY)))
         if (!DangerousSql.isReadOnlyQuery(statement)) {
             return Result.failure(
-                IllegalArgumentException("预览只执行 SELECT / WITH 语句；这条是写操作，请改用「执行 SQL」"),
+                IllegalArgumentException(Msg.text(StrKey.PREVIEW_WRITE_REJECTED)),
             )
         }
         val schema = currentSchema()
@@ -6193,7 +6307,7 @@ class DatabaseBrowserState(
             val rows = mutableListOf<Map<String, String>>()
             var truncated = false
             engine.handle(req).collect { resp ->
-                if (!resp.success) throw IllegalStateException(resp.error.ifBlank { "预览失败" })
+                if (!resp.success) throw IllegalStateException(resp.error.ifBlank { Msg.text(StrKey.PREVIEW_FAILED) })
                 if (resp.hasSqlRowFrame()) {
                     val values = resp.sqlRowFrame.row.valuesMap
                     if (values.isEmpty()) return@collect
@@ -6250,45 +6364,45 @@ class DatabaseBrowserState(
      * @return 失败时返回错误文案；成功返回 `null`（session id 已写进 [SqlSheet.transactionSessionId]）。
      */
     suspend fun beginTransaction(sheet: DatabaseBrowserState.SqlSheet): String? {
-        if (sheet.transactionSessionId != null) return "该 sheet 已在事务中"
+        if (sheet.transactionSessionId != null) return Msg.text(StrKey.SHEET_ALREADY_IN_TRANSACTION)
         val resp = runCatching {
             engine.invoke(engineConn(database = currentSchema())) {
                 category = Category.SYSTEM
                 action = Action.BEGIN
                 systemRequest = systemRequest { sessionId = UUID.randomUUID().toString() }
             }
-        }.getOrNull() ?: return "开启事务失败：引擎无响应"
-        if (!resp.success) return resp.error.ifBlank { "开启事务失败" }
+        }.getOrNull() ?: return Msg.text(StrKey.BEGIN_TRANSACTION_NO_RESPONSE)
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.BEGIN_TRANSACTION_FAILED) }
         val body = resp.system
         // 引擎回显 session id；拿不到就当失败 —— 前端**必须**持有它，
         // 后续请求靠它找到那条被钉住的连接，拿不到等于事务没开。
         val sid = body?.begin?.sessionId.orEmpty()
-        if (sid.isBlank()) return "引擎未返回 session id，事务未开启"
+        if (sid.isBlank()) return Msg.text(StrKey.NO_SESSION_ID)
         sheet.transactionSessionId = sid
         return null
     }
 
     /** 提交事务 —— 发 `SYSTEM.COMMIT`。 */
     suspend fun commitTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
-        endTransaction(sheet, Action.COMMIT, "提交事务失败")
+        endTransaction(sheet, Action.COMMIT, Msg.text(StrKey.COMMIT_TRANSACTION_FAILED))
 
     /** 回滚事务 —— 发 `SYSTEM.ROLLBACK`。 */
     suspend fun rollbackTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
-        endTransaction(sheet, Action.ROLLBACK, "回滚事务失败")
+        endTransaction(sheet, Action.ROLLBACK, Msg.text(StrKey.ROLLBACK_TRANSACTION_FAILED))
 
     private suspend fun endTransaction(
         sheet: DatabaseBrowserState.SqlSheet,
         action: com.kxxnzstdsw.grpc.Action,
         fallback: String,
     ): String? {
-        val sid = sheet.transactionSessionId ?: return "当前不在事务中"
+        val sid = sheet.transactionSessionId ?: return Msg.text(StrKey.NOT_IN_TRANSACTION)
         val resp = runCatching {
             engine.invoke(engineConn(database = currentSchema())) {
                 category = Category.SYSTEM
                 this.action = action
                 systemRequest = systemRequest { sessionId = sid }
             }
-        }.getOrNull() ?: return "$fallback：引擎无响应"
+        }.getOrNull() ?: return Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, fallback)
         if (!resp.success) return resp.error.ifBlank { fallback }
         // 无论引擎报成功与否都清本地 id：`SYSTEM.ROLLBACK` 失败时那条连接仍被钉着，
         // 但用户已经看到错误并会重试 —— 留着 id 会让「提交」按钮一直亮着，
@@ -6318,7 +6432,7 @@ class DatabaseBrowserState(
 
     /** 造数脚本列表（顺序 = 引擎 `tables` 执行顺序 = 多表外键依赖顺序）。 */
     val generateScripts: SnapshotStateList<GenerateScript> =
-        mutableStateListOf(GenerateScript("脚本 1"))
+        mutableStateListOf(GenerateScript(Msg.text(StrKey.SCRIPT_DEFAULT_NAME)))
 
     var selectedGenerateIndex: Int by mutableStateOf(0)
 
@@ -6345,7 +6459,7 @@ class DatabaseBrowserState(
 
     /** 新增一个脚本并选中它 —— 初始内容为 [GENERATE_SCRIPT_TEMPLATE] 模板。 */
     fun addGenerateScript() {
-        generateScripts.add(GenerateScript("脚本 ${generateScripts.size + 1}"))
+        generateScripts.add(GenerateScript(Msg.format(StrKey.SCRIPT_NTH_NAME, generateScripts.size + 1)))
         selectedGenerateIndex = generateScripts.lastIndex
     }
 
@@ -6402,7 +6516,7 @@ class DatabaseBrowserState(
         currentConnection ?: return
         val scripts = generateScripts.filter { it.editor.text.isNotBlank() }
         if (scripts.isEmpty()) {
-            generateError = "造数脚本为空"
+            generateError = Msg.text(StrKey.GENERATE_SCRIPT_EMPTY)
             return
         }
         generateGeneration++
@@ -6444,7 +6558,7 @@ class DatabaseBrowserState(
             if (gen != generateGeneration) return@launch  // 已重新执行 —— 丢弃过期响应
             val flow = result.getOrNull()
             if (flow == null) {
-                generateError = result.exceptionOrNull()?.message ?: "造数失败"
+                generateError = result.exceptionOrNull()?.message ?: Msg.text(StrKey.GENERATE_FAILED)
                 generateRunning = false
                 return@launch
             }
@@ -6457,7 +6571,7 @@ class DatabaseBrowserState(
                         return@collect
                     }
                     if (!resp.success) {
-                        generateError = resp.error.ifBlank { "造数失败" }
+                        generateError = resp.error.ifBlank { Msg.text(StrKey.GENERATE_FAILED) }
                     } else if (resp.hasGenProgressFrame()) {
                         val frame = resp.genProgressFrame
                         // 引擎的 `script_index` 是 **1-based**（GenerateHandler 发帧时 +1），
@@ -6480,7 +6594,7 @@ class DatabaseBrowserState(
                 return@launch
             }
             if (gen != generateGeneration) return@launch
-            if (generateError == null && !hasGenerateResult) generateError = "没有插入任何数据"
+            if (generateError == null && !hasGenerateResult) generateError = Msg.text(StrKey.NO_DATA_INSERTED)
             generateRunning = false
         }
     }
@@ -6525,7 +6639,7 @@ class DatabaseBrowserState(
         selectedSqlIndex = 0
         // 造数工作台同理 —— 脚本与统计都绑定在上一连接上，整体复位
         generateScripts.clear()
-        generateScripts.add(GenerateScript("脚本 1"))
+        generateScripts.add(GenerateScript(Msg.text(StrKey.SCRIPT_DEFAULT_NAME)))
         selectedGenerateIndex = 0
         generateTablesProcessed = 0
         generateError = null
@@ -6618,7 +6732,7 @@ class DatabaseBrowserState(
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
-                        errorMessage = resp.error.ifBlank { "加载数据库失败" }
+                        errorMessage = resp.error.ifBlank { Msg.text(StrKey.LOAD_DATABASES_FAILED) }
                         databases = emptyList()
                     } else {
                         errorMessage = null
@@ -6671,7 +6785,7 @@ class DatabaseBrowserState(
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
-                        _tableLoadError[database] = resp.error.ifBlank { "加载表失败" }
+                        _tableLoadError[database] = resp.error.ifBlank { Msg.text(StrKey.LOAD_TABLES_FAILED) }
                     } else {
                         _tablesByDatabase[database] =
                             resp.table.list.itemsList.map { it.name }
@@ -6734,9 +6848,9 @@ class DatabaseBrowserState(
                         }
                     }.getOrNull()
                     when {
-                        resp == null -> failure = failure ?: "引擎无响应"
+                        resp == null -> failure = failure ?: Msg.text(StrKey.ENGINE_NO_RESPONSE)
                         !resp.success ->
-                            failure = failure ?: resp.error.ifBlank { "加载失败" }
+                            failure = failure ?: resp.error.ifBlank { Msg.text(StrKey.LOAD_FAILED) }
                         else -> {
                             // 五类的 list 元素都是消息（视图带 definition、触发器带
                             // timing/event 等），树里只显示 `.name`；其余字段留给
@@ -6913,7 +7027,7 @@ class DatabaseBrowserState(
                     _tableObjectError.remove("$slot::${kind.name}")
                 } else {
                     _tableObjectError["$slot::${kind.name}"] =
-                        resp?.error?.takeIf { it.isNotBlank() } ?: "加载失败"
+                        resp?.error?.takeIf { it.isNotBlank() } ?: Msg.text(StrKey.LOAD_FAILED)
                 }
                 loadingTableObjects.remove(slot to kind)
             }
@@ -7059,7 +7173,7 @@ class DatabaseBrowserState(
             result.fold(
                 onSuccess = { resp ->
                     if (!resp.success) {
-                        tab.error = resp.error.ifBlank { "读取失败" }
+                        tab.error = resp.error.ifBlank { Msg.text(StrKey.READ_FAILED) }
                         tab.columns = emptyList()
                         tab.rows = emptyList()
                     } else {

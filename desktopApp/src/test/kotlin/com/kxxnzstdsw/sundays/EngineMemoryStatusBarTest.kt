@@ -2,11 +2,11 @@ package com.kxxnzstdsw.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -15,10 +15,11 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runComposeUiTest
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.settings.formatBytes
-import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Test
 
 /**
  * 底部 JVM 堆占用状态栏 —— 比例算法、格式化、渲染与失效降级。
@@ -90,19 +91,21 @@ class EngineMemoryStatusBarTest {
     /** 渲染空态（无 sheet）下的屏 —— 状态栏必须**照样出现**。 */
     private fun ComposeUiTest.renderBar(probe: suspend () -> EngineMemory?) {
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = emptyList(),
-                    activeSheetId = null,
-                    connections = emptyList(),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    memoryProbe = probe,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = emptyList(),
+                        activeSheetId = null,
+                        connections = emptyList(),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        memoryProbe = probe,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
@@ -112,7 +115,7 @@ class EngineMemoryStatusBarTest {
         // 探针挂起不返回：断言「还没有数据」这个初始态本身是可见且不崩的
         renderBar(probe = { kotlinx.coroutines.awaitCancellation() })
 
-        onNodeWithText("堆内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).assertIsDisplayed()
         onNodeWithText("— / —").assertIsDisplayed()
     }
 
@@ -150,7 +153,7 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 2_000) {
             onAllNodesWithText("— / —").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("堆内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).assertIsDisplayed()
         onNodeWithText("— / —").assertIsDisplayed()
     }
 
@@ -172,21 +175,23 @@ class EngineMemoryStatusBarTest {
         // memoryProbe == null 是「调用方不要这个功能」的显式表达（如 AddConnectionDialog 场景），
         // 此时不应渲染任何内存文字
         setContent {
-            MaterialTheme {
-                DatabaseBrowserScreen(
-                    sheets = emptyList(),
-                    activeSheetId = null,
-                    connections = emptyList(),
-                    onSelectSheet = {},
-                    onCloseSheet = {},
-                    onAddSheet = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+            ProvideTestStrings {
+                MaterialTheme {
+                    DatabaseBrowserScreen(
+                        sheets = emptyList(),
+                        activeSheetId = null,
+                        connections = emptyList(),
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
-        onNodeWithText("堆内存").assertDoesNotExist()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).assertDoesNotExist()
     }
 
     // =========================================================================
@@ -207,10 +212,10 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("JVM 内存").assertDoesNotExist()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertDoesNotExist()
 
-        onNodeWithText("堆内存").performClick()
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
     }
 
     @Test
@@ -221,7 +226,7 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("堆内存").performClick()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
 
         listOf("堆已用", "堆已分配", "堆上限", "堆空闲").forEach {
             onNodeWithText(it).assertIsDisplayed()
@@ -236,7 +241,7 @@ class EngineMemoryStatusBarTest {
     fun `the popup shows a dash per row before the first reading`() = runComposeUiTest {
         // 空面板会让用户以为程序坏了；逐行「—」至少说明「探针还没回来」
         renderBar(probe = { kotlinx.coroutines.awaitCancellation() })
-        onNodeWithText("堆内存").performClick()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
 
         listOf("堆已用", "堆已分配", "堆上限", "堆空闲").forEach {
             onNodeWithText(it).assertIsDisplayed()
@@ -250,11 +255,11 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("堆内存").performClick()
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
 
-        onNodeWithText("堆内存").performClick()
-        onNodeWithText("JVM 内存").assertDoesNotExist()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertDoesNotExist()
     }
 
     @Test
@@ -266,7 +271,7 @@ class EngineMemoryStatusBarTest {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
         val root = onRoot().fetchSemanticsNode().boundsInRoot
-        val bar = onNodeWithText("堆内存").fetchSemanticsNode().boundsInRoot
+        val bar = onNodeWithText(zh(StrKey.HEAP_MEMORY)).fetchSemanticsNode().boundsInRoot
 
         assertTrue(
             bar.width < root.width / 2,
@@ -287,7 +292,7 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("堆内存").performClick()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
 
         val root = onRoot().fetchSemanticsNode().boundsInRoot
         // 量面板本身而不是里面的文字节点 —— 后者恒然很窄，量它等于没测
@@ -300,7 +305,7 @@ class EngineMemoryStatusBarTest {
         // 右对齐：右缘与状态栏内容右缘一致（窗口右 10dp）
         assertEquals(root.right - 10f, panel.right, absoluteTolerance = 1.0f)
         // 贴在状态栏上沿，不压住状态栏
-        val bar = onNodeWithText("堆内存").fetchSemanticsNode().boundsInRoot
+        val bar = onNodeWithText(zh(StrKey.HEAP_MEMORY)).fetchSemanticsNode().boundsInRoot
         assertTrue(
             panel.bottom <= bar.top + 1f,
             "面板底部 ${panel.bottom} 应在状态栏顶部 ${bar.top} 之上",
@@ -315,15 +320,15 @@ class EngineMemoryStatusBarTest {
         }
 
         // 指针停在状态栏上点击 —— 此时面板**不该**关（指针还在其中之一）
-        onNodeWithText("堆内存").performMouseInput { moveTo(center) }.performClick()
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performMouseInput { moveTo(center) }.performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
         mainClock.advanceTimeBy(1_000)
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
 
         // 指针移到窗口左上角：状态栏与面板都不在指针下，宽限期过后应自动收起
         onRoot().performMouseInput { moveTo(Offset(4f, 4f)) }
         waitUntil(timeoutMillis = 5_000) {
-            onAllNodesWithText("JVM 内存").fetchSemanticsNodes().isEmpty()
+            onAllNodesWithText(zh(StrKey.JVM_MEMORY)).fetchSemanticsNodes().isEmpty()
         }
     }
 
@@ -335,13 +340,13 @@ class EngineMemoryStatusBarTest {
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("512M / 2G").fetchSemanticsNodes().isNotEmpty()
         }
-        onNodeWithText("堆内存").performMouseInput { moveTo(center) }.performClick()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performMouseInput { moveTo(center) }.performClick()
         val panel = onNodeWithTag(MEMORY_DETAIL_PANEL_TAG).fetchSemanticsNode().boundsInRoot.center
 
         onRoot().performMouseInput { moveTo(panel) }
         // 远超过宽限期也不该关
         mainClock.advanceTimeBy(2_000)
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
     }
 
     /**
@@ -362,25 +367,25 @@ class EngineMemoryStatusBarTest {
         }
 
         // 1) 打开面板并把指针**移进面板**（此时面板悬停标志 = true）
-        onNodeWithText("堆内存").performMouseInput { moveTo(center) }.performClick()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performMouseInput { moveTo(center) }.performClick()
         val panelCenter = onNodeWithTag(MEMORY_DETAIL_PANEL_TAG).fetchSemanticsNode().boundsInRoot.center
         onRoot().performMouseInput { moveTo(panelCenter) }
 
         // 2) 用面板上的「×」关闭 —— 这是唯一会让指针离开面板边界的关闭方式，
         //    节点随之消失，Exit 永远等不到
-        onNodeWithContentDescription("关闭内存详情").performClick()
-        onNodeWithText("JVM 内存").assertDoesNotExist()
+        onNodeWithContentDescription(zh(StrKey.CLOSE_MEMORY_DETAIL)).performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertDoesNotExist()
 
         // 3) 指针彻底移开
         onRoot().performMouseInput { moveTo(Offset(4f, 4f)) }
 
         // 4) 重新打开再移开：若悬停标志已卡死为 true，这里就永远关不掉
-        onNodeWithText("堆内存").performClick()
-        onNodeWithText("JVM 内存").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.HEAP_MEMORY)).performClick()
+        onNodeWithText(zh(StrKey.JVM_MEMORY)).assertIsDisplayed()
         onRoot().performMouseInput { moveTo(Offset(4f, 4f)) }
 
         waitUntil(timeoutMillis = 5_000) {
-            onAllNodesWithText("JVM 内存").fetchSemanticsNodes().isEmpty()
+            onAllNodesWithText(zh(StrKey.JVM_MEMORY)).fetchSemanticsNodes().isEmpty()
         }
     }
 }

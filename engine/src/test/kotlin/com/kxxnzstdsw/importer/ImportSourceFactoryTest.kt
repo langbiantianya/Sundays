@@ -1,20 +1,50 @@
 package com.kxxnzstdsw.importer
 
 import com.kxxnzstdsw.grpc.ImportRunRequest
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.io.TempDir
+import com.kxxnzstdsw.i18n.AppLanguage
+import com.kxxnzstdsw.i18n.LanguageScope
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.Test
 
 /**
  * ImportSourceFactory 单元测试 —— 只用临时文件，不连接任何数据库。
  */
 class ImportSourceFactoryTest {
+
+    /**
+     * 把进程级默认语言钉死成简体中文 —— 本类断言的是**错误消息的中文子串**。
+     *
+     * 这些消息现在经 `Msg.text(StrKey.…)` 查表得到，语言取自 `LanguageScope`；
+     * 而 `LanguageScope` 没设时回落到**运行测试的机器**的 `Locale.getDefault()`。
+     * 不钉住的话，下面那些 `contains("只能调用一次")` 之类的断言就只是在断言
+     * 「这台开发机是中文」—— 换一台英文机器跑，同一批用例会集体转红，
+     * 而红的原因与被测代码毫无关系。
+     *
+     * 用**进程级**默认而不是 `withLanguage { }` 包每个断言：这些类里断言很多，
+     * 逐个包会把真正的断言体埋进噪声里；进程级只需在每个用例前后各设一次，
+     * 且 `@AfterEach` 会还原，不给相邻的测试留脏值。
+     */
+    @BeforeEach
+    fun pinChineseForMessages() {
+        previousLanguage = LanguageScope.processLanguageOrNull()
+        LanguageScope.setProcessLanguage(AppLanguage.ZH_HANS)
+    }
+
+    @AfterEach
+    fun restoreLanguage() {
+        LanguageScope.setProcessLanguage(previousLanguage)
+    }
+
+    private var previousLanguage: AppLanguage? = null
 
     private fun write(dir: Path, name: String, content: String, charset: Charset = StandardCharsets.UTF_8): File {
         val file = dir.resolve(name).toFile()

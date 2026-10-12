@@ -1,6 +1,8 @@
 package com.kxxnzstdsw.importer
 
 import com.kxxnzstdsw.grpc.ImportRunRequest
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -39,12 +41,12 @@ object ImportSourceFactory {
      */
     fun open(req: ImportRunRequest, targetColumns: List<String> = emptyList()): ImportSource {
         val path = req.filePath
-        require(path.isNotBlank()) { "导入文件路径不能为空: file_path" }
+        require(path.isNotBlank()) { Msg.text(StrKey.IMPORT_PATH_EMPTY) }
 
         val format = ImportFormat.parse(req.format)
         val file = File(path)
-        require(file.isFile) { "导入文件不存在或不是普通文件: $path" }
-        require(file.canRead()) { "导入文件不可读: $path" }
+        require(file.isFile) { Msg.format(StrKey.IMPORT_FILE_NOT_FOUND, path) }
+        require(file.canRead()) { Msg.format(StrKey.IMPORT_FILE_UNREADABLE, path) }
 
         val charset = resolveCharset(req.encoding)
         val delimiter = req.delimiter.firstOrNull() ?: DEFAULT_DELIMITER
@@ -69,9 +71,9 @@ object ImportSourceFactory {
         return try {
             Charset.forName(encoding.trim())
         } catch (e: IllegalCharsetNameException) {
-            throw IllegalArgumentException("导入文件编码名非法: '$encoding' — ${e.message}", e)
+            throw IllegalArgumentException(Msg.format(StrKey.IMPORT_ENCODING_INVALID, encoding, e.message), e)
         } catch (e: UnsupportedCharsetException) {
-            throw IllegalArgumentException("JVM 不支持的导入文件编码: '$encoding'", e)
+            throw IllegalArgumentException(Msg.format(StrKey.IMPORT_ENCODING_UNSUPPORTED, encoding), e)
         }
     }
 
@@ -90,7 +92,7 @@ object ImportSourceFactory {
         BufferedReader(InputStreamReader(BomStrippingInputStream(FileInputStream(file)), charset))
     } catch (e: IOException) {
         // canRead() 只能挡住大部分情况，权限在检查之后被改、或路径指向目录仍可能落到这里
-        throw IllegalArgumentException("导入文件无法打开: $path — ${e.message}", e)
+        throw IllegalArgumentException(Msg.format(StrKey.IMPORT_FILE_OPEN_FAILED, path, e.message), e)
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.dialect
 
+import com.kxxnzstdsw.i18n.Msg
+import com.kxxnzstdsw.i18n.StrKey
 import java.sql.Connection
 
 /**
@@ -541,7 +543,7 @@ interface DatabaseDialect {
      * @param schema Schema 名称（为空使用默认 schema）
      */
     suspend fun listViews(conn: Connection, schema: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("$driverName 不支持视图列表")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_VIEW_LIST, driverName))
     }
 
     /**
@@ -550,21 +552,21 @@ interface DatabaseDialect {
      * @param definition 视图定义 SQL（如 "SELECT id, name FROM users"）
      */
     suspend fun createView(conn: Connection, viewName: String, definition: String): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持创建视图")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_CREATE_VIEW, driverName))
     }
 
     /**
      * 删除视图
      */
     suspend fun dropView(conn: Connection, viewName: String, ifExists: Boolean): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持删除视图")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_DROP_VIEW, driverName))
     }
 
     /**
      * 获取视图完整 DDL
      */
     suspend fun getViewDDL(conn: Connection, viewName: String, schema: String): String {
-        throw UnsupportedOperationException("$driverName 不支持视图 DDL")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_VIEW_DDL, driverName))
     }
 
     // endregion
@@ -575,7 +577,7 @@ interface DatabaseDialect {
      * 列出表的所有索引
      */
     suspend fun listIndexes(conn: Connection, tableName: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("$driverName 不支持索引列表")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_INDEX_LIST, driverName))
     }
 
     /**
@@ -591,7 +593,7 @@ interface DatabaseDialect {
         unique: Boolean,
         ifNotExists: Boolean = false
     ): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持创建索引")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_CREATE_INDEX, driverName))
     }
 
     /**
@@ -600,7 +602,7 @@ interface DatabaseDialect {
      * @param ifExists `true` → `DROP INDEX IF EXISTS <name>`（索引不存在时不抛错）
      */
     suspend fun dropIndex(conn: Connection, indexName: String, tableName: String?, ifExists: Boolean = false): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持删除索引")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_DROP_INDEX, driverName))
     }
 
     // endregion
@@ -611,7 +613,7 @@ interface DatabaseDialect {
      * 列出表的所有外键
      */
     suspend fun listForeignKeys(conn: Connection, tableName: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("$driverName 不支持外键列表")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_FOREIGN_KEY_LIST, driverName))
     }
 
     /**
@@ -627,14 +629,14 @@ interface DatabaseDialect {
         onDelete: String?,
         onUpdate: String?
     ): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持添加外键")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_ADD_FOREIGN_KEY, driverName))
     }
 
     /**
      * 删除外键
      */
     suspend fun dropForeignKey(conn: Connection, tableName: String, fkName: String, ifExists: Boolean = false): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持删除外键")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_DROP_FOREIGN_KEY, driverName))
     }
 
     // endregion
@@ -645,14 +647,14 @@ interface DatabaseDialect {
      * 列出 schema 下的所有触发器
      */
     suspend fun listTriggers(conn: Connection, schema: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("$driverName 不支持触发器列表")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_TRIGGER_LIST, driverName))
     }
 
     /**
      * 获取触发器完整 DDL
      */
     suspend fun getTriggerDDL(conn: Connection, triggerName: String, schema: String): String {
-        throw UnsupportedOperationException("$driverName 不支持触发器 DDL")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_TRIGGER_DDL, driverName))
     }
 
     // endregion
@@ -663,14 +665,14 @@ interface DatabaseDialect {
      * 重命名表
      */
     suspend fun renameTable(conn: Connection, oldName: String, newName: String): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持表重命名")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_RENAME_TABLE, driverName))
     }
 
     /**
      * 清空表（TRUNCATE）
      */
     suspend fun truncateTable(conn: Connection, tableName: String): Boolean {
-        throw UnsupportedOperationException("$driverName 不支持清空表")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_TRUNCATE, driverName))
     }
 
     // endregion
@@ -681,7 +683,7 @@ interface DatabaseDialect {
      * 返回 SQL 的执行计划（每行一个 map，键为列名）
      */
     suspend fun explainSQL(conn: Connection, sql: String): List<Map<String, String>> {
-        throw UnsupportedOperationException("$driverName 不支持 EXPLAIN")
+        throw UnsupportedOperationException(Msg.format(StrKey.DIALECT_NO_EXPLAIN, driverName))
     }
 
     // endregion

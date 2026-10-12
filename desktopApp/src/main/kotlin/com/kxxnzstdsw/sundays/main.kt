@@ -34,6 +34,7 @@ import com.kxxnzstdsw.engine.IdbEngine
 import com.kxxnzstdsw.grpc.Action
 import com.kxxnzstdsw.grpc.Category
 import com.kxxnzstdsw.grpc.connectionConfig
+import com.kxxnzstdsw.i18n.LanguageScope
 import com.kxxnzstdsw.sundays.connection.AddConnectionDialog
 import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
 import com.kxxnzstdsw.sundays.connection.ConnectionStatus
@@ -44,6 +45,7 @@ import com.kxxnzstdsw.sundays.settings.SettingsScreen
 import com.kxxnzstdsw.sundays.settings.SystemInfo
 import com.kxxnzstdsw.sundays.settings.SystemInfoState
 import com.kxxnzstdsw.sundays.ui.AppearanceState
+import com.kxxnzstdsw.sundays.ui.ProvideStrings
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
 import com.kxxnzstdsw.sundays.ui.rememberPersistentAppearanceState
 
@@ -93,12 +95,27 @@ fun main() = application {
         // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
         // 会出现「按钮变了、界面没变」。见 AppearanceState 的 KDoc。
         val appearance = rememberPersistentAppearanceState()
+        // 把界面语言同步给**同 JVM 内的引擎**（Direct 模式）。
+        //
+        // 为什么界面语言还要额外喂引擎一次：界面文案走 CompositionLocal，与引擎无关；
+        // 但引擎抛出的错误消息是**原样上屏**的，它读的是 `LanguageScope`。不设的话
+        // 引擎只会按机器 locale 猜 —— 界面是德语、报错是中文。
+        //
+        // 放在 `LaunchedEffect` 而不是组合体内直接赋值：`LanguageScope` 的进程级默认是
+        // 普通字段，直接赋值会在每次重组时都执行一遍（且从组合中写全局状态本身就不该做）。
+        LaunchedEffect(appearance.language) {
+            LanguageScope.setProcessLanguage(appearance.language)
+        }
         SundaysTheme(
             darkTheme = appearance.resolvedDark(),
             palette = appearance.palette,
             // 紧凑档与配色 / 明暗正交：只改 LocalDensity 覆盖，故照样在主题最外层消费
             compact = appearance.compactMode,
         ) {
+            // 文案表注入点 —— 必须在**所有**界面之上（含引导页），否则引导页读不到
+            // 用户刚选的语言，第一次进来会闪一下错误语言。刻意放在 `SundaysTheme`
+            // **内部**：引导页渲染在主题内部正是为了让外观改动即时重绘，语言同理。
+            ProvideStrings(appearance.language) {
             // 首次启动引导 —— 放在 `SundaysTheme` **内部**是刻意的：这样每一次点选都会立刻
             // 重绘整页，用户看到的就是真实效果，不需要「预览图 + 应用按钮」那套。
             //
@@ -118,9 +135,12 @@ fun main() = application {
                     dark = appearance.resolvedDark(),
                     compactMode = appearance.compactMode,
                     onCompactModeChange = appearance::selectCompactMode,
+                    language = appearance.language,
+                    onLanguageChange = appearance::selectLanguage,
                     onFinish = appearance::completeOnboarding,
                     modifier = Modifier.fillMaxSize(),
                 )
+            }
             }
         }
     }
@@ -421,6 +441,8 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                 onCompactModeChange = appearance::selectCompactMode,
                 // 「重新打开外观引导」入口 —— 以浮层展示，不是替换当前屏
                 onOpenOnboarding = { onboardingReplay = true },
+                language = appearance.language,
+                onLanguageChange = appearance::selectLanguage,
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.DATABASE -> {
@@ -539,6 +561,10 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
                 dark = appearance.resolvedDark(),
                 compactMode = appearance.compactMode,
                 onCompactModeChange = appearance::selectCompactMode,
+                // 重进引导页时带上当前语言与同一个写回入口 —— 在这里改语言
+                // 与在设置页改语言落到完全相同的持久化路径（AppearanceState.selectLanguage）。
+                language = appearance.language,
+                onLanguageChange = appearance::selectLanguage,
                 // 重进时**不**碰 onboardingCompleted —— 它早就是 true；
                 // 这里只是收起浮层，回调的每一次外观变更各自已经落盘了。
                 onFinish = { onboardingReplay = false },

@@ -1,5 +1,7 @@
 package com.kxxnzstdsw.sundays.editor
 
+import com.kxxnzstdsw.i18n.StrKey
+
 /**
  * 造数沙箱注入的宿主函数 —— 补全候选的**权威清单**。
  *
@@ -33,22 +35,27 @@ object GenerateHelpers {
     /**
      * 宿主函数候选（按展示顺序排列，**不要**在此处排序 —— 弹层按传入顺序展示）。
      *
-     * `detail` 写成紧凑签名：弹层宽度有限，完整参数名塞不下，够用即可。
+     * 签名写成紧凑形式：弹层宽度有限，完整参数名塞不下，够用即可。
+     *
+     * 带中文的签名走 [CompletionItem.detailKey] 而不是 `detail` —— 函数名（`random_date`）
+     * 是不变量，参数名（`起, 止`）不是。把整条塞进 `detail` 的话，德语界面里就会蹦出
+     * `random_date(起, 止)`。纯 ASCII 的签名（`random_int(min, max)`）没有这个问题，
+     * 保持字符串字面量即可，不必浪费一个键位。
      */
     val completions: List<CompletionItem> = listOf(
-        CompletionItem("insert", CompletionKind.BUILTIN, "insert(表名, {列=值})"),
-        CompletionItem("lastId", CompletionKind.BUILTIN, "lastId() → 自增ID"),
+        CompletionItem("insert", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_INSERT),
+        CompletionItem("lastId", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_LAST_ID),
         CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
         CompletionItem("random_float", CompletionKind.BUILTIN, "random_float(min, max)"),
-        CompletionItem("random_string", CompletionKind.BUILTIN, "random_string(长度≤256)"),
+        CompletionItem("random_string", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_STRING),
         CompletionItem("random_name", CompletionKind.BUILTIN, "random_name()"),
         CompletionItem("random_email", CompletionKind.BUILTIN, "random_email()"),
         CompletionItem("random_phone", CompletionKind.BUILTIN, "random_phone()"),
-        CompletionItem("random_date", CompletionKind.BUILTIN, "random_date(起, 止)"),
-        CompletionItem("random_datetime", CompletionKind.BUILTIN, "random_datetime(起, 止)"),
+        CompletionItem("random_date", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATE),
+        CompletionItem("random_datetime", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATETIME),
         CompletionItem("random_time", CompletionKind.BUILTIN, "random_time()"),
         CompletionItem("random_uuid", CompletionKind.BUILTIN, "random_uuid()"),
-        CompletionItem("random_enum", CompletionKind.BUILTIN, "random_enum({候选…})"),
+        CompletionItem("random_enum", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_ENUM),
     )
 
     /**

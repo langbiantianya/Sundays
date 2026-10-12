@@ -7,6 +7,8 @@ version = "0.1.0"
 
 dependencies {
     implementation(project(":api"))
+    // 「Excel 文件不存在: …」这条界面可见报错由文案表提供语言。
+    implementation(project(":i18n"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.slf4j.api)
 

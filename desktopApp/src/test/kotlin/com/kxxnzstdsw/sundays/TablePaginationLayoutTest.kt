@@ -1,13 +1,15 @@
 package com.kxxnzstdsw.sundays
 
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import com.kxxnzstdsw.i18n.PluralStrKey
+import com.kxxnzstdsw.i18n.StrKey
 import com.kxxnzstdsw.sundays.table.DataTable
 import com.kxxnzstdsw.sundays.table.PageSize
 import com.kxxnzstdsw.sundays.table.TABLE_BODY_TAG
@@ -15,9 +17,9 @@ import com.kxxnzstdsw.sundays.table.TABLE_PAGINATION_TAG
 import com.kxxnzstdsw.sundays.table.TableColumn
 import com.kxxnzstdsw.sundays.table.TableRow
 import com.kxxnzstdsw.sundays.ui.SundaysTheme
-import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Test
 
 /**
  * 分页底栏的**布局契约** —— 窄容器下不得把按钮标签压成竖排，更不得把按钮压没。
@@ -84,12 +86,14 @@ class TablePaginationLayoutTest {
     /** 在 [widthPx] 宽的测试窗口里渲染一张 3 页的表。 */
     private fun ComposeUiTest.renderTable() {
         setContent {
-            SundaysTheme {
-                DataTable(
-                    columns = columns(),
-                    rows = manyRows(),
-                    pageSize = PageSize.S100,
-                )
+            ProvideTestStrings {
+                SundaysTheme {
+                    DataTable(
+                        columns = columns(),
+                        rows = manyRows(),
+                        pageSize = PageSize.S100,
+                    )
+                }
             }
         }
         waitForIdle()
@@ -174,20 +178,20 @@ class TablePaginationLayoutTest {
             // 紧凑档隐藏「首页 / 末页 / 共 N 条」：结果集通常几十页，首末页几乎不用；
             // 总条数在表头上下文里也能推知。牺牲描述、保留操作。
             assertEquals(
-                0, onAllNodesWithText("首页").fetchSemanticsNodes().size,
+                0, onAllNodesWithText(zh(StrKey.FIRST_PAGE)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「首页」——宁可少两个低频按钮，也不要把标签压变形",
             )
             assertEquals(
-                0, onAllNodesWithText("末页").fetchSemanticsNodes().size,
+                0, onAllNodesWithText(zh(StrKey.LAST_PAGE)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「末页」",
             )
             assertEquals(
-                0, onAllNodesWithText("共 250 条").fetchSemanticsNodes().size,
+                0, onAllNodesWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「共 N 条」",
             )
             // 翻页本身必须完好 —— 不能为了排版把真正在用的功能砍掉
-            onNodeWithText("上一页").assertIsDisplayed()
-            onNodeWithText("下一页").assertIsDisplayed()
+            onNodeWithText(zh(StrKey.PREV_PAGE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsDisplayed()
             onNodeWithText("1 / 3").assertIsDisplayed()
         }
 
@@ -251,11 +255,11 @@ class TablePaginationLayoutTest {
     fun `wide containers keep every jump`() = runDesktopComposeUiTest(width = 1024, height = 400) {
         renderTable()
 
-        onNodeWithText("首页").assertIsDisplayed()
-        onNodeWithText("上一页").assertIsDisplayed()
-        onNodeWithText("下一页").assertIsDisplayed()
-        onNodeWithText("末页").assertIsDisplayed()
-        onNodeWithText("共 250 条").assertIsDisplayed()
+        onNodeWithText(zh(StrKey.FIRST_PAGE)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.PREV_PAGE)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsDisplayed()
+        onNodeWithText(zh(StrKey.LAST_PAGE)).assertIsDisplayed()
+        onNodeWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).assertIsDisplayed()
 
         val bodyWidthDp = tableBodyWidthDp()
         assertTrue(
