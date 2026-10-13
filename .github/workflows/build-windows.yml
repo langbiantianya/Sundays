@@ -159,11 +159,18 @@ jobs:
       # 原始日志，而那个接口要求仓库 admin 权限。结果就是 CI 一红，
       # 报错原文对没有 admin 的人不可见 —— 只能靠猜。
       #
-      # 绕法：把日志末尾几行用 `::error::` 工作流命令转成 **annotation**。
+      # 绕法：把报错用 `::error::` 工作流命令转成 **annotation**。
       # annotation 挂在 check-run 上，走 /check-runs/{id}/annotations 接口，
       # 那个接口公开可读，而且不受「步骤日志过大」的限制。
-      # 代价是数量有上限（每步每级别 10 条、每 job 50 条），所以只取末尾 8 行 ——
-      # 报错几乎总在最后，且真正有用的那几行也在这里。
+      # 代价是数量有上限（每步每级别 10 条、每 job 50 条），所以必须挑着发。
+      #
+      # 挑的是 Gradle 固定的报错骨架：
+      #     * What went wrong:
+      #     <真正的原因>
+      #     * Try:
+      # 只要 sed 出 `* What went wrong:` 到 `* Try:` 之间那一段。
+      # 上一版直接取日志末尾 8 行，结果只捞到 `* Try:` 那段模板话，
+      # 真正的原因全在它上面几十行 —— 白跑一轮。
       # -----------------------------------------------------------------------
       - name: 失败原因（匿名可读）
         if: failure()
@@ -173,9 +180,20 @@ jobs:
             echo "::error::没有 gradle-build.log，打包步骤没跑到写日志那一步"
             exit 0
           fi
-          echo "===== gradle 日志末尾 40 行 ====="
-          tail -n 40 gradle-build.log
-          echo "===== 末尾 8 行已转成 annotation ====="
-          tail -n 8 gradle-build.log | while IFS= read -r line; do
-            echo "::error::$line"
-          done
+          # Gradle 报错骨架；捞不到就退回日志末尾 20 行（shell 自身失败等非 Gradle 错误）
+          block="$(sed -n '/^\* What went wrong:/,/^\* Try:/p' gradle-build.log)"
+          if [ -z "$block" ]; then
+            echo "（没找到 * What went wrong * 骨架，改用日志末尾 20 行）"
+            block="$(tail -n 20 gradle-build.log)"
+          fi
+          echo "===== 失败详情 ====="
+          echo "$block"
+          echo "===== 关键行已转成 annotation ====="
+          # `>` 开头的是 Gradle 给出的原因；Caused by / Exception 是异常链，
+          # 三类一起收，取最后 8 条（annotation 上限 10 条，留点余量）
+          printf '%s\n' "$block" \
+            | grep -E '^(>|Caused by:)|[Ee]xception|[Ee]rror' \
+            | tail -n 8 \
+            | while IFS= read -r line; do
+                echo "::error::$line"
+              done
