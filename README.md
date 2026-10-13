@@ -472,6 +472,30 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 ---
 
+## 打包 Windows 安装包
+
+```bash
+./gradlew :desktopApp:packageMsi            # → desktopApp/build/compose/binaries/main/msi/*.msi  （约 280 MB）
+./gradlew :desktopApp:createDistributable   # → .../binaries/main/app/                          （约 353 MB，便携版）
+```
+
+推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会自动打这两个产物并作为 artifact 上传
+（工作流见 [`.github/workflows/build-windows.yml`](./.github/workflows/build-windows.yml)）。
+
+三点值得知道：
+
+- **便携版里的 exe 不是单文件。** `com.kxxnzstdsw.sundays.exe` 是 jpackage 的启动器，
+  依赖同级的 `app/` 与 `runtime/` 目录；单独拷走会报缺 DLL。要分发就分发整个目录。
+- **CI 里会把 Gradle 分发源换回官方。** 仓库的 `gradle-wrapper.properties` 指向腾讯云镜像，
+  那是给国内开发机用的；Actions runner 在境外，从那里拉两百多 MB 的 `-all.zip` 不稳。
+  这个替换只在 CI 生效，不改仓库文件。依赖仓库的 aliyun 镜像则保留 —— 它在境外同样可达。
+- **JDK 钉在 25。** 仓库没有 `jvmToolchain` 声明，构建跟着跑它的 JDK 走，
+  所以 CI 的 JDK 同时决定了产物的字节码目标与 jlink 运行时版本。
+
+> 安装包目前**未签名**，装的时候 Windows SmartScreen 会拦一下。
+
+---
+
 ## 运行测试
 
 ```bash
