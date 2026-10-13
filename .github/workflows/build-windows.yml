@@ -39,6 +39,9 @@ jobs:
             os: windows-latest
             jdk: temurin
             jdkArch: x64
+            # PE header 里的 machine 字段：0x8664 = x64，0xAA64 = ARM64。
+            # 留给「校验产物架构」那一步断言用。
+            peMachine: '0x8664'
           - arch: arm64
             os: windows-11-arm
             # ⚠️ 这里**不能**用 temurin。Temurin 至今没有发布 Windows ARM64 的
@@ -54,6 +57,7 @@ jobs:
             # architecture 默认值是 x64。ARM 腿必须显式给 aarch64
             # （arm64 是它的别名，会被规范化成 aarch64）。
             jdkArch: aarch64
+            peMachine: '0xAA64'
 
     steps:
       - uses: actions/checkout@v7
@@ -122,6 +126,63 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew.bat :desktopApp:packageMsi :desktopApp:createDistributable 2>&1 | tee gradle-build.log
+
+      # 产物架构自检：矩阵里写了 arm64，不代表包里真是 arm64 的东西。
+      # 这一步把「应该是」变成「验过」，同时挡住以后谁把坐标写死成 x64 的回归。
+      #
+      # 验两处，两处都必须对：
+      #   1. jlink 出来的 runtime/bin/server/jvm.dll —— PE header 的 machine 字段
+      #   2. app 目录里那份 skiko 原生 dll（skiko-windows-*.dll）
+      # 只验第 1 处是不够的：jvm 对只说明 **JDK** 对，说明不了 Compose 有没有
+      # 按 os.arch 选到对应的 skiko native 库 —— 而那才是这次 ARM 构建的核心风险点。
+      # 第 2 处直接读那个 dll 的 machine 字段，比比对文件名可靠，
+      # 也不必猜 ARM 端它到底叫什么。
+      #
+      # 故意放在上传**之前**：架构不对的包不该产出成可下载的产物。
+      - name: 校验产物架构
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '${{ matrix.peMachine }}'
+
+          function Get-PeMachine([string]$path) {
+            $b = [System.IO.File]::ReadAllBytes($path)
+            # PE 签名在 0x3C 处存的是 e_lfanew，machine 紧跟在 PE\0\0 之后 4 字节
+            $peOff = [BitConverter]::ToInt32($b, 0x3C)
+            # 必须带上 0x 前缀，否则拿到的是 '8664'，跟 matrix 里的 '0x8664'
+            # 比不相等 —— 架构明明对也会判失败（这个坑本地实跑才暴露出来）
+            return '0x{0:X4}' -f [BitConverter]::ToUInt16($b, $peOff + 4)
+          }
+
+          $fail = @()
+          $roots = Get-ChildItem 'desktopApp/build/compose/binaries/main/app' -Directory
+          foreach ($r in $roots) {
+            $jvm = Join-Path $r.FullName 'runtime/bin/server/jvm.dll'
+            if (Test-Path $jvm) {
+              $m = Get-PeMachine $jvm
+              Write-Host "jvm.dll PE machine = 0x$m（期望 $expected）"
+              if ($m -ne $expected) { $fail += "jvm.dll 架构不对：0x$m != $expected" }
+            } else {
+              $fail += "找不到 $jvm"
+            }
+
+            $dll = Get-ChildItem (Join-Path $r.FullName 'app') -Filter 'skiko-windows-*.dll' -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($dll) {
+              $m2 = Get-PeMachine $dll.FullName
+              Write-Host "$($dll.Name) PE machine = 0x$m2"
+              if ($m2 -ne $expected) { $fail += "skiko 原生库架构不对：$($dll.Name) 是 0x$m2 != $expected" }
+            } else {
+              $fail += 'app 目录里找不到 skiko-windows-*.dll'
+            }
+          }
+          if ($roots.Count -eq 0) { $fail += 'app-image 目录是空的' }
+
+          if ($fail.Count -gt 0) {
+            $fail | ForEach-Object { Write-Host "::error::$_" }
+            exit 1
+          }
+          Write-Host "架构自检通过：$expected"
 
       - uses: actions/upload-artifact@v7
         with:
