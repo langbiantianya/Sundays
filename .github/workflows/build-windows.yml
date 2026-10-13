@@ -113,8 +113,15 @@ jobs:
       # app/ 与 runtime/ 目录，单独把 exe 拷走跑不起来（会报缺 DLL）。
       # 所以上传整个目录，不 zip 也不挑文件 —— 免得有人下到一半才发现少东西。
       # 交给 upload-artifact 自己压缩，也避开了 Compress-Archive 在超长路径上的老毛病。
+      #
+      # pipefail 必须显式开：Gradle 的输出过了 tee 之后，管道最后一环的退出码
+      # 成了 tee 的 0，不开 pipefail 的话**构建失败会被当成成功**，
+      # 然后下一步 upload-artifact 因 if-no-files-found: error 才报一个驴唇不对马嘴的错。
       - name: 打包
-        run: .\gradlew.bat :desktopApp:packageMsi :desktopApp:createDistributable
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew.bat :desktopApp:packageMsi :desktopApp:createDistributable 2>&1 | tee gradle-build.log
 
       - uses: actions/upload-artifact@v7
         with:
@@ -143,3 +150,32 @@ jobs:
           path: desktopApp/build/compose/logs/
           if-no-files-found: ignore
           retention-days: 7
+
+      # -----------------------------------------------------------------------
+      # 这一步存在的唯一理由是**让失败可诊断**，两条腿都挂也无所谓。
+      #
+      # 问题的根源：GitHub 网页版会把大的步骤日志整个截断，显示成一句
+      # 「This step has been truncated due to its large size」；想看原文只能下载
+      # 原始日志，而那个接口要求仓库 admin 权限。结果就是 CI 一红，
+      # 报错原文对没有 admin 的人不可见 —— 只能靠猜。
+      #
+      # 绕法：把日志末尾几行用 `::error::` 工作流命令转成 **annotation**。
+      # annotation 挂在 check-run 上，走 /check-runs/{id}/annotations 接口，
+      # 那个接口公开可读，而且不受「步骤日志过大」的限制。
+      # 代价是数量有上限（每步每级别 10 条、每 job 50 条），所以只取末尾 8 行 ——
+      # 报错几乎总在最后，且真正有用的那几行也在这里。
+      # -----------------------------------------------------------------------
+      - name: 失败原因（匿名可读）
+        if: failure()
+        shell: bash
+        run: |
+          if [ ! -f gradle-build.log ]; then
+            echo "::error::没有 gradle-build.log，打包步骤没跑到写日志那一步"
+            exit 0
+          fi
+          echo "===== gradle 日志末尾 40 行 ====="
+          tail -n 40 gradle-build.log
+          echo "===== 末尾 8 行已转成 annotation ====="
+          tail -n 8 gradle-build.log | while IFS= read -r line; do
+            echo "::error::$line"
+          done
