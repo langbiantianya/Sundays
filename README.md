@@ -482,7 +482,14 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会自动打这两个产物并作为 artifact 上传
 （工作流见 [`.github/workflows/build-windows.yml`](./.github/workflows/build-windows.yml)）。
 
-三点值得知道：
+**x64 与 arm64 两条腿并行构建**，产物名带架构后缀：
+
+| 产物 | x64 | arm64 |
+| --- | --- | --- |
+| 安装包 | `sundays-windows-x64-msi` | `sundays-windows-arm64-msi` |
+| 便携版 | `sundays-windows-x64-portable` | `sundays-windows-arm64-portable` |
+
+几点值得知道：
 
 - **便携版里的 exe 不是单文件。** `com.kxxnzstdsw.sundays.exe` 是 jpackage 的启动器，
   依赖同级的 `app/` 与 `runtime/` 目录；单独拷走会报缺 DLL。要分发就分发整个目录。
@@ -491,6 +498,15 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
   这个替换只在 CI 生效，不改仓库文件。依赖仓库的 aliyun 镜像则保留 —— 它在境外同样可达。
 - **JDK 钉在 25。** 仓库没有 `jvmToolchain` 声明，构建跟着跑它的 JDK 走，
   所以 CI 的 JDK 同时决定了产物的字节码目标与 jlink 运行时版本。
+- **arm64 腿换成了 Zulu。** Temurin 至今没有发布 Windows ARM64 的 JDK 25
+  （Adoptium 的 assets 接口查 `25 / aarch64 / windows` 返回空数组），照用 Temurin 会在装 JDK 那步就失败。
+  Zulu 有 `win_aarch64` 的 25.0.4.1，与 x64 腿的 Temurin 25.0.4.1+1 是同一个 JDK 版本。
+- **构建脚本没为 ARM 改过一行。** 架构切换全靠「跑在哪台机器上」自动发生：
+  Compose 插件读 `os.arch` 判定 `aarch64 → windows-arm64`，于是自动换成
+  `desktop-jvm-windows-arm64`，它带出的 `skiko-awt-runtime-windows-arm64:0.144.6` 在 Maven Central 上确实存在；
+  WiX 是与架构无关的 zip，其 x64 工具由 Windows 的模拟层跑。
+  其余带原生库的依赖也都有 ARM64 版本（sqlite-jdbc、duckdb_jdbc、luajava 均已实测确认）。
+- **两条腿 `fail-fast: false`。** ARM 那条工具链明显更脆，不让它把已经打好的 x64 一起取消掉。
 
 > 安装包目前**未签名**，装的时候 Windows SmartScreen 会拦一下。
 

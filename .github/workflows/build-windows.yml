@@ -1,6 +1,6 @@
 name: Windows 安装包
 
-# 推 main / 打 tag / 手动触发都构建。
+# 推 main / 打 tag / 手动触发都构建，x64 与 arm64 两条腿并行跑。
 #
 # 刻意**不在** pull_request 上跑：这个仓库的 UI 测试依赖内网 MySQL/PostgreSQL
 # （192.168.1.5），PR 上必然红一片，起不到把关作用还把 CI 变成噪声。
@@ -20,9 +20,40 @@ permissions:
 
 jobs:
   package:
-    name: 打包 Windows x64 安装包
-    runs-on: windows-latest
-    timeout-minutes: 45
+    name: 打包 Windows ${{ matrix.arch }} 安装包
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      # 关键：x64 是主力出货渠道，arm64 是后来补的、工具链明显更脆的一条腿
+      # （JDK 得换厂商、WiX 得靠 x64 模拟跑、Gradle 在 Windows ARM 上禁用了富终端）。
+      # 默认的 fail-fast 会让 ARM 一失败就把已经成功的 x64 一起取消掉，
+      # 那等于「为了试新东西把老渠道也赔进去」，所以关掉。
+      fail-fast: false
+      matrix:
+        # 矩阵键刻意全用驼峰、不带连字符 —— `matrix.java-distribution` 会被
+        # Actions 表达式解析成减法（matrix.java - distribution）而静默失效，
+        # 想省事就得写成 matrix['java-distribution']，两种写法都得记着，不如绕开。
+        include:
+          - arch: x64
+            os: windows-latest
+            jdk: temurin
+            jdkArch: x64
+          - arch: arm64
+            os: windows-11-arm
+            # ⚠️ 这里**不能**用 temurin。Temurin 至今没有发布 Windows ARM64 的
+            # JDK 25 —— 查 Adoptium 的 assets API：
+            #   /v3/assets/latest/25/hotspot?architecture=aarch64&os=windows → []
+            # 对照组：同一接口把 architecture 换成 x64 有 25.0.4.1+1，
+            # 版本降到 21 也有 windows aarch64。也就是说卡的是「25 + Windows + ARM」
+            # 这个组合，不是平台、也不是 API 用法。照抄 x64 那条腿的 temurin 的话，
+            # setup-java 会在装 JDK 这一步直接失败，根本走不到打包。
+            # Zulu 有 win_aarch64 的 25.0.4.1，正好和 x64 腿的 Temurin 25.0.4.1+1
+            # 同一个 JDK 版本，也和本机 zulu 25.0.4.1 一致。
+            jdk: zulu
+            # architecture 默认值是 x64。ARM 腿必须显式给 aarch64
+            # （arm64 是它的别名，会被规范化成 aarch64）。
+            jdkArch: aarch64
 
     steps:
       - uses: actions/checkout@v7
@@ -50,17 +81,33 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          # 25 是本机实测能打出 MSI 的版本（zulu 25.0.4.1，Temurin 同为 25.0.4.1+1 LTS）。
+          # 25 是本机实测能打出 MSI 的版本（zulu 25.0.4.1），Temurin 同为 25.0.4.1+1 LTS。
           # 仓库里**没有**任何 jvmToolchain 声明 —— 构建跟着跑它的 JDK 走，
           # 所以这里钉住的不只是「用什么编译」，还决定产物的字节码目标
           # 与 jlink 打包出来的运行时版本，两者必须与本地一致，否则测出来的包不是同一个包。
+          #
+          # Gradle 从 9.2.0 起才正式支持在 Windows ARM64 上跑（本项目用 9.7.1，
+          # 在官方兼容性矩阵的「Windows 11 / AMD64, AArch64」一栏里），
+          # 代价是富终端被禁用、输出退化成纯文本 —— 只影响日志好不好看，无碍构建。
           java-version: '25'
-          distribution: temurin
+          distribution: ${{ matrix.jdk }}
+          architecture: ${{ matrix.jdkArch }}
 
       - uses: gradle/actions/setup-gradle@v6
 
       # packageMsi          → 安装包（WiX 由 Compose 插件自己下载解压，runner 无需预装）
       # createDistributable → 便携版目录，内含 com.kxxnzstdsw.sundays.exe
+      #
+      # ARM 腿上这两步**没有任何额外配置**。整个链路是靠「跑在哪台机器上」自动切换的，
+      # 仓库的构建脚本一个字都不用改：
+      #   · Compose 插件读 System.getProperty("os.arch")，aarch64 → 目标 windows-arm64，
+      #     于是 compose.desktop.currentOs 解析成 desktop-jvm-windows-arm64:1.11.1，
+      #     它再带出 skiko-awt-runtime-windows-arm64:0.144.6（该坐标确实存在）。
+      #   · WiX 是 wix311-binaries.zip，跟架构无关；里面的 candle/light 是 x64 程序，
+      #     在 ARM64 Windows 上由系统的 x64 模拟层跑，不需要预装、也不需要设 WIX_PATH。
+      #   · 其余带原生库的依赖都有 ARM64 版本（实测）：
+      #     sqlite-jdbc 的 org/sqlite/native/Windows/aarch64/sqlitejdbc.dll、
+      #     duckdb_jdbc 的 windows_arm64 分类、luajava 的 lua55arm64.dll / luajitarm64.dll。
       #
       # ⚠️ 便携版里的 exe **不是单文件**：jpackage 的 Windows 启动器依赖同级的
       # app/ 与 runtime/ 目录，单独把 exe 拷走跑不起来（会报缺 DLL）。
@@ -71,25 +118,28 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: sundays-windows-x64-msi
+          # x64 沿用原来的名字，老链接和已下到本地的东西不用改。
+          name: sundays-windows-${{ matrix.arch }}-msi
           path: desktopApp/build/compose/binaries/main/msi/*.msi
           if-no-files-found: error
           retention-days: 30
 
       - uses: actions/upload-artifact@v7
         with:
-          name: sundays-windows-x64-portable
+          name: sundays-windows-${{ matrix.arch }}-portable
           path: desktopApp/build/compose/binaries/main/app/
           if-no-files-found: error
           retention-days: 30
 
       # 打包失败时把 jpackage 的日志捞出来 —— 报错的最后几行只在文件里，
       # 控制台上往往只剩一句 exit code，没有这几行就只能靠猜。
+      # artifact 名**必须带架构**：upload-artifact v4 起不允许同一 run 内重名，
+      # 两条腿同时失败时都叫 packaging-logs 会撞车，反而把真正有用的日志丢掉。
       - name: 收集 jpackage 日志
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: packaging-logs
+          name: packaging-logs-${{ matrix.arch }}
           path: desktopApp/build/compose/logs/
           if-no-files-found: ignore
           retention-days: 7
