@@ -501,12 +501,29 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 - **arm64 腿换成了 Zulu。** Temurin 至今没有发布 Windows ARM64 的 JDK 25
   （Adoptium 的 assets 接口查 `25 / aarch64 / windows` 返回空数组），照用 Temurin 会在装 JDK 那步就失败。
   Zulu 有 `win_aarch64` 的 25.0.4.1，与 x64 腿的 Temurin 25.0.4.1+1 是同一个 JDK 版本。
-- **构建脚本没为 ARM 改过一行。** 架构切换全靠「跑在哪台机器上」自动发生：
+- **protoc 是唯一需要动构建脚本的地方。** `protoc` 与 `protoc-gen-grpc-java` 都是按平台分发的
+  原生可执行文件，而**上游没有发布 `windows-aarch_64` 这个 classifier**（protoc 4.35.1 只有
+  `windows-x86_32` / `windows-x86_64`，ARM 版只给了 `linux-aarch_64` 与 `osx-aarch_64`）。
+  插件按 `os.arch` 去要一个不存在的产物，直接挂在依赖解析上，构建根本走不到编译。
+  做法是在 Windows ARM64 上改用 `windows-x86_64` 那份：protoc 只是代码生成器，
+  产出与平台无关的 Java/Kotlin 源码 —— 插件自己的注释就写着「不同操作系统产出的生成代码相同」，
+  它甚至刻意把 OS classifier 排除在任务输入之外好让不同系统复用同一份产物；
+  而 Windows ARM64 能原生模拟 x64 程序，所以跑得起来，产出与 x64 上逐字节一致。
+  非 ARM 机器行为与改动前完全一致。
+- **其余部分没为 ARM 改过一行。** 架构切换全靠「跑在哪台机器上」自动发生：
   Compose 插件读 `os.arch` 判定 `aarch64 → windows-arm64`，于是自动换成
   `desktop-jvm-windows-arm64`，它带出的 `skiko-awt-runtime-windows-arm64:0.144.6` 在 Maven Central 上确实存在；
   WiX 是与架构无关的 zip，其 x64 工具由 Windows 的模拟层跑。
   其余带原生库的依赖也都有 ARM64 版本（sqlite-jdbc、duckdb_jdbc、luajava 均已实测确认）。
+- **产物架构会被 CI 验一遍。** 「矩阵里写了 arm64」不等于「包里真是 arm64」。
+  工作流有一道自检读 PE header 的 machine 字段，同时查 jlink 出来的 `jvm.dll`
+  和 app 目录里那份 skiko 原生 dll —— 后者才是 Compose 有没有按架构选对 native 库的直接证据，
+  只看 `jvm.dll` 只能说明 JDK 对。不一致就失败，且**放在上传之前**，架构不对的包不会变成可下载的产物。
 - **两条腿 `fail-fast: false`。** ARM 那条工具链明显更脆，不让它把已经打好的 x64 一起取消掉。
+- **CI 失败的原因对没有 admin 的人也是可读的。** GitHub 网页版会把大步骤日志整个截断，
+  原始日志下载又要求仓库权限 —— 结果是 CI 一红就没人看得到报错原文。工作流因此把 Gradle 的
+  `* What went wrong *` 段转成 annotation（`/check-runs/{id}/annotations` 公开可读，
+  且不受「步骤日志过大」的限制），长期兜底。
 
 > 安装包目前**未签名**，装的时候 Windows SmartScreen 会拦一下。
 
