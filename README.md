@@ -536,8 +536,8 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 | 产物 | 架构 | 大小 |
 | --- | --- | --- |
-| `sundays-flatpak-amd64` | x86_64 | 约 265 MB |
-| `sundays-flatpak-arm64` | aarch64 | 约 263 MB |
+| `sundays-flatpak-amd64` | x86_64 | 约 298 MB |
+| `sundays-flatpak-arm64` | aarch64 | 约 296 MB |
 
 两条腿各跑在**原生 runner** 上（`ubuntu-latest` 与 `ubuntu-24.04-arm`），
 不交叉编译、不走 QEMU —— 模拟出来的东西只能「宣称」是 ARM64。
@@ -550,7 +550,7 @@ flatpak run com.kxxnzstdsw.sundays
 
 几点值得知道：
 
-- **bundle 里是本应用，`org.freedesktop.Platform` 仍来自 Flathub。**
+- **bundle 里是本应用，`org.freedesktop.Platform` 与 OpenJDK 扩展仍来自 Flathub。**
   安装时按 metadata 里的 runtime 声明去取，所以装它需要能访问 Flathub。
   runtime 钉在 **26.08**（当前稳定分支，支持到 2028-09）。
 - **JDK 来自 Flathub 的 `org.freedesktop.Sdk.Extension.openjdk`，不随包分发 jlink 运行时。**
@@ -558,6 +558,8 @@ flatpak run com.kxxnzstdsw.sundays
   manifest 里加一个模块跑它自带的 `install.sh`，把 JVM 落到 `/app/jre`，
   再由我们生成的 `/bin/sh` 启动器 `exec` 它。主类与 JVM 参数不写死，
   是从 jpackage 生成的 `.cfg` 里读出来的。
+  代价是 bundle 比自带 jlink 运行时那版大了约 32 MB ——
+  扩展的 `install.sh` 装的是完整 JDK（`conf/lib/release`），不是 jlink 裁过的最小集。
 - **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
   MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 - **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的
