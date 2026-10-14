@@ -227,6 +227,18 @@ jobs:
           set +e
           echo "::warning::flatpak-builder = $(command -v flatpak-builder)；版本 $(flatpak-builder --version 2>&1)"
           cd packaging/flatpak
+          # 预检：manifest 的 command 必须能在组装产物里找到对应文件。
+          # 应用被装到 /app/sundays 下，所以 command 应是 sundays/bin/...；
+          # 少写或多写一层，flatpak-builder 只会在收尾时报一句 Command not found。
+          cmd="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                 com.kxxnzstdsw.sundays.json | head -n1)"
+          echo "::warning::manifest command = $cmd"
+          if [ ! -e "sundays-app/$cmd" ]; then
+            echo "::error::command=$cmd 在组装产物里没有对应文件（期望 sundays-app/$cmd）"
+            echo "::error::组装产物顶层：$(ls -A sundays-app 2>&1 | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "::warning::command 与组装产物对得上"
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --repo="$GITHUB_WORKSPACE/flatpak-repo" \
             "$GITHUB_WORKSPACE/flatpak-build" \

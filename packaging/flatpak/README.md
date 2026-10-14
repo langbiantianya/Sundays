@@ -75,6 +75,12 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 工作流里 `cd packaging/flatpak` 之后再调用，两种解释结果必然相同，就不必赌；
 输出目录则用 `$GITHUB_WORKSPACE` 绝对路径指回仓库根。
 
+**应用装在 `/app/sundays`，所以 `command` 是 `sundays/bin/...`。**
+`flatpak-builder` 收尾时会校验 `command` 在 `/app` 下真实存在，
+写成 `bin/...` 就报 `Command 'bin/com.kxxnzstdsw.sundays' not found`。
+jpackage 的启动器靠自身位置推导 `$APPDIR`，嵌套一层不影响它找
+`lib/app/*.cfg` 与 `lib/runtime`。
+
 **`build-commands` 装进 `files/` 而不是 `/app/`。**
 `buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
 的内容，写它不必依赖 `/app` 那个符号链接。拷贝应用那一步写成
