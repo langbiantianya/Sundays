@@ -40,12 +40,15 @@ jobs:
             # arm64 是 "AArch64"。这里只取能区分两者的那个 token。
             elfMachine: X86-64
             # skiko 原生运行时包的 classifier 本身编码了目标平台：
-            # linux-x64 / linux-aarch64，两者互不为子串，判别干净。
+            # linux-x64 / linux-arm64，两者互不为子串，判别干净。
+            # ⚠️ Linux 的 arm64 产物叫 linux-arm64，不是 linux-aarch64 ——
+            # Maven 的 osdetector 用 aarch64，skiko 自己发包时用 arm64，
+            # 两套命名。首版按 aarch64 写，被自检当场拦下来了。
             skikoToken: x64
           - flatpakArch: arm64
             os: ubuntu-24.04-arm
             elfMachine: AArch64
-            skikoToken: aarch64
+            skikoToken: arm64
 
     steps:
       - uses: actions/checkout@v7
@@ -102,7 +105,7 @@ jobs:
       #
       # 第 2 条刻意看 **jar 名字而不是解出来的 .so**：那个 .so 是应用启动时
       # 才落地的，构建产物里未必有，Windows 腿上有是那边 jpackage 顺手放的，
-      # 不能假定 Linux 也一样。而 classifier（linux-x64 / linux-aarch64）
+      # 不能假定 Linux 也一样。而 classifier（linux-x64 / linux-arm64）
       # 是 Gradle 解析时确定下来的，板上钉钉。
       #
       # 全部用 find -name（按基名匹配）而非 -path：后者的通配符不跨 '/'，
@@ -177,18 +180,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
 
+      # 列出远端到底有哪些 freedesktop 运行时。这不是装饰：arm64 上某个
+      # 分支缺某个 ref 时，flatpak install 会在几秒内直接失败，而那几秒的
+      # 步骤日志在匿名视角下看不到。把 ref 列表打成 warning，谁缺一目了然。
+      # continue-on-error：这个查询本身失败不该拖垮构建。
+      - name: 查远端可用的 freedesktop 运行时
+        continue-on-error: true
+        run: |
+          flatpak remote-ls flathub --runtime --columns=ref 2>/dev/null \
+            | grep -E '^org\.freedesktop\.(Platform|Sdk|Platform\.GL|Platform\.Vulkan)//' \
+            | sort | tail -n 24 \
+            | while IFS= read -r ref; do echo "::warning::远端有 $ref"; done
+
       # 运行时与 SDK 有两个多 G，是整个流程里最慢的一步，放在组装之后。
       # --disable-rofiles-fuse：CI 上没有 fuse daemon，用不了 rofiles-fuse
       # 那个更快的 checkout 路径，退回普通方式即可，只是慢一点。
+      #
+      # 只装 Platform 与 Sdk，不装 Platform.GL / Platform.Vulkan：
+      # 自 23.08 起 GL/EGL/Mesa 已经并进主运行时，那两个扩展是给老应用留的
+      # 兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
+      # 上一轮就是这一步在两条腿上失败的。
       - name: 安装 freedesktop 运行时与 SDK
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y --noninteractive flathub \
-            org.freedesktop.Platform//"$FREEDESKTOP_RUNTIME" \
-            org.freedesktop.Platform.GL//"$FREEDESKTOP_RUNTIME" \
-            org.freedesktop.Platform.Vulkan//"$FREEDESKTOP_RUNTIME" \
-            org.freedesktop.Sdk//"$FREEDESKTOP_RUNTIME"
+          if ! flatpak install --user -y --noninteractive flathub \
+              "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
+              "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" 2>&1 | tee runtime-install.log; then
+            echo "::error::freedesktop $FREEDESKTOP_RUNTIME 运行时/SDK 安装失败，末尾输出："
+            tail -n 20 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          flatpak list --user --columns=ref
 
       - name: 构建 Flatpak
         run: |

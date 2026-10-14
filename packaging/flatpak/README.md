@@ -56,6 +56,12 @@ app-image 自带的原生启动器（Linux 在 `bin/com.kxxnzstdsw.sundays`）�
 原生启动器靠 `$APPDIR` 的相对关系去找 `lib/app/<同名>.cfg` 和 `lib/runtime`，
 一挪动位置就只会在**启动时**才炸，而不是在构建时。
 
+**不装 `Platform.GL` / `Platform.Vulkan` 扩展。**
+自 freedesktop 23.08 起，GL / EGL / Mesa 已经并进主运行时，那两个扩展是留给
+老应用的兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
+CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就退出，
+匿名视角下那几秒的日志偏偏看不到。
+
 **`finish-args` 里的 `--share=network` 与 `--filesystem=home` 不能省。**
 前者是连 MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 
