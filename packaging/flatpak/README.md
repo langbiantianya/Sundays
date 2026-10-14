@@ -82,8 +82,18 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 `Failed to execute child process "eu-strip"` —— 前面十几步全绿，看着像
 快成功了。所以工作流装完立刻逐个 `command -v` 点名确认。
 
+**内容要装进 `/app`，不能只装进模块目录下的 `files/`。**
+`builder_options_get_prefix()` 对非 runtime 构建返回 `/app` —— 那才是模块构建
+沙箱里指向应用目录的前缀。模块 build-dir 里的 `files/` **不会**自动并到
+`<build-dir>/files`，收尾阶段校验 command 时看的是后者。
+
+这个坑的表现极具误导性：探测行验的是模块目录里的 `files/`，永远报
+`exists=yes exec=yes`；而收尾时 `<build-dir>/files` 已被清空，于是报
+`Command not found`。**验错了地方，就把「文件在」误当成「文件进了应用」。**
+所以现在两处都写，探测行也同时报两处的落地情况。
+
 **`command` 必须写成绝对路径 `/app/bin/...`，不能写 `bin/...`。**
-这条是 `flatpak-builder` 源码里的硬逻辑（`builder-manifest.c` 的
+这是 `flatpak-builder` 源码里的硬逻辑（`builder-manifest.c` 的
 `builder_manifest_finish`）：
 
 ```c
