@@ -529,6 +529,45 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 ---
 
+## 打包 Linux Flatpak
+
+推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会同时打出两个架构的
+单文件 bundle（工作流见 [`.github/workflows/build-flatpak.yml`](./.github/workflows/build-flatpak.yml)）：
+
+| 产物 | 架构 | 大小 |
+| --- | --- | --- |
+| `sundays-flatpak-amd64` | x86_64 | 约 265 MB |
+| `sundays-flatpak-arm64` | aarch64 | 约 263 MB |
+
+两条腿各跑在**原生 runner** 上（`ubuntu-latest` 与 `ubuntu-24.04-arm`），
+不交叉编译、不走 QEMU —— 模拟出来的东西只能「宣称」是 ARM64。
+
+```bash
+# 安装
+flatpak install --user sundays-flatpak-amd64.flatpak
+flatpak run com.kxxnzstdsw.sundays
+```
+
+几点值得知道：
+
+- **bundle 里是本应用，`org.freedesktop.Platform` 仍来自 Flathub。**
+  安装时按 metadata 里的 runtime 声明去取，所以装它需要能访问 Flathub。
+  runtime 钉在 **24.08**（基于 Ubuntu 24.04 / glibc 2.39），与 CI 构建机一致，
+  免得启动时才报 `GLIBC_2.39 not found`。
+- **用的必须是 app-image 自带的原生启动器，不能自己写启动脚本。**
+  Compose 给 jlink 传了 `--strip-native-commands`，打出来的运行时里
+  **一个可执行文件都没有**（本机实测 `runtime/bin/` 下 67 个文件全是 DLL）。
+  所以组装脚本不重排目录、整棵 app-image 原样搬进 `/app`。
+- **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
+  MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
+- **产物架构同样会被 CI 验一遍**，且放在下载 2GB 运行时之前：
+  读 `libjvm.so` 与原生启动器的 ELF Machine，再查 skiko jar 的 classifier
+  （`linux-x64` / `linux-arm64`）。
+
+细节与排障见 [`packaging/flatpak/README.md`](./packaging/flatpak/README.md)。
+
+---
+
 ## 运行测试
 
 ```bash
