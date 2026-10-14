@@ -212,8 +212,12 @@ jobs:
             block="$(tail -n 20 gradle-build.log)"
           fi
           echo "$block"
+          # 只捞真正的报错行。早先这里把 '^>' 也当关键词，于是 `> Task :xxx` 这种
+          # 普通控制台进度行被当成报错刷了八条，annotation 全是噪音，
+          # 反而把真正那句错误淹掉了 —— 排查时先被这些带偏。
           printf '%s\n' "$block" \
-            | grep -E '^(>|Caused by:)|[Ee]xception|[Ee]rror' \
+            | grep -vE '^> Task |^$' \
+            | grep -E 'Caused by|Exception|error|Error|FAILURE|cannot|Could not|failed' \
             | tail -n 8 \
             | while IFS= read -r line; do
                 echo "::error::$line"
