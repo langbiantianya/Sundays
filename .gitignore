@@ -58,4 +58,14 @@ bin/
 ### VS Code ###
 .vscode/
 
+### Flatpak ###
+# 以下都是 build-flatpak.yml 生成的中间物 / 产物，不入库。
+# 注意 sundays-app/ 与那个 .png：它们由 .github/scripts/assemble-flatpak-app.sh
+# 从 Gradle 的 app-image 里现拼，仓库里只保留 manifest、.desktop 与组装脚本。
+/flatpak-build/
+/flatpak-repo/
+/packaging/flatpak/sundays-app/
+/packaging/flatpak/com.kxxnzstdsw.Sundays.png
+/*.flatpak
+
 ### Mac OS ###

@@ -1,0 +1,199 @@
+name: Flatpak 打包
+
+# 与 Windows 那条腿一样：推 main / 打 tag / 手动触发。
+# 刻意不在 pull_request 上跑 —— 这个仓库的 UI 测试依赖内网数据库（192.168.1.5）。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: flatpak-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # runtime 版本必须与 packaging/flatpak/*.json 里的 runtime-version 一致，
+  # 两边漂移的话「装了运行时但 manifest 要的是另一个」会在构建中途才炸。
+  # 下面有一道校验专门比对这两个值。
+  FREEDESKTOP_RUNTIME: '24.08'
+
+jobs:
+  bundle:
+    name: 打包 Flatpak ${{ matrix.flatpakArch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+
+    strategy:
+      # 与 Windows 腿同一个道理：arm64 的工具链更脆（多一层运行时下载、
+      # 多一堆原生库），不让它取消掉已经打好的 amd64。
+      fail-fast: false
+      matrix:
+        # 矩阵键不用连字符 —— matrix.foo-bar 会被 Actions 表达式解析成减法。
+        include:
+          - flatpakArch: amd64
+            os: ubuntu-latest
+            # readelf 对 ELF 的 Machine 字段：x86-64 是 "Advanced Micro Devices X86-64"，
+            # arm64 是 "AArch64"。这里只取能区分两者的那个 token。
+            elfMachine: X86-64
+          - flatpakArch: arm64
+            os: ubuntu-24.04-arm
+            elfMachine: AArch64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ---------------------------------------------------------------------------
+      # 仓库的 wrapper 指向腾讯云镜像，那是给国内开发机用的。
+      # GitHub 托管的 runner 在境外，从那里拉一个 -all.zip（两百多 MB）既慢又不稳。
+      # 只在 CI 里换回官方源，**不改仓库文件** —— 国内开发者照旧走镜像。
+      - name: Gradle 分发源换回官方
+        run: |
+          sed -i 's|mirrors\.cloud\.tencent\.com/gradle|services.gradle.org/distributions|' \
+            gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      - uses: actions/setup-java@v6
+        with:
+          # 与 Windows 腿保持一致：仓库里没有 jvmToolchain 声明，构建跟着
+          # 跑它的 JDK 走，所以这里同时决定了字节码目标与 jlink 出来的运行时。
+          java-version: '25'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # 先确认 runner 架构，别等到打包完了才发现跑错了机器。
+      - name: 确认 runner 架构
+        run: |
+          echo "uname -m   = $(uname -m)"
+          echo "runner.arch = ${{ runner.arch }}"
+          echo "期望架构   = ${{ matrix.flatpakArch }}"
+
+      # Compose 的 app-image 就是我们要的全部内容：jlink 出来的运行时 + 打平的 jar。
+      # Linux 上同样有 skiko 的 linux-aarch_64 产物，所以这里不需要 Windows 腿
+      # 那个「protoc 退回 x86_64」的绕法 —— osdetector 会自己挑 linux-aarch_64。
+      # pipefail 必须显式开，否则构建失败会被 tee 吞成成功。
+      - name: 打包应用
+        run: |
+          set -o pipefail
+          ./gradlew :desktopApp:createDistributable --stacktrace 2>&1 | tee gradle-build.log
+
+      # 用 `bash <脚本>` 而不是 `./<脚本>`：这个仓库主要在 Windows 上开发，
+      # git 在那里通常不记录可执行位（core.fileMode=false），
+      # 文件推上去是 100644，Linux runner 上直接 ./ 就会 Permission denied。
+      # 显式交给 bash 解释器，这个依赖就消失了（脚本本身也用了 set -o pipefail，
+      # 本来就必须由 bash 执行，不能用 sh）。
+      - name: 组装 Flatpak 目录
+        run: bash .github/scripts/assemble-flatpak-app.sh
+
+      # 架构自检：在花时间下载 2GB 运行时之前，先确认打出来的确实是目标架构。
+      # 读两个文件的 ELF Machine 字段：
+      #   libjvm.so    —— jlink 出来的运行时，对说明 JDK 是目标架构
+      #   libskiko*.so —— Compose 按 os.arch 选的那个原生渲染库，
+      #                  这一条才是「架构识别是否生效」的直接证据
+      - name: 校验应用架构
+        run: |
+          ELF_MACHINE='${{ matrix.elfMachine }}'
+          STAGE=packaging/flatpak/sundays-app
+
+          check() {
+            local f="$1" what="$2"
+            if [ ! -f "$f" ]; then
+              echo "::error::$what 不存在：$f"
+              return 1
+            fi
+            local m
+            m="$(readelf -h "$f" | sed -n 's/.*Machine: *//p' | head -n1)"
+            echo "$what：$(basename "$f") Machine = $m（期望含 $ELF_MACHINE）"
+            case "$m" in
+              *"$ELF_MACHINE"*) ;;
+              *) echo "::error::$what 架构不对：期望含 $ELF_MACHINE，实际 $m"; return 1 ;;
+            esac
+          }
+
+          fail=0
+          # 不写死 libjvm.so 的位置：JDK 在 Linux 上是 lib/server/，
+          # 在 Windows 上是 bin/server/，两个平台布局不同
+          check "$(find "$STAGE/runtime" -name 'libjvm.so' -print -quit)" "jlink 运行时" || fail=1
+          check "$(find "$STAGE/app" -name 'libskiko*.so' -print -quit)" "skiko 原生库" || fail=1
+          exit $fail
+
+      # ---------------------------------------------------------------------------
+      # manifest 里的 runtime-version 与 env 里那个必须一致，否则会出现
+      # 「装了 24.08 的运行时，manifest 却在要 26.08」这种中途才炸的错。
+      - name: 校验 runtime 版本与 manifest 一致
+        run: |
+          in_manifest="$(sed -n 's/.*"runtime-version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            packaging/flatpak/com.kxxnzstdsw.Sundays.json | head -n1)"
+          echo "env      = $FREEDESKTOP_RUNTIME"
+          echo "manifest = $in_manifest"
+          if [ "$in_manifest" != "$FREEDESKTOP_RUNTIME" ]; then
+            echo "::error::runtime 版本不一致：env 是 $FREEDESKTOP_RUNTIME，manifest 是 $in_manifest"
+            exit 1
+          fi
+
+      - name: 安装 flatpak 工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
+
+      # 运行时与 SDK 有两个多 G，是整个流程里最慢的一步，放在组装之后。
+      # --disable-rofiles-fuse：CI 上没有 fuse daemon，用不了 rofiles-fuse
+      # 那个更快的 checkout 路径，退回普通方式即可，只是慢一点。
+      - name: 安装 freedesktop 运行时与 SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.freedesktop.Platform//"$FREEDESKTOP_RUNTIME" \
+            org.freedesktop.Platform.GL//"$FREEDESKTOP_RUNTIME" \
+            org.freedesktop.Platform.Vulkan//"$FREEDESKTOP_RUNTIME" \
+            org.freedesktop.Sdk//"$FREEDESKTOP_RUNTIME"
+
+      - name: 构建 Flatpak
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --repo=flatpak-repo flatpak-build \
+            packaging/flatpak/com.kxxnzstdsw.Sundays.json
+
+      # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
+      # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
+      - name: 导出单文件 bundle
+        run: |
+          flatpak build-bundle flatpak-repo \
+            "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
+            com.kxxnzstdsw.Sundays stable
+          ls -lh *.flatpak
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sundays-flatpak-${{ matrix.flatpakArch }}
+          path: sundays-flatpak-${{ matrix.flatpakArch }}.flatpak
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------------------------------------------------------------------------
+      # 失败原因转 annotation：GitHub 网页版会把大步骤日志整个截断，
+      # 原始日志下载要仓库权限，结果就是 CI 一红没人看得到报错原文。
+      # annotation 走 /check-runs/{id}/annotations，公开可读且不受步骤大小限制。
+      - name: 失败原因（匿名可读）
+        if: failure()
+        run: |
+          if [ ! -f gradle-build.log ]; then
+            echo "::error::没有 gradle-build.log；失败发生在 Gradle 之外（见上方步骤）"
+            exit 0
+          fi
+          block="$(sed -n '/^\* What went wrong:/,/^\* Try:/p' gradle-build.log)"
+          if [ -z "$block" ]; then
+            block="$(tail -n 20 gradle-build.log)"
+          fi
+          echo "$block"
+          printf '%s\n' "$block" \
+            | grep -E '^(>|Caused by:)|[Ee]xception|[Ee]rror' \
+            | tail -n 8 \
+            | while IFS= read -r line; do
+                echo "::error::$line"
+              done

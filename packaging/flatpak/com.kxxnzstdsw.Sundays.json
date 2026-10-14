@@ -1,0 +1,43 @@
+{
+  "//": "Sundays 的 Flatpak manifest。runtime 钉在 24.08 是有意为之：freedesktop 24.08 基于 Ubuntu 24.04（glibc 2.39），与 CI 构建机一致，skiko 的 .so 与 jlink 出来的 JDK 原生库不会踩 GLIBC_2.39 not found。选型理由与故障排查见同目录 README.md。sources 只有一份目录和两个静态文件 —— 应用本体由 .github/scripts/assemble-flatpak-app.sh 在外面拼好，flatpak-builder 在此只负责装配与导出元数据，不参与编译。",
+
+  "id": "com.kxxnzstdsw.Sundays",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "24.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "bin/sundays",
+
+  "finish-args": [
+    "--share=ipc",
+    "--socket=x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--share=network",
+    "--filesystem=home"
+  ],
+
+  "cleanup": [
+    "/include",
+    "/lib/pkgconfig",
+    "/share/man",
+    "*.a",
+    "*.la"
+  ],
+
+  "modules": [
+    {
+      "name": "sundays",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cp -a sundays-app /app/sundays",
+        "install -Dm644 com.kxxnzstdsw.Sundays.desktop /app/share/applications/com.kxxnzstdsw.Sundays.desktop",
+        "install -Dm644 com.kxxnzstdsw.Sundays.png /app/share/icons/hicolor/256x256/apps/com.kxxnzstdsw.Sundays.png"
+      ],
+      "sources": [
+        { "type": "dir", "path": "sundays-app" },
+        { "type": "file", "path": "com.kxxnzstdsw.Sundays.desktop" },
+        { "type": "file", "path": "com.kxxnzstdsw.Sundays.png" }
+      ]
+    }
+  ]
+}

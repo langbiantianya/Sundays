@@ -1,0 +1,8 @@
+# shell 脚本在 Linux 上执行。CRLF 会让它在每一个换行处报
+# `\r: command not found` —— 而且这类错往往只在真正跑起来的 Linux runner 上
+# 才显形，本地 Windows 上完全看不出来。
+#
+# 这条规则保证 .sh 无论从哪个平台 checkout 都是 LF。
+# 仓库里有一个 fix-crlf.ps1 会把文件批量刷成 CRLF，有这条规则在，
+# 提交时 git 仍会把 .sh 归一化成 LF，不会真的把它改坏。
+*.sh text eol=lf
