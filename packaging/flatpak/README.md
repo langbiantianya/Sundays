@@ -73,6 +73,27 @@ jlink 出来的 —— 它与 runtime 的 glibc、头文件、库版本天然对
 代价要说明白：`install.sh` 装的是完整 JDK 的 `conf/lib/release`，
 所以 `/app/jre` 仍然有体积，这部分由扩展决定，不归我们管。
 
+**`sdk-extensions` 声明了不等于装了 —— 必须显式 `flatpak install`。**
+manifest 里写 `"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk"]`
+只是在告诉 flatpak-builder「我需要这个扩展」，它**不会替你装**。
+flatpak-builder 1.4.2 实测直接回一句就退出：
+
+```
+error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
+```
+
+所以工作流在「安装 freedesktop 运行时与 SDK」那一步把三个 ref 一起装：
+`Platform`、`Sdk`、`Sdk.Extension.openjdk`。
+
+顺便记一个**假阴性**，它比缺 ref 更危险：检查远端 ref 的那一步原本排在
+`flatpak remote-add` **之前**，于是查询时 remote 还不存在，
+`Platform` / `Sdk` / `Sdk.Extension.openjdk` 三个全部报「远端没有」，
+还带着 `::error::` 级别 —— 看起来像铁证，实际是查了个空。
+（同一轮里下一步 `flatpak install` 明明成功装上了 26.08 的 Platform 与 Sdk，
+两条信息直接矛盾，只是当时没往一处想。）
+**诊断步骤的输出必须和它自己的前置条件对照着看；断言放在被断言的东西之前，
+等于什么都没断言。** 现在 `remote-add` 提前到那一步里，`--if-not-exists` 幂等。
+
 **用自写的 `/bin/sh` 启动器，不再用 app-image 自带的原生启动器。**
 这条路曾经被证明是走不通的，所以现在能走了值得记一笔原因：
 

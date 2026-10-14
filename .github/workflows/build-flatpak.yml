@@ -218,15 +218,21 @@ jobs:
       # 会在几秒内直接失败，而那几秒的步骤日志在匿名视角下看不到。
       # continue-on-error：这个查询本身失败不该拖垮构建。
       #
-      # 上一版是 `flatpak remote-ls --columns=ref | grep -E '^org\.freedesktop\.'`。
-      # 看着合理，其实是个**永远空转**的写法：remote-ls 的 ref 列打的是带
-      # `runtime/` 前缀的完整 ref（runtime/org.freedesktop.Sdk/x86_64/26.08），
-      # 锚在行首的 `^org\.freedesktop\.` 一条都匹配不到。于是那一步从头到尾
-      # 输出为空、前十几轮排障里却一直以为「ref 列表已经打出来了」。
-      # 换成 remote-info 直接问「这个 ref 能不能拿到」，二元答案，不会看错。
+      # 远端必须先在这里加上。上一版这个检查排��「安装 flatpak 工具」之后、
+      # 「安装运行时与 SDK」之前，于是查的时候 flathub 这个 remote 还不存在，
+      # 三个 ref 全报「远端没有」—— 一个百分之百的假阴性，而且带着 error 级别，
+      # 差点被当成真结论。remote-add 是幂等的（--if-not-exists），提前加无害。
+      #
+      # 用 remote-info 而不是 `remote-ls --columns=ref | grep`：
+      # 后者的 ref 列打的是带 runtime/ 前缀的完整 ref
+      # （runtime/org.freedesktop.Sdk/x86_64/26.08），行首锚 org\.freedesktop\.
+      # 一条都匹配不到，那步从加进来起就一直空转，却一直被当成「ref 列表已经
+      # 打出来了」。remote-info 是二元答案，不依赖输出格式。
       - name: 查远端可用的 freedesktop 运行时
         continue-on-error: true
         run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
           for r in "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
                    "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" \
                    "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_RUNTIME"; do
@@ -246,16 +252,20 @@ jobs:
       # 兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
       # 上一轮就是这一步在两条腿上失败的。
       #
-      # OpenJDK 扩展不用在这里装：manifest 的 sdk-extensions 声明了它，
-      # flatpak-builder 会自己去装。手动装反而多一条可能出错的路径。
+      # **OpenJDK 扩展必须在这里显式装**。manifest 里声明 sdk-extensions 只是
+      # 告诉 flatpak-builder「我需要它」，它并不会替你装 —— 1.4.2 实测直接回一句
+      #   error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
+      # 就退出了。之前注释里写的「flatpak-builder 会自己去装」是错的，
+      # 没有任何报错提示，是靠这一步的失败才验出来的。
       - name: 安装 freedesktop 运行时与 SDK
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
           if ! flatpak install --user -y --noninteractive flathub \
               "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
-              "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" 2>&1 | tee runtime-install.log; then
-            echo "::error::freedesktop $FREEDESKTOP_RUNTIME 运行时/SDK 安装失败，末尾输出："
+              "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" \
+              "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_RUNTIME" 2>&1 | tee runtime-install.log; then
+            echo "::error::freedesktop $FREEDESKTOP_RUNTIME 运行时/SDK/OpenJDK 扩展安装失败，末尾输出："
             tail -n 8 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
