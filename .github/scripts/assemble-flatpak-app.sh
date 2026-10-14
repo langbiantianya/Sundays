@@ -22,7 +22,9 @@ set -euo pipefail
 APP_IMAGE_ROOT="desktopApp/build/compose/binaries/main/app"
 PACKAGING_DIR="packaging/flatpak"
 STAGE="$PACKAGING_DIR/sundays-app"
-APP_ID="com.kxxnzstdsw.Sundays"
+# 全小写：Flatpak 应用 ID 只允许 [a-z0-9_-] 与点。首版这里写的是
+# com.kxxnzstdsw.Sundays（大写 S），flatpak-builder 当场拒收，0 秒退出。
+APP_ID="com.kxxnzstdsw.sundays"
 ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
 
 # 必须与 desktopApp/build.gradle.kts 里的 nativeDistributions.packageName 一致。

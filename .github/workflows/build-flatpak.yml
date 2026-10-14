@@ -167,7 +167,7 @@ jobs:
       - name: 校验 runtime 版本与 manifest 一致
         run: |
           in_manifest="$(sed -n 's/.*"runtime-version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-            packaging/flatpak/com.kxxnzstdsw.Sundays.json | head -n1)"
+            packaging/flatpak/com.kxxnzstdsw.sundays.json | head -n1)"
           echo "env      = $FREEDESKTOP_RUNTIME"
           echo "manifest = $in_manifest"
           if [ "$in_manifest" != "$FREEDESKTOP_RUNTIME" ]; then
@@ -213,19 +213,30 @@ jobs:
           fi
           flatpak list --user --columns=ref
 
+      # flatpak-builder 失败时把末尾输出打成 annotation。它有多种「秒退」型拒绝
+      # （应用 ID 非法、source 找不到、输出目录嵌在源目录里），错误原文只有一行，
+      # 却正好落在匿名视角看不见的那几步里。
       - name: 构建 Flatpak
         run: |
-          flatpak-builder --user --force-clean --disable-rofiles-fuse \
-            --repo=flatpak-repo flatpak-build \
-            packaging/flatpak/com.kxxnzstdsw.Sundays.json
+          if ! flatpak-builder --user --force-clean --disable-rofiles-fuse \
+              --repo=flatpak-repo flatpak-build \
+              packaging/flatpak/com.kxxnzstdsw.sundays.json 2>&1 | tee builder.log; then
+            echo "::error::flatpak-builder 失败，末尾输出："
+            tail -n 30 builder.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
 
       # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
       # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
       - name: 导出单文件 bundle
         run: |
-          flatpak build-bundle flatpak-repo \
-            "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
-            com.kxxnzstdsw.Sundays stable
+          if ! flatpak build-bundle flatpak-repo \
+              "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
+              com.kxxnzstdsw.sundays stable 2>&1 | tee bundle.log; then
+            echo "::error::导出 bundle 失败，末尾输出："
+            tail -n 20 bundle.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
           ls -lh *.flatpak
 
       - uses: actions/upload-artifact@v7

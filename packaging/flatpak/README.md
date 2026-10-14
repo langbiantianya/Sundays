@@ -11,22 +11,22 @@ bash .github/scripts/assemble-flatpak-app.sh
 
 # 再往下需要 flatpak-builder 与 freedesktop 运行时
 flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
-  packaging/flatpak/com.kxxnzstdsw.Sundays.json
-flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.Sundays stable
+  packaging/flatpak/com.kxxnzstdsw.sundays.json
+flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays stable
 ```
 
 ## 目录里各文件干什么
 
 | 文件 | 作用 |
 | --- | --- |
-| `com.kxxnzstdsw.Sundays.json` | manifest，flatpak-builder 读它 |
-| `com.kxxnzstdsw.Sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
-| `com.kxxnzstdsw.Sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
+| `com.kxxnzstdsw.sundays.json` | manifest，flatpak-builder 读它 |
+| `com.kxxnzstdsw.sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
+| `com.kxxnzstdsw.sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
 | `sundays-app/` | 组装好的应用目录（app-image 原样搬过来），**不入库** |
 
 改 `desktopApp/build.gradle.kts` 里的 `nativeDistributions.packageName` 时，
 `.github/scripts/assemble-flatpak-app.sh` 的 `LAUNCHER_NAME` 与
-`com.kxxnzstdsw.Sundays.json` 的 `command` 要一起改 —— 启动器文件名与
+`com.kxxnzstdsw.sundays.json` 的 `command` 要一起改 —— 启动器文件名与
 `app/<同名>.cfg` 是配套的。脚本会显式断言启动器存在，对不上直接报错。
 
 `manifest` 里的 `sources` 只声明一份目录与两个静态文件：应用本体是
@@ -55,6 +55,12 @@ app-image 自带的原生启动器（Linux 在 `bin/com.kxxnzstdsw.sundays`）�
 也正因为如此，组装脚本**不重排目录，整棵 app-image 原样拷进 `sundays-app/`**：
 原生启动器靠 `$APPDIR` 的相对关系去找 `lib/app/<同名>.cfg` 和 `lib/runtime`，
 一挪动位置就只会在**启动时**才炸，而不是在构建时。
+
+**应用 ID 必须全小写：`com.kxxnzstdsw.sundays`。**
+Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstdsw.Sundays`
+（跟着 `mainClass` 的大写 S 走），`flatpak-builder` 当场拒收，**0 秒退出**。
+这也正好和 jpackage 的命名一致 —— app-image 目录本来就叫
+`com.kxxnzstdsw.sundays`。
 
 **不装 `Platform.GL` / `Platform.Vulkan` 扩展。**
 自 freedesktop 23.08 起，GL / EGL / Mesa 已经并进主运行时，那两个扩展是留给
