@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# 把 Gradle 打出来的 app-image 原样搬进 Flatpak 目录，并备好图标。
+# 从 Gradle 打出来的 app-image 里**只取应用本体**（jar + resources + 原生资源），
+# 另写一个 shell 启动器，JDK 交给 Flathub 的 freedesktop 扩展提供。
 #
-# ⚠️ 这里换过一次思路，值得记下来，因为它反直觉：
+# ⚠️ 这里换过一次思路，第二次，记下来免得又绕回去：
 #
-# 最开始是自己在 bin/ 下写一个启动脚本 exec runtime/bin/java。**这在 Compose
-# 打包产物上必然跑不起来** —— Compose 给 jlink 传了 --strip-native-commands，
-# 打出来的运行时里连一个可执行文件都没有。本机实测：
-#   desktopApp/build/compose/tmp/main/runtime/bin/  67 个文件，全是 DLL，0 个 exe
-#   desktopApp/build/compose/binaries/.../runtime/bin/  同上
-# 唯一的启动器是 app-image 自带的原生启动器（Linux 在 bin/<packageName>，
-# Windows 在 <packageName>.exe）。
+# 第一版是「整个 app-image 原样搬 + 用它自带的原生启动器」。那是因为 Compose 给
+# jlink 传了 --strip-native-commands，打出来的运行时里连一个可执行文件都没有
+# （本机实测 desktopApp/build/compose/tmp/main/runtime/bin/ 67 个文件全是 DLL、
+# 0 个 exe），所以「自己写脚本 exec runtime/bin/java」在原理上跑不通。
 #
-# 所以本脚本不再重排目录、不再自己写启动脚本：**整个 app-image 原样拷贝**。
-# 原生启动器靠 $APPDIR 的相对关系去找 lib/app 里的 .cfg 和 lib/runtime，
-# 目录结构一改它就找不到；原样搬过去，这些关系天然保持。
+# 第二版不再自带 JDK。**关键事实：org.freedesktop.Platform 运行时里没有 JVM**，
+# Platform 与 Sdk 都不提供（真正给 JVM 的是 SDK 扩展 org.freedesktop.Sdk.Extension.openjdk，
+# 且它只能构建时可见，运行时要用必须靠它自带的 install.sh 把 JVM 落到 /app）。
+# 所以「用运行时的 JDK」在 Flatpak 里的准确含义是：改用 Freedesktop 官方扩展提供的
+# OpenJDK，而不是 jpackage 用 jlink 现场裁出来的那一份。
+# 换来的好处有三：
+#   1. bundle 里不再塞一份与 glibc 绑死的自裁 JDK，构建机与运行时的 glibc 差异从此无关；
+#   2. 那份 JDK 由 Freedesktop SDK 团队针对同版本 runtime 编译，java.desktop 等模块齐备；
+#   3. 版本跟随 Flathub 更新，不必跟着 Gradle 每次重新裁。
+# 代价是 /app/jre 仍然占体积（那由扩展的 install.sh 决定，不归我们管）。
 #
 # 单独成文件而不是塞进 workflow：这段逻辑有分支、有断言、以后还会改，
 # 塞进 YAML 的 run: 里既难读也不好在本地复现。
@@ -22,20 +27,20 @@ set -euo pipefail
 APP_IMAGE_ROOT="desktopApp/build/compose/binaries/main/app"
 PACKAGING_DIR="packaging/flatpak"
 STAGE="$PACKAGING_DIR/sundays-app"
+# 应用本体在包内的落点。**磁盘相对路径与包内绝对路径必须分开写两个变量**：
+# 曾经图省事拼成 "$STAGE$APPDIR_IN_APP"，而后者以 / 开头，拼出来是
+# sundays-app/app/share/sundays/app —— 一个看着像绝对路径、其实是相对路径的东西，
+# 于是所有文件整整错了一层目录，而脚本自己的断言查的也是同一个错路径，
+# 一路绿灯直到打包完才发现少了 jar。
+APPDIR_REL="share/sundays/app"
+APPDIR_IN_APP="/app/$APPDIR_REL"
 # 全小写：Flatpak 应用 ID 只允许 [a-z0-9_-] 与点。首版这里写的是
 # com.kxxnzstdsw.Sundays（大写 S），flatpak-builder 当场拒收，0 秒退出。
 APP_ID="com.kxxnzstdsw.sundays"
-ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
-
-# 必须与 desktopApp/build.gradle.kts 里的 nativeDistributions.packageName 一致。
-# 启动器文件名和 app/<同名>.cfg 是配套的，对不上就启动不了，所以这里显式断言，
-# 而不是猜一个名字去 find。
+# 必须与 desktopApp/build.gradle.kts 里的 nativeDistributions.packageName 一致，
+# 同时也是 jpackage 生成的 .cfg 文件名。
 LAUNCHER_NAME="com.kxxnzstdsw.sundays"
-
-# jlink 直接产出的运行时。app-image 里的那份是 jpackage 从它拷过去的，
-# 万一拷贝没落全（Gradle 构建缓存只还原任务声明过的输出时就可能发生），
-# 拿这份原图顶上。两者内容本就同源。
-JLINK_RUNTIME="desktopApp/build/compose/tmp/main/runtime"
+ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
 
 say() { echo "::error::$1"; }
 
@@ -65,104 +70,160 @@ dump_lay_of_land() {
   say "app-image 文件总数 $(find "$APP_IMAGE_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')"
   while IFS= read -r line; do
     [ -n "$line" ] || continue          # 没有候选时别打一条空 annotation，白占额度
-    say "  JVM 库 $line"; n=$((n + 1))
+    say "  jar 目录候选 $line"; n=$((n + 1))
     [ "$n" -ge 3 ] && break
   done <<EOF
-$(find "$base" -type f \( -name 'libjvm.so' -o -name 'jvm.dll' \) 2>/dev/null | sort)
+$(find "$APP_IMAGE_ROOT" -type d \( -name app -o -path '*/lib/app' \) 2>/dev/null | sort)
 EOF
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    say "  启动器 $line"; n=$((n + 1))
+    say "  cfg/启动器 $line"; n=$((n + 1))
     [ "$n" -ge 5 ] && break
   done <<EOF
-$(find "$APP_IMAGE_ROOT" -type f -perm -u+x ! -name '*.jar' ! -name '*.so' 2>/dev/null | sort)
+$(find "$APP_IMAGE_ROOT" -maxdepth 3 -type f \( -name '*.cfg' -o -name '*.exe' \) 2>/dev/null | sort)
 EOF
 }
 
-# --- 定位 app-image 根目录 --------------------------------------------------
-# 判据：某个 bin/ 目录的父目录里同时躺着 app/ 或 lib/app（jar 与 .cfg 的所在）。
-# lib/runtime/bin 也会被 find 命中，但它父目录里既没有 app 也没有 lib/app，
-# 自然被排除 —— 这比按目录名猜层级可靠。
-APP_IMAGE_DIR=""
-while IFS= read -r b; do
-  parent="$(dirname "$b")"
-  if [ -d "$parent/lib/app" ] || [ -d "$parent/app" ]; then
-    APP_IMAGE_DIR="$parent"
+# --- 定位 jar 目录（应用本体所在） ------------------------------------------
+# 判据是「目录里有 jar 也有 jpackage 生成的 .cfg」，而不是目录叫什么。
+#
+# 曾经这里是「找含 bin/ 且旁边有 app 或 lib/app 的根」，那在 Linux 上成立，
+# 在 Windows 上却从来没成立过：jpackage 的 Windows 布局压根没有 bin/，
+# 启动器就是根目录下的 com.kxxnzstdsw.sundays.exe。本仓库主要在 Windows 上开发，
+# 一条判据只对一半平台成立就意味着本地永远复现不了 CI 的路径 ——
+# 而这份脚本的价值恰恰在于能在本地跑。
+#
+# .cfg 那半个条件也不是凑数：主类与 java-options 都要从它里面读，
+# 读不到就必须硬失败，总比猜一个主类名、等到用户点开始菜单才显形好。
+JAR_DIR=""
+while IFS= read -r d; do
+  if [ -n "$(find "$d" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ] \
+     && [ -n "$(find "$d" -maxdepth 1 -name '*.cfg' -print -quit 2>/dev/null)" ]; then
+    JAR_DIR="$d"
     break
   fi
 done <<EOF
-$(find "$APP_IMAGE_ROOT" -type d -name bin 2>/dev/null | sort || true)
+$(find "$APP_IMAGE_ROOT" -type d -name app 2>/dev/null | sort || true)
 EOF
 
-if [ -z "$APP_IMAGE_DIR" ]; then
-  say "$APP_IMAGE_ROOT 下找不到「含 bin/ 且旁边有 app 或 lib/app」的应用根目录"
+if [ -z "$JAR_DIR" ]; then
+  say "$APP_IMAGE_ROOT 下找不到「同时含 jar 与 .cfg」的 app 目录"
+  say "主类只能从 .cfg 的 app.mainclass 取，取不到就不猜 —— 猜错只会在运行时炸"
   dump_lay_of_land
   exit 1
 fi
+APP_IMAGE_DIR="$(dirname "$JAR_DIR")"
+[ "$(basename "$APP_IMAGE_DIR")" = lib ] && APP_IMAGE_DIR="$(dirname "$APP_IMAGE_DIR")"
 echo "app-image 根目录：$APP_IMAGE_DIR"
+echo "jar 目录：$JAR_DIR（$(find "$JAR_DIR" -maxdepth 1 -name '*.jar' | wc -l | tr -d ' ') 个 jar）"
 
-# --- 校验原生启动器 --------------------------------------------------------
-# 必须用它，不能自己写脚本 exec java：运行时里没有 java 可执行文件（见文件头）。
-LAUNCHER="$APP_IMAGE_DIR/bin/$LAUNCHER_NAME"
-if [ ! -f "$LAUNCHER" ]; then
-  say "找不到原生启动器 $LAUNCHER"
-  say "若 packageName 改过，同步改本脚本的 LAUNCHER_NAME 与 packaging/flatpak/*.json 的 command"
+# --- 读 jpackage 的 .cfg ----------------------------------------------------
+# 主类与 JVM 参数一律从 jpackage 自己生成的配置里读，不在脚本里再写死第二份。
+# 两份一旦漂移（改了 mainClass 却忘了改脚本），症状是启动时 ClassNotFoundException，
+# 而那要等到用户点开始菜单才显形。CFG 是 jpackage 的单一事实来源。
+CFG="$(find "$JAR_DIR" -maxdepth 1 -name "$LAUNCHER_NAME.cfg" -print -quit 2>/dev/null || true)"
+if [ -z "$CFG" ]; then
+  say "$JAR_DIR 下找不到 $LAUNCHER_NAME.cfg"
   dump_lay_of_land
   exit 1
 fi
 
-# --- 组装：整棵目录原样搬过去 ----------------------------------------------
-# 不重排层级。原生启动器靠 $APPDIR 相对定位 .cfg 与 lib/runtime，
-# 一旦挪动位置就会在启动时（而不是构建时）才炸。
+MAINCLASS="$(sed -n 's/^app\.mainclass=//p' "$CFG" | head -n1 | tr -d '\r')"
+if [ -z "$MAINCLASS" ]; then
+  say "$CFG 里没有 app.mainclass —— 组装脚本拒绝猜主类"
+  dump_lay_of_land
+  exit 1
+fi
+echo "主类：$MAINCLASS"
+
+# java-options 逐行收集，拼成一行可以直接塞进 exec 的实参列表。
+# $APPDIR 是 jpackage 留给启动器的占位符，换成本脚本自己的落点；
+# Windows 上生成的 cfg 用反斜杠做分隔符，统一成 /，这样本地跑出来的脚本
+# 和 Linux 上生成的不会有区别。
+OPTS=""
+while IFS= read -r raw; do
+  opt="${raw%$'\r'}"
+  opt="${opt#java-options=}"
+  [ -n "$opt" ] || continue
+  # 单引号会让下面生成的 shell 脚本失配。与其写一套转义规则，不如当场拒绝：
+  # jpackage 生成的参数里不会出现单引号，出现了说明哪里不对，该报错而不是硬转。
+  case "$opt" in
+    *"'"*) say ".cfg 的 java-options 里出现单引号，无法安全生成启动脚本：$opt"; exit 1 ;;
+  esac
+  opt="${opt//\$APPDIR/$APPDIR_IN_APP}"
+  opt="${opt//\\//}"
+  OPTS="$OPTS '$opt'"
+done <<EOF
+$(grep -E '^java-options=' "$CFG" || true)
+EOF
+if [ -z "$OPTS" ]; then
+  say "$CFG 里一条 java-options 都没有，生成出来的启动器等于裸跑主类"
+  exit 1
+fi
+echo "java-options 条数：$(printf '%s' "$OPTS" | tr -c "'" '\n' | grep -c "'")"
+
+# --- 组装 -------------------------------------------------------------------
+# 只搬应用本体：jar、resources、以及 jpackage 顺手拷进来的原生资源
+# （Linux 上是 libskiko-linux-*.so 与 libicudtl.dat，Windows 上是对应的 .dll/.dat）。
+# **不搬 jlink 运行时** —— 它是这一版要摆脱的东西。
 rm -rf "$STAGE"
-mkdir -p "$STAGE"
-cp -a "$APP_IMAGE_DIR/." "$STAGE/"
-# cp -a 已经保留执行位；这里再点一次是防 jpackage 在某个平台上漏掉。
-chmod +x "$STAGE/bin/$LAUNCHER_NAME"
+mkdir -p "$STAGE/bin" "$STAGE/$APPDIR_REL"
+cp -a "$JAR_DIR/." "$STAGE/$APPDIR_REL/"
+
+if [ ! -d "$STAGE/$APPDIR_REL/resources" ]; then
+  # 只告警，不失败。本机实测 Windows 产物里这个目录是**空的**，Linux 上会不会
+  # 干脆没有也没验证过，而 jpackage 的 .cfg 里那句 -Dcompose.application.resources.dir
+  # 指向的就是它 —— 目录不存在时 Compose 会回退到 classpath，功能不受影响。
+  # 曾经这里是个硬失败：为一个「本来就可以没有」的东西卡住整条流水线，
+  # 是这个仓库吃过好几次的亏（见 packaging/flatpak/README.md 末尾）。
+  echo "提示：没有 resources 目录，Compose 会回退到 classpath 取资源"
+fi
+if [ -z "$(find "$STAGE/$APPDIR_REL" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then
+  say "$STAGE/$APPDIR_REL 下没有 jar"
+  exit 1
+fi
+if find "$STAGE" -type d -name runtime -print -quit 2>/dev/null | grep -q .; then
+  say "$STAGE 里出现了 runtime 目录 —— jlink 运行时不该被搬进来"
+  exit 1
+fi
+
+# --- 生成启动器 -------------------------------------------------------------
+# 一个 /bin/sh 脚本，exec Freedesktop 扩展装到 /app/jre 的 java。
+# classpath 用 Java 通配符而不是逐个列 160 个 jar：jpackage 把 classpath 折成了
+# 多行续行（实测 cfg 共 169 行，classpath 就占了 160 行），解析它比不解析更脆，
+# 而 -cp '/path/*' 由 JVM 自己按目录枚举，语义完全一致。
+#
+# exec 写成**一行**，不用反斜杠续行。续行要同时躲两层转义（printf 的格式串
+# 和 shell 的反斜杠），实测写错过一次，结果每个 java-options 都被截断成独立一行，
+# java 只收到第一个参数 —— 而 sh -n 完全看不出来。
+LAUNCHER="$STAGE/bin/$LAUNCHER_NAME"
+{
+  printf '%s\n' '#!/bin/sh'
+  printf '%s\n' '# 由 .github/scripts/assemble-flatpak-app.sh 从 jpackage 的 .cfg 生成，勿手改。'
+  printf '%s\n' '# 入口原来用 app-image 自带的原生二进制；现在 JDK 由'
+  printf '%s\n' '# org.freedesktop.Sdk.Extension.openjdk 提供，这里只负责把 JVM 拉起来。'
+  printf '%s\n' 'set -eu'
+  printf '%s\n' "APPDIR='$APPDIR_IN_APP'"
+  printf '%s\n' 'JAVA=/app/jre/bin/java'
+  printf '%s\n' '# 兜底：万一扩展换了个落点，退到 PATH 上找 java。'
+  printf '%s\n' 'if [ ! -x "$JAVA" ]; then JAVA="$(command -v java 2>/dev/null || true)"; fi'
+  printf '%s\n' 'if [ -z "$JAVA" ] || [ ! -x "$JAVA" ]; then'
+  printf '%s\n' '  echo "Sundays: 找不到可用的 java（期望 /app/jre/bin/java，来自 org.freedesktop.Sdk.Extension.openjdk）" >&2'
+  printf '%s\n' '  exit 127'
+  printf '%s\n' 'fi'
+  printf '%s\n' "exec \"\$JAVA\"$OPTS -cp \"\$APPDIR/*\" '$MAINCLASS' \"\$@\""
+} > "$LAUNCHER"
+chmod +x "$LAUNCHER"
+
+if [ ! -s "$LAUNCHER" ]; then
+  say "生成的启动器是空文件：$LAUNCHER"
+  exit 1
+fi
 
 # 图标：Flatpak 的图标约定是 /app/share/icons/hicolor/256x256/apps/<app-id>.png，
 # 源图正好是 256 的，manifest 的 build-commands 会把它装到那个位置。
 cp "$ICON_SRC" "$PACKAGING_DIR/$APP_ID.png"
 
-# --- 运行时自愈 ------------------------------------------------------------
-# jpackage 是把 jlink 原图拷进 app-image 的。若 Gradle 构建缓存只还原了任务
-# 声明过的输出，这一步拷过去的东西可能没落全，启动器就会在运行时报找不到
-# libjli。发现没有 JVM 共享库就用原图补上，并说清楚补了没有。
-JVM_LIB=""
-for probe in "$STAGE/lib/runtime/lib/server/libjvm.so" "$STAGE/runtime/lib/server/libjvm.so"; do
-  if [ -f "$probe" ]; then
-    JVM_LIB="$probe"
-    break
-  fi
-done
-
-if [ -z "$JVM_LIB" ] && [ -f "$JLINK_RUNTIME/lib/server/libjvm.so" ]; then
-  say "app-image 里的运行时缺 JVM 共享库，改用 jlink 原图 $JLINK_RUNTIME 补齐"
-  rm -rf "$STAGE/lib/runtime" "$STAGE/runtime"
-  cp -a "$JLINK_RUNTIME" "$STAGE/lib/runtime"
-  JVM_LIB="$STAGE/lib/runtime/lib/server/libjvm.so"
-fi
-
-if [ -z "$JVM_LIB" ]; then
-  say "既没有 app-image 自带的运行时，也没有可用的 jlink 原图（$JLINK_RUNTIME）"
-  dump_lay_of_land
-  exit 1
-fi
-echo "JVM 共享库：$JVM_LIB"
-
-JAR_DIR=""
-for cand in "$STAGE/lib/app" "$STAGE/app"; do
-  if [ -d "$cand" ] && [ -n "$(find "$cand" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then
-    JAR_DIR="$cand"
-    break
-  fi
-done
-
-if [ -z "$JAR_DIR" ]; then
-  say "$STAGE 下找不到装着 jar 的目录（lib/app 或 app）"
-  dump_lay_of_land
-  exit 1
-fi
-echo "jar 目录：$JAR_DIR（$(find "$JAR_DIR" -maxdepth 1 -name '*.jar' | wc -l | tr -d ' ') 个 jar）"
+echo "启动器：$LAUNCHER"
 echo "已组装 $STAGE"
 du -sh "$STAGE" | awk '{print "  体积 " $1}'

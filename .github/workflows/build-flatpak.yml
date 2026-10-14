@@ -19,7 +19,12 @@ env:
   # runtime 版本必须与 packaging/flatpak/*.json 里的 runtime-version 一致，
   # 两边漂移的话「装了运行时但 manifest 要的是另一个」会在构建中途才炸。
   # 下面有一道校验专门比对这两个值。
-  FREEDESKTOP_RUNTIME: '24.08'
+  #
+  # 26.08 是当前稳定分支（2026-08 正式发布，支持到 2028-09）。此前的 24.08 已 EOL，
+  # 而且当初钉住它是因为要迁就自带的 jlink JDK 的 glibc；现在 JDK 换成了
+  # Freedesktop 官方扩展提供的 OpenJDK —— 那是针对同一版 runtime 编译的，
+  # 构建机与运行时的 glibc 差异从此不再是约束，所以可以放心上最新分支。
+  FREEDESKTOP_RUNTIME: '26.08'
 
 jobs:
   bundle:
@@ -36,9 +41,10 @@ jobs:
         include:
           - flatpakArch: amd64
             os: ubuntu-latest
-            # readelf 对 ELF 的 Machine 字段：x86-64 是 "Advanced Micro Devices X86-64"，
-            # arm64 是 "AArch64"。这里只取能区分两者的那个 token。
-            elfMachine: X86-64
+            # 直接对 ELF 头里 e_machine 字段的字面值（偏移 0x12，小端 2 字节），
+            # 而不是 readelf 打印的 Machine 字符串。字符串得再解析一层，
+            # 字面值不用 —— 0x3E 是 x86-64，0xB7 是 AArch64。
+            elfEmachine: '0x3E'
             # skiko 原生运行时包的 classifier 本身编码了目标平台：
             # linux-x64 / linux-arm64，两者互不为子串，判别干净。
             # ⚠️ Linux 的 arm64 产物叫 linux-arm64，不是 linux-aarch64 ——
@@ -47,7 +53,7 @@ jobs:
             skikoToken: x64
           - flatpakArch: arm64
             os: ubuntu-24.04-arm
-            elfMachine: AArch64
+            elfEmachine: '0xB7'
             skikoToken: arm64
 
     steps:
@@ -79,7 +85,8 @@ jobs:
           echo "runner.arch = ${{ runner.arch }}"
           echo "期望架构   = ${{ matrix.flatpakArch }}"
 
-      # Compose 的 app-image 就是我们要的全部内容：jlink 出来的运行时 + 打平的 jar。
+      # Compose 的 app-image 只用来取「打平的 jar + 资源」，jlink 出来的那份运行时
+      # 会被组装脚本丢掉 —— JDK 改由 Freedesktop 的 OpenJDK 扩展提供。
       # Linux 上同样有 skiko 的 linux-aarch_64 产物，所以这里不需要 Windows 腿
       # 那个「protoc 退回 x86_64」的绕法 —— osdetector 会自己挑 linux-aarch_64。
       # pipefail 必须显式开，否则构建失败会被 tee 吞成成功。
@@ -98,52 +105,40 @@ jobs:
 
       # 架构自检：在花时间下载 2GB 运行时之前，先确认打出来的确实是目标架构。
       #
-      # 查两样，缺一不可：
-      #   1. libjvm.so 的 ELF Machine —— 证明 **JDK** 是目标架构
-      #   2. skiko-awt-runtime-*.jar 的名字 —— 证明 Compose 有没有按 os.arch
-      #      选到对应的 native 库，而这才是这次 ARM 构建的核心风险点
-      #
-      # 第 2 条刻意看 **jar 名字而不是解出来的 .so**：那个 .so 是应用启动时
-      # 才落地的，构建产物里未必有，Windows 腿上有是那边 jpackage 顺手放的，
-      # 不能假定 Linux 也一样。而 classifier（linux-x64 / linux-arm64）
-      # 是 Gradle 解析时确定下来的，板上钉钉。
+      # 自从不再自带 jlink JDK 之后，包里唯一与架构强相关的东西就只剩 skiko 的
+      # 原生库了。所以原来查 libjvm.so 与原生启动器两条都删掉 —— 那两个文件现在
+      # 根本不存在，留着只会让这道自检永远红。
       #
       # 全部用 find -name（按基名匹配）而非 -path：后者的通配符不跨 '/'，
       # 见 assemble-flatpak-app.sh 里踩过的坑。
       - name: 校验应用架构
         run: |
-          ELF_MACHINE='${{ matrix.elfMachine }}'
+          ELF_MACHINE='${{ matrix.elfEmachine }}'
           SKIKO_TOKEN='${{ matrix.skikoToken }}'
           STAGE=packaging/flatpak/sundays-app
           fail=0
 
-          # 整棵 app-image 原样搬过来，所以运行时落在 lib/runtime 而不是 runtime。
-          # 这里不加深度限制地全树找，省得跟着 jpackage 的目录约定反复改。
-          jvm="$(find "$STAGE" -type f -name libjvm.so -print -quit 2>/dev/null || true)"
-          if [ -z "$jvm" ]; then
-            echo "::error::$STAGE 里找不到 libjvm.so，jlink 运行时没就位"
+          # 先确认组装产物是新布局：只有 jar、资源和一个 shell 启动器，
+          # 不该再有 jlink 出来的 runtime 目录。布局没切过来就往下跑，
+          # 等于在给一份没人验证过的目录树打包。
+          if find "$STAGE" -type d -name runtime -print -quit 2>/dev/null | grep -q .; then
+            echo "::error::$STAGE 里还有 runtime 目录 —— jlink 运行时不该被搬进来"
             fail=1
-          else
-            m="$(readelf -h "$jvm" | sed -n 's/.*Machine: *//p' | head -n1)"
-            echo "libjvm.so Machine = $m（期望含 $ELF_MACHINE）"
-            case "$m" in
-              *"$ELF_MACHINE"*) ;;
-              *) echo "::error::运行时架构不对：实际 $m，期望含 $ELF_MACHINE"; fail=1 ;;
-            esac
+          fi
+          jars="$(find "$STAGE" -type f -name '*.jar' | wc -l | tr -d ' ')"
+          echo "组装产物 jar 数 = $jars"
+          if [ "$jars" -lt 50 ]; then
+            echo "::error::组装产物只有 $jars 个 jar，app-image 多半没找对"
+            fail=1
           fi
 
-          # 原生启动器也验一下：它是 ELF 可执行文件，架构错了同样启动不了。
-          launcher="$(find "$STAGE/bin" -maxdepth 1 -type f -print -quit 2>/dev/null || true)"
-          if [ -z "$launcher" ]; then
-            echo "::error::$STAGE/bin 下没有原生启动器"
+          # 启动器现在是 /bin/sh 脚本，不再是 ELF 可执行文件，只查存在且可执行。
+          launcher="$STAGE/bin/com.kxxnzstdsw.sundays"
+          if [ ! -x "$launcher" ]; then
+            echo "::error::$launcher 不存在或不可执行"
             fail=1
           else
-            lm="$(readelf -h "$launcher" | sed -n 's/.*Machine: *//p' | head -n1)"
-            echo "原生启动器 $(basename "$launcher") Machine = $lm（期望含 $ELF_MACHINE）"
-            case "$lm" in
-              *"$ELF_MACHINE"*) ;;
-              *) echo "::error::启动器架构不对：实际 $lm，期望含 $ELF_MACHINE"; fail=1 ;;
-            esac
+            echo "启动器 = $launcher"
           fi
 
           skiko="$(find "$STAGE" -type f -name 'skiko-awt-runtime-*.jar' -print -quit 2>/dev/null || true)"
@@ -157,6 +152,24 @@ jobs:
               *"$SKIKO_TOKEN"*) ;;
               *) echo "::error::skiko 选错了平台：$base，期望含 $SKIKO_TOKEN"; fail=1 ;;
             esac
+
+            # 直接读 jar 里那个 .so 的 ELF 头 e_machine（偏移 0x12，小端 2 字节）。
+            # 不查 app-image 里落地的 .so：那个要到应用启动时才被 skiko 解出来，
+            # 构建产物里未必有，Linux 上有没有全看 jpackage 的心情，不能当契约。
+            # 不查 jar 名以外的东西：文件名可以是错的，字节不会。
+            #
+            # 用 python3 而不是 readelf：解 zip 要 python3（runner 镜像标配），
+            # readelf 属于 binutils，为了读两个字节多装一个包不值得。
+            if command -v python3 >/dev/null 2>&1; then
+              m="$(python3 -c 'import sys,zipfile,struct; z=zipfile.ZipFile(sys.argv[1]); n=[i for i in z.namelist() if i.endswith(".so")]; print("NO_SO" if not n else "0x%02X" % struct.unpack_from("<H", z.read(n[0]), 18)[0])' "$skiko" 2>&1)"
+              echo "skiko 内嵌 .so 的 ELF e_machine = $m（期望 $ELF_MACHINE）"
+              if [ "$m" != "$ELF_MACHINE" ]; then
+                echo "::error::skiko 原生库架构不对：e_machine=$m，期望 $ELF_MACHINE"
+                fail=1
+              fi
+            else
+              echo "::warning::runner 上没有 python3，跳过 ELF 复核（只剩 classifier 一道）"
+            fi
           fi
 
           exit $fail
@@ -199,8 +212,10 @@ jobs:
       - name: 查远端可用的 freedesktop 运行时
         continue-on-error: true
         run: |
+          # OpenJDK 扩展也在名单里 —— 它是 JDK 的唯一来源，缺了 manifest 直接构建不了。
+          # 名字带 // 的（不带 arch 的）是 SDK 扩展 ref，运行时本体会多一段 arch。
           flatpak remote-ls flathub --runtime --columns=ref 2>/dev/null \
-            | grep -E '^org\.freedesktop\.(Platform|Sdk|Platform\.GL|Platform\.Vulkan)//' \
+            | grep -E '^org\.freedesktop\.(Platform|Sdk|Platform\.GL|Platform\.Vulkan|Sdk\.Extension\.openjdk)//' \
             | sort | tail -n 24 \
             | while IFS= read -r ref; do echo "::warning::远端有 $ref"; done
 
@@ -212,6 +227,9 @@ jobs:
       # 自 23.08 起 GL/EGL/Mesa 已经并进主运行时，那两个扩展是给老应用留的
       # 兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
       # 上一轮就是这一步在两条腿上失败的。
+      #
+      # OpenJDK 扩展不用在这里装：manifest 的 sdk-extensions 声明了它，
+      # flatpak-builder 会自己去装。手动装反而多一条可能出错的路径。
       - name: 安装 freedesktop 运行时与 SDK
         run: |
           flatpak remote-add --user --if-not-exists flathub \
@@ -291,6 +309,17 @@ jobs:
             exit 1
           fi
           echo "::warning::产物就位：flatpak-build/files/$built（$(du -sh flatpak-build/files | cut -f1)）"
+
+          # JDK 来自 OpenJDK 扩展的 install.sh，落在 /app/jre。
+          # 单独验它：manifest 里那步 test -x 只保证构建沙箱里能跑，
+          # 真正要确认的是它进了应用目录 —— 否则用户点开始菜单时
+          # 启动器只会打一句「找不到可用的 java」然后退出 127。
+          if [ ! -x flatpak-build/files/jre/bin/java ]; then
+            echo "::error::应用目录里没有 jre/bin/java —— OpenJDK 扩展没装进来"
+            echo "::error://app 顶层：$(ls -A flatpak-build/files 2>&1 | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "::warning::应用内 JDK：flatpak-build/files/jre/bin/java"
 
       # 导出成单文件 bundle。
       #

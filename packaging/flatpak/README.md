@@ -16,7 +16,7 @@ flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays master
 ```
 
 bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
-`org.freedesktop.Platform` 来自 Flathub，安装时按 metadata 里的 runtime
+`org.freedesktop.Platform` 与 OpenJDK 扩展来自 Flathub，安装时按 metadata 里的
 声明去取，所以换机器装它仍需要能访问 Flathub。
 
 **导出时分支取 ref 的最后一段。**
@@ -32,12 +32,13 @@ bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
 | `com.kxxnzstdsw.sundays.json` | manifest，flatpak-builder 读它 |
 | `com.kxxnzstdsw.sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
 | `com.kxxnzstdsw.sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
-| `sundays-app/` | 组装好的应用目录（app-image 原样搬过来），**不入库** |
+| `sundays-app/` | 组装好的应用目录（只有 jar + 资源 + 启动脚本），**不入库** |
 
 改 `desktopApp/build.gradle.kts` 里的 `nativeDistributions.packageName` 时，
 `.github/scripts/assemble-flatpak-app.sh` 的 `LAUNCHER_NAME` 与
-`com.kxxnzstdsw.sundays.json` 的 `command` 要一起改 —— 启动器文件名与
-`app/<同名>.cfg` 是配套的。脚本会显式断言启动器存在，对不上直接报错。
+`com.kxxnzstdsw.sundays.json` 的 `command` 要一起改。
+**主类不用改**：启动器里的主类是从 jpackage 生成的 `.cfg` 的 `app.mainclass`
+读出来的，脚本里没有第二份。
 
 `manifest` 里的 `sources` 只声明一份目录与两个静态文件：应用本体是
 `.github/scripts/assemble-flatpak-app.sh` 在 flatpak-builder **外面**拼好的，
@@ -47,30 +48,82 @@ flatpak-builder 在这里只负责把它装进 `/app` 并导出元数据，不�
 
 ## 几个选型理由
 
-**runtime 用 24.08 而不是 Flathub 当前的 26.08。**
-freedesktop 24.08 基于 Ubuntu 24.04，glibc 是 2.39；CI 的构建机也是
-ubuntu-24.04 / ubuntu-24.04-arm，glibc 同样是 2.39。skiko 的原生 `.so` 与
-jlink 出来的 JDK 原生库都是在 2.39 上编的 —— 换成更老的 runtime（23.08 是
-glibc 2.38）就会在**启动时**报 `GLIBC_2.39 not found`，而且那种错只在装好
-Flatpak 之后才显形，排查成本很高。runtime 比构建环境新则没问题（新运行时向下兼容）。
+**runtime 用 26.08。**
+当前稳定分支（2026-08 正式发布，支持到 2028-09），24.08 已 EOL。
+此前钉在 24.08 是因为要迁就自带的那份 jlink JDK —— 它是在 CI 构建机的
+glibc 上编的，runtime 太老就会在启动时报 `GLIBC_2.39 not found`。
+现在 JDK 换成了 Freedesktop 官方扩展提供的 OpenJDK（针对同一版 runtime 编译），
+这个约束随之消失：runtime 比构建环境新是安全的（新运行时向下兼容）。
 
-**用 Compose 自带的原生启动器，不要自己写启动脚本。**
-这条和最初的设想正好相反，值得记下来：Compose 给 jlink 传了
+**JDK 不自己打包，用 `org.freedesktop.Sdk.Extension.openjdk`。**
+这是本文档里最反直觉的一条，值得写清楚：
+
+> **freedesktop 的 runtime 和 sdk 本身都没有 JVM。**
+> Platform 与 Sdk 只保证「桌面上常用的东西」，Java 不在其中 ——
+> 几百 MB 的东西塞进每个应用都要挂载的运行时里，代价比收益大。
+> 官方给的唯一途径是 SDK 扩展 `org.freedesktop.Sdk.Extension.openjdk`，
+> 而且它**只在构建时可见**；要在运行时用，必须跑它自带的
+> `/usr/lib/sdk/openjdk/install.sh`，由那个脚本把 JVM 复制到 `/app/jre`。
+
+所以 manifest 里多了一个 `openjdk` 模块，内容就一行 `install.sh`；
+`/app/jre` 里那份东西是 Freedesktop 自己编的 OpenJDK，不是 jpackage 现场
+jlink 出来的 —— 它与 runtime 的 glibc、头文件、库版本天然对齐，
+换运行时版本时不用重新裁一遍。
+
+代价要说明白：`install.sh` 装的是完整 JDK 的 `conf/lib/release`，
+所以 `/app/jre` 仍然有体积，这部分由扩展决定，不归我们管。
+
+**用自写的 `/bin/sh` 启动器，不再用 app-image 自带的原生启动器。**
+这条路曾经被证明是走不通的，所以现在能走了值得记一笔原因：
+
+第一版想自己写个脚本 `exec runtime/bin/java`，但 Compose 给 jlink 传了
 `--strip-native-commands`，打出来的运行时里**一个可执行文件都没有**
-（本机实测 `desktopApp/build/compose/tmp/main/runtime/bin/` 下 67 个文件全是
-Windows DLL，`0` 个 `.exe`）。所以「自己写个脚本 `exec runtime/bin/java`」
-这条路在原理上就走不通 —— 那个 `java` 根本不存在。
-app-image 自带的原生启动器（Linux 在 `bin/com.kxxnzstdsw.sundays`）是唯一入口。
+（本机实测 `desktopApp/build/compose/tmp/main/runtime/bin/` 下 67 个文件
+全是 DLL、`0` 个 `.exe`）。既然要带的那份运行时里根本没有 `java`，
+自己写脚本 exec 它就无从谈起，只能反过来用 app-image 自带的原生启动器，
+并且为了迁就它**整棵 app-image 原样搬、不重排目录**（它靠 `$APPDIR` 的
+相对关系去找 `lib/app/<同名>.cfg` 和 `lib/runtime`）。
 
-也正因为如此，组装脚本**不重排目录，整棵 app-image 原样拷进 `sundays-app/`**：
-原生启动器靠 `$APPDIR` 的相对关系去找 `lib/app/<同名>.cfg` 和 `lib/runtime`，
-一挪动位置就只会在**启动时**才炸，而不是在构建时。
+现在运行时整个不要了，`$APPDIR` 的那套相对关系也就不再需要，
+「自己写启动脚本」重新变得可行 —— 同一个想法，隔了一次方案调整就成立了。
+**当时判定的「不可能」只对当时的前提成立。**
+
+启动器长这样（由组装脚本从 `.cfg` 生成，勿手改）：
+
+```sh
+#!/bin/sh
+set -eu
+APPDIR='/app/share/sundays/app'
+JAVA=/app/jre/bin/java
+if [ ! -x "$JAVA" ]; then JAVA="$(command -v java 2>/dev/null || true)"; fi
+if [ -z "$JAVA" ] || [ ! -x "$JAVA" ]; then
+  echo "Sundays: 找不到可用的 java（期望 /app/jre/bin/java，来自 org.freedesktop.Sdk.Extension.openjdk）" >&2
+  exit 127
+fi
+exec "$JAVA" '-Djpackage.app-version=1.0.0' '-Dcompose.application.resources.dir=/app/share/sundays/app/resources' '-Dcompose.application.configure.swing.globals=true' '-Dskiko.library.path=/app/share/sundays/app' -cp "$APPDIR/*" 'com.kxxnzstdsw.sundays.MainKt' "$@"
+```
+
+两个细节：
+
+- **主类与 `java-options` 一律从 jpackage 生成的 `.cfg` 读**，脚本里不写死第二份。
+  两份一旦漂移（改了 `mainClass` 却忘了改脚本），症状是启动时
+  `ClassNotFoundException`，要等到用户点开始菜单才显形。读不到 `.cfg` 时
+  脚本直接失败，不猜。
+- **classpath 用 `-cp "$APPDIR/*"`**，由 JVM 自己按目录枚举 jar。
+  jpackage 把 classpath 折成了多行续行（实测 `.cfg` 共 169 行，classpath
+  就占了 160 行），解析它比不解析更脆，而通配符语义完全一致。
+
+**组装脚本用「目录里有 jar 也有 `.cfg`」定位应用本体，不看目录叫什么。**
+Linux 的 app-image 是 `lib/app/`，Windows 是 `app/`；更关键的是 Windows 布局
+**根本没有 `bin/`**（启动器就是根下的 `com.kxxnzstdsw.sundays.exe`）。
+第一版的定位判据是「含 `bin/` 且旁边有 `app` 或 `lib/app` 的根」，
+在 Linux 上成立、在 Windows 上从来没成立过 —— 而这个仓库主要在 Windows 上
+开发，一条只对一半平台成立的判据意味着本地永远复现不了 CI 的路径，
+也就失去了「能在本地跑」这个唯一价值。
 
 **应用 ID 必须全小写：`com.kxxnzstdsw.sundays`。**
 Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstdsw.Sundays`
 （跟着 `mainClass` 的大写 S 走），`flatpak-builder` 当场拒收，**0 秒退出**。
-这也正好和 jpackage 的命名一致 —— app-image 目录本来就叫
-`com.kxxnzstdsw.sundays`。
 
 **不装 `Platform.GL` / `Platform.Vulkan` 扩展。**
 自 freedesktop 23.08 起，GL / EGL / Mesa 已经并进主运行时，那两个扩展是留给
@@ -92,13 +145,14 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 `Failed to execute child process "eu-strip"` —— 前面十几步全绿，看着像
 快成功了。所以工作流装完立刻逐个 `command -v` 点名确认。
 
-**内容要装进 `/app`，不能只装进模块目录下的 `files/`。**
-`builder_options_get_prefix()` 对非 runtime 构建返回 `/app` —— 那才是模块构建
-沙箱里指向应用目录的前缀。模块 build-dir 里的 `files/` **不会**自动并到
-`<build-dir>/files`，收尾阶段校验 command 时看的是后者。
+**内容要同时写 `/app` 与 `files/`，两个地方都写。**
+`builder_options_get_prefix()` 对非 runtime 构建返回 `/app`；
+但历史上两种写法都被证伪过：只写模块目录下的 `files/`，收尾阶段校验 command
+时看的是 `<build-dir>/files`，于是报 `Command not found`；只写 `/app` 时，
+一旦某个版本上模块沙箱前缀并非 `files`，同样落空。
 
 这个坑的表现极具误导性：探测行验的是模块目录里的 `files/`，永远报
-`exists=yes exec=yes`；而收尾时 `<build-dir>/files` 已被清空，于是报
+`exists=yes`；而收尾时 `<build-dir>/files` 已被清空，于是报
 `Command not found`。**验错了地方，就把「文件在」误当成「文件进了应用」。**
 所以现在两处都写，探测行也同时报两处的落地情况。
 
@@ -120,29 +174,32 @@ else if (g_str_has_prefix (self->command, "/app/"))
 所以 `bin/com.kxxnzstdsw.sundays` 实际找的是
 `files/bin/bin/com.kxxnzstdsw.sundays` —— 哪怕 `files/bin/com.kxxnzstdsw.sundays`
 明明存在且可执行（build-commands 末尾那行 `CHK` 会打出 `exists=yes exec=yes`
-佐证），也照样报 `Command 'bin/com.kxxnzstdsw.sundays' not found`。
-相对写法只适合「command 就是个可执行文件名」的老式用法，
-官方测试清单里就是 `"command": "hello.sh"`。
+佐证），也照样报 `Command not found`。相对写法只适合「command 就是个
+可执行文件名」的老式用法，官方测试清单里就是 `"command": "hello.sh"`。
 
 这一条在排查上很费人：文件确实在、日志里也确实出现了它，
 但工具坚持说找不到。中途还先后试过嵌套一层（`/app/sundays/bin`）、
 往 `/app` 额外同步、加条件守卫又撤销，绕了一大圈 ——
 最后是直接把源码拉下来 grep 出来的，看源码十分钟，比猜十轮快。
 
-**应用装在 `/app` 根，`command` 指向 `bin/...`。**
-
-**内容写进 `files/`，`buildsystem` 用 `simple`。**
-
-**`build-commands` 装进 `files/` 而不是 `/app/`。**
-`buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
-的内容，写它不必依赖 `/app` 那个符号链接。拷贝应用那一步写成
-`if [ -d sundays-app ] ... else ...`：不同 flatpak-builder 版本上 `dir` 类型的
-落点不同（有的是 `sundays-app/` 子目录，有的把内容摊到模块根），两种都收。
-第一条 `echo MODULE_DIR: $(ls -A ...)` 把模块目录内容压成一行打进构建日志，
-等于自带现场取证。
-
 **`finish-args` 里的 `--share=network` 与 `--filesystem=home` 不能省。**
 前者是连 MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
+
+## 架构自检
+
+放在下载 2GB 运行时之前，查两样：
+
+1. **skiko jar 的 classifier**（`linux-x64` / `linux-arm64`）——
+   Gradle 解析依赖时按 `os.arch` 选出来的，板上钉钉。
+   ⚠️ Linux 的 arm64 产物叫 `linux-arm64` 不是 `linux-aarch64`：
+   Maven 的 osdetector 用 `aarch64`，skiko 自己发包时用 `arm64`，两套命名。
+2. **skiko jar 内嵌 `.so` 的 ELF 头 `e_machine`**（偏移 `0x12`，小端 2 字节；
+   `0x3E` = x86-64，`0xB7` = AArch64）—— 文件名可以是错的，字节不会。
+
+刻意读 jar 里的字节，而不是 app-image 里落地的那个 `.so`：后者要到应用
+启动时才被 skiko 解出来，构建产物里未必有（Linux 上有没有全看 jpackage
+的心情，不能当契约）。用 `python3` 解 zip 而不是 `readelf`，
+因为 `readelf` 属于 binutils，为了读两个字节多装一个包不值得。
 
 ## 和 Windows 腿的差异
 
@@ -162,5 +219,10 @@ workflow command 发出的 annotation，超出 10 条的部分直接丢弃 —�
 开头的 banner。
 
 组装脚本的失败诊断同理压在 8 条以内：Gradle 结论行、compose 子目录
-（压平成一行的目录树）、产物文件数、JVM 库与启动器候选各若干。
+（压平成一行的目录树）、产物文件数、jar 目录与 cfg 候选各若干。
 **能打多少打多少是错的，要打最有用的那几条。**
+
+同理，**别为「本来就可以没有」的东西写硬断言**。组装脚本一度要求
+`resources/` 目录必须存在，可本机实测它在 Windows 产物里就是个空目录，
+Linux 上会不会干脆没有也没验证过 —— 为这种可有可无的东西卡住整条流水线，
+是这个仓库吃过好几次的亏。现在那里只打印一行提示。
