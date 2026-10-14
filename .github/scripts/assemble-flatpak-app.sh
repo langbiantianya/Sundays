@@ -40,7 +40,12 @@ JLINK_RUNTIME="desktopApp/build/compose/tmp/main/runtime"
 say() { echo "::error::$1"; }
 
 # 失败时唯一的匿名可读通道是 /check-runs/{id}/annotations：网页版会把大步骤日志
-# 整个截断，原始日志下载要仓库权限。没有这条就只能靠猜 —— 前三次失败都是猜错了。
+# 整个截断，原始日志下载要仓库权限。没有这条就只能靠猜 —— 前几次失败都是猜错了。
+#
+# ⚠️ 但这条通道有上限：GitHub 每个步骤只保留**前 10 条** workflow-command
+# annotation，多发的直接丢弃。所以这里必须把最重要的放最前面、总条数压在 8 以内，
+# 而不是「能打多少打多少」—— 曾经一口气打 40 条目录树，结果真正有用的那几行
+# 排在第 11 条之后，一条都没留下来。
 dump_lay_of_land() {
   local n=0 line
   if [ -f gradle-build.log ]; then
@@ -55,23 +60,20 @@ dump_lay_of_land() {
     return
   fi
 
-  while IFS= read -r line; do
-    say "  目录 $line"; n=$((n + 1))
-    [ "$n" -ge 25 ] && break
-  done <<EOF
-$(find "$base" -maxdepth 4 -type d 2>/dev/null | sort)
-EOF
-
+  # 目录树压成一行，省额度也更好读。-mindepth 1 是为了不把 base 自己再列一遍。
+  say "compose 子目录：$(find "$base" -mindepth 1 -maxdepth 3 -type d 2>/dev/null | sed "s|^$base/||" | tr '\n' ' ' | head -c 400)"
   say "app-image 文件总数 $(find "$APP_IMAGE_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')"
   while IFS= read -r line; do
+    [ -n "$line" ] || continue          # 没有候选时别打一条空 annotation，白占额度
     say "  JVM 库 $line"; n=$((n + 1))
-    [ "$n" -ge 32 ] && break
+    [ "$n" -ge 3 ] && break
   done <<EOF
 $(find "$base" -type f \( -name 'libjvm.so' -o -name 'jvm.dll' \) 2>/dev/null | sort)
 EOF
   while IFS= read -r line; do
+    [ -n "$line" ] || continue
     say "  启动器 $line"; n=$((n + 1))
-    [ "$n" -ge 40 ] && break
+    [ "$n" -ge 5 ] && break
   done <<EOF
 $(find "$APP_IMAGE_ROOT" -type f -perm -u+x ! -name '*.jar' ! -name '*.so' 2>/dev/null | sort)
 EOF

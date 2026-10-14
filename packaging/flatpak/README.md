@@ -77,9 +77,11 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 
 **`build-commands` 装进 `files/` 而不是 `/app/`。**
 `buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
-的内容，写它不必依赖 `/app` 那个符号链接。第一条 `ls -A` 不是手滑 ——
-若哪个 source 没落到预期名字上，后面的 `cp` 会报 `cannot stat`，而这行
-`ls` 的输出会进构建日志，日志又被工作流打成 annotation，等于自带现场取证。
+的内容，写它不必依赖 `/app` 那个符号链接。拷贝应用那一步写成
+`if [ -d sundays-app ] ... else ...`：不同 flatpak-builder 版本上 `dir` 类型的
+落点不同（有的是 `sundays-app/` 子目录，有的把内容摊到模块根），两种都收。
+第一条 `echo MODULE_DIR: $(ls -A ...)` 把模块目录内容压成一行打进构建日志，
+等于自带现场取证。
 
 **`finish-args` 里的 `--share=network` 与 `--filesystem=home` 不能省。**
 前者是连 MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
@@ -92,6 +94,15 @@ protoc 是有 `linux-aarch_64` 产物的，osdetector 会自己挑对。
 
 ## 排障
 
-CI 失败时先看 run 页面的 annotation —— 工作流把 Gradle 的 `* What went wrong *`
-段转成了 annotation，`/check-runs/{id}/annotations` 公开可读，
+CI 失败时看 run 的 annotation —— `/check-runs/{id}/annotations` 公开可读，
 不受「GitHub 网页把大步骤日志截断」的限制，也不需要仓库 admin 权限。
+
+**但这条通道每个步骤只保留前 10 条。**
+workflow command 发出的 annotation，超出 10 条的部分直接丢弃 —— 不是截断显示，
+是真的没有。所以工作流只 dump 日志的**末尾 9 行**并且先发：曾经整份日志逐行
+发出去，真正那句错误排在第 13、14 行，结果一条都没留下来，屏幕上只剩满屏
+开头的 banner。
+
+组装脚本的失败诊断同理压在 8 条以内：Gradle 结论行、compose 子目录
+（压平成一行的目录树）、产物文件数、JVM 库与启动器候选各若干。
+**能打多少打多少是错的，要打最有用的那几条。**

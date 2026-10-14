@@ -208,7 +208,7 @@ jobs:
               "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
               "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" 2>&1 | tee runtime-install.log; then
             echo "::error::freedesktop $FREEDESKTOP_RUNTIME 运行时/SDK 安装失败，末尾输出："
-            tail -n 20 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
+            tail -n 8 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
           flatpak list --user --columns=ref
@@ -234,7 +234,11 @@ jobs:
           rc=$?
           cd "$GITHUB_WORKSPACE"
           echo "::warning::flatpak-builder 退出码 = $rc"
-          sed 's/^/::error::  /' builder.log
+          # 只取日志**末尾** 9 行，且必须放在最前面发。
+          # GitHub 每个步骤只保留**前 10 条** workflow-command annotation —— 上一轮
+          # 把整份日志逐行 dump，结果真正那句错误排在第 13、14 行，直接被丢掉了，
+          # 看到的 10 条全是开头的 banner。同理别指望把几十行日志全搬过来。
+          tail -n 9 builder.log | while IFS= read -r line; do echo "::error::$line"; done
           echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
           echo "::warning::flatpak-build 顶层：$(ls -A flatpak-build 2>&1 | tr '\n' ' ')"
           echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
@@ -270,7 +274,8 @@ jobs:
             "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
             com.kxxnzstdsw.sundays "$branch" > bundle.log 2>&1
           rc=$?
-          sed 's/^/::error::  /' bundle.log
+          # 同样只取末尾 9 行，理由见「构建 Flatpak」那步的注释。
+          tail -n 9 bundle.log | while IFS= read -r line; do echo "::error::$line"; done
           echo "::warning::build-bundle 退出码 = $rc"
           if [ "$rc" -ne 0 ]; then exit "$rc"; fi
           ls -lh *.flatpak
