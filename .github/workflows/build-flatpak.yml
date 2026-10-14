@@ -213,18 +213,29 @@ jobs:
           fi
           flatpak list --user --columns=ref
 
-      # flatpak-builder 失败时把末尾输出打成 annotation。它有多种「秒退」型拒绝
-      # （应用 ID 非法、source 找不到、输出目录嵌在源目录里），错误原文只有一行，
-      # 却正好落在匿名视角看不见的那几步里。
+      # 这一步全程自报现场。上一轮它「成功」了却什么也没留下：repo 不存在、
+      # files/ 是空的、耗时不到 1 秒。成功却没产物，是最难受的一种失败 ——
+      # 猜测空间太大，所以把版本号、完整输出、三处目录内容全打成 annotation。
       - name: 构建 Flatpak
         run: |
-          if ! flatpak-builder --user --force-clean --disable-rofiles-fuse \
-              --repo=flatpak-repo flatpak-build \
-              packaging/flatpak/com.kxxnzstdsw.sundays.json 2>&1 | tee builder.log; then
-            echo "::error::flatpak-builder 失败，末尾输出："
-            tail -n 30 builder.log | while IFS= read -r line; do echo "::error::$line"; done
+          set +e
+          echo "::warning::flatpak-builder = $(command -v flatpak-builder)；版本 $(flatpak-builder --version 2>&1)"
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --repo=flatpak-repo flatpak-build \
+            packaging/flatpak/com.kxxnzstdsw.sundays.json > builder.log 2>&1
+          rc=$?
+          echo "::warning::flatpak-builder 退出码 = $rc"
+          sed 's/^/::error::  /' builder.log
+          echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
+          echo "::warning::flatpak-build 顶层：$(ls -A flatpak-build 2>&1 | tr '\n' ' ')"
+          echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
+          echo "::warning::flatpak-repo 顶层：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+          if [ ! -d flatpak-build/files/sundays ]; then
+            echo "::error::退出码 0 但 files/sundays 不存在 —— build-commands 没生效，别当成构建成功"
             exit 1
           fi
+          echo "::warning::应用目录体积：$(du -sh flatpak-build/files/sundays | cut -f1)"
 
       # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
       # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
