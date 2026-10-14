@@ -11,23 +11,60 @@ STAGE="$PACKAGING_DIR/sundays-app"
 APP_ID="com.kxxnzstdsw.Sundays"
 ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
 
-# --- 定位 app-image --------------------------------------------------------
-# 刻意**不写死路径**。Compose 在 Linux 上的 app-image 布局是否与 Windows 一致
-# 文档没讲清楚，写死一旦对不上就是「文件不存在」这种没法自查的错。
-# 改用 find 去找那个唯一确定存在的产物：jlink 打出来的 java 可执行文件。
-JAVA_BIN="$(find "$APP_IMAGE_ROOT" -type f -path '*/runtime/bin/java' -print -quit 2>/dev/null || true)"
-if [ -z "$JAVA_BIN" ]; then
-  echo "::error::$APP_IMAGE_ROOT 下找不到 runtime/bin/java —— app-image 根本没打出来" >&2
+if [ ! -d "$APP_IMAGE_ROOT" ]; then
+  echo "::error::$APP_IMAGE_ROOT 不存在 —— app-image 根本没打出来" >&2
   exit 1
 fi
 
-# runtime/bin/java -> .../<pkg>/runtime -> .../app/<pkg> -> jar 目录是它下面的 app/
+# --- 定位 jlink 出来的运行时 ------------------------------------------------
+# ⚠️ 这里是第一版栽的坑，值得写下来：
+# GNU find 的 -path 用 fnmatch(FNM_PATHNAME)，**通配符 * 不跨 '/'**。
+# 所以 `-path '*/runtime/bin/java'` 匹配的是「**恰好一段**前缀 + /runtime/bin/java」，
+# 而真实路径有三段前缀（<appName>/lib/runtime/bin/java），永远匹配不上，
+# 表现为「明明打出来了却说找不到」。
+# 教训：find 的 -path 不是 shell 的 glob。要么用 -name（按基名匹配，不涉及斜杠），
+# 要么自己遍历。本文件统一走 -name。
+JAVA_BIN=""
+while IFS= read -r cand; do
+  # 只认 <...>/runtime/bin/java 这个形状
+  if [ "$(basename "$(dirname "$cand")")" = "bin" ] &&
+     [ "$(basename "$(dirname "$(dirname "$cand")")")" = "runtime" ]; then
+    JAVA_BIN="$cand"
+    break
+  fi
+done <<EOF
+$(find "$APP_IMAGE_ROOT" -type f -name java 2>/dev/null || true)
+EOF
+
+if [ -z "$JAVA_BIN" ]; then
+  echo "::error::$APP_IMAGE_ROOT 下找不到 runtime/bin/java —— app-image 没打出来或布局变了" >&2
+  echo "实际目录树（前 3 层）：" >&2
+  find "$APP_IMAGE_ROOT" -maxdepth 3 -type d 2>/dev/null | head -n 40 >&2
+  exit 1
+fi
+
+# Linux 的 jpackage app-image 是 <app>/lib/runtime，Windows 是 <app>/runtime。
+# 两段 dirname 刚好都落在「app 根目录」上，所以这里不用区分平台。
 RUNTIME_DIR="$(dirname "$(dirname "$JAVA_BIN")")"
 APP_IMAGE_DIR="$(dirname "$RUNTIME_DIR")"
-LIB_DIR="$APP_IMAGE_DIR/app"
+echo "app-image 根目录：$APP_IMAGE_DIR"
 
-if [ ! -d "$LIB_DIR" ]; then
-  echo "::error::$LIB_DIR 不是目录，app-image 布局与预期不符（找的是 $JAVA_BIN）" >&2
+# --- 定位 jar 目录 ---------------------------------------------------------
+# 同样两平台不同：Linux 是 lib/app，Windows 是 app。
+# 不写死，改成「找一个叫 app 且底下有 jar 的目录」。
+LIB_DIR=""
+while IFS= read -r d; do
+  if [ -d "$d" ] && [ -n "$(find "$d" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then
+    LIB_DIR="$d"
+    break
+  fi
+done <<EOF
+$(find "$APP_IMAGE_DIR" -maxdepth 2 -type d -name app 2>/dev/null || true)
+EOF
+
+if [ -z "$LIB_DIR" ]; then
+  echo "::error::$APP_IMAGE_DIR 下找不到装着 jar 的 app 目录" >&2
+  find "$APP_IMAGE_DIR" -maxdepth 2 -type d 2>/dev/null | head -n 40 >&2
   exit 1
 fi
 
@@ -36,7 +73,7 @@ if [ "$JAR_COUNT" -lt 1 ]; then
   echo "::error::$LIB_DIR 下一个 jar 都没有，依赖没打进来" >&2
   exit 1
 fi
-echo "app-image: $APP_IMAGE_DIR（$JAR_COUNT 个 jar）"
+echo "jar 目录：$LIB_DIR（$JAR_COUNT 个 jar）"
 
 # --- 组装 ------------------------------------------------------------------
 rm -rf "$STAGE"
@@ -49,8 +86,9 @@ cp -a "$LIB_DIR/." "$STAGE/app/"
 cp "$ICON_SRC" "$PACKAGING_DIR/$APP_ID.png"
 
 # --- 启动脚本 --------------------------------------------------------------
-# 不用 Compose 自带的原生启动器：它靠相对路径回溯去找 runtime/，
-# 在 Flatpak 沙箱里行为不易预期。自己 exec 出错时日志直接指向 java，好排查得多。
+# 不用 Compose 自带的原生启动器：Linux 上它在 bin/<name>，靠相对路径回溯去找
+# lib/runtime，在 Flatpak 沙箱里行为不易预期。自己 exec 出错时日志直接指向
+# java，好排查得多。
 cat > "$STAGE/bin/sundays" <<'LAUNCHER'
 #!/bin/sh
 HERE="$(cd "$(dirname "$0")/.." && pwd)"

@@ -39,9 +39,13 @@ jobs:
             # readelf 对 ELF 的 Machine 字段：x86-64 是 "Advanced Micro Devices X86-64"，
             # arm64 是 "AArch64"。这里只取能区分两者的那个 token。
             elfMachine: X86-64
+            # skiko 原生运行时包的 classifier 本身编码了目标平台：
+            # linux-x64 / linux-aarch64，两者互不为子串，判别干净。
+            skikoToken: x64
           - flatpakArch: arm64
             os: ubuntu-24.04-arm
             elfMachine: AArch64
+            skikoToken: aarch64
 
     steps:
       - uses: actions/checkout@v7
@@ -90,35 +94,52 @@ jobs:
         run: bash .github/scripts/assemble-flatpak-app.sh
 
       # 架构自检：在花时间下载 2GB 运行时之前，先确认打出来的确实是目标架构。
-      # 读两个文件的 ELF Machine 字段：
-      #   libjvm.so    —— jlink 出来的运行时，对说明 JDK 是目标架构
-      #   libskiko*.so —— Compose 按 os.arch 选的那个原生渲染库，
-      #                  这一条才是「架构识别是否生效」的直接证据
+      #
+      # 查两样，缺一不可：
+      #   1. libjvm.so 的 ELF Machine —— 证明 **JDK** 是目标架构
+      #   2. skiko-awt-runtime-*.jar 的名字 —— 证明 Compose 有没有按 os.arch
+      #      选到对应的 native 库，而这才是这次 ARM 构建的核心风险点
+      #
+      # 第 2 条刻意看 **jar 名字而不是解出来的 .so**：那个 .so 是应用启动时
+      # 才落地的，构建产物里未必有，Windows 腿上有是那边 jpackage 顺手放的，
+      # 不能假定 Linux 也一样。而 classifier（linux-x64 / linux-aarch64）
+      # 是 Gradle 解析时确定下来的，板上钉钉。
+      #
+      # 全部用 find -name（按基名匹配）而非 -path：后者的通配符不跨 '/'，
+      # 见 assemble-flatpak-app.sh 里踩过的坑。
       - name: 校验应用架构
         run: |
           ELF_MACHINE='${{ matrix.elfMachine }}'
+          SKIKO_TOKEN='${{ matrix.skikoToken }}'
           STAGE=packaging/flatpak/sundays-app
+          fail=0
 
-          check() {
-            local f="$1" what="$2"
-            if [ ! -f "$f" ]; then
-              echo "::error::$what 不存在：$f"
-              return 1
-            fi
-            local m
-            m="$(readelf -h "$f" | sed -n 's/.*Machine: *//p' | head -n1)"
-            echo "$what：$(basename "$f") Machine = $m（期望含 $ELF_MACHINE）"
+          jvm="$(find "$STAGE/runtime" -type f -name libjvm.so -print -quit 2>/dev/null || true)"
+          if [ -z "$jvm" ]; then
+            echo "::error::$STAGE/runtime 里找不到 libjvm.so，jlink 运行时没就位"
+            fail=1
+          else
+            m="$(readelf -h "$jvm" | sed -n 's/.*Machine: *//p' | head -n1)"
+            echo "libjvm.so Machine = $m（期望含 $ELF_MACHINE）"
             case "$m" in
               *"$ELF_MACHINE"*) ;;
-              *) echo "::error::$what 架构不对：期望含 $ELF_MACHINE，实际 $m"; return 1 ;;
+              *) echo "::error::运行时架构不对：实际 $m，期望含 $ELF_MACHINE"; fail=1 ;;
             esac
-          }
+          fi
 
-          fail=0
-          # 不写死 libjvm.so 的位置：JDK 在 Linux 上是 lib/server/，
-          # 在 Windows 上是 bin/server/，两个平台布局不同
-          check "$(find "$STAGE/runtime" -name 'libjvm.so' -print -quit)" "jlink 运行时" || fail=1
-          check "$(find "$STAGE/app" -name 'libskiko*.so' -print -quit)" "skiko 原生库" || fail=1
+          skiko="$(find "$STAGE/app" -maxdepth 1 -type f -name 'skiko-awt-runtime-*.jar' -print -quit 2>/dev/null || true)"
+          if [ -z "$skiko" ]; then
+            echo "::error::$STAGE/app 里找不到 skiko-awt-runtime-*.jar"
+            fail=1
+          else
+            base="$(basename "$skiko")"
+            echo "skiko 原生运行时包 = $base（期望含 $SKIKO_TOKEN）"
+            case "$base" in
+              *"$SKIKO_TOKEN"*) ;;
+              *) echo "::error::skiko 选错了平台：$base，期望含 $SKIKO_TOKEN"; fail=1 ;;
+            esac
+          fi
+
           exit $fail
 
       # ---------------------------------------------------------------------------
