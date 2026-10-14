@@ -82,18 +82,15 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 `Failed to execute child process "eu-strip"` —— 前面十几步全绿，看着像
 快成功了。所以工作流装完立刻逐个 `command -v` 点名确认。
 
-**应用装在 `/app/sundays`，所以 `command` 是 `sundays/bin/...`。**
-`flatpak-builder` 收尾时会校验 `command` 在 `/app` 下真实存在，
-写成 `bin/...` 就报 `Command 'bin/com.kxxnzstdsw.sundays' not found`。
-jpackage 的启动器靠自身位置推导 `$APPDIR`，嵌套一层不影响它找
-`lib/app/*.cfg` 与 `lib/runtime`。
+**应用装在 `/app` 根，`command` 是 `bin/...`。**
+试过把应用嵌到 `/app/sundays` 下，编译、剥离、提交全都正常，
+`files/sundays/bin/com.kxxnzstdsw.sundays` 也确实存在且可执行
+（build-commands 里那行 `CHK` 会打印 `exists=yes exec=yes` 佐证），
+但 `flatpak-builder` 收尾时仍报 `Command 'sundays/bin/...' not found` ——
+它按 `files/bin/<command>` 去找启动器，嵌套一层就对不上了。
+装在 `/app` 根既绕开这个问题，也是最常规的布局。
 
-**内容要写进 `files/` 再同步到 `/app/`，两处都写。**
-`flatpak-builder` 1.4.2 在 `buildsystem: simple` 下，模块内容提交看的是
-`files/`，但校验 `command` 时看的是 `/app` —— 只写 `files/` 一律报
-`Command not found`。所以 build-commands 里先装进 `files/`，再
-`cp -a files/. /app/` 同步过去。两条腿都验证过：加了同步就通，
-去掉立刻退回 `Command not found`。
+**内容写进 `files/`，`buildsystem` 用 `simple`。**
 
 **`build-commands` 装进 `files/` 而不是 `/app/`。**
 `buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
