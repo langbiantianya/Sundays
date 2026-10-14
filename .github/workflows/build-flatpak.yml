@@ -228,15 +228,31 @@ jobs:
 
       # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
       # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
+      #
+      # 分支不写死。flatpak-builder 往 repo 里导出的默认分支是 master，
+      # 首版这里写的是 stable，于是去要一个不存在的 ref。这里改成先读 repo
+      # 里真实存在的 ref 再取分支，以后 flatpak-builder 改默认值也不会带崩。
       - name: 导出单文件 bundle
         run: |
-          if ! flatpak build-bundle flatpak-repo \
-              "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
-              com.kxxnzstdsw.sundays stable 2>&1 | tee bundle.log; then
-            echo "::error::导出 bundle 失败，末尾输出："
-            tail -n 20 bundle.log | while IFS= read -r line; do echo "::error::$line"; done
+          set +e
+          ostree --repo=flatpak-repo refs > repo-refs.txt 2>&1
+          sed 's/^/::warning::repo ref: /' repo-refs.txt
+          ref="$(grep '^app/com\.kxxnzstdsw\.sundays/' repo-refs.txt | head -n1)"
+          if [ -z "$ref" ]; then
+            echo "::error::repo 里没有 app/com.kxxnzstdsw.sundays 的 ref —— flatpak-builder 那步多半没真导出"
+            echo "::error::repo 目录内容：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
+            echo "::error::构建目录内容：$(ls -A flatpak-build/files 2>&1 | head -c 400)"
             exit 1
           fi
+          branch="${ref#app/com.kxxnzstdsw.sundays/}"
+          echo "::warning::用分支 $branch 导出"
+          flatpak build-bundle flatpak-repo \
+            "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
+            com.kxxnzstdsw.sundays "$branch" > bundle.log 2>&1
+          rc=$?
+          sed 's/^/::error::  /' bundle.log
+          echo "::warning::build-bundle 退出码 = $rc"
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
           ls -lh *.flatpak
 
       - uses: actions/upload-artifact@v7
