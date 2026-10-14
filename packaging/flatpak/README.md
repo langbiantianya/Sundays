@@ -82,13 +82,34 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 `Failed to execute child process "eu-strip"` —— 前面十几步全绿，看着像
 快成功了。所以工作流装完立刻逐个 `command -v` 点名确认。
 
-**应用装在 `/app` 根，`command` 是 `bin/...`。**
-试过把应用嵌到 `/app/sundays` 下，编译、剥离、提交全都正常，
-`files/sundays/bin/com.kxxnzstdsw.sundays` 也确实存在且可执行
-（build-commands 里那行 `CHK` 会打印 `exists=yes exec=yes` 佐证），
-但 `flatpak-builder` 收尾时仍报 `Command 'sundays/bin/...' not found` ——
-它按 `files/bin/<command>` 去找启动器，嵌套一层就对不上了。
-装在 `/app` 根既绕开这个问题，也是最常规的布局。
+**`command` 必须写成绝对路径 `/app/bin/...`，不能写 `bin/...`。**
+这条是 `flatpak-builder` 源码里的硬逻辑（`builder-manifest.c` 的
+`builder_manifest_finish`）：
+
+```c
+if (!g_path_is_absolute (self->command))
+  {
+    bin_dir = g_file_resolve_relative_path (files_dir, "bin");
+    command_file = g_file_get_child (bin_dir, self->command);   /* files/bin/<整串> */
+  }
+else if (g_str_has_prefix (self->command, "/app/"))
+  command_file = g_file_resolve_relative_path (files_dir, self->command + 5);
+```
+
+**相对路径的 `command` 会被整个当作文件名挂到 `files/bin/` 下面。**
+所以 `bin/com.kxxnzstdsw.sundays` 实际找的是
+`files/bin/bin/com.kxxnzstdsw.sundays` —— 哪怕 `files/bin/com.kxxnzstdsw.sundays`
+明明存在且可执行（build-commands 末尾那行 `CHK` 会打出 `exists=yes exec=yes`
+佐证），也照样报 `Command 'bin/com.kxxnzstdsw.sundays' not found`。
+相对写法只适合「command 就是个可执行文件名」的老式用法，
+官方测试清单里就是 `"command": "hello.sh"`。
+
+这一条在排查上很费人：文件确实在、日志里也确实出现了它，
+但工具坚持说找不到。中途还先后试过嵌套一层（`/app/sundays/bin`）、
+往 `/app` 额外同步、加条件守卫又撤销，绕了一大圈 ——
+最后是直接把源码拉下来 grep 出来的，看源码十分钟，比猜十轮快。
+
+**应用装在 `/app` 根，`command` 指向 `bin/...`。**
 
 **内容写进 `files/`，`buildsystem` 用 `simple`。**
 

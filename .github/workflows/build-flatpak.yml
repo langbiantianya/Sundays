@@ -239,15 +239,25 @@ jobs:
           set +e
           echo "::warning::flatpak-builder = $(command -v flatpak-builder)；版本 $(flatpak-builder --version 2>&1)"
           cd packaging/flatpak
-          # 预检：manifest 的 command 必须能在组装产物里找到对应文件。
-          # 应用装在 /app 根，所以 sundays-app/<command> 就是它该在的位置。
-          # 这类路径错要让 flatpak-builder 跑到收尾才报 Command not found，
-          # 在那之前十几步全绿，很容易误以为「快成功了」。
+          # 预检：把 flatpak-builder 的 command 解析规则原样搬过来，提前拦下
+          # 拼错的情况 —— 它要跑到收尾才报错，而那之前十几步全绿。
+          # 规则见 builder-manifest.c：
+          #   以 /app/ 开头  → files/<去掉 /app/ 的部分>
+          #   相对且带 '/'   → files/bin/<整串>（整串当文件名挂到 bin 下）
+          #   相对裸文件名   → files/bin/<该文件名>
           cmd="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
                  com.kxxnzstdsw.sundays.json | head -n1)"
-          echo "::warning::command=$cmd，对应组装产物 sundays-app/$cmd"
-          if [ ! -e "sundays-app/$cmd" ]; then
-            echo "::error::command=$cmd 在组装产物里没有对应文件（期望 sundays-app/$cmd）"
+          case "$cmd" in
+            /*) rel="${cmd#/app/}" ;;
+            */*)
+              echo "::error::command=$cmd 是带路径的相对写法 —— flatpak-builder 会把整串当文件名挂到 files/bin/ 下（即 files/bin/$cmd），请写成 /app/$cmd"
+              exit 1
+              ;;
+            *) rel="bin/$cmd" ;;
+          esac
+          echo "::warning::command=$cmd，实际找 files/$rel，对应组装产物 sundays-app/$rel"
+          if [ ! -e "sundays-app/$rel" ]; then
+            echo "::error::command=$cmd 在组装产物里没有对应文件（期望 sundays-app/$rel）"
             echo "::error::组装产物顶层：$(ls -A sundays-app 2>&1 | tr '\n' ' ')"
             exit 1
           fi
