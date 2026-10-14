@@ -228,13 +228,28 @@ jobs:
           echo "::warning::flatpak-builder = $(command -v flatpak-builder)；版本 $(flatpak-builder --version 2>&1)"
           cd packaging/flatpak
           # 预检：manifest 的 command 必须能在组装产物里找到对应文件。
-          # 应用被装到 /app/sundays 下，所以 command 应是 sundays/bin/...；
-          # 少写或多写一层，flatpak-builder 只会在收尾时报一句 Command not found。
+          # command 是相对 /app 的，而应用被装在 /app/<dest> 下，所以比对前要
+          # 剥掉 dest 这一段 —— sundays-app/bin/... 对上的才是
+          # sundays/bin/...，不是 sundays-app/sundays/bin/...
+          # dest 从 manifest 自己的 build-commands 里推导，不在这里重复写死。
           cmd="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
                  com.kxxnzstdsw.sundays.json | head -n1)"
-          echo "::warning::manifest command = $cmd"
-          if [ ! -e "sundays-app/$cmd" ]; then
-            echo "::error::command=$cmd 在组装产物里没有对应文件（期望 sundays-app/$cmd）"
+          dest="$(grep -o 'files/[a-z0-9_-]*/' com.kxxnzstdsw.sundays.json | head -n1 \
+                 | sed 's|^files/||; s|/$||')"
+          rel="$cmd"
+          if [ -n "$dest" ]; then
+            case "$cmd" in
+              "$dest"/*) rel="${cmd#"$dest"/}" ;;
+              *)
+                echo "::error::command=$cmd 没有以安装目录 $dest/ 开头 —— 应用装在 /app/$dest 下，command 必须带上这一层"
+                echo "::error::组装产物顶层：$(ls -A sundays-app 2>&1 | tr '\n' ' ')"
+                exit 1
+                ;;
+            esac
+          fi
+          echo "::warning::command=$cmd，安装目录=/app/$dest，对应组装产物 sundays-app/$rel"
+          if [ ! -e "sundays-app/$rel" ]; then
+            echo "::error::command=$cmd 在组装产物里没有对应文件（期望 sundays-app/$rel）"
             echo "::error::组装产物顶层：$(ls -A sundays-app 2>&1 | tr '\n' ' ')"
             exit 1
           fi
