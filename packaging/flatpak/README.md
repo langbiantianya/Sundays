@@ -88,6 +88,13 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 jpackage 的启动器靠自身位置推导 `$APPDIR`，嵌套一层不影响它找
 `lib/app/*.cfg` 与 `lib/runtime`。
 
+**内容要写进 `files/` 再同步到 `/app/`，两处都写。**
+`flatpak-builder` 1.4.2 在 `buildsystem: simple` 下，模块内容提交看的是
+`files/`，但校验 `command` 时看的是 `/app` —— 只写 `files/` 一律报
+`Command not found`。所以 build-commands 里先装进 `files/`，再
+`cp -a files/. /app/` 同步过去。两条腿都验证过：加了同步就通，
+去掉立刻退回 `Command not found`。
+
 **`build-commands` 装进 `files/` 而不是 `/app/`。**
 `buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
 的内容，写它不必依赖 `/app` 那个符号链接。拷贝应用那一步写成
