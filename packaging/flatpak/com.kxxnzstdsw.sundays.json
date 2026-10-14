@@ -1,5 +1,5 @@
 {
-  "//": "Sundays 的 Flatpak manifest。id 必须全小写：Flatpak 的应用 ID 规范只允许 [a-z0-9_-] 与点，首版写成 com.kxxnzstdsw.Sundays（大写 S）被 flatpak-builder 当场拒掉，0 秒就退。这与 jpackage 的命名一致 —— app-image 目录本来就叫 com.kxxnzstdsw.sundays。runtime 钉在 24.08 是有意为之：freedesktop 24.08 基于 Ubuntu 24.04（glibc 2.39），与 CI 构建机一致，skiko 的 .so 与 jlink 出来的 JDK 原生库不会踩 GLIBC_2.39 not found。选型理由与故障排查见同目录 README.md。sources 只有一份目录和两个静态文件 —— 应用本体由 .github/scripts/assemble-flatpak-app.sh 在外面拼好，flatpak-builder 在此只负责装配与导出元数据，不参与编译。command 指向 Compose app-image 自带的原生启动器，不是自写脚本：Compose 给 jlink 传了 --strip-native-commands，运行时里没有任何 java 可执行文件，只能用它。build-commands 装进 files/ 而不是 /app/：buildsystem 为 simple 时 CWD 就是模块构建目录，写 files/ 不必依赖 /app 那个符号链接，少一个不确定项。",
+  "//": "Sundays 的 Flatpak manifest。id 必须全小写：Flatpak 的应用 ID 规范只允许 [a-z0-9_-] 与点，首版写成 com.kxxnzstdsw.Sundays（大写 S）被 flatpak-builder 当场拒掉，0 秒就退。这与 jpackage 的命名一致 —— app-image 目录本来就叫 com.kxxnzstdsw.sundays。runtime 钉在 24.08 是有意为之：freedesktop 24.08 基于 Ubuntu 24.04（glibc 2.39），与 CI 构建机一致，skiko 的 .so 与 jlink 出来的 JDK 原生库不会踩 GLIBC_2.39 not found。选型理由与故障排查见同目录 README.md。sources 只有一份目录和两个静态文件 —— 应用本体由 .github/scripts/assemble-flatpak-app.sh 在外面拼好，flatpak-builder 在此只负责装配与导出元数据，不参与编译。command 指向 Compose app-image 自带的原生启动器，不是自写脚本：Compose 给 jlink 传了 --strip-native-commands，运行时里没有任何 java 可执行文件，只能用它。build-commands 装进 files/ 而不是 /app/：buildsystem 为 simple 时 CWD 就是模块构建目录，写 files/ 不必依赖 /app 那个符号链接，少一个不确定项。第一条 ls -A 不是手滑 —— sources 里的 dir 类型若没落到预期名字上，后面的 cp 会报 cannot stat，而这行 ls 的输出会进构建日志，日志又被工作流打成 annotation，等于自带现场取证。",
 
   "id": "com.kxxnzstdsw.sundays",
   "runtime": "org.freedesktop.Platform",
@@ -29,6 +29,7 @@
       "name": "sundays",
       "buildsystem": "simple",
       "build-commands": [
+        "ls -A",
         "cp -a sundays-app files/sundays",
         "install -Dm644 com.kxxnzstdsw.sundays.desktop files/share/applications/com.kxxnzstdsw.sundays.desktop",
         "install -Dm644 com.kxxnzstdsw.sundays.png files/share/icons/hicolor/256x256/apps/com.kxxnzstdsw.sundays.png"

@@ -68,6 +68,19 @@ Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstds
 CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就退出，
 匿名视角下那几秒的日志偏偏看不到。
 
+**flatpak-builder 要在 manifest 所在目录下调用。**
+`sources` 里的相对路径按「manifest 所在目录」还是按「当前工作目录」解析，
+各版本说法不一 —— 从仓库根调用时，`dir` source 没被放进模块构建目录，
+构建命令直接报 `cp: cannot stat 'sundays-app'`。
+工作流里 `cd packaging/flatpak` 之后再调用，两种解释结果必然相同，就不必赌；
+输出目录则用 `$GITHUB_WORKSPACE` 绝对路径指回仓库根。
+
+**`build-commands` 装进 `files/` 而不是 `/app/`。**
+`buildsystem` 为 `simple` 时 CWD 就是模块构建目录，`files/` 就是最终 `/app`
+的内容，写它不必依赖 `/app` 那个符号链接。第一条 `ls -A` 不是手滑 ——
+若哪个 source 没落到预期名字上，后面的 `cp` 会报 `cannot stat`，而这行
+`ls` 的输出会进构建日志，日志又被工作流打成 annotation，等于自带现场取证。
+
 **`finish-args` 里的 `--share=network` 与 `--filesystem=home` 不能省。**
 前者是连 MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 

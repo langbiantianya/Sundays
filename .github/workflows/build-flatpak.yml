@@ -216,14 +216,23 @@ jobs:
       # 这一步全程自报现场。上一轮它「成功」了却什么也没留下：repo 不存在、
       # files/ 是空的、耗时不到 1 秒。成功却没产物，是最难受的一种失败 ——
       # 猜测空间太大，所以把版本号、完整输出、三处目录内容全打成 annotation。
+      #
+      # 关键：**站在 manifest 所在目录里调用 flatpak-builder**。
+      # sources 里的相对路径到底按「manifest 所在目录」还是按「当前工作目录」
+      # 解析，各版本说法不一；从仓库根调用时 dir source 没被放进模块构建目录，
+      # 于是 cp: cannot stat 'sundays-app'。站到同一个目录里，两种解释结果
+      # 必然相同，就不必赌。输出目录仍指回工作区根。
       - name: 构建 Flatpak
         run: |
           set +e
           echo "::warning::flatpak-builder = $(command -v flatpak-builder)；版本 $(flatpak-builder --version 2>&1)"
+          cd packaging/flatpak
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
-            --repo=flatpak-repo flatpak-build \
-            packaging/flatpak/com.kxxnzstdsw.sundays.json > builder.log 2>&1
+            --repo="$GITHUB_WORKSPACE/flatpak-repo" \
+            "$GITHUB_WORKSPACE/flatpak-build" \
+            com.kxxnzstdsw.sundays.json > "$GITHUB_WORKSPACE/builder.log" 2>&1
           rc=$?
+          cd "$GITHUB_WORKSPACE"
           echo "::warning::flatpak-builder 退出码 = $rc"
           sed 's/^/::error::  /' builder.log
           echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
