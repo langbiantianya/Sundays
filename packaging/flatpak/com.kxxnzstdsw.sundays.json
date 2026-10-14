@@ -1,5 +1,5 @@
 {
-  "//": "Sundays 的 Flatpak manifest。id 必须全小写：Flatpak 的应用 ID 规范只允许 [a-z0-9_-] 与点，首版写成 com.kxxnzstdsw.Sundays（大写 S）被 flatpak-builder 当场拒掉，0 秒就退。这与 jpackage 的命名一致 —— app-image 目录本来就叫 com.kxxnzstdsw.sundays。runtime 钉在 24.08 是有意为之：freedesktop 24.08 基于 Ubuntu 24.04（glibc 2.39），与 CI 构建机一致，skiko 的 .so 与 jlink 出来的 JDK 原生库不会踩 GLIBC_2.39 not found。选型理由与故障排查见同目录 README.md。sources 只有一份目录和两个静态文件 —— 应用本体由 .github/scripts/assemble-flatpak-app.sh 在外面拼好，flatpak-builder 在此只负责装配与导出元数据，不参与编译。command 指向 Compose app-image 自带的原生启动器，不是自写脚本：Compose 给 jlink 传了 --strip-native-commands，运行时里没有任何 java 可执行文件，只能用它。build-commands 装进 files/ 而不是 /app/：buildsystem 为 simple 时 CWD 就是模块构建目录，写 files/ 不必依赖 /app 那个符号链接，少一个不确定项。应用整体装在 /app/sundays 下，所以 command 是 sundays/bin/... 而不是 bin/...：flatpak-builder 在收尾时会校验 command 在 /app 下真实存在，路径不对就报 Command not found。内容先写进 files/，再无条件 cp -a files/. /app/ 同步过去：flatpak-builder 1.4.2 在 simple buildsystem 下校验 command 时看的是 /app，只写 files/ 会报 Command not found。曾试过加个「/app 里已有桌面文件就跳过」的守卫省掉自我拷贝，结果 command 立刻又找不到 —— 那个守卫是错的，已撤。末尾那行 PROBE 把两处的目录树各取三层打进构建日志，且放在最后 —— 工作流只取日志末尾几行，探测行放前面就会被截掉；上轮就是靠它一次看清了全貌。",
+  "//": "Sundays 的 Flatpak manifest。id 必须全小写：Flatpak 的应用 ID 规范只允许 [a-z0-9_-] 与点，首版写成 com.kxxnzstdsw.Sundays（大写 S）被 flatpak-builder 当场拒掉，0 秒就退。这与 jpackage 的命名一致 —— app-image 目录本来就叫 com.kxxnzstdsw.sundays。runtime 钉在 24.08 是有意为之：freedesktop 24.08 基于 Ubuntu 24.04（glibc 2.39），与 CI 构建机一致，skiko 的 .so 与 jlink 出来的 JDK 原生库不会踩 GLIBC_2.39 not found。选型理由与故障排查见同目录 README.md。sources 只有一份目录和两个静态文件 —— 应用本体由 .github/scripts/assemble-flatpak-app.sh 在外面拼好，flatpak-builder 在此只负责装配与导出元数据，不参与编译。command 指向 Compose app-image 自带的原生启动器，不是自写脚本：Compose 给 jlink 传了 --strip-native-commands，运行时里没有任何 java 可执行文件，只能用它。build-commands 装进 files/ 而不是 /app/：buildsystem 为 simple 时 CWD 就是模块构建目录，写 files/ 不必依赖 /app 那个符号链接，少一个不确定项。应用整体装在 /app/sundays 下，所以 command 是 sundays/bin/... 而不是 bin/...：flatpak-builder 在收尾时会校验 command 在 /app 下真实存在，路径不对就报 Command not found。内容只写进 files/。末尾那行 CHK 把「启动器是否存在、是否可执行、bin 目录长什么样、files 树前两层是什么」压成一行打进构建日志：flatpak-builder 收尾时会校验 command 在 files/ 下真实存在，文件明明在却被判不存在时，光靠日志尾部是查不出来的 —— 探测行必须独立成行带标记，工作流才能按内容 grep 出来，不受它在日志里的位置影响。",
 
   "id": "com.kxxnzstdsw.sundays",
   "runtime": "org.freedesktop.Platform",
@@ -34,9 +34,7 @@
         "mkdir -p files/share/applications files/share/icons/hicolor/256x256/apps",
         "install -Dm644 com.kxxnzstdsw.sundays.desktop files/share/applications/com.kxxnzstdsw.sundays.desktop",
         "install -Dm644 com.kxxnzstdsw.sundays.png files/share/icons/hicolor/256x256/apps/com.kxxnzstdsw.sundays.png",
-        "mkdir -p /app 2>/dev/null || true",
-        "cp -a files/. /app/ 2>/dev/null || true",
-        "echo PROBE files=[$(find files -maxdepth 3 2>&1 | tr '\\n' ' ')] app=[$(find /app -maxdepth 3 2>&1 | tr '\\n' ' ')]"
+        "echo CHK exists=$(test -e files/sundays/bin/com.kxxnzstdsw.sundays && echo yes || echo no) exec=$(test -x files/sundays/bin/com.kxxnzstdsw.sundays && echo yes || echo no) bin=$(ls -l files/sundays/bin 2>&1 | tr '\\n' ' ') tree=$(find files -maxdepth 2 2>&1 | tr '\\n' ' ')"
       ],
       "sources": [
         { "type": "dir", "path": "sundays-app" },

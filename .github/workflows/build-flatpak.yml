@@ -273,11 +273,11 @@ jobs:
           rc=$?
           cd "$GITHUB_WORKSPACE"
           echo "::warning::flatpak-builder 退出码 = $rc"
-          # 只取日志**末尾** 9 行，且必须放在最前面发。
-          # GitHub 每个步骤只保留**前 10 条** workflow-command annotation —— 上一轮
-          # 把整份日志逐行 dump，结果真正那句错误排在第 13、14 行，直接被丢掉了，
-          # 看到的 10 条全是开头的 banner。同理别指望把几十行日志全搬过来。
-          tail -n 9 builder.log | while IFS= read -r line; do echo "::error::$line"; done
+          # 按内容 grep，而不是 tail。GitHub 每步骤只保留前 10 条 annotation，
+          # tail 会随 flatpak-builder 日志变长而漂移 —— 上轮就因为 debuginfo
+          # 剥离的输出挤在后面，把真正想看的行顶出去了。按关键词捞则不受位置影响。
+          grep -E 'CHK|Error|error:|Command|not found|No such' builder.log \
+            | tail -n 8 | while IFS= read -r line; do echo "::error::$line"; done
           echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
           echo "::warning::flatpak-build 顶层：$(ls -A flatpak-build 2>&1 | tr '\n' ' ')"
           echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
