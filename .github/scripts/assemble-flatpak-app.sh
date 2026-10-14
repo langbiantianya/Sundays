@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# 把 Gradle 打出来的 app-image 摆成 Flatpak 需要的目录结构，并生成启动脚本。
+# 把 Gradle 打出来的 app-image 原样搬进 Flatpak 目录，并备好图标。
+#
+# ⚠️ 这里换过一次思路，值得记下来，因为它反直觉：
+#
+# 最开始是自己在 bin/ 下写一个启动脚本 exec runtime/bin/java。**这在 Compose
+# 打包产物上必然跑不起来** —— Compose 给 jlink 传了 --strip-native-commands，
+# 打出来的运行时里连一个可执行文件都没有。本机实测：
+#   desktopApp/build/compose/tmp/main/runtime/bin/  67 个文件，全是 DLL，0 个 exe
+#   desktopApp/build/compose/binaries/.../runtime/bin/  同上
+# 唯一的启动器是 app-image 自带的原生启动器（Linux 在 bin/<packageName>，
+# Windows 在 <packageName>.exe）。
+#
+# 所以本脚本不再重排目录、不再自己写启动脚本：**整个 app-image 原样拷贝**。
+# 原生启动器靠 $APPDIR 的相对关系去找 lib/app 里的 .cfg 和 lib/runtime，
+# 目录结构一改它就找不到；原样搬过去，这些关系天然保持。
 #
 # 单独成文件而不是塞进 workflow：这段逻辑有分支、有断言、以后还会改，
 # 塞进 YAML 的 run: 里既难读也不好在本地复现。
@@ -11,12 +25,20 @@ STAGE="$PACKAGING_DIR/sundays-app"
 APP_ID="com.kxxnzstdsw.Sundays"
 ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
 
-# 失败时唯一的匿名可读通道是 /check-runs/{id}/annotations：网页版会把大步骤日志
-# 整个截断，原始日志下载要仓库权限。所以「到底产出了什么」必须打成 annotation，
-# 否则就只能靠猜 —— 前两次失败都是猜布局猜错了。
-# 上限 40 行：再多 GitHub 那边不好翻，也挤占真正报错的可见度。
+# 必须与 desktopApp/build.gradle.kts 里的 nativeDistributions.packageName 一致。
+# 启动器文件名和 app/<同名>.cfg 是配套的，对不上就启动不了，所以这里显式断言，
+# 而不是猜一个名字去 find。
+LAUNCHER_NAME="com.kxxnzstdsw.sundays"
+
+# jlink 直接产出的运行时。app-image 里的那份是 jpackage 从它拷过去的，
+# 万一拷贝没落全（Gradle 构建缓存只还原任务声明过的输出时就可能发生），
+# 拿这份原图顶上。两者内容本就同源。
+JLINK_RUNTIME="desktopApp/build/compose/tmp/main/runtime"
+
 say() { echo "::error::$1"; }
 
+# 失败时唯一的匿名可读通道是 /check-runs/{id}/annotations：网页版会把大步骤日志
+# 整个截断，原始日志下载要仓库权限。没有这条就只能靠猜 —— 前三次失败都是猜错了。
 dump_lay_of_land() {
   local n=0 line
   if [ -f gradle-build.log ]; then
@@ -25,142 +47,118 @@ dump_lay_of_land() {
     say "工作区没有 gradle-build.log，失败可能不在 Gradle"
   fi
 
-  if [ ! -d "$APP_IMAGE_ROOT" ]; then
-    say "搜索根 $APP_IMAGE_ROOT 不存在"
-    local base="desktopApp/build/compose"
-    if [ -d "$base" ]; then
-      while IFS= read -r line; do
-        say "  目录 $line"; n=$((n + 1))
-        [ "$n" -ge 30 ] && break
-      done <<EOF
-$(find "$base" -maxdepth 4 -type d 2>/dev/null | sort)
-EOF
-    else
-      say "连 $base 都不存在 —— Gradle 压根没往 build/compose 写东西"
-    fi
+  local base="desktopApp/build/compose"
+  if [ ! -d "$base" ]; then
+    say "连 $base 都不存在 —— Gradle 压根没往 build/compose 写东西"
     return
   fi
 
-  say "搜索根存在，共 $(find "$APP_IMAGE_ROOT" -type f | wc -l | tr -d ' ') 个文件"
   while IFS= read -r line; do
     say "  目录 $line"; n=$((n + 1))
-    [ "$n" -ge 30 ] && break
+    [ "$n" -ge 25 ] && break
   done <<EOF
-$(find "$APP_IMAGE_ROOT" -maxdepth 4 -type d 2>/dev/null | sort)
+$(find "$base" -maxdepth 4 -type d 2>/dev/null | sort)
+EOF
+
+  say "app-image 文件总数 $(find "$APP_IMAGE_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  while IFS= read -r line; do
+    say "  JVM 库 $line"; n=$((n + 1))
+    [ "$n" -ge 32 ] && break
+  done <<EOF
+$(find "$base" -type f \( -name 'libjvm.so' -o -name 'jvm.dll' \) 2>/dev/null | sort)
 EOF
   while IFS= read -r line; do
-    say "  运行时候选 $line"; n=$((n + 1))
+    say "  启动器 $line"; n=$((n + 1))
     [ "$n" -ge 40 ] && break
   done <<EOF
-$(find "$APP_IMAGE_ROOT" -type f -name 'java*' 2>/dev/null | sort)
+$(find "$APP_IMAGE_ROOT" -type f -perm -u+x ! -name '*.jar' ! -name '*.so' 2>/dev/null | sort)
 EOF
 }
 
-if [ ! -d "$APP_IMAGE_ROOT" ]; then
-  say "$APP_IMAGE_ROOT 不存在 —— app-image 根本没打出来"
-  dump_lay_of_land
-  exit 1
-fi
-
-# --- 定位 jlink 出来的运行时 ------------------------------------------------
-# ⚠️ 这里栽过两次坑，值得写下来：
-#
-# 一、GNU find 的 -path 用 fnmatch(FNM_PATHNAME)，**通配符 * 不跨 '/'**。
-#    所以 `-path '*/runtime/bin/java'` 匹配的是「**恰好一段**前缀 + /runtime/bin/java」，
-#    而真实路径是 <app>/lib/runtime/bin/java，有两段前缀，永远匹配不上。
-#    教训：find 的 -path 不是 shell 的 glob。要么用 -name（按基名匹配），要么自己遍历。
-#
-# 二、Windows 上实测到的是 <app>/runtime/bin/java，Linux 的 jpackage 按惯例是
-#    <app>/lib/runtime/bin/java。**后者是推断，不是实测** —— 所以这里不写死
-#    「祖父目录必须叫 runtime」，而是先找标准的 runtime/bin/java，找不到就退而
-#    接受任意 bin/java，两段 dirname 照样落在 app 根目录上。
-JAVA_BIN=""
-while IFS= read -r cand; do
-  if [ "$(basename "$(dirname "$cand")")" = "bin" ] &&
-     [ "$(basename "$(dirname "$(dirname "$cand")")")" = "runtime" ]; then
-    JAVA_BIN="$cand"
+# --- 定位 app-image 根目录 --------------------------------------------------
+# 判据：某个 bin/ 目录的父目录里同时躺着 app/ 或 lib/app（jar 与 .cfg 的所在）。
+# lib/runtime/bin 也会被 find 命中，但它父目录里既没有 app 也没有 lib/app，
+# 自然被排除 —— 这比按目录名猜层级可靠。
+APP_IMAGE_DIR=""
+while IFS= read -r b; do
+  parent="$(dirname "$b")"
+  if [ -d "$parent/lib/app" ] || [ -d "$parent/app" ]; then
+    APP_IMAGE_DIR="$parent"
     break
   fi
 done <<EOF
-$(find "$APP_IMAGE_ROOT" -type f -name java 2>/dev/null | sort || true)
+$(find "$APP_IMAGE_ROOT" -type d -name bin 2>/dev/null | sort || true)
 EOF
 
-if [ -z "$JAVA_BIN" ]; then
-  while IFS= read -r cand; do
-    if [ "$(basename "$(dirname "$cand")")" = "bin" ]; then
-      JAVA_BIN="$cand"
-      break
-    fi
-  done <<EOF
-$(find "$APP_IMAGE_ROOT" -type f -name java 2>/dev/null | sort || true)
-EOF
-fi
-
-if [ -z "$JAVA_BIN" ]; then
-  say "$APP_IMAGE_ROOT 下找不到可执行入口 java —— app-image 没打出来，或布局跟预期不同"
+if [ -z "$APP_IMAGE_DIR" ]; then
+  say "$APP_IMAGE_ROOT 下找不到「含 bin/ 且旁边有 app 或 lib/app」的应用根目录"
   dump_lay_of_land
   exit 1
 fi
-
-# <...>/<runtime>/bin/java 往上两级就是 app 根目录；退化情形 <...>/bin/java
-# 则落在它的上一层，但那一层同时装着 bin 与 app，拷成 runtime 依然能用。
-RUNTIME_DIR="$(dirname "$(dirname "$JAVA_BIN")")"
-APP_IMAGE_DIR="$(dirname "$RUNTIME_DIR")"
-echo "java 入口：$JAVA_BIN"
 echo "app-image 根目录：$APP_IMAGE_DIR"
 
-# --- 定位 jar 目录 ---------------------------------------------------------
-# Linux 是 lib/app，Windows 是 app，深度不一。不写死平台，找「叫 app 且底下有 jar」的。
-LIB_DIR=""
-while IFS= read -r d; do
-  if [ -d "$d" ] && [ -n "$(find "$d" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then
-    LIB_DIR="$d"
-    break
-  fi
-done <<EOF
-$(find "$APP_IMAGE_DIR" -maxdepth 3 -type d -name app 2>/dev/null | sort || true)
-EOF
-
-if [ -z "$LIB_DIR" ]; then
-  say "$APP_IMAGE_DIR 下找不到装着 jar 的 app 目录"
+# --- 校验原生启动器 --------------------------------------------------------
+# 必须用它，不能自己写脚本 exec java：运行时里没有 java 可执行文件（见文件头）。
+LAUNCHER="$APP_IMAGE_DIR/bin/$LAUNCHER_NAME"
+if [ ! -f "$LAUNCHER" ]; then
+  say "找不到原生启动器 $LAUNCHER"
+  say "若 packageName 改过，同步改本脚本的 LAUNCHER_NAME 与 packaging/flatpak/*.json 的 command"
   dump_lay_of_land
   exit 1
 fi
 
-JAR_COUNT="$(find "$LIB_DIR" -maxdepth 1 -name '*.jar' | wc -l | tr -d ' ')"
-if [ "$JAR_COUNT" -lt 1 ]; then
-  say "$LIB_DIR 下一个 jar 都没有，依赖没打进来"
-  exit 1
-fi
-echo "jar 目录：$LIB_DIR（$JAR_COUNT 个 jar）"
-
-# --- 组装 ------------------------------------------------------------------
+# --- 组装：整棵目录原样搬过去 ----------------------------------------------
+# 不重排层级。原生启动器靠 $APPDIR 相对定位 .cfg 与 lib/runtime，
+# 一旦挪动位置就会在启动时（而不是构建时）才炸。
 rm -rf "$STAGE"
-mkdir -p "$STAGE/bin" "$STAGE/app"
-cp -a "$RUNTIME_DIR" "$STAGE/runtime"
-cp -a "$LIB_DIR/." "$STAGE/app/"
+mkdir -p "$STAGE"
+cp -a "$APP_IMAGE_DIR/." "$STAGE/"
+# cp -a 已经保留执行位；这里再点一次是防 jpackage 在某个平台上漏掉。
+chmod +x "$STAGE/bin/$LAUNCHER_NAME"
 
 # 图标：Flatpak 的图标约定是 /app/share/icons/hicolor/256x256/apps/<app-id>.png，
 # 源图正好是 256 的，manifest 的 build-commands 会把它装到那个位置。
 cp "$ICON_SRC" "$PACKAGING_DIR/$APP_ID.png"
 
-# --- 启动脚本 --------------------------------------------------------------
-# 不用 Compose 自带的原生启动器：Linux 上它在 bin/<name>，靠相对路径回溯去找
-# lib/runtime，在 Flatpak 沙箱里行为不易预期。自己 exec 出错时日志直接指向
-# java，好排查得多。
-cat > "$STAGE/bin/sundays" <<'LAUNCHER'
-#!/bin/sh
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# --- 运行时自愈 ------------------------------------------------------------
+# jpackage 是把 jlink 原图拷进 app-image 的。若 Gradle 构建缓存只还原了任务
+# 声明过的输出，这一步拷过去的东西可能没落全，启动器就会在运行时报找不到
+# libjli。发现没有 JVM 共享库就用原图补上，并说清楚补了没有。
+JVM_LIB=""
+for probe in "$STAGE/lib/runtime/lib/server/libjvm.so" "$STAGE/runtime/lib/server/libjvm.so"; do
+  if [ -f "$probe" ]; then
+    JVM_LIB="$probe"
+    break
+  fi
+done
 
-# -cp 整串加引号是关键：shell 就不会做通配展开，而 Java 认 "目录/*" 这个写法
-# （展开成该目录下所有 jar）。若让 shell 先展开，会变成一串空格分隔的路径，
-# java 只把第一个当 classpath，剩下的全被当成主类和参数 —— 报的是莫名其妙的错。
-exec "$HERE/runtime/bin/java" \
-  -Djava.awt.headless=false \
-  -cp "$HERE/app/*" \
-  com.kxxnzstdsw.sundays.MainKt "$@"
-LAUNCHER
-chmod +x "$STAGE/bin/sundays"
+if [ -z "$JVM_LIB" ] && [ -f "$JLINK_RUNTIME/lib/server/libjvm.so" ]; then
+  say "app-image 里的运行时缺 JVM 共享库，改用 jlink 原图 $JLINK_RUNTIME 补齐"
+  rm -rf "$STAGE/lib/runtime" "$STAGE/runtime"
+  cp -a "$JLINK_RUNTIME" "$STAGE/lib/runtime"
+  JVM_LIB="$STAGE/lib/runtime/lib/server/libjvm.so"
+fi
 
+if [ -z "$JVM_LIB" ]; then
+  say "既没有 app-image 自带的运行时，也没有可用的 jlink 原图（$JLINK_RUNTIME）"
+  dump_lay_of_land
+  exit 1
+fi
+echo "JVM 共享库：$JVM_LIB"
+
+JAR_DIR=""
+for cand in "$STAGE/lib/app" "$STAGE/app"; do
+  if [ -d "$cand" ] && [ -n "$(find "$cand" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then
+    JAR_DIR="$cand"
+    break
+  fi
+done
+
+if [ -z "$JAR_DIR" ]; then
+  say "$STAGE 下找不到装着 jar 的目录（lib/app 或 app）"
+  dump_lay_of_land
+  exit 1
+fi
+echo "jar 目录：$JAR_DIR（$(find "$JAR_DIR" -maxdepth 1 -name '*.jar' | wc -l | tr -d ' ') 个 jar）"
 echo "已组装 $STAGE"
 du -sh "$STAGE" | awk '{print "  体积 " $1}'

@@ -114,9 +114,11 @@ jobs:
           STAGE=packaging/flatpak/sundays-app
           fail=0
 
-          jvm="$(find "$STAGE/runtime" -type f -name libjvm.so -print -quit 2>/dev/null || true)"
+          # 整棵 app-image 原样搬过来，所以运行时落在 lib/runtime 而不是 runtime。
+          # 这里不加深度限制地全树找，省得跟着 jpackage 的目录约定反复改。
+          jvm="$(find "$STAGE" -type f -name libjvm.so -print -quit 2>/dev/null || true)"
           if [ -z "$jvm" ]; then
-            echo "::error::$STAGE/runtime 里找不到 libjvm.so，jlink 运行时没就位"
+            echo "::error::$STAGE 里找不到 libjvm.so，jlink 运行时没就位"
             fail=1
           else
             m="$(readelf -h "$jvm" | sed -n 's/.*Machine: *//p' | head -n1)"
@@ -127,9 +129,23 @@ jobs:
             esac
           fi
 
-          skiko="$(find "$STAGE/app" -maxdepth 1 -type f -name 'skiko-awt-runtime-*.jar' -print -quit 2>/dev/null || true)"
+          # 原生启动器也验一下：它是 ELF 可执行文件，架构错了同样启动不了。
+          launcher="$(find "$STAGE/bin" -maxdepth 1 -type f -print -quit 2>/dev/null || true)"
+          if [ -z "$launcher" ]; then
+            echo "::error::$STAGE/bin 下没有原生启动器"
+            fail=1
+          else
+            lm="$(readelf -h "$launcher" | sed -n 's/.*Machine: *//p' | head -n1)"
+            echo "原生启动器 $(basename "$launcher") Machine = $lm（期望含 $ELF_MACHINE）"
+            case "$lm" in
+              *"$ELF_MACHINE"*) ;;
+              *) echo "::error::启动器架构不对：实际 $lm，期望含 $ELF_MACHINE"; fail=1 ;;
+            esac
+          fi
+
+          skiko="$(find "$STAGE" -type f -name 'skiko-awt-runtime-*.jar' -print -quit 2>/dev/null || true)"
           if [ -z "$skiko" ]; then
-            echo "::error::$STAGE/app 里找不到 skiko-awt-runtime-*.jar"
+            echo "::error::$STAGE 里找不到 skiko-awt-runtime-*.jar"
             fail=1
           else
             base="$(basename "$skiko")"

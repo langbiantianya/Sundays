@@ -22,7 +22,12 @@ flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.Sundays stable
 | `com.kxxnzstdsw.Sundays.json` | manifest，flatpak-builder 读它 |
 | `com.kxxnzstdsw.Sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
 | `com.kxxnzstdsw.Sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
-| `sundays-app/` | 组装好的应用目录，**不入库** |
+| `sundays-app/` | 组装好的应用目录（app-image 原样搬过来），**不入库** |
+
+改 `desktopApp/build.gradle.kts` 里的 `nativeDistributions.packageName` 时，
+`.github/scripts/assemble-flatpak-app.sh` 的 `LAUNCHER_NAME` 与
+`com.kxxnzstdsw.Sundays.json` 的 `command` 要一起改 —— 启动器文件名与
+`app/<同名>.cfg` 是配套的。脚本会显式断言启动器存在，对不上直接报错。
 
 `manifest` 里的 `sources` 只声明一份目录与两个静态文件：应用本体是
 `.github/scripts/assemble-flatpak-app.sh` 在 flatpak-builder **外面**拼好的，
@@ -39,13 +44,17 @@ jlink 出来的 JDK 原生库都是在 2.39 上编的 —— 换成更老的 run
 glibc 2.38）就会在**启动时**报 `GLIBC_2.39 not found`，而且那种错只在装好
 Flatpak 之后才显形，排查成本很高。runtime 比构建环境新则没问题（新运行时向下兼容）。
 
-**启动脚本自己写，不复用 Compose 的原生启动器。**
-Compose 那个启动器靠相对路径回溯去找 `runtime/`，在 Flatpak 沙箱里行为不易预期。
-自己 `exec` 到 jlink 出来的 `java`，出错时日志直接指向 java，好排查得多。
+**用 Compose 自带的原生启动器，不要自己写启动脚本。**
+这条和最初的设想正好相反，值得记下来：Compose 给 jlink 传了
+`--strip-native-commands`，打出来的运行时里**一个可执行文件都没有**
+（本机实测 `desktopApp/build/compose/tmp/main/runtime/bin/` 下 67 个文件全是
+Windows DLL，`0` 个 `.exe`）。所以「自己写个脚本 `exec runtime/bin/java`」
+这条路在原理上就走不通 —— 那个 `java` 根本不存在。
+app-image 自带的原生启动器（Linux 在 `bin/com.kxxnzstdsw.sundays`）是唯一入口。
 
-**`-cp "$dir/*"` 整串要带引号。**
-shell 若先做通配展开，会展开成一串空格分隔的路径，`java` 只把第一个当 classpath，
-剩下的全被当成主类和参数，报出来的是莫名其妙的错。带引号则由 Java 自己展开。
+也正因为如此，组装脚本**不重排目录，整棵 app-image 原样拷进 `sundays-app/`**：
+原生启动器靠 `$APPDIR` 的相对关系去找 `lib/app/<同名>.cfg` 和 `lib/runtime`，
+一挪动位置就只会在**启动时**才炸，而不是在构建时。
 
 **`finish-args` 里的 `--share=network` 与 `--filesystem=home` 不能省。**
 前者是连 MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
