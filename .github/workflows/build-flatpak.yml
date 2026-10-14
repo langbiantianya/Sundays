@@ -279,11 +279,18 @@ jobs:
           echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
           echo "::warning::flatpak-repo 顶层：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
           if [ "$rc" -ne 0 ]; then exit "$rc"; fi
-          if [ ! -d flatpak-build/files/sundays ]; then
-            echo "::error::退出码 0 但 files/sundays 不存在 —— build-commands 没生效，别当成构建成功"
+          # 「成功却没产物」这道断言留着，但断言点必须跟着 manifest 走 ——
+          # 上一版它写死了 files/sundays，那还是几轮前嵌套布局时的路径，
+          # 应用改到 /app 根之后它就一直误报，把已经成功的构建判成失败。
+          built="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                  packaging/flatpak/com.kxxnzstdsw.sundays.json | head -n1)"
+          built="${built#/app/}"
+          if [ ! -e "flatpak-build/files/$built" ]; then
+            echo "::error::退出码 0 但 flatpak-build/files/$built 不存在 —— 产物没落到应用目录"
+            echo "::error::files 顶层：$(ls -A flatpak-build/files 2>&1 | tr '\n' ' ')"
             exit 1
           fi
-          echo "::warning::应用目录体积：$(du -sh flatpak-build/files/sundays | cut -f1)"
+          echo "::warning::产物就位：flatpak-build/files/$built（$(du -sh flatpak-build/files | cut -f1)）"
 
       # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
       # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
