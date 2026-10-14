@@ -193,13 +193,27 @@ else if (g_str_has_prefix (self->command, "/app/"))
    Gradle 解析依赖时按 `os.arch` 选出来的，板上钉钉。
    ⚠️ Linux 的 arm64 产物叫 `linux-arm64` 不是 `linux-aarch64`：
    Maven 的 osdetector 用 `aarch64`，skiko 自己发包时用 `arm64`，两套命名。
-2. **skiko jar 内嵌 `.so` 的 ELF 头 `e_machine`**（偏移 `0x12`，小端 2 字节；
+2. **并排那个原生库的 ELF 头 `e_machine`**（偏移 `0x12`，小端 2 字节；
    `0x3E` = x86-64，`0xB7` = AArch64）—— 文件名可以是错的，字节不会。
 
-刻意读 jar 里的字节，而不是 app-image 里落地的那个 `.so`：后者要到应用
-启动时才被 skiko 解出来，构建产物里未必有（Linux 上有没有全看 jpackage
-的心情，不能当契约）。用 `python3` 解 zip 而不是 `readelf`，
-因为 `readelf` 属于 binutils，为了读两个字节多装一个包不值得。
+第 2 条查的**不是 jar 里的条目，而是 app 目录下一个普通文件**。
+这一点第一版想当然搞错了：以为 `skiko-awt-runtime-*.jar` 里内嵌 `.so`，
+结果两条腿一起报 `NO_SO`。真相是 Compose 的 Gradle 插件会**合成**一个
+`skiko-awt-runtime-<平台>-<版本>.jar` —— 那个 jar 只有 2 个条目
+（本机实测 Windows 产物：293 字节、2 条，纯空壳）—— 真正的库是它从 skiko
+发行物里解出来、并排放进 app 目录的 `skiko-<平台>.dll` /
+`libskiko-linux-<平台>.so`，旁边还有 `libicudtl.dat`：
+
+```
+app/
+├── skiko-awt-runtime-linux-x64-0.144.6.jar   ← 合成的空壳，只有名字有意义
+├── libskiko-linux-x64.so                     ← 真正的原生库
+└── libicudtl.dat
+```
+
+所以 classifier 检查的是文件名（证明 Gradle 选对了平台），
+架构检查读的是那个并排文件的字节。用 `python3` 读前 20 字节而不是 `readelf`：
+`readelf` 属于 binutils，为了读两个字节多装一个包不值得。
 
 ## 和 Windows 腿的差异
 

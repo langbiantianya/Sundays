@@ -152,23 +152,32 @@ jobs:
               *"$SKIKO_TOKEN"*) ;;
               *) echo "::error::skiko 选错了平台：$base，期望含 $SKIKO_TOKEN"; fail=1 ;;
             esac
+          fi
 
-            # 直接读 jar 里那个 .so 的 ELF 头 e_machine（偏移 0x12，小端 2 字节）。
-            # 不查 app-image 里落地的 .so：那个要到应用启动时才被 skiko 解出来，
-            # 构建产物里未必有，Linux 上有没有全看 jpackage 的心情，不能当契约。
-            # 不查 jar 名以外的东西：文件名可以是错的，字节不会。
-            #
-            # 用 python3 而不是 readelf：解 zip 要 python3（runner 镜像标配），
-            # readelf 属于 binutils，为了读两个字节多装一个包不值得。
-            if command -v python3 >/dev/null 2>&1; then
-              m="$(python3 -c 'import sys,zipfile,struct; z=zipfile.ZipFile(sys.argv[1]); n=[i for i in z.namelist() if i.endswith(".so")]; print("NO_SO" if not n else "0x%02X" % struct.unpack_from("<H", z.read(n[0]), 18)[0])' "$skiko" 2>&1)"
-              echo "skiko 内嵌 .so 的 ELF e_machine = $m（期望 $ELF_MACHINE）"
-              if [ "$m" != "$ELF_MACHINE" ]; then
-                echo "::error::skiko 原生库架构不对：e_machine=$m，期望 $ELF_MACHINE"
-                fail=1
-              fi
-            else
-              echo "::warning::runner 上没有 python3，跳过 ELF 复核（只剩 classifier 一道）"
+          # 原生库是**并排的普通文件**，不是 jar 里的条目。
+          # 这点上一版想当然搞错了：以为 skiko-awt-runtime-*.jar 里内嵌 .so，
+          # 结果解出来一个都没有，两条腿一起红。原因值得记：
+          # Compose 的 Gradle 插件会**合成**一个 skiko-awt-runtime-<平台>-<版本>.jar，
+          # 那个 jar 只有 2 个条目（实测本机 Windows 产物：293 字节、2 条），
+          # 真正的库是它从 skiko 发行物里解出来、并排放在 app 目录下的
+          # skiko-<平台>.dll / libskiko-<平台>.so。
+          # 所以 classifier 检查的是文件名，证明 Gradle 选对了平台；
+          # 架构检查要读那个并排文件的字节。
+          so="$(find "$STAGE" -type f -name '*.so' -print -quit 2>/dev/null || true)"
+          if [ -z "$so" ]; then
+            echo "::error::$STAGE 里找不到 .so —— skiko 的原生库没跟着 app-image 进来"
+            echo "::error::非 jar 的文件：$(find "$STAGE" -type f ! -name '*.jar' ! -name '*.cfg' | head -c 300 | tr '\n' ' ')"
+            fail=1
+          elif ! command -v python3 >/dev/null 2>&1; then
+            echo "::warning::runner 上没有 python3，跳过 ELF 复核（只剩 classifier 一道）"
+          else
+            # ELF 头 e_machine 在偏移 0x12，小端 2 字节：0x3E=x86-64，0xB7=AArch64。
+            # 连 \x7fELF 魔数一起验，免得读到一个名字像 .so 的非 ELF 文件还照报架构。
+            m="$(python3 -c 'import sys,struct; d=open(sys.argv[1],"rb").read(20); print("NOT_ELF" if len(d)<20 or d[:4]!=b"\x7fELF" else "0x%02X" % struct.unpack_from("<H",d,18)[0])' "$so" 2>&1)"
+            echo "原生库 ${so##*/} 的 ELF e_machine = $m（期望 $ELF_MACHINE）"
+            if [ "$m" != "$ELF_MACHINE" ]; then
+              echo "::error::skiko 原生库架构不对：e_machine=$m，期望 $ELF_MACHINE"
+              fail=1
             fi
           fi
 
@@ -205,19 +214,28 @@ jobs:
           done
           echo "::warning::工具就位：$(command -v eu-strip eu-elfcompress | tr '\n' ' ')"
 
-      # 列出远端到底有哪些 freedesktop 运行时。这不是装饰：arm64 上某个
-      # 分支缺某个 ref 时，flatpak install 会在几秒内直接失败，而那几秒的
-      # 步骤日志在匿名视角下看不到。把 ref 列表打成 warning，谁缺一目了然。
+      # 点名三个 ref 在远端到底存不存在。这不是装饰：缺 ref 时 flatpak install
+      # 会在几秒内直接失败，而那几秒的步骤日志在匿名视角下看不到。
       # continue-on-error：这个查询本身失败不该拖垮构建。
+      #
+      # 上一版是 `flatpak remote-ls --columns=ref | grep -E '^org\.freedesktop\.'`。
+      # 看着合理，其实是个**永远空转**的写法：remote-ls 的 ref 列打的是带
+      # `runtime/` 前缀的完整 ref（runtime/org.freedesktop.Sdk/x86_64/26.08），
+      # 锚在行首的 `^org\.freedesktop\.` 一条都匹配不到。于是那一步从头到尾
+      # 输出为空、前十几轮排障里却一直以为「ref 列表已经打出来了」。
+      # 换成 remote-info 直接问「这个 ref 能不能拿到」，二元答案，不会看错。
       - name: 查远端可用的 freedesktop 运行时
         continue-on-error: true
         run: |
-          # OpenJDK 扩展也在名单里 —— 它是 JDK 的唯一来源，缺了 manifest 直接构建不了。
-          # 名字带 // 的（不带 arch 的）是 SDK 扩展 ref，运行时本体会多一段 arch。
-          flatpak remote-ls flathub --runtime --columns=ref 2>/dev/null \
-            | grep -E '^org\.freedesktop\.(Platform|Sdk|Platform\.GL|Platform\.Vulkan|Sdk\.Extension\.openjdk)//' \
-            | sort | tail -n 24 \
-            | while IFS= read -r ref; do echo "::warning::远端有 $ref"; done
+          for r in "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
+                   "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" \
+                   "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_RUNTIME"; do
+            if flatpak remote-info --user flathub "$r" >/dev/null 2>&1; then
+              echo "::warning::远端有 $r"
+            else
+              echo "::error::远端没有 $r"
+            fi
+          done
 
       # 运行时与 SDK 有两个多 G，是整个流程里最慢的一步，放在组装之后。
       # --disable-rofiles-fuse：CI 上没有 fuse daemon，用不了 rofiles-fuse

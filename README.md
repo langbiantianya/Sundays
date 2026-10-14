@@ -560,9 +560,9 @@ flatpak run com.kxxnzstdsw.sundays
   是从 jpackage 生成的 `.cfg` 里读出来的。
 - **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
   MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
-- **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：解出 skiko jar 内嵌的
-  `.so`，直接读 ELF 头 `e_machine`（`0x3E` = x86-64，`0xB7` = AArch64），
-  再对一遍 jar 的 classifier（`linux-x64` / `linux-arm64`）。
+- **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的
+  classifier（`linux-x64` / `linux-arm64`），再直接读 app 目录里 skiko 原生库的
+  ELF 头 `e_machine`（`0x3E` = x86-64，`0xB7` = AArch64）。
 
 细节与排障见 [`packaging/flatpak/README.md`](./packaging/flatpak/README.md)。
 
