@@ -292,12 +292,14 @@ jobs:
           fi
           echo "::warning::产物就位：flatpak-build/files/$built（$(du -sh flatpak-build/files | cut -f1)）"
 
-      # 导出成单文件 bundle：既是可直接安装的产物，也顺带包含了整棵依赖树，
-      # 用户不必再单独解决 org.freedesktop.Platform 的安装问题。
+      # 导出成单文件 bundle。
       #
-      # 分支不写死。flatpak-builder 往 repo 里导出的默认分支是 master，
-      # 首版这里写的是 stable，于是去要一个不存在的 ref。这里改成先读 repo
-      # 里真实存在的 ref 再取分支，以后 flatpak-builder 改默认值也不会带崩。
+      # 分支不写死，也不整段截取：ref 的完整形状是 app/<id>/<arch>/<branch>，
+      # 拿「app/<id>/ 之后的全部」会连 <arch> 一起当成分支名，flatpak 会回一句
+      # Branch can't contain / 而失败。取最后一段才是分支。
+      # 另外 bundle 里含的是本应用（以及同 repo 里的 debug runtime）；
+      # org.freedesktop.Platform 来自 Flathub，安装时按 metadata 里的 runtime
+      # 声明去取 —— 导出步骤已实测过 repo 里只有 app 与 debug runtime 两个 ref。
       - name: 导出单文件 bundle
         run: |
           set +e
@@ -307,11 +309,10 @@ jobs:
           if [ -z "$ref" ]; then
             echo "::error::repo 里没有 app/com.kxxnzstdsw.sundays 的 ref —— flatpak-builder 那步多半没真导出"
             echo "::error::repo 目录内容：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
-            echo "::error::构建目录内容：$(ls -A flatpak-build/files 2>&1 | head -c 400)"
             exit 1
           fi
-          branch="${ref#app/com.kxxnzstdsw.sundays/}"
-          echo "::warning::用分支 $branch 导出"
+          branch="${ref##*/}"
+          echo "::warning::ref=$ref，分支=$branch"
           flatpak build-bundle flatpak-repo \
             "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
             com.kxxnzstdsw.sundays "$branch" > bundle.log 2>&1

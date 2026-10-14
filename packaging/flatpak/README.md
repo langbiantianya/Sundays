@@ -12,8 +12,18 @@ bash .github/scripts/assemble-flatpak-app.sh
 # 再往下需要 flatpak-builder 与 freedesktop 运行时
 flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
   packaging/flatpak/com.kxxnzstdsw.sundays.json
-flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays stable
+flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays master
 ```
+
+bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
+`org.freedesktop.Platform` 来自 Flathub，安装时按 metadata 里的 runtime
+声明去取，所以换机器装它仍需要能访问 Flathub。
+
+**导出时分支取 ref 的最后一段。**
+`flatpak-builder` 导出的 ref 完整形状是 `app/<id>/<arch>/<branch>` ——
+实测就是 `app/com.kxxnzstdsw.sundays/x86_64/master`。取「`app/<id>/` 之后的
+全部」会把 `<arch>` 一并当成分支名，`flatpak build-bundle` 会回一句
+`Branch can't contain /` 而失败。`${ref##*/}` 取的才是分支。
 
 ## 目录里各文件干什么
 
