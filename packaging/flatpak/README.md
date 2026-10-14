@@ -75,6 +75,13 @@ CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就�
 工作流里 `cd packaging/flatpak` 之后再调用，两种解释结果必然相同，就不必赌；
 输出目录则用 `$GITHUB_WORKSPACE` 绝对路径指回仓库根。
 
+**`elfutils` 不能从 apt 列表里省掉。**
+`flatpak-builder` 1.x 剥离 debuginfo 时调的是 `eu-strip`、压缩时调
+`eu-elfcompress`，两个都在 `elfutils` 包里。缺了它们不会在安装时报错，
+而是等模块全部装好、走到收尾阶段才炸一句
+`Failed to execute child process "eu-strip"` —— 前面十几步全绿，看着像
+快成功了。所以工作流装完立刻逐个 `command -v` 点名确认。
+
 **应用装在 `/app/sundays`，所以 `command` 是 `sundays/bin/...`。**
 `flatpak-builder` 收尾时会校验 `command` 在 `/app` 下真实存在，
 写成 `bin/...` 就报 `Command 'bin/com.kxxnzstdsw.sundays' not found`。

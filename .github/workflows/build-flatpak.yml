@@ -178,7 +178,19 @@ jobs:
       - name: 安装 flatpak 工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder ostree
+          # elfutils 不能省。flatpak-builder 1.x 剥离 debuginfo 时调的是 eu-strip，
+          # 压缩时调 eu-elfcompress，这两个都在 elfutils 包里。缺了不会在安装时
+          # 报错，而是等模块都装好了才炸：
+          #   Failed to execute child process "eu-strip" (No such file or directory)
+          # 属于「前面全绿、最后一步才崩」的那类，装完立刻点名确认。
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder ostree elfutils
+          for b in flatpak flatpak-builder ostree eu-strip eu-elfcompress; do
+            if ! command -v "$b" >/dev/null 2>&1; then
+              echo "::error::$b 没装上"
+            fi
+          done
+          echo "::warning::工具就位：$(command -v eu-strip eu-elfcompress | tr '\n' ' ')"
 
       # 列出远端到底有哪些 freedesktop 运行时。这不是装饰：arm64 上某个
       # 分支缺某个 ref 时，flatpak install 会在几秒内直接失败，而那几秒的
