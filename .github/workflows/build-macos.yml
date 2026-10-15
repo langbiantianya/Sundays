@@ -207,7 +207,14 @@ jobs:
             fi
           fi
 
-          skiko="$(find1 "$APP" -type f -name '*skiko*' || true)"
+          # ⚠️ 模式必须收窄到 `*.dylib`。
+          # 用 `-name '*skiko*'` 会先撞上两个都不是目标的东西：
+          #   skiko-awt-<版本>.jar            —— 纯 JVM 字节码，lipo 读不了
+          #   libskiko-macos-<架构>.dylib.sha256 —— 校验和文本文件
+          # 两个都「存在」，所以找不到的分支一次都没触发，于是永远报架构不对 ——
+          # 而其实启动器与 libjvm.dylib 早就验过了，全是对的。
+          # 这种错法比「找不到文件」更坏：它看起来像构建坏了，其实是检查写坏了。
+          skiko="$(find1 "$APP" -type f -name '*skiko*.dylib' || true)"
           if [ -z "$skiko" ]; then
             echo "::warning::CHK3 skiko 原生库缺失"
             echo "::warning::CHK3b Contents/app: $(brief "$(ls -A "$APP/Contents/app" 2>&1 || true)")"
