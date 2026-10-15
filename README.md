@@ -608,11 +608,15 @@ flatpak run com.kxxnzstdsw.sundays
   是从 jpackage 生成的 `.cfg` 里读出来的。
   代价是 bundle 比自带 jlink 运行时那版大了约 32 MB ——
   扩展的 `install.sh` 装的是完整 JDK（`conf/lib/release`），不是 jlink 裁过的最小集。
-- **这个扩展的分支跟的是 freedesktop 基线（`//26.08`），不是 GNOME 版本（`//51`）。**
-  两者在 manifest 里长得一样，只写裸名字会被解析成 `//51` 而那个 ref 不存在。
-  CI 有一条校验把 `runtime` / `runtime-version` / `sdk` / 扩展分支四个字段
-  逐个与 env 比对；构建完还会读 `flatpak-build/metadata`，逐字确认导出的
-  `runtime=` / `sdk=` 确实指向 GNOME 51 —— 换运行时最容易被自己骗过去的就是这一处。
+- **`sdk-extensions` 里只能写裸名,写上 `//分支` 必然失败。**
+  `org.freedesktop.Sdk.Extension.openjdk//26.08` 会得到一句
+  `Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/51 not installed`
+  —— flatpak 的 `build-init` 只剥 `@tag`,不解析 `//分支`。
+  扩展装在 `//26.08` 上是 CI `flatpak install` 的事,manifest 不参与这个决定;
+  装完会逐字核对三个 ref。CI 另有一条校验把 manifest 的
+  `runtime` / `runtime-version` / `sdk` / `sdk-extensions` 四个字段与 env 比对;
+  构建完还会读 `flatpak-build/metadata`,逐字确认导出的 `runtime=` / `sdk=`
+  确实指向 GNOME 51 —— 换运行时最容易被自己骗过去的就是这一处。
 - **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
   MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 - **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的

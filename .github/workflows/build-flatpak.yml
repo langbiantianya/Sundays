@@ -26,11 +26,12 @@ env:
   # 下面这两个值必须分开记，因为它们回答的是两个不同的问题：
   #   GNOME_RUNTIME       —— runtime / sdk 用哪一代（org.gnome.*//51）
   #   FREEDESKTOP_BRANCH  —— 底下那层 freedesktop 基线（26.08）
-  # JDK 扩展的分支跟的是**基线**，所以 manifest 里必须写死
-  # org.freedesktop.Sdk.Extension.openjdk//26.08；只写裸名字会被解析成 //51，
-  # 而 openjdk 扩展只发布在 18.08~26.08 这些基线分支上，//51 那个 ref 不存在。
   #
-  # 下面各有一道校验分别比对这两个值与 manifest，改一边忘了另一边会当场报出来。
+  # FREEDESKTOP_BRANCH 只用在**安装**那一步：org.freedesktop.Sdk.Extension.openjdk
+  # 装在 //26.08 这条基线分支上。它**不进 manifest** —— manifest 的
+  # sdk-extensions 里只能写裸名，写成 //26.08 会被 flatpak build-init 判成
+  # 「没装这个扩展」，理由见「校验 manifest 与 env 一致」那步的注释。
+  # 换句话说：基线决定装哪个 ref，manifest 不参与这个决定。
   GNOME_RUNTIME: '51'
   FREEDESKTOP_BRANCH: '26.08'
 
@@ -230,8 +231,30 @@ jobs:
           chk runtime        org.gnome.Platform "$(pick runtime)"
           chk runtime-version "$GNOME_RUNTIME"    "$(pick runtime-version)"
           chk sdk            org.gnome.Sdk       "$(pick sdk)"
-          chk openjdk-branch "$FREEDESKTOP_BRANCH" \
-            "$(flat | sed -n 's#.*openjdk//\([^"]*\).*#\1#p' | head -n1)"
+
+          # sdk-extensions 单独比，且单独判「有没有多写 //分支」这一种错法 ——
+          # 它是本仓库真踩过的坑，而且错法只有一种。
+          #
+          # flatpak build-init 的 ensure_extensions() 只调 flatpak_parse_extension_with_tag()
+          # 剥 @tag，**不解析 //分支**，然后拿整串去跟 SDK metadata 里声明的扩展点
+          # id 比。所以 org.freedesktop.Sdk.Extension.openjdk//26.08 永远匹配不上，
+          # 而且报错会把整串再拼上 <arch>/<SDK 的分支>，变成一句看着像路径拼接错了的
+          # 「...openjdk//26.08/x86_64/51 not installed」。
+          #
+          # 扩展装在哪个分支跟 manifest 无关，是 flatpak install 时的事，交给下面
+          # 「安装 GNOME 运行时与 SDK」那步装完点名核对。
+          ext="$(flat | tr -d '\n' \
+            | sed -n 's#.*"sdk-extensions"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*#\1#p' \
+            | tr -d '[:space:]"')"
+          if [ "$ext" = org.freedesktop.Sdk.Extension.openjdk ]; then
+            echo "::warning::sdk-extensions = $ext"
+          else
+            case "$ext" in
+              *//*) echo "::error::sdk-extensions=$ext 带了 //分支，flatpak build-init 不认这种写法" ;;
+              *)    echo "::error::sdk-extensions 期望 org.freedesktop.Sdk.Extension.openjdk，实际 $ext" ;;
+            esac
+            fail=1
+          fi
           exit $fail
 
       - name: 安装 flatpak 工具
@@ -294,22 +317,22 @@ jobs:
       # 就是 freedesktop Platform/Sdk 的一层扩展，装它会把底下那层基线一并带下来，
       # 所以**不需要**再单独装 org.freedesktop.Platform / Sdk。
       #
+      # **分支跟 manifest 无关，manifest 里写的是裸名。** 扩展装在哪条分支上是
+      # 这一步的事：GNOME 51 的基线是 26.08，所以装 //26.08 那个 ref。
+      # manifest 那边写 `//26.08` 反而会挂 —— flatpak build-init 的
+      # ensure_extensions() 不解析 `//分支`。
+      #
       # 也**不装** Platform.GL / Platform.Vulkan / GL.default：
       # 自 23.08 起 GL/EGL/Mesa 已经并进主运行时，这些是给老应用留的兼容件，
       # 装上只是平白多几个可能不存在的 ref —— 上一轮就是这一步在两条腿上失败的。
-      #
-      # **OpenJDK 扩展必须在这里显式装**。manifest 里声明 sdk-extensions 只是
-      # 告诉 flatpak-builder「我需要这个扩展挂进构建沙箱的 /usr」，它并不会替你装
-      # —— 1.4.2 实测直接回一句就退出了：
-      #   error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
-      # 之前注释里写的「flatpak-builder 会自己去装」是错的，没有任何报错提示，
-      # 是靠这一步的失败才验出来的。
-      #
-      # 分支必须跟 manifest 里写的一致，也就是 **26.08（基线）而不是 51**：
-      # org.gnome.Sdk//51 是架在 org.freedesktop.Sdk//26.08 上的，openjdk 扩展
-      # 只发布在各个基线分支上，//51 那个 ref 不存在。
       - name: 安装 GNOME 运行时与 SDK
         run: |
+          # pipefail 必须显式开。没写 shell: 的步骤用的是 GitHub 的默认 shell
+          # `bash -e {0}`，**没有 pipefail**：管道里 flatpak install 挂了会被
+          # tee 吃掉退出码，步骤照样判绿。而后面 flatpak-builder 只会说
+          # 「Requested extension ... not installed」—— 把「装失败」说成
+          # 「没装」，方向完全相反。诊断步骤自己绝不能成为失败原因。
+          set -o pipefail
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
           if ! flatpak install --user -y --noninteractive flathub \
@@ -320,7 +343,22 @@ jobs:
             tail -n 8 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
-          flatpak list --user --columns=ref
+
+          # 装没装上要**点名核对**，不能等 flatpak-builder 报「not installed」
+          # 才发现 —— 那句话只说「没装」，不说「装失败」，两者排查方向不同。
+          flatpak list --user --columns=ref > installed-refs.txt
+          cat installed-refs.txt
+          CPU='${{ matrix.flatpakCpu }}'
+          for r in "runtime/org.gnome.Platform/$CPU/$GNOME_RUNTIME" \
+                   "runtime/org.gnome.Sdk/$CPU/$GNOME_RUNTIME" \
+                   "runtime/org.freedesktop.Sdk.Extension.openjdk/$CPU/$FREEDESKTOP_BRANCH"; do
+            if grep -qx "$r" installed-refs.txt; then
+              echo "::warning::已装 $r"
+            else
+              echo "::error::没装上 $r"
+              exit 1
+            fi
+          done
 
       # 这一步全程自报现场。上一轮它「成功」了却什么也没留下：repo 不存在、
       # files/ 是空的、耗时不到 1 秒。成功却没产物，是最难受的一种失败 ——

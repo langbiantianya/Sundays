@@ -66,33 +66,59 @@ org.freedesktop.Platform.codecs-extra    26.08-extra
 换成官方扩展提供的 OpenJDK 之后这个约束就没了 —— 新运行时向下兼容，
 不需要为了迁就构建环境而把 runtime 压老。）
 
-**JDK 扩展的分支跟的是基线，不是 GNOME 版本 —— 必须写死 `//26.08`。**
-这是换成 GNOME 之后最容易踩的一条，原因是 manifest 里两个版本号长得一样：
+**`sdk-extensions` 里只能写裸名，写上 `//分支` 必然失败。**
+这一条是本仓库真踩过的坑，而且错法只有一种，值得把机制写清楚：
 
 ```json
-"runtime-version": "51",
-"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk//26.08"]
+"sdk-extensions": [ "org.freedesktop.Sdk.Extension.openjdk" ]
 ```
 
-`org.gnome.Sdk//51` 扩展的是 `org.freedesktop.Sdk//26.08`，
-所以 `openjdk` 扩展只能落在基线那些分支上（实测它在 18.08~26.08 上都有 ref，
-`//51` 那个 ref 根本不存在）。只写裸名字 `org.freedesktop.Sdk.Extension.openjdk`
-会被 flatpak-builder 按 SDK 的分支解析成 `//51`，于是：
+写成交 `org.freedesktop.Sdk.Extension.openjdk//26.08` 会得到一句看起来像
+路径拼接错了的报错：
 
 ```
-error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/51 not installed
+error: Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/51 not installed
 ```
 
-**改 runtime 时，`runtime-version` 与 `sdk-extensions` 的分支是两个独立的改动点。**
-只改前一个是很自然的手滑 —— 本地怎么试都过不了就算了，更糟的是它可能在别的
-环节先失败，报错指向别处。工作流里为此加了一道校验，把 manifest 的
-`runtime` / `runtime-version` / `sdk` / openjdk 分支四个字段逐个与 env 比对，
-对不上就当场报出是哪一条。
+注意末尾那个 `/x86_64/51` —— 它把 `//26.08` 当成了名字的一部分，
+又拼上了 SDK 的 arch 与**分支 51**（不是基线 26.08）。机制在 flatpak
+`build-init` 的 `ensure_extensions()` 里（`app/flatpak-builtins-build-init.c`）：
 
-这条校验本地实跑时又抓到一个自己写的 bug：取值用的 `sed ... | head -n1`
-取的是**第一个**匹配，而 manifest 开头那段 `"//"` 长注释里同样写着
-`openjdk//26.08`，于是分支被读成了「26.08；只写裸名字会被 flatpak-builder 按 SDK
-的分支解析成」。**注释写给谁看不影响它也会被 grep 到。**
+```c
+extensions = flatpak_list_extensions (metakey, default_arch, default_branch);
+...
+/* Remove any '@' from the name */
+flatpak_parse_extension_with_tag (requested_extension, &requested_extension_name, NULL);
+...
+if (strcmp (ext->id, requested_extension_name) == 0) { ... }
+...
+return flatpak_fail (error, _("Requested extension %s/%s/%s not installed"),
+                     requested_extension_name, default_arch, default_branch);
+```
+
+三件事同时成立：
+
+1. `flatpak_parse_extension_with_tag()` **只剥 `@tag`，不解析 `//分支`**
+   （flatpak main 上这段代码至今一字未改，所以任何版本都一样）；
+2. 候选扩展来自 **SDK 自己 metadata 里声明的扩展点** ——
+   `org.gnome.Sdk//51` 确实声明了 `org.freedesktop.Sdk.Extension.openjdk`，
+   所以**裸名能对上**（Java-GI 官方模板 `jwharm/java-gi-app-template`
+   跑在 GNOME 49 上用的就是这个写法）；
+3. 报错消息把整串再拼上 `<arch>/<SDK 的分支>`，于是成了那句话。
+
+**扩展装在哪条分支上跟 manifest 无关。** 那是 `flatpak install` 时的事：
+GNOME 51 的基线是 26.08，所以 CI 里装 `//26.08` 那个 ref，装完立刻点名核对
+（见下面「装完必须核对」）。manifest 只负责说「我要这个扩展点」。
+
+**改 runtime 时，`runtime-version` 与「装哪个扩展 ref」是两个独立改动点。**
+只改前一个是自然的手滑，但**不会**像想象中那样立刻报错：裸名照样能对上，
+真正出事的是装错分支。工作流里把两件事分开守着 —— manifest 的四个字段逐个与
+env 比对（其中 sdk-extensions 单独判「有没有多写 `//`」），安装完再把三个 ref
+逐个点名核对。
+
+这条校验本地实跑时还抓到一个自己写的 bug：取值用的 `sed ... | head -n1`
+取的是**第一个**匹配，而 manifest 开头那段 `"//"` 长注释里同样写着扩展名，
+于是取出来的东西带上了半句注释。**注释写给谁看不影响它也会被 grep 到。**
 现在取值前先把 `"//":` 那一行滤掉，并且用真实 manifest 与一份改坏的 manifest
 各跑一遍 —— 只跑正向用例的话，这个 bug 会一路活到 CI 上。
 
@@ -134,7 +160,7 @@ jlink 出来的 —— 它与 runtime 的 glibc、头文件、库版本天然对
 所以 `/app/jre` 仍然有体积，这部分由扩展决定，不归我们管。
 
 **`sdk-extensions` 声明了不等于装了 —— 必须显式 `flatpak install`。**
-manifest 里写 `"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk//26.08"]`
+manifest 里写 `"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk"]`
 只是在告诉 flatpak-builder「构建时把这个扩展挂进沙箱的 `/usr`」，它**不会替你装**。
 flatpak-builder 1.4.2 实测直接回一句就退出：
 
@@ -146,6 +172,19 @@ error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 no
 `org.gnome.Platform//51`、`org.gnome.Sdk//51`、`openjdk//26.08`。
 底下那层 `org.freedesktop.Platform` / `Sdk` **不用单独装** ——
 `org.gnome.Platform` 本身就是架在它们上面的一层扩展，装它会把基线一并带下来。
+
+**装完必须点名核对「装上了」，不能只信退出码。**
+两个理由，都不是假设：
+
+- **没写 `shell:` 的步骤，GitHub 用的默认 shell 是 `bash -e {0}`，没有 pipefail。**
+  `flatpak install … | tee runtime-install.log` 里前者挂了，退出码会被 `tee` 吃掉，
+  步骤照样判绿。而后面 flatpak-builder 只会说 `not installed` ——
+  把「装失败」说成「没装」，排查方向正好相反。
+  要 pipefail 就得显式 `set -o pipefail`（或者给步骤写 `shell: bash`，
+  它的包装器是 `bash --noprofile --norc -eo pipefail {0}`）。
+- **`flatpak list --user --columns=ref` 的输出是可以逐字比对的**，
+  比任何「大概装上了」都硬。所以安装之后立刻核对三个 ref，
+  少一个就在这里报，而不是拖到 flatpak-builder 才炸。
 
 远端 ref 的预检从三个增加到五个，多出来的两个正是上面那两个只查不装的
 运行时扩展（`org.gnome.Platform.Locale//51`、`GL.default//26.08`）。
