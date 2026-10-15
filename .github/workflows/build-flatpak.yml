@@ -415,15 +415,26 @@ jobs:
           rc=$?
           cd "$GITHUB_WORKSPACE"
           echo "::warning::flatpak-builder 退出码 = $rc"
-          # 按内容 grep，而不是 tail。GitHub 每步骤只保留前 10 条 annotation，
-          # tail 会随 flatpak-builder 日志变长而漂移 —— 上轮就因为 debuginfo
-          # 剥离的输出挤在后面，把真正想看的行顶出去了。按关键词捞则不受位置影响。
-          grep -E 'CHK|Error|error:|Command|not found|No such' builder.log \
-            | tail -n 8 | while IFS= read -r line; do echo "::error::$line"; done
-          echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
-          echo "::warning::flatpak-build 顶层：$(ls -A flatpak-build 2>&1 | tr '\n' ' ')"
-          echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
-          echo "::warning::flatpak-repo 顶层：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
+
+          # 下面这一大段**只在失败时**才打。
+          #
+          # GitHub 每个步骤每级只保留前 10 条 annotation，超出直接丢弃
+          # —— 不是截断显示，是真的没有。而这一段是「成功却没产物」那类
+          # 现场排查的唯一线索：按内容 grep（不是 tail，tail 会随
+          # flatpak-builder 日志变长而漂移，上轮就因为 debuginfo 剥离的
+          # 输出挤在后面把真正想看的行顶出去）加上四处目录内容。
+          #
+          # 之前它在成功路径上也照打，于是白白占掉 8 条 error + 4 条 warning，
+          # 正好把后面那条 metadata 断言的证据挤没了 —— 断言跑了、也过了，
+          # 却什么都看不见。**诊断输出放在失败路径上，成功的证据才有位置。**
+          if [ "$rc" -ne 0 ]; then
+            grep -E 'CHK|Error|error:|Command|not found|No such' builder.log \
+              | tail -n 8 | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::warning::工作区顶层：$(ls -A | tr '\n' ' ')"
+            echo "::warning::flatpak-build 顶层：$(ls -A flatpak-build 2>&1 | tr '\n' ' ')"
+            echo "::warning::flatpak-build/files：$(ls -A flatpak-build/files 2>&1 | head -c 500)"
+            echo "::warning::flatpak-repo 顶层：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
+          fi
           if [ "$rc" -ne 0 ]; then exit "$rc"; fi
           # 「成功却没产物」这道断言留着，但断言点必须跟着 manifest 走 ——
           # 上一版它写死了 files/sundays，那还是几轮前嵌套布局时的路径，
