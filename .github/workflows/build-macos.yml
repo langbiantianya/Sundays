@@ -1,0 +1,248 @@
+name: macOS 安装包
+
+# 推 main / 打 tag / 手动触发都构建，x64 与 arm64 两条腿并行跑。
+#
+# 与 Windows、Flatpak 两条腿同一个原则：**各跑各的原生机器**，不交叉编译。
+# 在 Apple Silicon 上「用参数编出 x86_64 切片」是一条命令的事，但那样得到的是
+# 交叉编译产物 —— 出问题时你分不清是代码不对还是交叉工具链不对。
+#
+# 刻意**不在** pull_request 上跑：这个仓库的 UI 测试依赖内网数据库
+# （192.168.1.5），PR 上必然红一片，起不到把关作用还把 CI 变成噪声。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: 打包 macOS ${{ matrix.arch }} 安装包
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      # arm64 工具链更脆（首次跑时多半要调适配），不让它取消掉已经打好的 x64。
+      fail-fast: false
+      matrix:
+        # 矩阵键刻意全用驼峰、不带连字符 —— `matrix.macho-cpu` 会被
+        # Actions 表达式解析成减法（matrix.macho - cpu）而静默失效。
+        include:
+          - arch: x64
+            # GitHub 托管的 macOS x86_64 镜像。macos-13 已下线、macos-14 已标
+            # deprecated，能用的 Intel 标签就剩 macos-15-intel 与 macos-26-intel。
+            os: macos-15-intel
+            jdkArch: x64
+            # Mach-O 的 CPU 类型。lipo -archs 对这两种分别打出 x86_64 / arm64。
+            machoCpu: x86_64
+          - arch: arm64
+            os: macos-15
+            # setup-java 的 architecture 默认就是 x64，ARM 腿必须显式给 aarch64。
+            jdkArch: aarch64
+            machoCpu: arm64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 先确认跑在哪种机器上，别等打包完了才发现跑错了。
+      - name: 确认 runner 架构
+        shell: bash
+        run: |
+          echo "uname -m    = $(uname -m)"
+          echo "arch       = $(arch)"
+          echo "macOS      = $(sw_vers -productVersion)"
+          echo "期望架构   = ${{ matrix.arch }} / ${{ matrix.machoCpu }}"
+
+      # ---------------------------------------------------------------------------
+      # 仓库里的 wrapper 指向腾讯云镜像，那是给国内开发机用的。
+      # GitHub 托管的 runner 在境外，从那里拉一个 -all.zip（两百多 MB）既慢又不稳。
+      # 只在 CI 里换回官方源，**不改仓库文件** —— 国内开发者照旧走镜像。
+      #
+      # ⚠️ sed 的写法与 Windows 腿不同：macOS 自带的是 BSD sed，
+      # 裸的 `sed -i` 会把备份后缀当成脚本内容（`-i: command not found`）。
+      # `-i.bak` 两边都认 —— GNU 把它当「后缀是 .bak 的 -i」，
+      # BSD 把它当「备份文件的扩展名」，行为恰好一致。写完把 .bak 删掉。
+      - name: Gradle 分发源换回官方
+        shell: bash
+        run: |
+          sed -i.bak 's|mirrors\.cloud\.tencent\.com/gradle|services.gradle.org/distributions|' \
+            gradle/wrapper/gradle-wrapper.properties
+          rm -f gradle/wrapper/gradle-wrapper.properties.bak
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      # 依赖仓库（settings.gradle.kts 里的 aliyun 镜像）**刻意保留**：
+      # 阿里云镜像在境外 runner 上同样可达，只是比 mavenCentral 慢一些。
+
+      - uses: actions/setup-java@v6
+        with:
+          # 与另外两条腿保持一致：仓库里没有 jvmToolchain 声明，
+          # 构建跟着跑它的 JDK 走，所以这里钉住的不只是「用什么编译」，
+          # 还决定产物的字节码目标与 jlink 出来的运行时版本。
+          #
+          # macOS 两个架构都有 Temurin 25（与 Windows ARM 腿那个
+          # 「Temurin 没有 Windows ARM64 JDK」的坑不同），所以两条腿同款。
+          java-version: '25'
+          distribution: temurin
+          architecture: ${{ matrix.jdkArch }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # packageDmg       → .dmg 镜像，装起来拖进 /Applications 即可
+      # createDistributable → .app 目录，给想直接双击跑的人
+      #
+      # packageDmg 本身就 dependsOn createDistributable，两个都写是为了把
+      # 「我要哪些产物」摆在明面上，省得以后有人改任务图时才发现少了一样。
+      #
+      # pipefail 必须显式开：Gradle 的输出过了 tee 之后，管道最后一环的退出码
+      # 成了 tee 的 0，不开 pipefail 的话**构建失败会被当成成功**，
+      # 然后下一步 upload-artifact 因 if-no-files-found: error 才报一个驴唇不对马大的错。
+      - name: 打包
+        shell: bash
+        run: |
+          set -o pipefail
+          bash ./gradlew :desktopApp:packageDmg :desktopApp:createDistributable 2>&1 | tee gradle-build.log
+
+      # 产物架构自检：矩阵里写了 arm64，不代表包里真是 arm64 的东西。
+      #
+      # 验三处，缺一不可：
+      #   1. .app 里那个启动器（Contents/MacOS/<packageName>）—— 它是我们自己的产物
+      #   2. Contents/runtime 里 jlink 出来的 libjvm.dylib —— 证明 **JDK** 对
+      #   3. skiko 的 .dylib —— 证明 Compose 有没有按 os.arch 选到对应的原生库，
+      #      而那才是这次 ARM 构建的核心风险点（前两条对说明不了它）
+      #
+      # 用 lipo -archs 而不是 `file`：前者直接给架构名（x86_64 / arm64），
+      # 后者对 universal binary 的描述是一长串，两个架构时没法干净地匹配。
+      #
+      # 找不到文件时报错，并把 app 目录前两层压成一行打进日志 —— 猜文件名猜错时，
+      # 这一行就是唯一的答案来源。
+      - name: 校验产物架构
+        shell: bash
+        run: |
+          set -uo pipefail
+          EXPECTED="${{ matrix.machoCpu }}"
+          APP_DIR="desktopApp/build/compose/binaries/main/app"
+          APP="$APP_DIR/com.kxxnzstdsw.sundays.app"
+          fail=0
+
+          arch_of() {
+            lipo -archs "$1" 2>/dev/null | tr -d ' \n'
+          }
+
+          if [ ! -d "$APP" ]; then
+            echo "::error::找不到 .app 包：$APP"
+            echo "::error::main/app 下有：$(ls -A "$APP_DIR" 2>&1 | tr '\n' ' ')"
+            exit 1
+          fi
+
+          launcher="$APP/Contents/MacOS/com.kxxnzstdsw.sundays"
+          if [ ! -f "$launcher" ]; then
+            echo "::error::找不到启动器 $launcher"
+            echo "::error::Contents/MacOS 下有：$(ls -A "$APP/Contents/MacOS" 2>&1 | tr '\n' ' ')"
+            fail=1
+          else
+            a="$(arch_of "$launcher")"
+            echo "启动器 Mach-O 架构 = $a（期望 $EXPECTED）"
+            if [ "$a" != "$EXPECTED" ]; then
+              echo "::error::启动器架构不对：$a != $EXPECTED"
+              fail=1
+            fi
+          fi
+
+          jvm="$(find "$APP/Contents/runtime" -type f -name 'libjvm.dylib' -print -quit 2>/dev/null || true)"
+          if [ -z "$jvm" ]; then
+            echo "::error::$APP/Contents/runtime 里找不到 libjvm.dylib，jlink 运行时没就位"
+            fail=1
+          else
+            a="$(arch_of "$jvm")"
+            echo "libjvm.dylib 架构 = $a（期望 $EXPECTED）"
+            if [ "$a" != "$EXPECTED" ]; then
+              echo "::error::JDK 架构不对：$a != $EXPECTED"
+              fail=1
+            fi
+          fi
+
+          skiko="$(find "$APP" -type f -name '*skiko*' -print -quit 2>/dev/null || true)"
+          if [ -z "$skiko" ]; then
+            echo "::error::$APP 里找不到 skiko 原生库"
+            echo "::error::Contents/app 下有：$(ls -A "$APP/Contents/app" 2>&1 | head -c 400 | tr '\n' ' ')"
+            fail=1
+          else
+            a="$(arch_of "$skiko")"
+            echo "skiko 原生库 ${skiko##*/} 架构 = $a（期望 $EXPECTED）"
+            if [ "$a" != "$EXPECTED" ]; then
+              echo "::error::skiko 原生库架构不对：$a != $EXPECTED"
+              fail=1
+            fi
+          fi
+
+          # 签名状态顺带报一下。没配 signing 时的行为是（Compose 源码
+          # MacSigner.kt 的 NoCertificateSigner）：arm64 会打 ad-hoc 签名
+          # （Apple Silicon 强制要求签名，否则内核直接杀进程），
+          # x86_64 保持未签名（Intel 本来就不要求）。两种都能跑，
+          # 但都会因为下载而带上隔离属性，首次打开要右键→打开或清 quarantine。
+          codesign -dv "$APP" > /tmp/codesign.log 2>&1 || true
+          echo "codesign -dv：$(head -n 3 /tmp/codesign.log | tr '\n' ' ' | head -c 300)"
+
+          exit $fail
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sundays-macos-${{ matrix.arch }}-dmg
+          path: desktopApp/build/compose/binaries/main/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      # .app 是**目录**不是单文件，和 Windows 便携版一个道理：双击运行依赖它内部
+      # 整套 Contents 结构，单独拿一个可执行文件出来是跑不起来的。
+      # 交给 upload-artifact 自己压缩，也避开了 ditto/tar 在长路径上的老毛病。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sundays-macos-${{ matrix.arch }}-app
+          path: desktopApp/build/compose/binaries/main/app/
+          if-no-files-found: error
+          retention-days: 30
+
+      # 打包失败时把 jpackage 的日志捞出来 —— 报错的最后几行只在文件里，
+      # 控制台上往往只剩一句 exit code，没有这几行就只能靠猜。
+      # artifact 名**必须带架构**：upload-artifact v4 起不允许同一 run 内重名。
+      - name: 收集 jpackage 日志
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: packaging-logs-macos-${{ matrix.arch }}
+          path: desktopApp/build/compose/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # 这一步存在的唯一理由是**让失败可诊断**。GitHub 网页版会把大的步骤日志
+      # 整个截断成一句「This step has been truncated due to its large size」，
+      # 原始日志下载又要求 admin 权限，结果就是 CI 一红没人看得到报错原文。
+      # 把报错用 `::error::` 转成 annotation，annotation 走
+      # /check-runs/{id}/annotations，公开可读且不受步骤大小限制。
+      # 代价是数量上限（每步每级别 10 条），所以必须挑着发。
+      - name: 失败原因（匿名可读）
+        if: failure()
+        shell: bash
+        run: |
+          if [ ! -f gradle-build.log ]; then
+            echo "::error::没有 gradle-build.log，打包步骤没跑到写日志那一步"
+            exit 0
+          fi
+          block="$(sed -n '/^\* What went wrong:/,/^\* Try:/p' gradle-build.log)"
+          if [ -z "$block" ]; then
+            block="$(tail -n 20 gradle-build.log)"
+          fi
+          echo "===== 失败详情 ====="
+          echo "$block"
+          printf '%s\n' "$block" \
+            | grep -E '^(>|Caused by:)|[Ee]xception|[Ee]rror' \
+            | tail -n 8 \
+            | while IFS= read -r line; do
+                echo "::error::$line"
+              done

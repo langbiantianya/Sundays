@@ -1,0 +1,213 @@
+name: 发布 Release 附件
+
+# 构建跑完之后，把六个产物挂到对应 tag 的 Release 上。
+#
+# 为什么单独一个工作流，而不是让两条构建工作流各挂各的：
+# 那个 tag 会同时触发 4 个 job（Windows x64/arm64、Flatpak amd64/arm64），
+# 六个 job 抢着创建同一个 Release，422 冲突是必然的。这里做唯一的写者。
+#
+# 为什么不能直接从构建 job 里传文件：Actions artifact 是 zip，
+# 而 portable 那条传的是整棵 app-image **目录**，Release 附件要的是
+# 能直接解压就用的 zip/MSI/flatpak，形态对不上，只能拉回来重整一次。
+#
+# 触发方式有二：
+#   1. 推 v* tag —— 与两条构建工作流同时启动，本工作流轮询等它们跑完再收
+#   2. 手动 —— 用来给已经存在的 Release 补附件（第一次没挂上、或产物重传了）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要补附件的 tag；留空则用当前 ref'
+        required: false
+        type: string
+
+permissions:
+  # 建 Release / 传附件需要写权限。构建工作流那边是 contents: read，
+  # 权限按最小范围给：只有这一个工作流需要 actions: read 去拉别的 run 的产物。
+  contents: write
+  actions: read
+
+env:
+  REPO: ${{ github.repository }}
+
+jobs:
+  attach:
+    name: 收集产物并挂到 Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # 用 API 解析而不是 git rev-list：省掉一次 checkout，
+      # 也省掉 annotated tag 在浅克隆里解析的麻烦。
+      # GET /repos/{owner}/{repo}/commits/{ref} 接受 tag 名，返回的是 commit。
+      - name: 定位 tag 对应的 commit
+        id: ctx
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          sha="$(gh api "repos/$REPO/commits/$TAG" --jq '.sha' 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            echo "::error::解析不出 $TAG 对应的 commit（tag 不存在？）"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG -> $sha"
+
+      # 三条构建工作流和本工作流是**同时**被 tag 触发的，所以一开始可能一个都
+      # 没注册上。先等到「三个 run 都出现且都结束」再动手，而不是看到 0 个就报错
+      # —— 后者会把一个纯粹的时间差报成失败。
+      #
+      # 顺带把 head_branch 等于 tag 这个条件写死：同一个 commit 通常也推过 main，
+      # 那些 run 的产物一样但会让等待变长，没有理由一起等。
+      - name: 等这次 tag 触发的构建 run 跑完
+        id: runs
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ctx.outputs.tag }}"
+          SHA="${{ steps.ctx.outputs.sha }}"
+          deadline=$(( $(date +%s) + 3600 ))
+          while :; do
+            gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_branch == \"$TAG\") | [.id, .name, .status, (.conclusion // \"-\")] | @tsv" \
+              > runs.tsv
+            total="$(grep -c . runs.tsv || true)"
+            running="$(awk -F'\t' '$3 != "completed"' runs.tsv | wc -l | tr -d ' ')"
+            echo "::warning::tag=$TAG 匹配到 $total 个构建 run，其中 $running 个未结束"
+            if [ "$total" -ge 3 ] && [ "$running" -eq 0 ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              while IFS= read -r line; do echo "::error::$line"; done < runs.tsv
+              echo "::error::等待构建 run 超时"
+              exit 1
+            fi
+            sleep 45
+          done
+          while IFS= read -r line; do echo "::warning::build run: $line"; done < runs.tsv
+          # 有 run 不是 success 时**不中断**：附件照挂，但在注释里说清楚，
+          # 免得看到一个不完整的 Release 却不知道为什么少了文件。
+          bad="$(awk -F'\t' '$4 != "success"' runs.tsv | wc -l | tr -d ' ')"
+          if [ "$bad" -ne 0 ]; then
+            echo "::warning::有 $bad 个构建 run 不是 success，产物可能不完整"
+          fi
+          {
+            echo "ids=$(awk -F'\t' '{printf "%s ", $1}' runs.tsv)"
+            echo "count=$total"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 下载产物
+        run: |
+          set -euo pipefail
+          for id in ${{ steps.runs.outputs.ids }}; do
+            name="$(awk -F'\t' -v i="$id" '$1 == i {print $2}' runs.tsv)"
+            echo "::warning::下载 run $id（$name）"
+            gh run download "$id" --repo "$REPO" --dir "raw/$id"
+          done
+          echo "::warning::下载到的 artifact 目录：$(find raw -maxdepth 2 -mindepth 2 -type d | tr '\n' ' ')"
+
+      # 四种产物四种处理：
+      #   msi      —— artifact 里就是那个 .msi，改个带架构与平台的名字
+      #   portable —— artifact 本身是整棵 app-image 目录，原样重打成 zip
+      #   dmg      —— artifact 里就是那个 .dmg，改个带架构的名字
+      #   app      —— artifact 本身是整棵 .app 目录，原样重打成 zip（外层保留
+      #               .app 这一层，用户解压后能直接把它拖进 /Applications）
+      # 架构从 artifact 名里反解（sundays-windows-<arch>-msi / sundays-macos-<arch>-dmg），
+      # 不写死矩阵值 —— 矩阵改名时这里自动跟上。
+      - name: 整理成可直接发布的附件
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          shopt -s nullglob
+
+          for f in raw/*/sundays-windows-*-msi/*.msi; do
+            arch="$(basename "$(dirname "$f")" | sed -n 's/^sundays-windows-\(.*\)-msi$/\1/p')"
+            [ -n "$arch" ] || continue
+            cp "$f" "out/sundays-windows-$arch.msi"
+          done
+
+          for d in raw/*/sundays-windows-*-portable; do
+            [ -d "$d" ] || continue
+            arch="$(basename "$d" | sed -n 's/^sundays-windows-\(.*\)-portable$/\1/p')"
+            [ -n "$arch" ] || continue
+            # 用 python3 -m zipfile 而不是 zip 命令：
+            # zip 不是 runner 镜像的必备工具（本地 git bash 就没有），
+            # 而 python3 已经是 build-flatpak 那条腿的硬依赖，多一个依赖少一分风险。
+            # 传 `.` 而不是目录名：传目录名会把那个目录本身也打进包里，
+            # 多一层没用的外壳目录。输出写在 $d 之外，免得把自己打进自己。
+            # ZipFile.write 会存 st_mode，可执行位（.exe、macOS 启动器）不会丢。
+            ( cd "$d" && python3 -m zipfile -c "$GITHUB_WORKSPACE/out/sundays-windows-$arch-portable.zip" . )
+          done
+
+          for f in raw/*/sundays-macos-*-dmg/*.dmg; do
+            arch="$(basename "$(dirname "$f")" | sed -n 's/^sundays-macos-\(.*\)-dmg$/\1/p')"
+            [ -n "$arch" ] || continue
+            cp "$f" "out/sundays-macos-$arch.dmg"
+          done
+
+          for d in raw/*/sundays-macos-*-app; do
+            [ -d "$d" ] || continue
+            arch="$(basename "$d" | sed -n 's/^sundays-macos-\(.*\)-app$/\1/p')"
+            [ -n "$arch" ] || continue
+            # 这里传的是 .app 包名而不是 `.`：zip 的根目录必须就是那个包，
+            # 用户解压后能直接把它拖进 /Applications。多包一层目录就多一步手工。
+            bundle="$(cd "$d" && ls -d ./*.app 2>/dev/null | head -n1 || true)"
+            bundle="${bundle#./}"
+            if [ -z "$bundle" ]; then
+              echo "::error::$d 里没有 .app 包；里面有：$(ls -A "$d" 2>&1 | head -c 300 | tr '\n' ' ')"
+              continue
+            fi
+            ( cd "$d" && python3 -m zipfile -c "$GITHUB_WORKSPACE/out/sundays-macos-$arch-app.zip" "$bundle" )
+          done
+
+          # Flatpak：artifact 里就是那个 .flatpak，文件名本来就是对的，原样搬。
+          # （这一段曾经被一次改写整个弄丢，必填清单里那两个名字还在，于是
+          #   「整理结果 8 个、清单要求 10 个」当场把它抓出来了。）
+          for f in raw/*/sundays-flatpak-*/*.flatpak; do
+            cp "$f" "out/"
+          done
+
+          echo "::warning::整理结果："
+          ls -la out | while IFS= read -r line; do echo "::warning::  $line"; done
+
+          # 缺文件必须在这里喊出来。等挂上去再发现少了两个，是最难查的一种状态。
+          missing=0
+          for need in sundays-windows-x64.msi \
+                      sundays-windows-arm64.msi \
+                      sundays-windows-x64-portable.zip \
+                      sundays-windows-arm64-portable.zip \
+                      sundays-macos-x64.dmg \
+                      sundays-macos-arm64.dmg \
+                      sundays-macos-x64-app.zip \
+                      sundays-macos-arm64-app.zip \
+                      sundays-flatpak-amd64.flatpak \
+                      sundays-flatpak-arm64.flatpak; do
+            if [ ! -f "out/$need" ]; then
+              echo "::error::缺 $need"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::缺 $missing 个附件。检查上面「下载产物」那步打出的 artifact 目录名，"
+            echo "::error::以及那 ${{ steps.runs.outputs.count }} 个构建 run 是否都上传了 artifact"
+            exit 1
+          fi
+          echo "::warning::十个附件齐了"
+
+      # Release 不存在就建一个**草稿**：自动发版不该替人按下发布键。
+      # 已经在的（不管是不是草稿）就直接补附件，--clobber 让重跑能覆盖同名文件。
+      - name: 挂到 Release
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ctx.outputs.tag }}"
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --title "$TAG" --draft --generate-notes
+            echo "::warning::$TAG 的 Release 不存在，已新建草稿（需人工补说明并点发布）"
+          fi
+          gh release upload "$TAG" --repo "$REPO" --clobber out/*
+          echo "::warning::附件已挂到 $TAG，草稿状态下到 Release 页面确认后再点发布"

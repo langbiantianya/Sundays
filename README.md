@@ -529,6 +529,42 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 ---
 
+## 打包 macOS 安装包
+
+推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会同时打出 x64 与 arm64
+两份（工作流见 [`.github/workflows/build-macos.yml`](./.github/workflows/build-macos.yml)）：
+
+| 产物 | 架构 | 说明 |
+| --- | --- | --- |
+| `sundays-macos-x64-dmg` | x86_64 | `.dmg`，拖进 `/Applications` 即可 |
+| `sundays-macos-arm64-dmg` | arm64 | 同上 |
+| `sundays-macos-x64-app` | x86_64 | `.app` 目录打包，双击即可运行 |
+| `sundays-macos-arm64-app` | arm64 | 同上 |
+
+两条腿各跑在**原生** runner 上（Intel 与 Apple Silicon 镜像），不交叉编译。
+GitHub 托管的 macOS 镜像里 `macos-13` 已下线、`macos-14` 已标 deprecated，
+Intel 侧现在只能用 `macos-15-intel`（或 `macos-26-intel`）。
+
+**首次打开会被 Gatekeeper 拦一下，这是预期行为。**
+本项目没有 Apple 开发者签名，Compose 在 arm64 上会自动打 **ad-hoc 签名**
+（Apple Silicon 强制要求签名，否则内核直接杀进程），x64 上则完全不签。
+两种都能运行，但浏览器下载都会带上隔离属性。两种绕法：
+
+```bash
+# 1. 右键点 .app → 选「打开」→ 再点一次「打开」
+# 2. 或者清掉隔离属性
+xattr -dr com.apple.quarantine /Applications/com.kxxnzstdsw.sundays.app
+```
+
+想要「双击就开、不用管签名」，需要一个 Apple Developer 账号并在
+`nativeDistributions` 里配 `macOS { signing { ... } }` 与公证
+（notarization）—— 密钥不能进仓库，得走 CI secrets，这部分还没做。
+
+架构会在上传之前用 `lipo -archs` 自检：启动器、`libjvm.dylib`、skiko 的
+`.dylib` 三处都得对（`x86_64` / `arm64`），错架构的包不会变成可下载的产物。
+
+---
+
 ## 打包 Linux Flatpak
 
 推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会同时打出两个架构的
@@ -565,6 +601,32 @@ flatpak run com.kxxnzstdsw.sundays
 - **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的
   classifier（`linux-x64` / `linux-arm64`），再直接读 app 目录里 skiko 原生库的
   ELF 头 `e_machine`（`0x3E` = x86-64，`0xB7` = AArch64）。
+
+---
+
+## 自动挂到 Release
+
+打 `v*` tag 时，除了三条构建工作流，还会启动
+[`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml)：
+它轮询等同一 tag 触发的构建 run 全部跑完，把十个产物整理成
+可直接使用的文件名，挂到该 tag 的 Release 上（**默认建草稿**，
+需要人工确认后再点发布）。
+
+**为什么不放在三条构建工作流里各挂各的**：一个 tag 会同时起 6 个 job，
+六个 job 抢着创建同一个 Release，422 冲突是必然的。这里做唯一的写者。
+
+产物名统一为 `sundays-<平台>-<架构>.<扩展名>`：
+
+| 附件 | 来源 |
+| --- | --- |
+| `sundays-windows-{x64,arm64}.msi` | Windows 安装包 |
+| `sundays-windows-{x64,arm64}-portable.zip` | Windows 便携版（原 app-image 目录重打） |
+| `sundays-macos-{x64,arm64}.dmg` | macOS 镜像 |
+| `sundays-macos-{x64,arm64}-app.zip` | macOS `.app` 包（保留 `.app` 外层，可直接拖进 `/Applications`） |
+| `sundays-flatpak-{amd64,arm64}.flatpak` | Linux Flatpak |
+
+给已经存在的 Release 补附件用手动触发（`workflow_dispatch`，填 `tag`），
+重跑会用 `--clobber` 覆盖同名附件。
 
 细节与排障见 [`packaging/flatpak/README.md`](./packaging/flatpak/README.md)。
 
