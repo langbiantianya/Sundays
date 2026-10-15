@@ -136,7 +136,14 @@ jobs:
       # 命令替换返回非零 → 整个 echo 不执行 → annotation 丢失 → 静默失败。
       # 诊断脚本的纪律：**绝不让「怎么打印错误」这件事本身成为失败原因。**
       #
-      # 数量压在 8 条以内：annotation 每步上限 10 条，超出的直接丢弃。
+      # 数量压在 10 条以内：annotation 每步上限 10 条，超出的直接丢弃。
+      #
+      # ⚠️ 每条消息都**必须短**（本文件用 cut -c1-60 截断）。这是第二轮实验
+      # 要验证的猜想：第二轮跑出来 5 条命令里只有 CHK0 活下来，而 CHK0 恰好是
+      # 唯一一条没塞目录列表的消息（44 字符），CHK1/2/3 都把 `head -c 300`
+      # 的目录树拼进消息里。若「过长被整条丢弃」成立，截短之后它们就该全部出现。
+      # 先把猜测标成猜测 —— 上一轮我就把「-e 导致消息丢失」当成定论写了注释，
+      # 结果只是治了表象。
       - name: 校验产物架构
         shell: bash
         run: |
@@ -158,48 +165,59 @@ jobs:
             return 0
           }
 
-          echo "::warning::CHK0 main/app = $(ls -A "$APP_DIR" 2>&1 | tr '\n' ' ' | head -c 300 || true)"
+          # 摘要 + 详情分成两条独立的短消息。这样即使详情那条太长被丢弃，
+          # 摘要仍然在；反过来则一条信息都留不下。
+          brief() { printf '%s' "$1" | cut -c1-60; }
+          detail() { printf '%s' "$1" | tr '\n' ' ' | cut -c1-60; }
+
+          echo "::warning::CHK0 main/app: $(brief "$(ls -A "$APP_DIR" 2>&1 || true)")"
 
           if [ ! -d "$APP" ]; then
-            echo "::error::找不到 .app 包：$APP"
+            echo "::error::找不到 .app 包"
+            echo "::warning::CHK0b main/app: $(brief "$(ls -A "$APP_DIR" 2>&1 || true)")"
             exit 1
           fi
 
           launcher="$APP/Contents/MacOS/com.kxxnzstdsw.sundays"
           if [ ! -f "$launcher" ]; then
-            echo "::warning::CHK1 启动器缺失；Contents/MacOS = $(ls -A "$APP/Contents/MacOS" 2>&1 | tr '\n' ' ' | head -c 300 || true)"
+            echo "::warning::CHK1 启动器缺失"
+            echo "::warning::CHK1b MacOS 目录: $(brief "$(ls -A "$APP/Contents/MacOS" 2>&1 || true)")"
+            echo "::warning::CHK1c Contents 目录: $(brief "$(ls -A "$APP/Contents" 2>&1 || true)")"
             fail=1
           else
             a="$(arch_of "$launcher")"
-            echo "::warning::CHK1 启动器 Mach-O = ${a:-<读不出>}（期望 $EXPECTED）"
+            echo "::warning::CHK1 启动器 = ${a:-?} 期望 $EXPECTED"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::启动器架构不对：${a:-读不出} != $EXPECTED"
+              echo "::error::启动器架构不对"
               fail=1
             fi
           fi
 
           jvm="$(find1 "$APP/Contents/runtime" -type f -name 'libjvm.dylib' || true)"
           if [ -z "$jvm" ]; then
-            echo "::warning::CHK2 libjvm.dylib 缺失；runtime 下有 = $(find "$APP/Contents/runtime" -maxdepth 3 -type d 2>/dev/null | head -c 300 | tr '\n' ' ' || true)"
+            echo "::warning::CHK2 libjvm.dylib 缺失"
+            echo "::warning::CHK2b runtime 下: $(brief "$(find "$APP/Contents/runtime" -maxdepth 3 -type d 2>/dev/null | tr '\n' ' ' || true)")"
             fail=1
           else
             a="$(arch_of "$jvm")"
-            echo "::warning::CHK2 libjvm.dylib = ${a:-<读不出>}（期望 $EXPECTED）"
+            echo "::warning::CHK2 libjvm = ${a:-?} 期望 $EXPECTED"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::JDK 架构不对：${a:-读不出} != $EXPECTED"
+              echo "::error::JDK 架构不对"
               fail=1
             fi
           fi
 
           skiko="$(find1 "$APP" -type f -name '*skiko*' || true)"
           if [ -z "$skiko" ]; then
-            echo "::warning::CHK3 skiko 原生库缺失；Contents/app = $(ls -A "$APP/Contents/app" 2>&1 | head -c 400 | tr '\n' ' ' || true)"
+            echo "::warning::CHK3 skiko 原生库缺失"
+            echo "::warning::CHK3b Contents/app: $(brief "$(ls -A "$APP/Contents/app" 2>&1 || true)")"
             fail=1
           else
             a="$(arch_of "$skiko")"
-            echo "::warning::CHK3 skiko ${skiko##*/} = ${a:-<读不出>}（期望 $EXPECTED）"
+            echo "::warning::CHK3 skiko: $(brief "${skiko##*/}")"
+            echo "::warning::CHK3c skiko 架构 = ${a:-?} 期望 $EXPECTED"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::skiko 原生库架构不对：${a:-读不出} != $EXPECTED"
+              echo "::error::skiko 原生库架构不对"
               fail=1
             fi
           fi
@@ -210,7 +228,12 @@ jobs:
           # x86_64 保持未签名（Intel 本来就不要求）。两种都能跑，
           # 但都会因为下载而带上隔离属性，首次打开要右键→打开或清 quarantine。
           codesign -dv "$APP" > /tmp/codesign.log 2>&1 || true
-          echo "::warning::CHK4 codesign = $(head -n 2 /tmp/codesign.log | tr '\n' ' ' | head -c 250)"
+          echo "::warning::CHK4 codesign: $(brief "$(head -n 2 /tmp/codesign.log 2>/dev/null || true)")"
+
+          # 收尾标记。它是「脚本确实跑到最后」的证据：看结果时，
+          # 只有 CHK0 说明中间某处死了；有 CHK9 说明全跑完了，
+          # 那没出现的 CHK1/2/3 就是消息本身被丢弃，不是没执行。
+          echo "::warning::CHK9 检查完毕 fail=$fail 期望=$EXPECTED"
 
           exit $fail
 
