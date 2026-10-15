@@ -119,64 +119,87 @@ jobs:
       # 用 lipo -archs 而不是 `file`：前者直接给架构名（x86_64 / arm64），
       # 后者对 universal binary 的描述是一长串，两个架构时没法干净地匹配。
       #
-      # 找不到文件时报错，并把 app 目录前两层压成一行打进日志 —— 猜文件名猜错时，
+      # 找到文件时报错，并把 app 目录前两层压成一行打进日志 —— 猜文件名猜错时，
       # 这一行就是唯一的答案来源。
+      #
+      # 输出策略：**先无条件打 CHK 行，再按需打 error**。
+      #
+      # ⚠️ 必须 `set +e` 打头。GitHub 的 shell: bash 包装器是
+      #     bash --noprofile --norc -eo pipefail {0}
+      # 也就是 **-e 默认就开着**，而 `set -uo pipefail` 只关掉了 -u。
+      # 诊断步骤最怕 -e：任何非零返回都会在**消息打出来之前**把步骤打断。
+      # 首跑就是这么变黑箱的 —— 一步失败、一条 annotation 都没有，屏幕上只剩
+      # 失败原因那步的一堆 `> Task :xxx` 噪音；x64 与 arm64 表现一模一样，
+      # 说明是结构问题而不是架构问题。
+      #
+      # 例：下面 `echo "::error::… $(ls -A 某目录)"` 一旦那个目录不存在，
+      # 命令替换返回非零 → 整个 echo 不执行 → annotation 丢失 → 静默失败。
+      # 诊断脚本的纪律：**绝不让「怎么打印错误」这件事本身成为失败原因。**
+      #
+      # 数量压在 8 条以内：annotation 每步上限 10 条，超出的直接丢弃。
       - name: 校验产物架构
         shell: bash
         run: |
-          set -uo pipefail
+          set +e
+          set -u
+          set -o pipefail
           EXPECTED="${{ matrix.machoCpu }}"
           APP_DIR="desktopApp/build/compose/binaries/main/app"
           APP="$APP_DIR/com.kxxnzstdsw.sundays.app"
           fail=0
 
+          # 不用 find 的 -quit：那是 GNU/BSD 的扩展，macOS 自带的 BSD find
+          # 不保证认。`| head -n1` 两边都有；head 收到 SIGPIPE 后仍返回 0，
+          # 不会因为管道被提前关掉而误报。
+          find1() { find "$@" 2>/dev/null | head -n1; }
+
           arch_of() {
             lipo -archs "$1" 2>/dev/null | tr -d ' \n'
+            return 0
           }
+
+          echo "::warning::CHK0 main/app = $(ls -A "$APP_DIR" 2>&1 | tr '\n' ' ' | head -c 300 || true)"
 
           if [ ! -d "$APP" ]; then
             echo "::error::找不到 .app 包：$APP"
-            echo "::error::main/app 下有：$(ls -A "$APP_DIR" 2>&1 | tr '\n' ' ')"
             exit 1
           fi
 
           launcher="$APP/Contents/MacOS/com.kxxnzstdsw.sundays"
           if [ ! -f "$launcher" ]; then
-            echo "::error::找不到启动器 $launcher"
-            echo "::error::Contents/MacOS 下有：$(ls -A "$APP/Contents/MacOS" 2>&1 | tr '\n' ' ')"
+            echo "::warning::CHK1 启动器缺失；Contents/MacOS = $(ls -A "$APP/Contents/MacOS" 2>&1 | tr '\n' ' ' | head -c 300 || true)"
             fail=1
           else
             a="$(arch_of "$launcher")"
-            echo "启动器 Mach-O 架构 = $a（期望 $EXPECTED）"
+            echo "::warning::CHK1 启动器 Mach-O = ${a:-<读不出>}（期望 $EXPECTED）"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::启动器架构不对：$a != $EXPECTED"
+              echo "::error::启动器架构不对：${a:-读不出} != $EXPECTED"
               fail=1
             fi
           fi
 
-          jvm="$(find "$APP/Contents/runtime" -type f -name 'libjvm.dylib' -print -quit 2>/dev/null || true)"
+          jvm="$(find1 "$APP/Contents/runtime" -type f -name 'libjvm.dylib' || true)"
           if [ -z "$jvm" ]; then
-            echo "::error::$APP/Contents/runtime 里找不到 libjvm.dylib，jlink 运行时没就位"
+            echo "::warning::CHK2 libjvm.dylib 缺失；runtime 下有 = $(find "$APP/Contents/runtime" -maxdepth 3 -type d 2>/dev/null | head -c 300 | tr '\n' ' ' || true)"
             fail=1
           else
             a="$(arch_of "$jvm")"
-            echo "libjvm.dylib 架构 = $a（期望 $EXPECTED）"
+            echo "::warning::CHK2 libjvm.dylib = ${a:-<读不出>}（期望 $EXPECTED）"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::JDK 架构不对：$a != $EXPECTED"
+              echo "::error::JDK 架构不对：${a:-读不出} != $EXPECTED"
               fail=1
             fi
           fi
 
-          skiko="$(find "$APP" -type f -name '*skiko*' -print -quit 2>/dev/null || true)"
+          skiko="$(find1 "$APP" -type f -name '*skiko*' || true)"
           if [ -z "$skiko" ]; then
-            echo "::error::$APP 里找不到 skiko 原生库"
-            echo "::error::Contents/app 下有：$(ls -A "$APP/Contents/app" 2>&1 | head -c 400 | tr '\n' ' ')"
+            echo "::warning::CHK3 skiko 原生库缺失；Contents/app = $(ls -A "$APP/Contents/app" 2>&1 | head -c 400 | tr '\n' ' ' || true)"
             fail=1
           else
             a="$(arch_of "$skiko")"
-            echo "skiko 原生库 ${skiko##*/} 架构 = $a（期望 $EXPECTED）"
+            echo "::warning::CHK3 skiko ${skiko##*/} = ${a:-<读不出>}（期望 $EXPECTED）"
             if [ "$a" != "$EXPECTED" ]; then
-              echo "::error::skiko 原生库架构不对：$a != $EXPECTED"
+              echo "::error::skiko 原生库架构不对：${a:-读不出} != $EXPECTED"
               fail=1
             fi
           fi
@@ -187,7 +210,7 @@ jobs:
           # x86_64 保持未签名（Intel 本来就不要求）。两种都能跑，
           # 但都会因为下载而带上隔离属性，首次打开要右键→打开或清 quarantine。
           codesign -dv "$APP" > /tmp/codesign.log 2>&1 || true
-          echo "codesign -dv：$(head -n 3 /tmp/codesign.log | tr '\n' ' ' | head -c 300)"
+          echo "::warning::CHK4 codesign = $(head -n 2 /tmp/codesign.log | tr '\n' ' ' | head -c 250)"
 
           exit $fail
 
@@ -230,19 +253,29 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          # 同样先 set +e：这一步的全部价值就是「把错误说出去」，
+          # 一旦它自己被 -e 打断，就变成黑箱里最黑的那个箱。
+          set +e
+          set -u
           if [ ! -f gradle-build.log ]; then
             echo "::error::没有 gradle-build.log，打包步骤没跑到写日志那一步"
             exit 0
           fi
-          block="$(sed -n '/^\* What went wrong:/,/^\* Try:/p' gradle-build.log)"
+          block="$(sed -n '/^\* What went wrong:/,/^\* Try:/p' gradle-build.log || true)"
           if [ -z "$block" ]; then
-            block="$(tail -n 20 gradle-build.log)"
+            block="$(tail -n 20 gradle-build.log || true)"
           fi
           echo "===== 失败详情 ====="
           echo "$block"
+          # `>` 开头有两类：Gradle 的原因（`> 某某失败`）与任务进度行
+          # （`> Task :desktopApp:jar`）。后者只是控制台进度，被当成报错的话
+          # 会把仅有的 10 条 annotation 全占掉，真正的原因反而被挤出去 ——
+          # 这正是首跑看到的：满屏 `> Task :xxx`，一句真错误都没有。
           printf '%s\n' "$block" \
-            | grep -E '^(>|Caused by:)|[Ee]xception|[Ee]rror' \
+            | grep -vE '^> Task |^$' \
+            | grep -E '^(> |Caused by:)|[Ee]xception|[Ee]rror' \
             | tail -n 8 \
             | while IFS= read -r line; do
                 echo "::error::$line"
               done
+          exit 0
