@@ -182,9 +182,19 @@ error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 no
   把「装失败」说成「没装」，排查方向正好相反。
   要 pipefail 就得显式 `set -o pipefail`（或者给步骤写 `shell: bash`，
   它的包装器是 `bash --noprofile --norc -eo pipefail {0}`）。
-- **`flatpak list --user --columns=ref` 的输出是可以逐字比对的**，
+- **`flatpak list --runtime --columns=ref` 的输出是可以逐字比对的**，
   比任何「大概装上了」都硬。所以安装之后立刻核对三个 ref，
   少一个就在这里报，而不是拖到 flatpak-builder 才炸。
+- **`--runtime` 这个 flag 不能少，它不是可选的修饰。**
+  `flatpak list` 默认**只列应用**；要列运行时必须显式加 `--runtime`。
+  少了它，这三个 ref（Platform、Sdk、SDK 扩展，全是 runtime）一个都不会出现，
+  三条断言于是**必然全判失败**，并且报出来的是「没装上」——
+  而事实上装得好好的。报错内容与事实完全相反时，最容易让人往错的方向查很久。
+  这跟上一条是同一个失败模式：**断言自己搞错了，于是把绿灯变成假警报。**
+
+  比对时把 `runtime/` 前缀去掉再比（`short="${r#runtime/}"` + `grep -qF`）：
+  那一列带不带前缀会随 flatpak 版本变，带不带都不该让断言翻脸。
+  失败时再打前三条与总行数，让人一眼看出「列表是空的」还是「少了一个」。
 
 远端 ref 的预检从三个增加到五个，多出来的两个正是上面那两个只查不装的
 运行时扩展（`org.gnome.Platform.Locale//51`、`GL.default//26.08`）。

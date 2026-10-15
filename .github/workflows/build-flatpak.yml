@@ -346,16 +346,27 @@ jobs:
 
           # 装没装上要**点名核对**，不能等 flatpak-builder 报「not installed」
           # 才发现 —— 那句话只说「没装」，不说「装失败」，两者排查方向不同。
-          flatpak list --user --columns=ref > installed-refs.txt
-          cat installed-refs.txt
+          #
+          # **--runtime 不能少。** `flatpak list` 默认只列**应用**，
+          # 而这里要核对的三个 ref（Platform、Sdk、SDK 扩展）全是 runtime。
+          # 少了这个 flag 时它一行都不输出，于是下面三条断言**必然全判失败**，
+          # 而且报出来的是「没装上」—— 与事实正好相反，装得好好的。
+          # 这个 flag 上一版是从旧代码里抄来的 `flatpak list --columns=ref`
+          # 顺手带过来的，它此前一直没在检查任何东西。
+          flatpak list --user --runtime --columns=ref > installed-refs.txt
           CPU='${{ matrix.flatpakCpu }}'
           for r in "runtime/org.gnome.Platform/$CPU/$GNOME_RUNTIME" \
                    "runtime/org.gnome.Sdk/$CPU/$GNOME_RUNTIME" \
                    "runtime/org.freedesktop.Sdk.Extension.openjdk/$CPU/$FREEDESKTOP_BRANCH"; do
-            if grep -qx "$r" installed-refs.txt; then
-              echo "::warning::已装 $r"
+            # 比较前把 runtime/ 前缀去掉：这列到底带不带前缀会随 flatpak 版本变，
+            # 而带不带都不该让断言翻脸。
+            short="${r#runtime/}"
+            if grep -qF -- "$short" installed-refs.txt; then
+              echo "::warning::已装 $short"
             else
-              echo "::error::没装上 $r"
+              echo "::error::没装上 $short"
+              echo "::error::已装的 runtime 前三条：$(head -n 3 installed-refs.txt | tr '\n' ' ')"
+              echo "::error::该列共 $(wc -l < installed-refs.txt) 行"
               exit 1
             fi
           done
