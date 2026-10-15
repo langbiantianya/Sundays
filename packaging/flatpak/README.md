@@ -9,15 +9,17 @@ Sundays 的 Flatpak 定义。CI 见 [`.github/workflows/build-flatpak.yml`](../.
 ./gradlew :desktopApp:createDistributable
 bash .github/scripts/assemble-flatpak-app.sh
 
-# 再往下需要 flatpak-builder 与 freedesktop 运行时
+# 再往下需要 flatpak-builder 与 GNOME 运行时
+flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
+  org.freedesktop.Sdk.Extension.openjdk//26.08
 flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
   packaging/flatpak/com.kxxnzstdsw.sundays.json
 flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays master
 ```
 
 bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
-`org.freedesktop.Platform` 与 OpenJDK 扩展来自 Flathub，安装时按 metadata 里的
-声明去取，所以换机器装它仍需要能访问 Flathub。
+`org.gnome.Platform`（连带底下的 freedesktop 基线）与 JDK 扩展来自 Flathub，
+安装时按 metadata 里的声明去取，所以换机器装它仍需要能访问 Flathub。
 
 **导出时分支取 ref 的最后一段。**
 `flatpak-builder` 导出的 ref 完整形状是 `app/<id>/<arch>/<branch>` ——
@@ -48,17 +50,75 @@ flatpak-builder 在这里只负责把它装进 `/app` 并导出元数据，不�
 
 ## 几个选型理由
 
-**runtime 用 26.08。**
-当前稳定分支（2026-08 正式发布，支持到 2028-09），24.08 已 EOL。
-此前钉在 24.08 是因为要迁就自带的那份 jlink JDK —— 它是在 CI 构建机的
-glibc 上编的，runtime 太老就会在启动时报 `GLIBC_2.39 not found`。
-现在 JDK 换成了 Freedesktop 官方扩展提供的 OpenJDK（针对同一版 runtime 编译），
-这个约束随之消失：runtime 比构建环境新是安全的（新运行时向下兼容）。
+**runtime 用 GNOME 51，底下是 freedesktop 26.08。**
+`org.gnome.Platform//51` 不是独立的一套运行时，它本身就是架在
+`org.freedesktop.Platform//26.08` 上的一层扩展 —— 证据是实测
+`flatpak install flathub org.gnome.Platform//51` 连带拉下来的东西：
+
+```
+org.freedesktop.Platform.GL.default      26.08
+org.freedesktop.Platform.VAAPI.Intel      26.08
+org.freedesktop.Platform.codecs-extra    26.08-extra
+```
+
+分支号就是底下那层基线的版本号。**记这个是因为后面那个 JDK 扩展要靠它**。
+（另：24.08 那时候钉着它，是因为要迁就自带 jlink JDK 的 glibc；
+换成官方扩展提供的 OpenJDK 之后这个约束就没了 —— 新运行时向下兼容，
+不需要为了迁就构建环境而把 runtime 压老。）
+
+**JDK 扩展的分支跟的是基线，不是 GNOME 版本 —— 必须写死 `//26.08`。**
+这是换成 GNOME 之后最容易踩的一条，原因是 manifest 里两个版本号长得一样：
+
+```json
+"runtime-version": "51",
+"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk//26.08"]
+```
+
+`org.gnome.Sdk//51` 扩展的是 `org.freedesktop.Sdk//26.08`，
+所以 `openjdk` 扩展只能落在基线那些分支上（实测它在 18.08~26.08 上都有 ref，
+`//51` 那个 ref 根本不存在）。只写裸名字 `org.freedesktop.Sdk.Extension.openjdk`
+会被 flatpak-builder 按 SDK 的分支解析成 `//51`，于是：
+
+```
+error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/51 not installed
+```
+
+**改 runtime 时，`runtime-version` 与 `sdk-extensions` 的分支是两个独立的改动点。**
+只改前一个是很自然的手滑 —— 本地怎么试都过不了就算了，更糟的是它可能在别的
+环节先失败，报错指向别处。工作流里为此加了一道校验，把 manifest 的
+`runtime` / `runtime-version` / `sdk` / openjdk 分支四个字段逐个与 env 比对，
+对不上就当场报出是哪一条。
+
+这条校验本地实跑时又抓到一个自己写的 bug：取值用的 `sed ... | head -n1`
+取的是**第一个**匹配，而 manifest 开头那段 `"//"` 长注释里同样写着
+`openjdk//26.08`，于是分支被读成了「26.08；只写裸名字会被 flatpak-builder 按 SDK
+的分支解析成」。**注释写给谁看不影响它也会被 grep 到。**
+现在取值前先把 `"//":` 那一行滤掉，并且用真实 manifest 与一份改坏的 manifest
+各跑一遍 —— 只跑正向用例的话，这个 bug 会一路活到 CI 上。
+
+**`org.gnome.Platform.Locale` 与 `org.freedesktop.Platform.GL.default` 不写进 manifest。**
+这两条最容易被顺手塞进 `sdk-extensions`，但那会让构建直接失败。三条独立证据：
+
+1. flatpak-builder 的 manifest 只有 `sdk-extensions` 与 `platform-extensions`
+   两个扩展相关的键，源码里 `builder_manifest_init_app_dir()` 把**两者**翻译成
+   同一句 `flatpak build-init --sdk-extension=`，语义都是「把这个扩展挂进
+   **构建沙箱的** `/usr`」。没有第三个键。
+2. flatpak 的 metadata 里**根本没有**应用级的「我依赖这些运行时扩展」键。
+   `runtime-extensions` 只存在于 `[Instance]` 组，而那是 flatpak 部署时写给
+   运行实例看的，不是应用能声明的输入（`common/flatpak-metadata-private.h`
+   里能看到的相关键只有 `app-extensions` 与 `runtime-extensions`，都属于 `[Instance]`）。
+3. 运行时扩展本来就随运行时一起被拉取与挂载。上面那条实测里，
+   `flatpak install org.gnome.Platform//51` 已经把 GL.default 26.08 带下来了 ——
+   应用侧不需要再声明一次。
+
+所以 CI 只**查**这两个 ref 存不存在，不装。查是为了让
+「这个基线上 GNOME 侧没发布某某扩展」变成一句几秒内可见的报错，
+而不是等用户装完、开始菜单点不动才发现少了东西。
 
 **JDK 不自己打包，用 `org.freedesktop.Sdk.Extension.openjdk`。**
 这是本文档里最反直觉的一条，值得写清楚：
 
-> **freedesktop 的 runtime 和 sdk 本身都没有 JVM。**
+> **runtime 和 sdk 本身都没有 JVM。**
 > Platform 与 Sdk 只保证「桌面上常用的东西」，Java 不在其中 ——
 > 几百 MB 的东西塞进每个应用都要挂载的运行时里，代价比收益大。
 > 官方给的唯一途径是 SDK 扩展 `org.freedesktop.Sdk.Extension.openjdk`，
@@ -74,25 +134,41 @@ jlink 出来的 —— 它与 runtime 的 glibc、头文件、库版本天然对
 所以 `/app/jre` 仍然有体积，这部分由扩展决定，不归我们管。
 
 **`sdk-extensions` 声明了不等于装了 —— 必须显式 `flatpak install`。**
-manifest 里写 `"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk"]`
-只是在告诉 flatpak-builder「我需要这个扩展」，它**不会替你装**。
+manifest 里写 `"sdk-extensions": ["org.freedesktop.Sdk.Extension.openjdk//26.08"]`
+只是在告诉 flatpak-builder「构建时把这个扩展挂进沙箱的 `/usr`」，它**不会替你装**。
 flatpak-builder 1.4.2 实测直接回一句就退出：
 
 ```
 error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
 ```
 
-所以工作流在「安装 freedesktop 运行时与 SDK」那一步把三个 ref 一起装：
-`Platform`、`Sdk`、`Sdk.Extension.openjdk`。
+所以工作流在「安装 GNOME 运行时与 SDK」那一步把三个 ref 一起装：
+`org.gnome.Platform//51`、`org.gnome.Sdk//51`、`openjdk//26.08`。
+底下那层 `org.freedesktop.Platform` / `Sdk` **不用单独装** ——
+`org.gnome.Platform` 本身就是架在它们上面的一层扩展，装它会把基线一并带下来。
+
+远端 ref 的预检从三个增加到五个，多出来的两个正是上面那两个只查不装的
+运行时扩展（`org.gnome.Platform.Locale//51`、`GL.default//26.08`）。
 
 顺便记一个**假阴性**，它比缺 ref 更危险：检查远端 ref 的那一步原本排在
 `flatpak remote-add` **之前**，于是查询时 remote 还不存在，
-`Platform` / `Sdk` / `Sdk.Extension.openjdk` 三个全部报「远端没有」，
-还带着 `::error::` 级别 —— 看起来像铁证，实际是查了个空。
-（同一轮里下一步 `flatpak install` 明明成功装上了 26.08 的 Platform 与 Sdk，
-两条信息直接矛盾，只是当时没往一处想。）
+三个 ref 全报「远端没有」，还带着 `::error::` 级别 —— 看起来像铁证，
+实际是查了个空。（同一轮里下一步 `flatpak install` 明明成功装上了 26.08 的
+Platform 与 Sdk，两条信息直接矛盾，只是当时没往一处想。）
 **诊断步骤的输出必须和它自己的前置条件对照着看；断言放在被断言的东西之前，
 等于什么都没断言。** 现在 `remote-add` 提前到那一步里，`--if-not-exists` 幂等。
+
+**构建完要验导出 metadata 里的 runtime 声明。**
+「换一个运行时」是一类特别容易被自己骗过去的改动：构建全绿、bundle 也导出来了，
+看上去哪儿都没问题，但如果 metadata 里 `runtime=` 仍旧是上一代，
+装到用户机器上的就还是旧运行时，而本地和 CI 都永远看不出来。
+所以「构建 Flatpak」那一步读完 `flatpak-build/metadata`，逐字比对
+`runtime=org.gnome.Platform/<cpu>/51` 与 `sdk=org.gnome.Sdk/<cpu>/51`。
+`<cpu>` 是 Flatpak 自己的叫法（`x86_64` / `aarch64`，不是矩阵里的
+`amd64` / `arm64`），单列了一项 `matrix.flatpakCpu`，不拿 `matrix.flatpakArch`
+顶替 —— 后者直接拼进 ref 会得到一个不存在的架构名，而这种错误一路要到
+用户装的时候才现形。这段断言本地拿假的 metadata 喂了四个场景：
+两个架构各自正确、runtime 停在旧版本、metadata 文件不存在。
 
 **用自写的 `/bin/sh` 启动器，不再用 app-image 自带的原生启动器。**
 这条路曾经被证明是走不通的，所以现在能走了值得记一笔原因：
@@ -146,11 +222,12 @@ Linux 的 app-image 是 `lib/app/`，Windows 是 `app/`；更关键的是 Window
 Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstdsw.Sundays`
 （跟着 `mainClass` 的大写 S 走），`flatpak-builder` 当场拒收，**0 秒退出**。
 
-**不装 `Platform.GL` / `Platform.Vulkan` 扩展。**
-自 freedesktop 23.08 起，GL / EGL / Mesa 已经并进主运行时，那两个扩展是留给
-老应用的兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
+**不装 `Platform.GL` / `Platform.Vulkan` / `GL.default` 扩展。**
+自 freedesktop 23.08 起，GL / EGL / Mesa 已经并进主运行时，这几个是留给
+老应用的兼容件。本应用不需要它们，装上只是平白多几个可能不存在的 ref ——
 CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就退出，
-匿名视角下那几秒的日志偏偏看不到。
+匿名视角下那几秒的日志偏偏看不到。`GL.default` 虽然由运行时自动带下来，
+也不必在 manifest 里点名，理由见上面「只查不装」那一节。
 
 **flatpak-builder 要在 manifest 所在目录下调用。**
 `sources` 里的相对路径按「manifest 所在目录」还是按「当前工作目录」解析，

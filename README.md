@@ -592,16 +592,27 @@ flatpak run com.kxxnzstdsw.sundays
 
 几点值得知道：
 
-- **bundle 里是本应用，`org.freedesktop.Platform` 与 OpenJDK 扩展仍来自 Flathub。**
+- **bundle 里是本应用，运行时与 JDK 扩展仍来自 Flathub。**
   安装时按 metadata 里的 runtime 声明去取，所以装它需要能访问 Flathub。
-  runtime 钉在 **26.08**（当前稳定分支，支持到 2028-09）。
+  运行时钉在 **GNOME 51**（`org.gnome.Platform` / `org.gnome.Sdk`），
+  底下那层 freedesktop 基线是 **26.08**。
+- **`org.gnome.Platform.Locale` 与 `org.freedesktop.Platform.GL.default` 不写进 manifest。**
+  它们是**运行时扩展**，随运行时一起被拉取和挂载，应用侧没有可写的键 ——
+  flatpak-builder 的 manifest 只有 `sdk-extensions` / `platform-extensions`，
+  两者都表示「构建时挂进沙箱的 `/usr`」；flatpak metadata 里也没有应用级的
+  「依赖这些运行时扩展」键。CI 只**查**它们存不存在，不装。
 - **JDK 来自 Flathub 的 `org.freedesktop.Sdk.Extension.openjdk`，不随包分发 jlink 运行时。**
-  freedesktop 的 runtime 与 sdk 本身**都不带 JVM**，JDK 是唯一由官方扩展提供的；
+  runtime 与 sdk 本身**都不带 JVM**，JDK 是唯一由官方扩展提供的；
   manifest 里加一个模块跑它自带的 `install.sh`，把 JVM 落到 `/app/jre`，
   再由我们生成的 `/bin/sh` 启动器 `exec` 它。主类与 JVM 参数不写死，
   是从 jpackage 生成的 `.cfg` 里读出来的。
   代价是 bundle 比自带 jlink 运行时那版大了约 32 MB ——
   扩展的 `install.sh` 装的是完整 JDK（`conf/lib/release`），不是 jlink 裁过的最小集。
+- **这个扩展的分支跟的是 freedesktop 基线（`//26.08`），不是 GNOME 版本（`//51`）。**
+  两者在 manifest 里长得一样，只写裸名字会被解析成 `//51` 而那个 ref 不存在。
+  CI 有一条校验把 `runtime` / `runtime-version` / `sdk` / 扩展分支四个字段
+  逐个与 env 比对；构建完还会读 `flatpak-build/metadata`，逐字确认导出的
+  `runtime=` / `sdk=` 确实指向 GNOME 51 —— 换运行时最容易被自己骗过去的就是这一处。
 - **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
   MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 - **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的

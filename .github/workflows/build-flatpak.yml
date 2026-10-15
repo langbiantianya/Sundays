@@ -16,21 +16,31 @@ permissions:
   contents: read
 
 env:
-  # runtime 版本必须与 packaging/flatpak/*.json 里的 runtime-version 一致，
-  # 两边漂移的话「装了运行时但 manifest 要的是另一个」会在构建中途才炸。
-  # 下面有一道校验专门比对这两个值。
+  # ---------------------------------------------------------------------------
+  # 运行时与 SDK 已从 freedesktop 换成 GNOME 51。
   #
-  # 26.08 是当前稳定分支（2026-08 正式发布，支持到 2028-09）。此前的 24.08 已 EOL，
-  # 而且当初钉住它是因为要迁就自带的 jlink JDK 的 glibc；现在 JDK 换成了
-  # Freedesktop 官方扩展提供的 OpenJDK —— 那是针对同一版 runtime 编译的，
-  # 构建机与运行时的 glibc 差异从此不再是约束，所以可以放心上最新分支。
-  FREEDESKTOP_RUNTIME: '26.08'
+  # GNOME 51 架在 freedesktop 26.08 基线上 —— 实测 `flatpak install flathub
+  # org.gnome.Platform//51` 连带拉下来的正是 org.freedesktop.Platform.GL.default 26.08、
+  # VAAPI.Intel 26.08、codecs-extra 26.08-extra，分支号就是基线版本号。
+  #
+  # 下面这两个值必须分开记，因为它们回答的是两个不同的问题：
+  #   GNOME_RUNTIME       —— runtime / sdk 用哪一代（org.gnome.*//51）
+  #   FREEDESKTOP_BRANCH  —— 底下那层 freedesktop 基线（26.08）
+  # JDK 扩展的分支跟的是**基线**，所以 manifest 里必须写死
+  # org.freedesktop.Sdk.Extension.openjdk//26.08；只写裸名字会被解析成 //51，
+  # 而 openjdk 扩展只发布在 18.08~26.08 这些基线分支上，//51 那个 ref 不存在。
+  #
+  # 下面各有一道校验分别比对这两个值与 manifest，改一边忘了另一边会当场报出来。
+  GNOME_RUNTIME: '51'
+  FREEDESKTOP_BRANCH: '26.08'
 
 jobs:
   bundle:
     name: 打包 Flatpak ${{ matrix.flatpakArch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
+    # GNOME SDK 比 freedesktop SDK 更大（多整层 GNOME 平台），
+    # 光「装运行时与 SDK」那一步就要拉两个多 G，所以比原来宽裕一些。
+    timeout-minutes: 90
 
     strategy:
       # 与 Windows 腿同一个道理：arm64 的工具链更脆（多一层运行时下载、
@@ -51,10 +61,15 @@ jobs:
             # Maven 的 osdetector 用 aarch64，skiko 自己发包时用 arm64，
             # 两套命名。首版按 aarch64 写，被自检当场拦下来了。
             skikoToken: x64
+            # Flatpak 自己用的 CPU 名：amd64 在 Flatpak 这边叫 x86_64，
+            # arm64 叫 aarch64。app 目录的 metadata 里 runtime=/sdk= 写的是它，
+            # 构建完要按它逐字比对，所以单列一项，别拿 matrix.flatpakArch 顶替。
+            flatpakCpu: x86_64
           - flatpakArch: arm64
             os: ubuntu-24.04-arm
             elfEmachine: '0xB7'
             skikoToken: arm64
+            flatpakCpu: aarch64
 
     steps:
       - uses: actions/checkout@v7
@@ -184,18 +199,40 @@ jobs:
           exit $fail
 
       # ---------------------------------------------------------------------------
-      # manifest 里的 runtime-version 与 env 里那个必须一致，否则会出现
-      # 「装了 24.08 的运行时，manifest 却在要 26.08」这种中途才炸的错。
-      - name: 校验 runtime 版本与 manifest 一致
+      # manifest 里的 runtime / runtime-version / sdk / sdk-extensions
+      # 必须与 env 里那两个值对得上，否则会出现「装了 GNOME 51，manifest 却在要
+      # freedesktop 26.08」这种中途才炸的错。
+      #
+      # 拆成四条而不是一次性比一串，是因为这四个字段各自会独立地错一次：
+      # 最容易出的不是版本号写错，而是只改了 runtime-version 忘了改 sdk-extensions
+      # 里的 //26.08 —— 那一条只有单独比才看得出来。
+      #
+      # **先把 `"//"` 那一整行注释滤掉再取值。** 这是本地实跑抓到的真 bug：
+      # manifest 开头那段长注释里同样写着 `openjdk//26.08`，而取值用的
+      # `head -n1` 取的是**第一个**匹配，于是把注释里那半句一起读了出来 ——
+      # 分支被读成「26.08；只写裸名字会被 flatpak-builder 按 SDK 的分支解析成」。
+      # 注释写给谁看不会影响它也被 grep 到，这跟它是不是「内容」无关。
+      - name: 校验 manifest 与 env 一致
         run: |
-          in_manifest="$(sed -n 's/.*"runtime-version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-            packaging/flatpak/com.kxxnzstdsw.sundays.json | head -n1)"
-          echo "env      = $FREEDESKTOP_RUNTIME"
-          echo "manifest = $in_manifest"
-          if [ "$in_manifest" != "$FREEDESKTOP_RUNTIME" ]; then
-            echo "::error::runtime 版本不一致：env 是 $FREEDESKTOP_RUNTIME，manifest 是 $in_manifest"
-            exit 1
-          fi
+          set -u
+          M=packaging/flatpak/com.kxxnzstdsw.sundays.json
+          flat() { sed '/^[[:space:]]*"\/\/":/d' "$M"; }
+          pick() { flat | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n1; }
+          fail=0
+          chk() {
+            if [ "$2" = "$3" ]; then
+              echo "::warning::$1 = $2"
+            else
+              echo "::error::$1：env 期望 $2，manifest 是 $3"
+              fail=1
+            fi
+          }
+          chk runtime        org.gnome.Platform "$(pick runtime)"
+          chk runtime-version "$GNOME_RUNTIME"    "$(pick runtime-version)"
+          chk sdk            org.gnome.Sdk       "$(pick sdk)"
+          chk openjdk-branch "$FREEDESKTOP_BRANCH" \
+            "$(flat | sed -n 's#.*openjdk//\([^"]*\).*#\1#p' | head -n1)"
+          exit $fail
 
       - name: 安装 flatpak 工具
         run: |
@@ -214,28 +251,34 @@ jobs:
           done
           echo "::warning::工具就位：$(command -v eu-strip eu-elfcompress | tr '\n' ' ')"
 
-      # 点名三个 ref 在远端到底存不存在。这不是装饰：缺 ref 时 flatpak install
+      # 点名每个 ref 在远端到底存不存在。这不是装饰：缺 ref 时 flatpak install
       # 会在几秒内直接失败，而那几秒的步骤日志在匿名视角下看不到。
       # continue-on-error：这个查询本身失败不该拖垮构建。
       #
-      # 远端必须先在这里加上。上一版这个检查排��「安装 flatpak 工具」之后、
+      # 远端必须先在这里加上。上一版这个检查排在「安装 flatpak 工具」之后、
       # 「安装运行时与 SDK」之前，于是查的时候 flathub 这个 remote 还不存在，
       # 三个 ref 全报「远端没有」—— 一个百分之百的假阴性，而且带着 error 级别，
       # 差点被当成真结论。remote-add 是幂等的（--if-not-exists），提前加无害。
+      #
+      # Locale 与 GL.default 查得到即可、**不需要装**（理由见下面 install 那步）：
+      # 查它们只为把「这个基线上 GNOME 侧没发布某某扩展」变成一句几秒内可见的报错，
+      # 而不是等用户装完、开始菜单点不动才发现少了东西。
       #
       # 用 remote-info 而不是 `remote-ls --columns=ref | grep`：
       # 后者的 ref 列打的是带 runtime/ 前缀的完整 ref
       # （runtime/org.freedesktop.Sdk/x86_64/26.08），行首锚 org\.freedesktop\.
       # 一条都匹配不到，那步从加进来起就一直空转，却一直被当成「ref 列表已经
       # 打出来了」。remote-info 是二元答案，不依赖输出格式。
-      - name: 查远端可用的 freedesktop 运行时
+      - name: 查远端可用的运行时 ref
         continue-on-error: true
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
-          for r in "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
-                   "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" \
-                   "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_RUNTIME"; do
+          for r in "org.gnome.Platform//$GNOME_RUNTIME" \
+                   "org.gnome.Sdk//$GNOME_RUNTIME" \
+                   "org.gnome.Platform.Locale//$GNOME_RUNTIME" \
+                   "org.freedesktop.Platform.GL.default//$FREEDESKTOP_BRANCH" \
+                   "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_BRANCH"; do
             if flatpak remote-info --user flathub "$r" >/dev/null 2>&1; then
               echo "::warning::远端有 $r"
             else
@@ -247,25 +290,33 @@ jobs:
       # --disable-rofiles-fuse：CI 上没有 fuse daemon，用不了 rofiles-fuse
       # 那个更快的 checkout 路径，退回普通方式即可，只是慢一点。
       #
-      # 只装 Platform 与 Sdk，不装 Platform.GL / Platform.Vulkan：
-      # 自 23.08 起 GL/EGL/Mesa 已经并进主运行时，那两个扩展是给老应用留的
-      # 兼容件。本应用不需要它们，装上只是平白多两个可能不存在的 ref ——
-      # 上一轮就是这一步在两条腿上失败的。
+      # 装的是 org.gnome.Platform//51 与 org.gnome.Sdk//51 —— GNOME 运行时本身
+      # 就是 freedesktop Platform/Sdk 的一层扩展，装它会把底下那层基线一并带下来，
+      # 所以**不需要**再单独装 org.freedesktop.Platform / Sdk。
+      #
+      # 也**不装** Platform.GL / Platform.Vulkan / GL.default：
+      # 自 23.08 起 GL/EGL/Mesa 已经并进主运行时，这些是给老应用留的兼容件，
+      # 装上只是平白多几个可能不存在的 ref —— 上一轮就是这一步在两条腿上失败的。
       #
       # **OpenJDK 扩展必须在这里显式装**。manifest 里声明 sdk-extensions 只是
-      # 告诉 flatpak-builder「我需要它」，它并不会替你装 —— 1.4.2 实测直接回一句
+      # 告诉 flatpak-builder「我需要这个扩展挂进构建沙箱的 /usr」，它并不会替你装
+      # —— 1.4.2 实测直接回一句就退出了：
       #   error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
-      # 就退出了。之前注释里写的「flatpak-builder 会自己去装」是错的，
-      # 没有任何报错提示，是靠这一步的失败才验出来的。
-      - name: 安装 freedesktop 运行时与 SDK
+      # 之前注释里写的「flatpak-builder 会自己去装」是错的，没有任何报错提示，
+      # 是靠这一步的失败才验出来的。
+      #
+      # 分支必须跟 manifest 里写的一致，也就是 **26.08（基线）而不是 51**：
+      # org.gnome.Sdk//51 是架在 org.freedesktop.Sdk//26.08 上的，openjdk 扩展
+      # 只发布在各个基线分支上，//51 那个 ref 不存在。
+      - name: 安装 GNOME 运行时与 SDK
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
           if ! flatpak install --user -y --noninteractive flathub \
-              "org.freedesktop.Platform//$FREEDESKTOP_RUNTIME" \
-              "org.freedesktop.Sdk//$FREEDESKTOP_RUNTIME" \
-              "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_RUNTIME" 2>&1 | tee runtime-install.log; then
-            echo "::error::freedesktop $FREEDESKTOP_RUNTIME 运行时/SDK/OpenJDK 扩展安装失败，末尾输出："
+              "org.gnome.Platform//$GNOME_RUNTIME" \
+              "org.gnome.Sdk//$GNOME_RUNTIME" \
+              "org.freedesktop.Sdk.Extension.openjdk//$FREEDESKTOP_BRANCH" 2>&1 | tee runtime-install.log; then
+            echo "::error::GNOME $GNOME_RUNTIME 运行时/SDK 安装失败，末尾输出："
             tail -n 8 runtime-install.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
@@ -349,14 +400,40 @@ jobs:
           fi
           echo "::warning::应用内 JDK：flatpak-build/files/jre/bin/java"
 
+          # 最后验一次**导出的 metadata 到底指向哪个运行时**。
+          # 这一条不能省：「换了运行时」是一类特别容易被自己骗过去的改动 ——
+          # 构建全绿、bundle 也导出来了，看上去什么都没问题，但 metadata 里
+          # 的 runtime= 仍旧是上一代的话，装到用户机器上的还是旧运行时，
+          # 而本地和 CI 都永远看不出来。flatpak-builder 把应用元数据写在
+          # <build-dir>/metadata，正是要交给 flatpak build-bundle 用的那一份。
+          if [ ! -f flatpak-build/metadata ]; then
+            echo "::error::flatpak-build/metadata 不存在 —— 断言点没了，先看 flatpak-build 顶层"
+            exit 1
+          fi
+          want_rt="org.gnome.Platform/${{ matrix.flatpakCpu }}/$GNOME_RUNTIME"
+          want_sdk="org.gnome.Sdk/${{ matrix.flatpakCpu }}/$GNOME_RUNTIME"
+          got_rt="$(sed -n 's/^runtime=//p' flatpak-build/metadata | head -n1)"
+          got_sdk="$(sed -n 's/^sdk=//p' flatpak-build/metadata | head -n1)"
+          echo "::warning::metadata runtime=$got_rt sdk=$got_sdk"
+          if [ "$got_rt" != "$want_rt" ]; then
+            echo "::error::导出的 runtime 是 $got_rt，期望 $want_rt"
+            exit 1
+          fi
+          if [ "$got_sdk" != "$want_sdk" ]; then
+            echo "::error::导出的 sdk 是 $got_sdk，期望 $want_sdk"
+            exit 1
+          fi
+          echo "::warning::metadata 指向 GNOME $GNOME_RUNTIME，对得上"
+
       # 导出成单文件 bundle。
       #
       # 分支不写死，也不整段截取：ref 的完整形状是 app/<id>/<arch>/<branch>，
       # 拿「app/<id>/ 之后的全部」会连 <arch> 一起当成分支名，flatpak 会回一句
       # Branch can't contain / 而失败。取最后一段才是分支。
       # 另外 bundle 里含的是本应用（以及同 repo 里的 debug runtime）；
-      # org.freedesktop.Platform 来自 Flathub，安装时按 metadata 里的 runtime
-      # 声明去取 —— 导出步骤已实测过 repo 里只有 app 与 debug runtime 两个 ref。
+      # org.gnome.Platform（连带底下的 freedesktop 基线）来自 Flathub，安装时按
+      # metadata 里的 runtime 声明去取 —— 导出步骤已实测过 repo 里只有 app 与
+      # debug runtime 两个 ref。
       - name: 导出单文件 bundle
         run: |
           set +e
