@@ -617,6 +617,13 @@ flatpak run com.kxxnzstdsw.sundays
   `runtime` / `runtime-version` / `sdk` / `sdk-extensions` 四个字段与 env 比对;
   构建完还会读 `flatpak-build/metadata`,逐字确认导出的 `runtime=` / `sdk=`
   确实指向 GNOME 51 —— 换运行时最容易被自己骗过去的就是这一处。
+- **GNOME 运行时里启动器会追加 `-Dswing.systemlaf=javax.swing.plaf.metal.MetalLookAndFeel`。**
+  这是绕一个 **JDK 自己的空指针**:`GTKLookAndFeel.initialize()` 里
+  `int v = unixToolkit.getGnomeShellMajorVersion();` —— `Integer` 直接拆箱,
+  而那个值要靠执行 `gnome-shell --version` 才有,Flatpak 沙箱里没有这个二进制。
+  属性名容易搞错:是 **`swing.systemlaf`**,不是 `swing.defaultlaf` ——
+  skiko 走的是 `UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())`,
+  而那个方法读的是前者。这条只加在 Flatpak 包里,Windows 与 macOS 仍用原生外观。
 - **`--share=network` 与 `--filesystem=home` 不能省。** 前者是连
   MySQL / PostgreSQL 的必要条件，后者是打开本地 SQLite / DuckDB 文件的必要条件。
 - **产物架构会被 CI 验一遍**，且放在下载 2GB 运行时之前：对一遍 skiko jar 的

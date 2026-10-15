@@ -122,6 +122,60 @@ env 比对（其中 sdk-extensions 单独判「有没有多写 `//`」），安�
 现在取值前先把 `"//":` 那一行滤掉，并且用真实 manifest 与一份改坏的 manifest
 各跑一遍 —— 只跑正向用例的话，这个 bug 会一路活到 CI 上。
 
+**GNOME 运行时里启动直接抛 NPE —— 必须给 `-Dswing.systemlaf`。**
+换到 GNOME 51 之后第一次启动是这样的：
+
+```
+Exception in thread "main" java.lang.NullPointerException:
+  Cannot invoke "java.lang.Integer.intValue()"
+  at java.desktop/com.sun.java.swing.plaf.gtk.GTKLookAndFeel.initialize(GTKLookAndFeel.java:1473)
+  at java.desktop/javax.swing.UIManager.setLookAndFeel(UIManager.java:611)
+  at org.jetbrains.skiko.Actuals_awtKt.setSystemLookAndFeel(Actuals.awt.kt:6)
+```
+
+**这是 JDK 自己的空指针，不是我们的代码。** `GTKLookAndFeel.initialize()` 里就两行：
+
+```java
+int gnomeShellVersion = unixToolkit.getGnomeShellMajorVersion();
+shouldApplyTheme = gnomeShellVersion >= 47;
+```
+
+`getGnomeShellMajorVersion()` 返回的是 `Integer`，要靠执行 `gnome-shell --version`
+才有值。Flatpak 沙箱里没有 `gnome-shell` 这个二进制（它属于 GNOME 会话，不属于
+运行时），于是返回 null，自动拆箱当场炸。**没有「保持 GTK 但不炸」的配置项。**
+
+修法是改用 Metal 外观，而属性名有个坑：
+
+> **是 `-Dswing.systemlaf`，不是 `-Dswing.defaultlaf`。**
+
+skiko 选外观就一行（`skiko/src/awtMain/kotlin/org/jetbrains/skiko/Actuals.awt.kt`）：
+
+```kotlin
+actual fun setSystemLookAndFeel() =
+    UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
+```
+
+而 `UIManager.getSystemLookAndFeelClassName()` 读的系统属性是 **`swing.systemlaf`** ——
+先读它，没有才按操作系统猜（Windows → `WindowsLookAndFeel`，
+Linux + GNOME → `GTKLookAndFeel`，macOS → `Aqua`）。
+另外 `UIManager.setLookAndFeel(String)`（javax/swing/UIManager.java:646）只按传进来的
+类名实例化，压根不读 `swing.defaultlaf` —— 写上去会让人以为修好了，实际一点用没有。
+
+所以组装脚本在读来的那批 java-options 之后**追加**一条：
+
+```
+-Dswing.systemlaf=javax.swing.plaf.metal.MetalLookAndFeel
+```
+
+放在组装脚本而不是 `build.gradle.kts`：jpackage 的 `--java-options` 是全局的，
+写进构建脚本会连 Windows 与 macOS 一起改掉，而那两边本来就该用原生外观
+（`WindowsLookAndFeel` / `Aqua`），改成 Metal 是纯倒退。
+这是**追加**而不是第二份拷贝 —— `.cfg` 里的主类与 java-options 仍然只有那一份。
+
+顺带一提：Flatpak 里那两条 `Failed to load module "canberra-gtk-module"` /
+`"pk-gtk-module"` 是 GTK 模块在找宿主上的桌面服务，找不到就打个 Gtk-Message。
+用了 Metal 之后 GTK 不再初始化，这两条也会一起消失。
+
 **`org.gnome.Platform.Locale` 与 `org.freedesktop.Platform.GL.default` 不写进 manifest。**
 这两条最容易被顺手塞进 `sdk-extensions`，但那会让构建直接失败。三条独立证据：
 

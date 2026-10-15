@@ -160,7 +160,46 @@ if [ -z "$OPTS" ]; then
   say "$CFG 里一条 java-options 都没有，生成出来的启动器等于裸跑主类"
   exit 1
 fi
+
+# --- Flatpak 专属的追加参数 -------------------------------------------------
+# 只对这份 Linux 包生效、但必须由我们加的 JVM 参数。
+#
+# 症状：GNOME 51 运行时里一点就抛
+#   NullPointerException: Cannot invoke "java.lang.Integer.intValue()"
+#     at java.desktop/com.sun.java.swing.plaf.gtk.GTKLookAndFeel.initialize(GTKLookAndFeel.java:1473)
+#
+# 那是 JDK 自己的空指针。GTKLookAndFeel.initialize() 里就两行：
+#   int gnomeShellVersion = unixToolkit.getGnomeShellMajorVersion();
+#   shouldApplyTheme = gnomeShellVersion >= 47;
+# getGnomeShellMajorVersion() 返回 Integer，要靠执行 `gnome-shell --version`
+# 才有值；Flatpak 沙箱里没有 gnome-shell 这个二进制（它属于 GNOME 会话，
+# 不属于运行时），于是返回 null，自动拆箱当场炸。
+# **不是我们代码的错，也没有「保持 GTK 但不炸」的配置项。**
+#
+# 为什么是 -Dswing.systemlaf 而不是 -Dswing.defaultlaf：
+# skiko 选外观就一行（Actuals.awt.kt）：
+#   UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
+# 而 UIManager.getSystemLookAndFeelClassName() 读的系统属性是 **swing.systemlaf**
+# —— 先读它，没有才按操作系统猜（Windows → WindowsLookAndFeel，
+# Linux + GNOME → GTKLookAndFeel，macOS → Aqua）。
+# 另外 UIManager.setLookAndFeel(String) 只按传进来的类名实例化，
+# 压根不读 swing.defaultlaf。所以后者在这里完全不起作用：写上去会让人
+# 以为修好了，实际一点用没有。
+#
+# 为什么放在这个脚本而不是 build.gradle.kts：jpackage 的 --java-options
+# 是全局的，写进构建脚本会连 Windows 与 macOS 一起改掉，而那两边本来就该用
+# 原生外观（WindowsLookAndFeel / AquaLookAndFeel），改成 Metal 是纯倒退。
+#
+# 这是**追加**而不是第二份拷贝：.cfg 里的主类与 java-options 仍然只有那一份，
+# 启动器里的 java 参数仍然是「读来的 + 这一条」。
+FLATPAK_ONLY_OPTS="-Dswing.systemlaf=javax.swing.plaf.metal.MetalLookAndFeel"
+case "$FLATPAK_ONLY_OPTS" in
+  *"'"*) say "FLATPAK_ONLY_OPTS 里有单引号，无法安全塞进启动脚本"; exit 1 ;;
+esac
+OPTS="$OPTS '$FLATPAK_ONLY_OPTS'"
+
 echo "java-options 条数：$(printf '%s' "$OPTS" | tr -c "'" '\n' | grep -c "'")"
+echo "其中 Flatpak 追加：$FLATPAK_ONLY_OPTS"
 
 # --- 组装 -------------------------------------------------------------------
 # 只搬应用本体：jar、resources、以及 jpackage 顺手拷进来的原生资源
