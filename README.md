@@ -534,12 +534,12 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 推 `main`、打 `v*` tag、或在 Actions 里手动触发，CI 会同时打出 x64 与 arm64
 两份（工作流见 [`.github/workflows/build-macos.yml`](./.github/workflows/build-macos.yml)）：
 
-| 产物 | 架构 | 说明 |
-| --- | --- | --- |
-| `sundays-macos-x64-dmg` | x86_64 | `.dmg`，拖进 `/Applications` 即可 |
-| `sundays-macos-arm64-dmg` | arm64 | 同上 |
-| `sundays-macos-x64-app` | x86_64 | `.app` 目录打包，双击即可运行 |
-| `sundays-macos-arm64-app` | arm64 | 同上 |
+| 产物 | 架构 | 大小 | 说明 |
+| --- | --- | --- | --- |
+| `sundays-macos-x64-dmg` | x86_64 | 约 291 MB | `.dmg`，拖进 `/Applications` 即可 |
+| `sundays-macos-arm64-dmg` | arm64 | 约 290 MB | 同上 |
+| `sundays-macos-x64-app` | x86_64 | 约 287 MB | `.app` 目录打包，双击即可运行 |
+| `sundays-macos-arm64-app` | arm64 | 约 286 MB | 同上 |
 
 两条腿各跑在**原生** runner 上（Intel 与 Apple Silicon 镜像），不交叉编译。
 GitHub 托管的 macOS 镜像里 `macos-13` 已下线、`macos-14` 已标 deprecated，
@@ -562,6 +562,12 @@ xattr -dr com.apple.quarantine /Applications/com.kxxnzstdsw.sundays.app
 
 架构会在上传之前用 `lipo -archs` 自检：启动器、`libjvm.dylib`、skiko 的
 `.dylib` 三处都得对（`x86_64` / `arm64`），错架构的包不会变成可下载的产物。
+
+> **排查这类 CI 失败的一条规矩：annotation 消息要短。**
+> 每步每级只有 10 条额度，而且**超长的消息会被整条丢弃** —— 实测 300 多字符的
+> 诊断一条都留不下，90 字符以内的稳定出现。所以「把目录树整个塞进一条消息」
+> 这种写法在 CI 里等于什么都没说。macOS 那条腿连踩三轮才定位到这一点，
+> 详见 `build-macos.yml` 里 `校验产物架构` 的注释。
 
 ---
 
