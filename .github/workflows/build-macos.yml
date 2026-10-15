@@ -309,3 +309,67 @@ jobs:
                 echo "::error::$line"
               done
           exit 0
+
+  # 把本工作流的产物挂到对应 tag 的 Release 上。理由见 build-flatpak.yml 同名 job。
+  release:
+    name: 发布 Release 附件
+    needs: [package]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      # job 级权限会整体替换工作流级的 contents: read，写权限必须在这里写全。
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # 两种产物两种处理：
+      #   dmg —— artifact 里是 jpackage 生成的文件名（带版本号），改个带架构的名字
+      #   app —— artifact 本身是整棵 .app **目录**。重打 zip 时传的是 .app 包名
+      #          而不是 `.`，这样 zip 的根目录就是那个包，用户解压后能直接
+      #          拖进 /Applications；多包一层目录就多一步手工。
+      - name: 整理附件
+        shell: bash
+        run: |
+          set +e
+          set -u
+          mkdir -p out
+          for f in artifacts/sundays-macos-*-dmg/*.dmg; do
+            [ -f "$f" ] || continue
+            arch="$(basename "$(dirname "$f")" | sed -n 's/^sundays-macos-\(.*\)-dmg$/\1/p')"
+            [ -n "$arch" ] || continue
+            cp "$f" "out/sundays-macos-$arch.dmg"
+          done
+          for d in artifacts/sundays-macos-*-app; do
+            [ -d "$d" ] || continue
+            arch="$(basename "$d" | sed -n 's/^sundays-macos-\(.*\)-app$/\1/p')"
+            [ -n "$arch" ] || continue
+            bundle="$(cd "$d" && ls -d ./*.app 2>/dev/null | head -n1 || true)"
+            bundle="${bundle#./}"
+            if [ -z "$bundle" ]; then
+              echo "::error::$d 里没有 .app 包"
+              continue
+            fi
+            ( cd "$d" && python3 -m zipfile -c "$GITHUB_WORKSPACE/out/sundays-macos-$arch-app.zip" "$bundle" )
+          done
+          echo "::warning::out: $(ls -A out 2>&1 | tr '\n' ' ' | cut -c1-60)"
+          for need in sundays-macos-x64.dmg sundays-macos-arm64.dmg \
+                      sundays-macos-x64-app.zip sundays-macos-arm64-app.zip; do
+            if [ ! -f "out/$need" ]; then
+              echo "::error::缺 $need"
+              exit 1
+            fi
+          done
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.dmg
+            out/*-app.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          draft: true

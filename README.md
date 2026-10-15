@@ -612,27 +612,36 @@ flatpak run com.kxxnzstdsw.sundays
 
 ## 自动挂到 Release
 
-打 `v*` tag 时，除了三条构建工作流，还会启动
-[`.github/workflows/publish-release.yml`](./.github/workflows/publish-release.yml)：
-它轮询等同一 tag 触发的构建 run 全部跑完，把十个产物整理成
-可直接使用的文件名，挂到该 tag 的 Release 上（**默认建草稿**，
-需要人工确认后再点发布）。
+打 `v*` tag 时，三条构建工作流各自会在打包作业之后多跑一个 `release` 作业：
+`actions/download-artifact` 把**本工作流自己的**产物拉回来，整理成能直接用的
+文件名，再交给 `softprops/action-gh-release` 挂到该 tag 的 Release 上。
+默认**建草稿**，人工确认后再点发布。
 
-**为什么不放在三条构建工作流里各挂各的**：一个 tag 会同时起 6 个 job，
-六个 job 抢着创建同一个 Release，422 冲突是必然的。这里做唯一的写者。
+作业放��构建工作流内部而不是另起一个工作流：「产物在哪儿」与「产物去哪儿」
+写在同一份 YAML 里，加一条构建线只需顺手加一个文件路径。独立工作流则要重新
+推导出 run 列表、跨 run 下载、重整 —— 同一件事维护两套描述。
+
+**两个绕不开的细节：**
+
+- **有些产物传上去的是「目录」，不是可发布的文件。** 便携版与 macOS 的 `.app`
+  都是整棵目录，直接交给 Release 会变成几百个内部文件逐个上传。所以先重整：
+  目录用 `python3 -m zipfile` 重打成 zip，`.msi` / `.dmg` 改成带架构的名字。
+  （`ZipFile.write` 会存 `st_mode`，`.exe` 与 macOS 启动器的可执行位不会在
+  重打时丢掉；macOS 的 zip 特意保留 `.app` 外层，解压后能直接拖进 `/Applications`。）
+- **三个 release 作业是并发创建同一个 Release 的。** 谁先谁算；万一撞上 `422`，
+  单独重跑那一个作业即可 —— 那时 Release 已经存在，`action-gh-release` 会走更新
+  分支。`fail_on_unmatched_files: true` 保证每个作业只上传自己那份，不会因为
+  「找不到别人的文件」而报一个驴唇不对马厚的错。
 
 产物名统一为 `sundays-<平台>-<架构>.<扩展名>`：
 
-| 附件 | 来源 |
+| 附件 | 来自 |
 | --- | --- |
 | `sundays-windows-{x64,arm64}.msi` | Windows 安装包 |
-| `sundays-windows-{x64,arm64}-portable.zip` | Windows 便携版（原 app-image 目录重打） |
+| `sundays-windows-{x64,arm64}-portable.zip` | Windows 便携版 |
 | `sundays-macos-{x64,arm64}.dmg` | macOS 镜像 |
-| `sundays-macos-{x64,arm64}-app.zip` | macOS `.app` 包（保留 `.app` 外层，可直接拖进 `/Applications`） |
+| `sundays-macos-{x64,arm64}-app.zip` | macOS `.app` 包 |
 | `sundays-flatpak-{amd64,arm64}.flatpak` | Linux Flatpak |
-
-给已经存在的 Release 补附件用手动触发（`workflow_dispatch`，填 `tag`），
-重跑会用 `--clobber` 覆盖同名附件。
 
 细节与排障见 [`packaging/flatpak/README.md`](./packaging/flatpak/README.md)。
 
