@@ -594,13 +594,16 @@ flatpak run com.kxxnzstdsw.sundays
 
 - **bundle 里是本应用，运行时与 JDK 扩展仍来自 Flathub。**
   安装时按 metadata 里的 runtime 声明去取，所以装它需要能访问 Flathub。
-  运行时钉在 **GNOME 51**（`org.gnome.Platform` / `org.gnome.Sdk`），
-  底下那层 freedesktop 基线是 **26.08**。
-- **`org.gnome.Platform.Locale` 与 `org.freedesktop.Platform.GL.default` 不写进 manifest。**
-  它们是**运行时扩展**，随运行时一起被拉取和挂载，应用侧没有可写的键 ——
-  flatpak-builder 的 manifest 只有 `sdk-extensions` / `platform-extensions`，
-  两者都表示「构建时挂进沙箱的 `/usr`」；flatpak metadata 里也没有应用级的
-  「依赖这些运行时扩展」键。CI 只**查**它们存不存在，不装。
+  运行时钉在 **freedesktop 26.08**（`org.freedesktop.Platform` / `org.freedesktop.Sdk`）。
+  曾试过换成 `org.gnome.Platform//51`,又换回来了 —— GNOME 51 本身只是架在
+  freedesktop 26.08 之上的一层扩展,而本应用一个 GNOME 库都用不上。
+- **`org.freedesktop.Platform.Locale` 与 `org.freedesktop.Platform.GL.default`
+  既不写进 manifest,也不单独装。** 它们是**运行时扩展**,随运行时一起被拉取和挂载,
+  应用侧没有可写的键 —— flatpak-builder 的 manifest 只有 `sdk-extensions` /
+  `platform-extensions`,两者都表示「构建时挂进沙箱的 `/usr`」;flatpak metadata 里
+  也没有应用级的「依赖这些运行时扩展」键。GNOME 那轮里 CI 曾对它们做「查而不装」的
+  预检,回 freedesktop 后撤掉了:`org.gnome.Platform.Locale//51` 是 GNOME 侧的 ref,
+  在这个基线上压根不存在,留着就是一条注定失败的断言。
 - **JDK 来自 Flathub 的 `org.freedesktop.Sdk.Extension.openjdk`，不随包分发 jlink 运行时。**
   runtime 与 sdk 本身**都不带 JVM**，JDK 是唯一由官方扩展提供的；
   manifest 里加一个模块跑它自带的 `install.sh`，把 JVM 落到 `/app/jre`，
@@ -610,17 +613,20 @@ flatpak run com.kxxnzstdsw.sundays
   扩展的 `install.sh` 装的是完整 JDK（`conf/lib/release`），不是 jlink 裁过的最小集。
 - **`sdk-extensions` 里只能写裸名,写上 `//分支` 必然失败。**
   `org.freedesktop.Sdk.Extension.openjdk//26.08` 会得到一句
-  `Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/51 not installed`
+  `Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/26.08 not installed`
   —— flatpak 的 `build-init` 只剥 `@tag`,不解析 `//分支`。
   扩展装在 `//26.08` 上是 CI `flatpak install` 的事,manifest 不参与这个决定;
   装完会逐字核对三个 ref。CI 另有一条校验把 manifest 的
   `runtime` / `runtime-version` / `sdk` / `sdk-extensions` 四个字段与 env 比对;
   构建完还会读 `flatpak-build/metadata`,逐字确认导出的 `runtime=` / `sdk=`
-  确实指向 GNOME 51 —— 换运行时最容易被自己骗过去的就是这一处。
-- **GNOME 运行时里启动器会追加 `-Dswing.systemlaf=javax.swing.plaf.metal.MetalLookAndFeel`。**
+  确实指向 freedesktop 26.08 —— 换运行时最容易被自己骗过去的就是这一处,
+  而且这两轮换运行时里,真正抓住问题的也正是它。
+- **Flatpak 包的启动器会追加 `-Dswing.systemlaf=javax.swing.plaf.metal.MetalLookAndFeel`。**
   这是绕一个 **JDK 自己的空指针**:`GTKLookAndFeel.initialize()` 里
   `int v = unixToolkit.getGnomeShellMajorVersion();` —— `Integer` 直接拆箱,
   而那个值要靠执行 `gnome-shell --version` 才有,Flatpak 沙箱里没有这个二进制。
+  根因是**沙箱**里缺这个可执行文件,与运行时是哪一家无关,所以换成 freedesktop
+  之后这行仍然保留(NPE 本身**尚未在真机上复验过**)。
   属性名容易搞错:是 **`swing.systemlaf`**,不是 `swing.defaultlaf` ——
   skiko 走的是 `UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())`,
   而那个方法读的是前者。这条只加在 Flatpak 包里,Windows 与 macOS 仍用原生外观。

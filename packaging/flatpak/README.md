@@ -9,8 +9,8 @@ Sundays 的 Flatpak 定义。CI 见 [`.github/workflows/build-flatpak.yml`](../.
 ./gradlew :desktopApp:createDistributable
 bash .github/scripts/assemble-flatpak-app.sh
 
-# 再往下需要 flatpak-builder 与 GNOME 运行时
-flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
+# 再往下需要 flatpak-builder 与 freedesktop 运行时
+flatpak install flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08 \
   org.freedesktop.Sdk.Extension.openjdk//26.08
 flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
   packaging/flatpak/com.kxxnzstdsw.sundays.json
@@ -18,7 +18,7 @@ flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays master
 ```
 
 bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
-`org.gnome.Platform`（连带底下的 freedesktop 基线）与 JDK 扩展来自 Flathub，
+freedesktop 运行时与 JDK 扩展来自 Flathub，
 安装时按 metadata 里的声明去取，所以换机器装它仍需要能访问 Flathub。
 
 **导出时分支取 ref 的最后一段。**
@@ -50,19 +50,32 @@ flatpak-builder 在这里只负责把它装进 `/app` 并导出元数据，不�
 
 ## 几个选型理由
 
-**runtime 用 GNOME 51，底下是 freedesktop 26.08。**
-`org.gnome.Platform//51` 不是独立的一套运行时，它本身就是架在
-`org.freedesktop.Platform//26.08` 上的一层扩展 —— 证据是实测
-`flatpak install flathub org.gnome.Platform//51` 连带拉下来的东西：
+**runtime 用 freedesktop 26.08；试过 `org.gnome.Platform//51`，换回来了。**
+换过去是为一件事：Linux 上依赖装不上，想赌 GNOME 运行时自带更多东西。
+换回来的理由有两条，都不是「看起来更标准」这种主观判断：
 
-```
-org.freedesktop.Platform.GL.default      26.08
-org.freedesktop.Platform.VAAPI.Intel      26.08
-org.freedesktop.Platform.codecs-extra    26.08-extra
-```
+1. **`org.gnome.Platform` 本身不是独立的一套运行时，它就是架在
+   `org.freedesktop.Platform//26.08` 上的一层扩展。** 证据是当时实测
+   `flatpak install flathub org.gnome.Platform//51` 连带拉下来的东西：
 
-分支号就是底下那层基线的版本号。**记这个是因为后面那个 JDK 扩展要靠它**。
-（另：24.08 那时候钉着它，是因为要迁就自带 jlink JDK 的 glibc；
+   ```
+   org.freedesktop.Platform.GL.default      26.08
+   org.freedesktop.Platform.VAAPI.Intel      26.08
+   org.freedesktop.Platform.codecs-extra    26.08-extra
+   ```
+
+   注意分支号 —— 那就是底下那层基线的版本号。所以 GNOME 51 这个数字
+   对本应用**没有任何独立含义**，它带来的每一件东西都来自 26.08，
+   而本应用一个 GNOME 库都用不上（Compose/Skiko 只要 GTK、要用 Wayland/X11，
+   那些在 freedesktop 基线里本来就有）。
+2. **启动器那个必须绕开的 JDK 空指针，与运行时是哪一家无关。**
+   详见下面「`-Dswing.systemlaf`」那一节：根因是沙箱里没有
+   `gnome-shell` 这个二进制，那是 Flatpak 的沙箱属性，不是 GNOME 运行时的属性。
+   **换个运行时去绕一个与运行时无关的 bug，只会既背上多一层 GNOME 平台、
+   又没修掉它。** 这也是当时 GNOME 那轮里最容易骗过自己的地方 ——
+   NPE 的栈里确实全是 `gtk`，看起来就像「是 GNOME 运行时的问题」。
+
+（另：更早的时候 runtime 钉在 24.08，是因为要迁就自带 jlink JDK 的 glibc；
 换成官方扩展提供的 OpenJDK 之后这个约束就没了 —— 新运行时向下兼容，
 不需要为了迁就构建环境而把 runtime 压老。）
 
@@ -77,11 +90,14 @@ org.freedesktop.Platform.codecs-extra    26.08-extra
 路径拼接错了的报错：
 
 ```
-error: Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/51 not installed
+error: Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/26.08 not installed
 ```
 
-注意末尾那个 `/x86_64/51` —— 它把 `//26.08` 当成了名字的一部分，
-又拼上了 SDK 的 arch 与**分支 51**（不是基线 26.08）。机制在 flatpak
+注意末尾那个 `/x86_64/26.08` —— 它把 `//26.08` 当成了名字的一部分，
+又拼上了 SDK 的 arch 与**分支**（刚好也是 26.08，于是看起来像一段重复的路径）。
+换过 GNOME 那阵子，同一个错会写成 `/x86_64/51`，因为 SDK 的分支变成了 51 ——
+**末尾那段永远跟着 SDK 当前的分支走，不跟着扩展名里写的那段走**，
+这也是当时能一眼看出「拼错了」的线索。机制在 flatpak
 `build-init` 的 `ensure_extensions()` 里（`app/flatpak-builtins-build-init.c`）：
 
 ```c
@@ -101,14 +117,17 @@ return flatpak_fail (error, _("Requested extension %s/%s/%s not installed"),
 1. `flatpak_parse_extension_with_tag()` **只剥 `@tag`，不解析 `//分支`**
    （flatpak main 上这段代码至今一字未改，所以任何版本都一样）；
 2. 候选扩展来自 **SDK 自己 metadata 里声明的扩展点** ——
-   `org.gnome.Sdk//51` 确实声明了 `org.freedesktop.Sdk.Extension.openjdk`，
-   所以**裸名能对上**（Java-GI 官方模板 `jwharm/java-gi-app-template`
-   跑在 GNOME 49 上用的就是这个写法）；
+   `org.freedesktop.Sdk//26.08` 自己就声明了 `org.freedesktop.Sdk.Extension.openjdk`，
+   所以**裸名能对上**；
 3. 报错消息把整串再拼上 `<arch>/<SDK 的分支>`，于是成了那句话。
 
 **扩展装在哪条分支上跟 manifest 无关。** 那是 `flatpak install` 时的事：
-GNOME 51 的基线是 26.08，所以 CI 里装 `//26.08` 那个 ref，装完立刻点名核对
-（见下面「装完必须核对」）。manifest 只负责说「我要这个扩展点」。
+manifest 只负责说「我要这个扩展点」，装的是 `//26.08` 还是别的分支，
+CI 里由 `flatpak install` 显式点名，装完立刻核对（见下面「装完必须核对」）。
+GNOME 那轮把这件事演示得很清楚：manifest 的 `sdk-extensions` 一个字没改，
+只有 `runtime` / `runtime-version` / `sdk` 三个字段在动，
+而安装命令里那个扩展 ref 的分支**必须跟着 SDK 的分支一起挪** ——
+manifest 看着「改好了」，装错分支照样是 `not installed`。
 
 **改 runtime 时，`runtime-version` 与「装哪个扩展 ref」是两个独立改动点。**
 只改前一个是自然的手滑，但**不会**像想象中那样立刻报错：裸名照样能对上，
@@ -122,8 +141,28 @@ env 比对（其中 sdk-extensions 单独判「有没有多写 `//`」），安�
 现在取值前先把 `"//":` 那一行滤掉，并且用真实 manifest 与一份改坏的 manifest
 各跑一遍 —— 只跑正向用例的话，这个 bug 会一路活到 CI 上。
 
-**GNOME 运行时里启动直接抛 NPE —— 必须给 `-Dswing.systemlaf`。**
-换到 GNOME 51 之后第一次启动是这样的：
+**造「改坏的样本」比验断言更容易出事，而且出的是静默的那种。**
+本地校验脚本要证「断言真的会红」，就得临时把 manifest 改坏再跑。
+第一版把这件事写成了「备份 → 改坏 → 跑 → 删备份」，漏掉了还原，于是：
+
+- 第二个用例读到的原文里**已经带着第一个用例的坏值**，坏效果逐个累积；
+- 跑完最后一份，脚本又把那份**已经被污染过的文本**写了回去 ——
+  真正的 manifest 被留在 `runtime=org.gnome.Platform` / `25.08` 的坏状态，
+  而**所有断言当时全绿**（因为校验跑在坏掉之前那一份上）。
+
+也就是说，这套专门用来抓 bug 的校验自己制造了一个 bug，还顺手把源码改了。
+现在改成 `try/finally` 里无条件还原，且还原之后**逐字比对**与原始文本一致，
+不一致就直接 `SystemExit` 停手 —— 没有兜底的还原等于没有还原。
+**备份文件的存在意义是「还回去」，不是「留个证据」；只删不还，等于没备份。**
+
+同一轮里还有个同类的：抽取工作流里那段代码时用 `pre.split("do", 1)`
+去找 `for ... do` 的后半截，而脚本里的 `>/dev/null` **含 "do"** ——
+切口落在 ref 列表之后，于是「预检了哪几条 ref」这个问题答的是空集，
+看起来像「一条都没配」。**按子串猜结构，猜到的位置和你想的位置没有必然关系。**
+
+**Flatpak 沙箱里启动直接抛 NPE —— 必须给 `-Dswing.systemlaf`。**
+第一次看到它的时候本应用跑在 GNOME 运行时上，栈里也全是 `gtk`，
+很容易读成「这是 GNOME 运行时的问题」。实际上不是：
 
 ```
 Exception in thread "main" java.lang.NullPointerException:
@@ -143,6 +182,13 @@ shouldApplyTheme = gnomeShellVersion >= 47;
 `getGnomeShellMajorVersion()` 返回的是 `Integer`，要靠执行 `gnome-shell --version`
 才有值。Flatpak 沙箱里没有 `gnome-shell` 这个二进制（它属于 GNOME 会话，不属于
 运行时），于是返回 null，自动拆箱当场炸。**没有「保持 GTK 但不炸」的配置项。**
+
+**所以 runtime 换回 freedesktop 并不能消掉它。** 缺的是沙箱里的一个可执行文件，
+而沙箱可见哪些二进制由 Flatpak 决定，与运行时是哪一家无关 ——
+换句话说，这行 `-Dswing.systemlaf` 是在 GNOME 那轮加的，换回来之后**继续保留**，
+不是因为它只在 GNOME 下才需要，而是因为它在哪种运行时下都需要。
+CI 能验的只有「包打出来、metadata 指向 freedesktop 26.08」；
+启动那一步本机没有 flatpak，**尚未在真机上复验过**。
 
 修法是改用 Metal 外观，而属性名有个坑：
 
@@ -176,8 +222,9 @@ Linux + GNOME → `GTKLookAndFeel`，macOS → `Aqua`）。
 `"pk-gtk-module"` 是 GTK 模块在找宿主上的桌面服务，找不到就打个 Gtk-Message。
 用了 Metal 之后 GTK 不再初始化，这两条也会一起消失。
 
-**`org.gnome.Platform.Locale` 与 `org.freedesktop.Platform.GL.default` 不写进 manifest。**
-这两条最容易被顺手塞进 `sdk-extensions`，但那会让构建直接失败。三条独立证据：
+**`org.freedesktop.Platform.Locale` 与 `org.freedesktop.Platform.GL.default`
+既不写进 manifest，也不单独装。** 这两条最容易被顺手塞进 `sdk-extensions`，
+但那会让构建直接失败。三条独立证据：
 
 1. flatpak-builder 的 manifest 只有 `sdk-extensions` 与 `platform-extensions`
    两个扩展相关的键，源码里 `builder_manifest_init_app_dir()` 把**两者**翻译成
@@ -187,13 +234,16 @@ Linux + GNOME → `GTKLookAndFeel`，macOS → `Aqua`）。
    `runtime-extensions` 只存在于 `[Instance]` 组，而那是 flatpak 部署时写给
    运行实例看的，不是应用能声明的输入（`common/flatpak-metadata-private.h`
    里能看到的相关键只有 `app-extensions` 与 `runtime-extensions`，都属于 `[Instance]`）。
-3. 运行时扩展本来就随运行时一起被拉取与挂载。上面那条实测里，
-   `flatpak install org.gnome.Platform//51` 已经把 GL.default 26.08 带下来了 ——
-   应用侧不需要再声明一次。
+3. 运行时扩展本来就随运行时一起被拉取与挂载。装
+   `org.freedesktop.Platform//26.08` 时 `GL.default 26.08` 就跟着下来了 ——
+   应用侧不需要再声明一次，也不需要再单独装一遍。
 
-所以 CI 只**查**这两个 ref 存不存在，不装。查是为了让
-「这个基线上 GNOME 侧没发布某某扩展」变成一句几秒内可见的报错，
-而不是等用户装完、开始菜单点不动才发现少了东西。
+GNOME 那轮里工作流曾对这三条做「查得到即可、**不装**」的预检，理由是
+「别等用户装完、开始菜单点不动，才发现这个基线上没发某某 GNOME 侧扩展」。
+换成 freedesktop 之后**不再预检它们**：manifest 一个 GNOME 库都不用，
+那条担心不成立；而且其中 `org.gnome.Platform.Locale//51` 本来就是 GNOME 侧的 ref，
+在 freedesktop 上压根不存在，留着就是一条注定失败的断言。
+**预检存在的意义是拦住你真会缺的东西，不是拦住你觉得「也许会用」的东西。**
 
 **JDK 不自己打包，用 `org.freedesktop.Sdk.Extension.openjdk`。**
 这是本文档里最反直觉的一条，值得写清楚：
@@ -222,10 +272,15 @@ flatpak-builder 1.4.2 实测直接回一句就退出：
 error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 not installed
 ```
 
-所以工作流在「安装 GNOME 运行时与 SDK」那一步把三个 ref 一起装：
-`org.gnome.Platform//51`、`org.gnome.Sdk//51`、`openjdk//26.08`。
-底下那层 `org.freedesktop.Platform` / `Sdk` **不用单独装** ——
+所以工作流在「安装 freedesktop 运行时与 SDK」那一步把三个 ref 一起装：
+`org.freedesktop.Platform//26.08`、`org.freedesktop.Sdk//26.08`、
+`openjdk//26.08`，三者分支相同。
+
+（GNOME 那轮的装法不一样：装的是 `org.gnome.Platform//51` 与
+`org.gnome.Sdk//51`，底下那层 freedesktop 基线**不用单独装** ——
 `org.gnome.Platform` 本身就是架在它们上面的一层扩展，装它会把基线一并带下来。
+换成 freedesktop 直装之后，Platform 与 Sdk 就都得点名了，
+**但仍然不多装**：三条就是三条，没有第四条「反正顺便」的东西。）
 
 **装完必须点名核对「装上了」，不能只信退出码。**
 两个理由，都不是假设：
@@ -250,8 +305,9 @@ error: Requested extension org.freedesktop.Sdk.Extension.openjdk/x86_64/26.08 no
   那一列带不带前缀会随 flatpak 版本变，带不带都不该让断言翻脸。
   失败时再打前三条与总行数，让人一眼看出「列表是空的」还是「少了一个」。
 
-远端 ref 的预检从三个增加到五个，多出来的两个正是上面那两个只查不装的
-运行时扩展（`org.gnome.Platform.Locale//51`、`GL.default//26.08`）。
+预检只覆盖要装的那三条 ref —— GNOME 那轮曾经是五条，多出来的
+`org.gnome.Platform.Locale//51` 与 `GL.default//26.08` 属于「查而不装」的运行时扩展，
+理由见上面那一节，回 freedesktop 后已撤掉。
 
 顺便记一个**假阴性**，它比缺 ref 更危险：检查远端 ref 的那一步原本排在
 `flatpak remote-add` **之前**，于是查询时 remote 还不存在，
@@ -266,7 +322,11 @@ Platform 与 Sdk，两条信息直接矛盾，只是当时没往一处想。）
 看上去哪儿都没问题，但如果 metadata 里 `runtime=` 仍旧是上一代，
 装到用户机器上的就还是旧运行时，而本地和 CI 都永远看不出来。
 所以「构建 Flatpak」那一步读完 `flatpak-build/metadata`，逐字比对
-`runtime=org.gnome.Platform/<cpu>/51` 与 `sdk=org.gnome.Sdk/<cpu>/51`。
+`runtime=org.freedesktop.Platform/<cpu>/26.08` 与 `sdk=org.freedesktop.Sdk/<cpu>/26.08`。
+这两条断言恰恰是**换运行时那两轮里唯一真正抓住过东西的检查** ——
+manifest 写对了、构建也绿了，但只有导出的 metadata 能证明成品指向的
+确实是这一代运行时。GNOME 那轮就是靠它确认「metadata 指向 GNOME 51，对得上」，
+换回来之后同样靠它确认指向 freedesktop 26.08。
 `<cpu>` 是 Flatpak 自己的叫法（`x86_64` / `aarch64`，不是矩阵里的
 `amd64` / `arm64`），单列了一项 `matrix.flatpakCpu`，不拿 `matrix.flatpakArch`
 顶替 —— 后者直接拼进 ref 会得到一个不存在的架构名，而这种错误一路要到
@@ -330,7 +390,7 @@ Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstds
 老应用的兼容件。本应用不需要它们，装上只是平白多几个可能不存在的 ref ——
 CI 上就是这一步失败的，而 `flatpak install` 缺 ref 时几秒内就退出，
 匿名视角下那几秒的日志偏偏看不到。`GL.default` 虽然由运行时自动带下来，
-也不必在 manifest 里点名，理由见上面「只查不装」那一节。
+也不必在 manifest 里点名，理由见上面「既不写进 manifest，也不单独装」那一节。
 
 **flatpak-builder 要在 manifest 所在目录下调用。**
 `sources` 里的相对路径按「manifest 所在目录」还是按「当前工作目录」解析，

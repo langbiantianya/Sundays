@@ -1,0 +1,50 @@
+Flatpak：弃用 GNOME 运行时，回到 org.freedesktop.Platform 26.08
+
+上一轮为「Linux 上依赖装不上」把运行时换成 org.gnome.Platform//51。
+现在换回来，两条理由都不是主观偏好：
+
+1. org.gnome.Platform 本身不是独立的一套运行时，它就是架在
+   org.freedesktop.Platform//26.08 之上的一层扩展。当时实测
+   `flatpak install flathub org.gnome.Platform//51` 连带拉下来的东西就是
+   GL.default 26.08 / VAAPI.Intel 26.08 / codecs-extra 26.08-extra ——
+   分支号与底下那层基线完全一致，说明 GNOME 51 这个数字对本应用没有独立含义。
+   而本应用一个 GNOME 库都用不上（Compose/Skiko 只要 GTK，要 Wayland/X11，
+   那些在 freedesktop 基线里本来就有），等于白白多背一整层 GNOME 平台。
+
+2. 启动器绕不开的那个 JDK 空指针与运行时是哪一家无关。根因是沙箱里没有
+   gnome-shell 这个可执行文件，那是 Flatpak 的沙箱属性。**换个运行时去绕一个
+   与运行时无关的 bug，只会既背上多一层平台、又没修掉它** —— 这也是当初最容易
+   骗过自己的地方，NPE 的栈里确实全是 gtk，看着就像「是 GNOME 运行时的问题」。
+   所以 assemble-flatpak-app.sh 里那行 -Dswing.systemlaf 继续保留。
+
+manifest 与工作流：
+- runtime/runtime-version/sdk 三字段回到 org.freedesktop.Platform / 26.08 /
+  org.freedesktop.Sdk，sdk-extensions 仍是裸名 org.freedesktop.Sdk.Extension.openjdk
+- env 里 GNOME_RUNTIME + FREEDESKTOP_BRANCH 合并为单个 FREEDESKTOP_RUNTIME
+- 一致性校验的期望值、安装 ref、已装断言 ref、metadata 断言期望值全部换成
+  freedesktop，并写清「试过 GNOME 又换回来」的理由
+- 步骤名与几处注释同步（原先还写着「安装 GNOME 运行时与 SDK」）
+- 远端 ref 预检回到三条：撤掉 GNOME 轮加的 org.gnome.Platform.Locale//51 与
+  GL.default//26.08。前者是 GNOME 侧的 ref，在 freedesktop 上压根不存在，留着就是
+  一条注定失败的断言；后者由运行时自动带下来，应用侧无需点名。
+  预检存在的意义是拦住真会缺的东西，不是拦住「也许会用」的东西
+
+两个 README 同步改回 freedesktop 口径，并把 GNOME 那轮的取舍过程作为历史记下来：
+为什么换过去、为什么换回来、那个 NPE 为什么不随运行时改变而消失。
+
+本地校验（抽取工作流里那几段真实脚本跑，不是跑副本）：
+- manifest JSON 合法，四个字段与 env 一致
+- 一致性校验：正向过；四条负向（runtime 停在 GNOME / runtime-version 写错分支 /
+  sdk 停在 GNOME / sdk-extensions 写成 //26.08）全部如期报 ::error::
+- metadata 断言：x86_64 与 aarch64 正向过；三条负向（runtime 停在 GNOME 51 /
+  runtime 对但 sdk 停在 GNOME / metadata 文件不存在）全部如期失败
+- 行尾：四个文件 CRLF 无 BOM，assemble-flatpak-app.sh 保持 LF
+
+校验脚本自己出过两个 bug，都记进了 packaging/flatpak/README.md：
+一是「备份 → 改坏 → 跑 → 删备份」漏了还原，坏值逐个用例累积，最后把真正的
+manifest 写回了坏状态，而当时所有断言全绿；改成 try/finally 无条件还原并逐字
+比对。二是用 split("do", 1) 抽取 for...do 的后半截，而脚本里的 >/dev/null 含 "do"，
+切口落在 ref 列表之后，于是「预检了哪几条」答的是空集。
+
+真机启动仍未验证：本机没有 flatpak，CI 只能验「包打出来、metadata 指向
+freedesktop 26.08」。
