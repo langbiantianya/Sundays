@@ -7,7 +7,7 @@
 | **Direct 直接模式（默认）** | `IdbEngine`（`engine/`） | 同 JVM 直接方法调用 | KMP Desktop 应用，零序列化、零子进程 |
 | **gRPC 模式** | `GrpcEngineClient`（`engine-grpc-client/`） | gRPC over TCP / UDS / 命名管道 | 跨进程、跨语言、子进程隔离、远程调试 |
 
-两者实现同一个接口 **`EngineClient`**（`com.kxxnzstdsw.client.EngineClient`，定义在 `engine-protocol/`）—— 调用方只面向接口编程，**换实现不改调用代码**。引擎侧另有 `IdbEngineServer` 提供 gRPC 服务端（`java -jar idb-engine.jar`）。
+两者实现同一个接口 **`EngineClient`**（`com.langbiantianya.client.EngineClient`，定义在 `engine-protocol/`）—— 调用方只面向接口编程，**换实现不改调用代码**。引擎侧另有 `IdbEngineServer` 提供 gRPC 服务端（`java -jar idb-engine.jar`）。
 
 引擎支持 **5 个** 可插拔方言：**MySQL** / **PostgreSQL** / **H2** / **DuckDB**（本地嵌入式 OLAP，v2.7） / **SQLite**（本地嵌入式关系型，v2.8）。
 
@@ -36,10 +36,10 @@ sundays/
 ├── dialect-sqlite/       SQLite 方言插件 JAR（v2.8 新增，62 测试）
 ├── engine-protocol/      调用层契约（v2.15）：proto 协议 + 强类型消息 + EngineClient 接口
 │   ├── src/main/proto/   idb_engine.proto + idb_export.proto（gRPC service + message schemas）
-│   └── src/main/kotlin/com/kxxnzstdsw/client/
+│   └── src/main/kotlin/com/langbiantianya/client/
 │       └── EngineClient.kt  调用层契约接口（handle / invoke / testConnection / disconnect / close）
 ├── engine/               引擎实现（主引擎模块）
-│   ├── src/main/kotlin/com/kxxnzstdsw/
+│   ├── src/main/kotlin/com/langbiantianya/
 │   │   ├── engine/       IdbEngine（EngineClient 的同进程实现）+ StatementRegistry（v2.16 查询取消）+ SqlScriptSplitter（v2.16 多语句切分）
 │   │   ├── grpc/         gRPC protobuf 边界
 │   │   ├── dispatcher/   RequestDispatcher（Category.Action → handler 路由）
@@ -52,11 +52,11 @@ sundays/
 │   │   └── loader/       ServiceLoader 动态加载 drivers/ + dialects/
 │   └── src/test/kotlin/  277 个 engine 测试（v2.16：+89，含 splitter / importer / cancel / multi-statement / transaction / import 集成测试）
 ├── engine-grpc-client/   gRPC 调用模块（v2.15）：EngineClient 的跨进程 gRPC 实现，21 项测试
-│   └── src/main/kotlin/com/kxxnzstdsw/client/grpc/
+│   └── src/main/kotlin/com/langbiantianya/client/grpc/
 │       ├── GrpcEngineClient.kt  经 gRPC stub 实现 EngineClient
 │       └── GrpcClientConfig.kt  端点配置（TCP / UDS / 命名管道）+ ChannelBuilder
 ├── i18n/                 六语言文案模块：StrKey 枚举 + 六份译文表 + 简繁判定 + 复数规则
-│   └── src/main/kotlin/com/kxxnzstdsw/i18n/
+│   └── src/main/kotlin/com/langbiantianya/i18n/
 │       ├── AppLanguage.kt   6 种语言（tag / 母语名 / 系统 Locale 判定 / 简繁判定）
 │       ├── StrKey.kt        438 个文案键（按语义分区）
 │       ├── Strings.kt       取值 + {0} 占位符替换 + 六表懒加载 + 降级链
@@ -72,7 +72,7 @@ sundays/
 │   └── jvmMain/          JVM 特定逻辑（如 Okio 文件系统等）
 └── desktopApp/           Compose Multiplatform Desktop 应用（v2.9 新前端）
     ├── build.gradle.kts  依赖 :engine（本地实现）与 :engine-grpc-client（gRPC 实现）
-    └── src/main/kotlin/com/kxxnzstdsw/sundays/
+    └── src/main/kotlin/com/langbiantianya/sundays/
         ├── main.kt                  KMP Desktop 入口：Window + SundaysTheme、createEngineClient() 选实现、顶层导航分派
         │                            （AppDestination / SundaysTheme / SundaysPalette 已在 :shared/commonMain）
         ├── ConnectionSession.kt     连接列表 / 向导 / 引擎会话状态机（持有 EngineClient 接口）
@@ -87,11 +87,11 @@ sundays/
 默认是同进程 `IdbEngine`（零序列化、零子进程）；设置 `-Dsundays.engine.endpoint` 则换成跨进程 `GrpcEngineClient`。
 
 ```kotlin
-// desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt —— 唯一的装配点
-import com.kxxnzstdsw.client.EngineClient
-import com.kxxnzstdsw.client.grpc.GrpcClientConfig
-import com.kxxnzstdsw.client.grpc.GrpcEngineClient
-import com.kxxnzstdsw.engine.IdbEngine
+// desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt —— 唯一的装配点
+import com.langbiantianya.client.EngineClient
+import com.langbiantianya.client.grpc.GrpcClientConfig
+import com.langbiantianya.client.grpc.GrpcEngineClient
+import com.langbiantianya.engine.IdbEngine
 
 const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
 
@@ -313,7 +313,7 @@ java -jar engine/build/libs/idb-engine.jar --mode grpc --ipc tcp --port 50051
 
 ### `CodeEditor` —— 可扩展代码编辑器
 
-`com.kxxnzstdsw.sundays.editor.ui.CodeEditor` / `CodeEditorWithToolbar`
+`com.langbiantianya.sundays.editor.ui.CodeEditor` / `CodeEditorWithToolbar`
 
 特性：
 - 语法高亮（基于 `CodeLanguageRegistry`，支持 SQL / Lua；新增语言只需 `registry.register(...)`）
@@ -351,7 +351,7 @@ CodeEditor(
 
 ### `DataTable` —— 虚拟滚动数据表格
 
-`com.kxxnzstdsw.sundays.table.DataTable`
+`com.langbiantianya.sundays.table.DataTable`
 
 特性：
 - **大量数据**：基于 `LazyColumn` 的虚拟滚动（item key = 主键）
@@ -396,7 +396,7 @@ DataTable(
 
 ### `ConnectionManagerScreen` —— 连接管理
 
-`com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen`
+`com.langbiantianya.sundays.connection.ConnectionManagerScreen`
 
 布局：**左侧连接列表 + 右侧引导式配置页面**。
 
@@ -512,7 +512,7 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
   装完开始菜单和桌面自然空空如也。这不是 jpackage 的毛病，是它本来就不替应用做这个决定。
   另外 `iconFile` 不给就用插件自带的 JetBrains 默认图标；仓库里的 `sundays.ico` 需要显式接上，
   否则建出来的快捷方式挂着 JetBrains 的图标。
-- **便携版里的 exe 不是单文件。** `com.kxxnzstdsw.sundays.exe` 是 jpackage 的启动器，
+- **便携版里的 exe 不是单文件。** `com.langbiantianya.sundays.exe` 是 jpackage 的启动器，
   依赖同级的 `app/` 与 `runtime/` 目录；单独拷走会报缺 DLL。要分发就分发整个目录。
 - **CI 里会把 Gradle 分发源换回官方。** 仓库的 `gradle-wrapper.properties` 指向腾讯云镜像，
   那是给国内开发机用的；Actions runner 在境外，从那里拉两百多 MB 的 `-all.zip` 不稳。
@@ -578,7 +578,7 @@ Intel 侧现在只能用 `macos-15-intel`（或 `macos-26-intel`）。
 ```bash
 # 1. 右键点 .app → 选「打开」→ 再点一次「打开」
 # 2. 或者清掉隔离属性
-xattr -dr com.apple.quarantine /Applications/com.kxxnzstdsw.sundays.app
+xattr -dr com.apple.quarantine /Applications/com.langbiantianya.sundays.app
 ```
 
 想要「双击就开、不用管签名」，需要一个 Apple Developer 账号并在
@@ -612,7 +612,7 @@ xattr -dr com.apple.quarantine /Applications/com.kxxnzstdsw.sundays.app
 ```bash
 # 安装
 flatpak install --user sundays-flatpak-amd64.flatpak
-flatpak run com.kxxnzstdsw.sundays
+flatpak run com.langbiantianya.sundays
 ```
 
 几点值得知道：
@@ -796,7 +796,7 @@ flatpak run com.kxxnzstdsw.sundays
 | v2.14 | **共享代码上移 `shared`（模块边界整理）**<br>`desktopApp` 中不依赖 `:engine` 的纯 UI 迁入 `:shared` 的 `commonMain`：新增 `navigation/AppDestination.kt`（顶层导航目标枚举）、`navigation/TopNavBar.kt`（`TopNavBar` + 私有 `NavChip`）、`ui/Theme.kt`（`SundaysTheme`，跟随系统明暗）。`desktopApp/Navigation.kt` 删除，`main.kt` 瘦身为「平台窗口 + 引擎状态机接线」（203 → 114 行），同时消除原先为规避导入冲突而写的 `private fun isSystemInDarkTheme()` 包装<br>边界判据：`:engine` 是纯 JVM 模块（`kotlin("jvm")` + HikariCP/JDBC/gRPC/Hadoop），而 `shared` 业务代码全在 KMP `commonMain` —— 任何引用 `IdbEngine` / proto 的代码都无法上移。故 `ConnectionSession`（`IdbEngine.testConnection` / `disconnect`）与 `DatabaseBrowserState` / `DatabaseBrowserScreen`（`IdbEngine.invoke` + proto 构造器）**保留在 desktopApp**，`engine ↮ shared` 的依赖方向不变<br>`TopNavBar` 新增 `modifier` 参数，与 shared 其余组件的 Reasonable Defaults 约定一致 |
 | v2.15 | **调用层抽象（invocation layer）**<br>新增 `engine-protocol/` 模块：proto 源从 `engine/src/main/proto/` 迁出（protobuf gradle 配置同步迁出），新增 `EngineClient` 接口（`handle` / `invoke` / `testConnection` / `disconnect` / `close`）—— 调用方只面向接口编程；该模块零业务逻辑，依赖以 `api` 导出，供服务端与客户端同时依赖而不成环<br>新增 `engine-grpc-client/` 模块：`GrpcEngineClient` 经 gRPC stub 实现同一接口（TCP / UDS / 命名管道），仅依赖 `:engine-protocol`，**不拖入** Hadoop / POI / LuaJIT / 方言插件；`GrpcClientConfig.fromTarget` 解析 `host:port` / `tcp://` / `unix://` / `pipe:` 端点，格式错误在连接前抛出<br>协议新增 `SYSTEM.DISCONNECT`（`Action.DISCONNECT = 19` + `SystemDisconnectResponse{closed}` + `SystemResponse.disconnect = 5`）—— 连接池活在引擎进程内，远程调用方需要线上路由才能释放；已纳入 `writeActions`（`dryRun` 短路，不得真的掐断用户连接）且幂等<br>`desktopApp`：`ConnectionSession` / `DatabaseBrowserState` / `MainScreen` 改持 `EngineClient`；`main.kt` 成为唯一装配点，`-Dsundays.engine.endpoint` 切换实现（默认同进程 `IdbEngine`）<br>修复 `IpcConfig.fromArgs` 把 `--mode` 误判为未知参数 —— 文档中的 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 此前必定退出失败，gRPC 客户端无从连上一个按文档启动的服务端<br>测试：530 项全通过（`engine` 188 / `engine-grpc-client` 21 / `desktopApp` 18 为新增） |
 
-| v2.16 | **引擎能力补齐 —— 关闭与 DBeaver / Navicat / DataGrip 的功能差距**<br>**查询取消**：新增 `SYSTEM.CANCEL`（`Action.CANCEL = 20`）—— 协程取消无法打断阻塞的 JDBC 调用，只有 `Statement.cancel()` 能真正停掉数据库侧工作；新增 `StatementRegistry` 按 request id 登记 `Statement` / canceler，覆盖 `SQL.EXECUTE`、流式 `DATA.LIST`（`pageSize=0`）、`DATA.GENERATE`；被取消请求在原 id 上返回 `success=false, error="cancelled"`<br>**数据导入**：新增 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`，与 EXPORT 对称），**主进程内运行**（不引入 POI / Parquet / Hadoop，故可取消）；新包 `com.kxxnzstdsw.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）支持 CSV / JSON Lines；`ignore_errors=true` 改为逐行 `executeUpdate`（H2 绑定阶段不报错，批处理无法归因到行），代价是吞吐下降<br>**事务会话**：新增 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action.BEGIN=22` / `COMMIT=23` / `ROLLBACK=24` / `SESSION_INFO=25`）+ `Request.session_id`（字段 6，**留空 = 无事务，向后兼容**）；`TransactionManager` 钉住连接并 `autoCommit=false`，连接所有权归会话直到 `COMMIT` / `ROLLBACK`<br>**多语句脚本**：`SqlExecuteRequest.multi_statement` + `SqlScriptSplitter`（只切顶层 `;`，正确处理引号 / 注释 / PostgreSQL 美元引用；注释文本原样保留），按序执行、首个失败即停<br>测试：`:engine:test` 188 → **277**（+89），项目总计 **619**，0 失败 |
+| v2.16 | **引擎能力补齐 —— 关闭与 DBeaver / Navicat / DataGrip 的功能差距**<br>**查询取消**：新增 `SYSTEM.CANCEL`（`Action.CANCEL = 20`）—— 协程取消无法打断阻塞的 JDBC 调用，只有 `Statement.cancel()` 能真正停掉数据库侧工作；新增 `StatementRegistry` 按 request id 登记 `Statement` / canceler，覆盖 `SQL.EXECUTE`、流式 `DATA.LIST`（`pageSize=0`）、`DATA.GENERATE`；被取消请求在原 id 上返回 `success=false, error="cancelled"`<br>**数据导入**：新增 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`，与 EXPORT 对称），**主进程内运行**（不引入 POI / Parquet / Hadoop，故可取消）；新包 `com.langbiantianya.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）支持 CSV / JSON Lines；`ignore_errors=true` 改为逐行 `executeUpdate`（H2 绑定阶段不报错，批处理无法归因到行），代价是吞吐下降<br>**事务会话**：新增 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action.BEGIN=22` / `COMMIT=23` / `ROLLBACK=24` / `SESSION_INFO=25`）+ `Request.session_id`（字段 6，**留空 = 无事务，向后兼容**）；`TransactionManager` 钉住连接并 `autoCommit=false`，连接所有权归会话直到 `COMMIT` / `ROLLBACK`<br>**多语句脚本**：`SqlExecuteRequest.multi_statement` + `SqlScriptSplitter`（只切顶层 `;`，正确处理引号 / 注释 / PostgreSQL 美元引用；注释文本原样保留），按序执行、首个失败即停<br>测试：`:engine:test` 188 → **277**（+89），项目总计 **619**，0 失败 |
 | v2.17 | **`shared/editor` 编辑器能力补齐**<br>**两向贴合的空格判定**：抽 `formatter/TokenSpacing.kt`（两个纯函数 `bindsLeft` / `bindsRight`），规则「两相邻 token 之间要空格 ⟺ 左不贴右 且 右不贴左」。换掉旧版「写前决定下一个」的 `pendingSpace` 标志；彻底消灭 `id , name` / `id> 1` / `a:: int` / `t. col` / `( 1 )` 一类反复出现的畸形，以及「格式化两次才收敛」的伪幂等性。注释只读（块注释里常放代码样例，碰了就是破坏），只清行尾空白，**不被主子句换行规则吞掉**；缩进原样搬运；空行折叠至多一个；幂等性逐样本锁定<br>**编辑器补全（「提示」）**：`CodeLanguage` SPI 新增 `completionCandidates(prefix, limit)`，默认实现返回空列表（只支持高亮的语言零改动）。SQL 忽略大小写、Lua 大小写敏感 ——「谁拥有大小写规则谁说了算」，把 `Pri` 补成 `print` 是制造 bug。词字符限定 ASCII（`Char.isLetterOrDigit()` 对中文返回 `true`，会让中文注释吞掉英文词）。接受候选替换**整个词**（光标在词中间时），弹层置于滚动容器内 + `Modifier.atCaret` 自绘 0×0 报告（不撑大编辑器高度，天然跟着代码滚），按键走 `onPreviewKeyEvent` 才能 `consume` `Tab`/`Enter` 的默认行为<br>**造数沙箱宿主函数进入补全**：`CodeEditor(extraCompletions = …)` 注入**上下文专属**候选 —— 造数工作台据此补出引擎注入的 13 个全局（`insert` / `lastId` / `random_*`）并显示签名。它们**绝不进** `LuaLanguage.BUILTINS`：那批函数只在造数沙箱里存在，普通 Lua 编辑器中调用会报 `attempt to call a nil value`，塞进语言词表等于让所有 Lua 补全都推荐不存在的函数。清单是静态复制（`:shared` 不能反向依赖 `:engine`），由 `GenerateSandboxContractTest` 读引擎源码抽取实际注册的全局名并断言**集合相等**来防漂移<br>测试：`FormatterSpacingTest`（27 项）+ `CompletionTest`（32 项，含「宿主函数不得进 `LuaLanguage`」不变量）+ `GenerateSandboxContractTest`（3 项）。变异验证 7 处全部如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.8 / §2.10](./shared/ARCHITECTURE.md) |
 | v2.18 | **SQL 工作台补全接入真实 schema**<br>`CompletionKind` 追加 `DATABASE` / `TABLE` / `COLUMN`（**必须追加在枚举末尾** —— `buildCompletionPool` 用 `kind.ordinal` 当类别排序键，插中间会打乱既有词表次序）。候选**全部来自已有状态、零额外请求**：库 ← 连接时的 `SCHEMA.LIST`；表 ← 展开该库时的 `TABLE.LIST`（复用树上的懒加载结果）；字段 ← **打开过预览的表**的 `columns`<br>字段只覆盖「访问过的表」是刻意的：全库全表 = 每张表一次 `TABLE.COLUMN_LIST`，200 张表就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。零等待、零额外往返，用得越多越全<br>库/表/字段整体**优先于**关键字（`FROM us` 想要 `users` 这张表，不是 `USING`）。关键字那一路本就由 `languageId` = 方言档位自动带来，无需重复注入。`extraCompletionsCaseSensitive = false`：标识符大小写因方言而异，敲 `FROM USERS` 该能补出 `users`；这里不存在造数宿主函数那种「改写语义」风险 —— 接受是用户主动点的动作，插入的是数据库里真实存在的名字<br>缓存签名 `schemaCompletionSignature` 刻意**不含 `tab.rows`**：那是真正的数据（可能上千行），牵进 `remember` 的 key 会让每次翻页都重建整份候选；而直接用 `tabs` 当 key 更糟 —— 双击打开表只改 `tab.columns`，`tabs` 引用不变，字段候选永远出不来<br>测试：`DatabaseBrowserFlowTest` +3（候选覆盖与 detail、库→表→字段 排序、签名只跟 columns 不跟 rows）、`CompletionTest` +2（大小写策略是调用方的选择、新类别须追加在末尾）。变异验证 2 处如期变红<br>详细：[`shared/ARCHITECTURE.md` §2.10.2](./shared/ARCHITECTURE.md) |
 | v2.19 | **补全触发阈值 2 → 1**<br>敲第一个字母就弹候选。**推翻 v2.17 的一条决策并记录推翻过程**：当时定 2 的理由是「单字符前缀几乎命中整个语言（`a` → `AND`/`ADD`/`AVG`…），弹层刚开就铺满屏幕，反而挡视线」—— 该理由**站不住**：弹层条数被 `maxCompletionItems` 封在 8 条，无论前缀多短都只显示 8 条，我把「**命中**数量多」误当成了「**显示**数量多」；且权衡方向也算错了，少按一次键的收益每次都发生，而「显得吵」是主观且能按 `Esc` 关掉的<br>「命中太多导致排序变差」的顾虑由两条规则兜住：上下文候选（库/表/字段/沙箱宿主函数）**整体优先**于关键字 —— 输入 `u` 时当前库里的 `users` 排在 `USING` 前面；语言候选按 类别→长度→字典序 排 —— 输入 `a` 时 `ADD`/`ALL` 靠前<br>阈值降到 1 **不等于**「没词字符时也弹」：空格/逗号/换行后 `wordPrefixBefore` 返回空串，仍然安静（单独断言）<br>测试：`CompletionTest` +3（阈值必须是 1、空前缀仍安静、limit 是硬约束）。变异验证：改回 2 → 第一条如期变红<br>**文档数字一并订正**（此前长期与实际脱节）：shared 97 → **217**、desktopApp 18 → **139**、engine 277 → **288**、`CompletionTest` 21 → **32**；并把「总计 619 失败」改成如实标注 Windows 下 11 项基线失败及其清单 |

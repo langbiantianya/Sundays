@@ -33,9 +33,9 @@ idb_engine 的 **H2 方言实现** —— **嵌入式内存数据库**，也是�
 dialect-h2/
 ├── build.gradle.kts              # 依赖 :api + kotlinx-coroutines + slf4j + JUnit 5 + h2
 └── src/
-    ├── main/kotlin/com/kxxnzstdsw/dialect/
+    ├── main/kotlin/com/langbiantianya/dialect/
     │   └── H2Dialect.kt          # 单文件实现（1342 行）
-    └── test/kotlin/com/kxxnzstdsw/dialect/
+    └── test/kotlin/com/langbiantianya/dialect/
         └── H2DialectTest.kt      # 63 个方言测试
 ```
 

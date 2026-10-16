@@ -100,7 +100,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       # packageMsi          → 安装包（WiX 由 Compose 插件自己下载解压，runner 无需预装）
-      # createDistributable → 便携版目录，内含 com.kxxnzstdsw.sundays.exe
+      # createDistributable → 便携版目录，内含 com.langbiantianya.sundays.exe
       #
       # ARM 腿上这两步**没有任何额外配置**。整个链路是靠「跑在哪台机器上」自动切换的，
       # 仓库的构建脚本一个字都不用改：

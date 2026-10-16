@@ -33,7 +33,7 @@ idb_engine 的 **MySQL 方言实现**，以 SPI 插件形式提供。引擎通�
 ```
 dialect-mysql/
 ├── build.gradle.kts          # 依赖 :api + kotlinx-coroutines
-└── src/main/kotlin/com/kxxnzstdsw/dialect/
+└── src/main/kotlin/com/langbiantianya/dialect/
     └── MySQLDialect.kt       # 单文件实现（1144 行）
 ```
 

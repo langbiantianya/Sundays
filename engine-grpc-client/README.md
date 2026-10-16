@@ -15,10 +15,10 @@ engine-grpc-client/
 ├── build.gradle.kts
 ├── README.md
 └── src/
-    ├── main/kotlin/com/kxxnzstdsw/client/grpc/
+    ├── main/kotlin/com/langbiantianya/client/grpc/
     │   ├── GrpcEngineClient.kt       # EngineClient 的 gRPC 实现
     │   └── GrpcClientConfig.kt       # 端点配置 + 解析 + ChannelBuilder
-    └── test/kotlin/com/kxxnzstdsw/client/grpc/
+    └── test/kotlin/com/langbiantianya/client/grpc/
         ├── GrpcEngineClientTest.kt   # 端到端（真实 gRPC server + 真实 H2）
         └── GrpcClientConfigTest.kt   # 端点解析边界
 ```
@@ -28,9 +28,9 @@ engine-grpc-client/
 ## 用法
 
 ```kotlin
-import com.kxxnzstdsw.client.EngineClient
-import com.kxxnzstdsw.client.grpc.GrpcClientConfig
-import com.kxxnzstdsw.client.grpc.GrpcEngineClient
+import com.langbiantianya.client.EngineClient
+import com.langbiantianya.client.grpc.GrpcClientConfig
+import com.langbiantianya.client.grpc.GrpcEngineClient
 
 val client: EngineClient = GrpcEngineClient.connect(GrpcClientConfig.fromTarget("localhost:50051"))
 try {

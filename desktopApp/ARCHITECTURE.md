@@ -33,12 +33,12 @@
 desktopApp/
 ├── build.gradle.kts    # composeMultiplatform + compose.material3 + :shared + :engine / :engine-grpc-client（两个引擎实现）+ 方言/驱动 runtimeOnly 依赖
 └── src/
-    ├── main/kotlin/com/kxxnzstdsw/sundays/
+    ├── main/kotlin/com/langbiantianya/sundays/
     │   ├── main.kt                    # 入口：main()（Window + SundaysTheme）+ createEngineClient()（引擎实现装配点）+ MainScreen()（目标分派）
     │   │                              # AppDestination 与 SundaysTheme / SundaysPalette 已上移 :shared/commonMain
     │   ├── ConnectionSession.kt       # 连接会话状态机：列表 / 向导 / 引擎会话状态 + 全部回调
     │   └── DatabaseBrowserScreen.kt   # 第二屏 UI + DatabaseBrowserState / TablePreviewTab 状态机
-    └── test/kotlin/com/kxxnzstdsw/sundays/
+    └── test/kotlin/com/langbiantianya/sundays/
         ├── ConnectionManagerFlowTest.kt  # 连接流程端到端（真引擎 + 真点击）
         ├── DatabaseBrowserFlowTest.kt    # 浏览 + 两个工作台状态机：拉库 → 展开表 → 开标签页 → 去重 → 关闭 → SQL 多 sheet → 造数
         ├── DatabaseBrowserUiTest.kt      # 真点击：双击开标签页 + SQL 工作台（含多 sheet）执行 + 造数工作台执行 + 切 pane 状态保持
@@ -54,7 +54,7 @@ desktopApp 现有 **161 个测试**（`ConnectionManagerFlowTest` / `DatabaseBro
 |---|---|
 | `build.gradle.kts` | 声明 `kotlinJvm` / `composeMultiplatform` / `composeCompiler` 插件；`:shared` 依赖 + **`:engine`（默认实现）与 `:engine-grpc-client`（端点实现）同时引入** + `protobuf-java` / `protobuf-kotlin-lite`（消费 typed proto）；**5 个方言插件 + 5 个 JDBC 驱动以 `runtimeOnly` 上应用类路径**（Direct 模式无需外部 `dialects/` `drivers/` 目录）；`material-icons-extended`；`compose.uiTest` + JUnit4 测试依赖（`testImplementation(project(":dialect-h2"))` 供 H2 内存库测试直接构造方言）；原生分发目标 `Dmg` + `Msi` + `Deb` |
 | `main.kt` | 应用入口（`application { Window { SundaysTheme { MainScreen(engine) } } }`）；`MainScreen` 持有 `AppDestination` 状态、`ConnectionSession` 与 `DatabaseBrowserState`，按目标分派到当前屏幕。`main.kt` 同时是**唯一的引擎装配点**（`createEngineClient()`） |
-| （已上移 `:shared`） | `AppDestination` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/Theme.kt) + `SundaysPalette`（配色 / 形状 / 字号）。均不引用 `:engine`，故可跨平台复用 |
+| （已上移 `:shared`） | `AppDestination` → [`shared/.../navigation/`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/navigation/)；`SundaysTheme` → [`shared/.../ui/Theme.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) + `SundaysPalette`（配色 / 形状 / 字号）。均不引用 `:engine`，故可跨平台复用 |
 | `ConnectionSession.kt` | 连接会话状态机（Compose 快照状态持有者）：`connectionList` / `selectedConnection` / `wizard` / `statuses` + `connect` / `disconnect` / `testConnection` / `save` / `delete` / 向导步进 |
 | `DatabaseBrowserScreen.kt` | 第二屏：`DatabaseBrowserScreen`（顶部连接条 + 左侧库/表树 + 右侧标签页预览）、`DatabaseBrowserState`（加载与标签页状态机）、`TablePreviewTab`（单表预览状态，`key = schema::table`）、`SqlSheet`（SQL 工作台单个 sheet 的编辑器 + 独立结果）、`DialectType → SqlDialectProfile` 映射（SQL 高亮档位随连接的库变）、`sqlSchemaCompletions` / `schemaCompletionSignature`（SQL 工作台补全候选）、`SCHEMA_PANEL_TAG` / `SCHEMA_DRAG_HANDLE_TAG`（树面板宽度契约的 UI 测试锚点） |
 | `ConnectionManagerFlowTest.kt` | 端到端流程测试：真 `IdbEngine`（按 `EngineClient` 传入）+ 真点击（`runComposeUiTest`），断言连接池建立/释放、状态流转、`connection.json` 落盘 |
@@ -416,7 +416,7 @@ H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持�
 
 ### 库/表树宽度可拖拽 —— 状态放在哪一层
 
-左侧树与右栏之间用 [`DragHandle`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/ui/DragHandle.kt)
+左侧树与右栏之间用 [`DragHandle`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt)
 分隔，拖动实时改变树宽，双击复位。
 
 | 参数 | 值 | 理由 |
@@ -453,7 +453,7 @@ H2 把未引用标识符归一为大写（`users` → `USERS`），MySQL 保持�
 | 菜单项 | 内容 | 是否走引擎 |
 |---|---|---|
 | 复制名称 | 裸名（`biz_user`） | 否 |
-| 复制引用名 | [`SqlIdentifier.tableRef`](../../shared/src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt) —— PG 给 `"examquestions"."public"."biz_user"`（库就是当前连接的库时）/ MySQL 给 `` `examquestions`.`biz_user` `` | 否 |
+| 复制引用名 | [`SqlIdentifier.tableRef`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/connection/SqlIdentifier.kt) —— PG 给 `"examquestions"."public"."biz_user"`（库就是当前连接的库时）/ MySQL 给 `` `examquestions`.`biz_user` `` | 否 |
 
 **PG 那条 catalog 这一级是按「库 == 当前连接的库」给的，不是按方言给的。**
 PG 支持 `catalog.schema.table` 三段式，唯一限制是库名必须等于当前连接的库；
@@ -778,7 +778,7 @@ HikariCP 池（这一步就是“初始化连接”），之后按 hash key 复�
 ### 核心契约
 
 ```kotlin
-// desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt
+// desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt
 const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
 
 internal fun createEngineClient(): EngineClient {

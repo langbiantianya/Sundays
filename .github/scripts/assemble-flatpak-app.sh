@@ -35,11 +35,11 @@ STAGE="$PACKAGING_DIR/sundays-app"
 APPDIR_REL="share/sundays/app"
 APPDIR_IN_APP="/app/$APPDIR_REL"
 # 全小写：Flatpak 应用 ID 只允许 [a-z0-9_-] 与点。首版这里写的是
-# com.kxxnzstdsw.Sundays（大写 S），flatpak-builder 当场拒收，0 秒退出。
-APP_ID="com.kxxnzstdsw.sundays"
+# com.langbiantianya.Sundays（大写 S），flatpak-builder 当场拒收，0 秒退出。
+APP_ID="com.langbiantianya.sundays"
 # 必须与 desktopApp/build.gradle.kts 里的 nativeDistributions.packageName 一致，
 # 同时也是 jpackage 生成的 .cfg 文件名。
-LAUNCHER_NAME="com.kxxnzstdsw.sundays"
+LAUNCHER_NAME="com.langbiantianya.sundays"
 ICON_SRC="desktopApp/src/main/resources/icons/sundays_256.png"
 
 say() { echo "::error::$1"; }
@@ -89,7 +89,7 @@ EOF
 #
 # 曾经这里是「找含 bin/ 且旁边有 app 或 lib/app 的根」，那在 Linux 上成立，
 # 在 Windows 上却从来没成立过：jpackage 的 Windows 布局压根没有 bin/，
-# 启动器就是根目录下的 com.kxxnzstdsw.sundays.exe。本仓库主要在 Windows 上开发，
+# 启动器就是根目录下的 com.langbiantianya.sundays.exe。本仓库主要在 Windows 上开发，
 # 一条判据只对一半平台成立就意味着本地永远复现不了 CI 的路径 ——
 # 而这份脚本的价值恰恰在于能在本地跑。
 #

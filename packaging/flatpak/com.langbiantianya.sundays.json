@@ -1,0 +1,64 @@
+{
+  "//": "Sundays 的 Flatpak manifest。几条反直觉的硬约束，都踩过，改之前先读完：①id 必须全小写 —— Flatpak 的应用 ID 规范只允许 [a-z0-9_-] 与点，首版写成 com.langbiantianya.Sundays 被 flatpak-builder 当场拒掉，0 秒就退。②command 必须写绝对路径 /app/bin/...，不能写 bin/... —— builder-manifest.c 的 builder_manifest_finish() 里，相对路径会被整个当作文件名挂到 files/bin/ 下（即 files/bin/bin/...），哪怕 files/bin/x 明明存在且可执行也照样报 Command not found；官方测试清单里 command: hello.sh 那种写法只适合「整串就是文件名」。③runtime 与 sdk 本身**都没有 JVM**，JDK 来自 SDK 扩展 org.freedesktop.Sdk.Extension.openjdk，且它只在构建时可见；运行时要用必须跑它自带的 /usr/lib/sdk/openjdk/install.sh，把 JVM 落到 /app/jre，由我们的 shell 启动器 exec。这是「用 Flatpak 的 JDK」在 Flatpak 体系里唯一的落地方式。④【最容易踩的一条，也是本仓库真踩过的】sdk-extensions 里**只能写裸名，不能带 //分支**。org.freedesktop.Sdk//26.08 自己就声明了 org.freedesktop.Sdk.Extension.openjdk 这个扩展点，所以裸名能对上；写成 org.freedesktop.Sdk.Extension.openjdk//26.08 反而会挂，报错是 Requested extension org.freedesktop.Sdk.Extension.openjdk//26.08/x86_64/26.08 not installed（注意那串诡异的重复拼接，见 README）。原因在 flatpak 的 build-init 源码 ensure_extensions()：它只调 flatpak_parse_extension_with_tag() 剥 @tag，**完全不解析 //分支**，然后拿整串去跟 SDK metadata 里声明的扩展点 id 比；报错消息则把整串再拼上 <arch>/<分支>，于是就成了那句看起来像路径拼接错误的话。**扩展装在哪个分支与 manifest 无关** —— 那是 flatpak install 时的事。⑤**不要用 GNOME 运行时**（org.gnome.Platform//51）。GNOME 51 架在 freedesktop 26.08 上，多带一整层 GNOME 平台，本应用一个 GNOME 库都用不上；而启动器绕不开的那个 JDK 空指针（GTKLookAndFeel 拆 gnome-shell 版本，沙箱里没有该二进制）跟运行时是哪一家无关，换回去也不会自己好。⑥org.freedesktop.Platform.GL.default 这类**运行时扩展**不是 manifest 键，别往 sdk-extensions 里塞。flatpak-builder 只有 sdk-extensions 与 platform-extensions 两个键，源码里两者都被翻译成同一句 flatpak build-init --sdk-extension=（把扩展挂进构建沙箱的 /usr）；flatpak metadata 里也没有应用级的「依赖这些运行时扩展」键（runtime-extensions 只存在于 [Instance]，那是 flatpak 部署时写给运行实例看的）。运行时扩展随运行时一起被拉取与挂载，应用侧什么都不用声明。⑦应用本体由 .github/scripts/assemble-flatpak-app.sh 在 flatpak-builder 外面拼好，这里只负责装配与导出元数据，不参与编译。⑧build-commands 同时写 /app 与 files/ 两处：历史上只写其中之一都被证伪过（写 files/ 时收尾阶段报 Command not found，写 /app 时若沙箱前缀不是 files 同样落空），两处都写就不必再赌 flatpak-builder 各版本对模块沙箱前缀的解析差异。末尾那行 CHK 会同时报 /app 与模块 files/ 两处的落地情况，正是为了不再验错地方。选型理由与全部踩坑见同目录 README.md。",
+
+  "id": "com.langbiantianya.sundays",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "26.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.openjdk"
+  ],
+  "command": "/app/bin/com.langbiantianya.sundays",
+
+  "finish-args": [
+    "--share=ipc",
+    "--socket=x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--share=network",
+    "--filesystem=home"
+  ],
+
+  "cleanup": [
+    "/include",
+    "/lib/pkgconfig",
+    "/share/man",
+    "*.a",
+    "*.la"
+  ],
+
+  "modules": [
+    {
+      "name": "openjdk",
+      "buildsystem": "simple",
+      "build-commands": [
+        "/usr/lib/sdk/openjdk/install.sh",
+        "test -x /app/jre/bin/java",
+        "echo CHK java=$(/app/jre/bin/java -version 2>&1 | head -n1)",
+        "echo CHK desktop=$(/app/jre/bin/java --list-modules 2>/dev/null | grep -c '^java.desktop')",
+        "echo CHK javac=$(test -x /app/jre/bin/javac && echo yes || echo no)",
+        "missing=$(ldd /app/jre/lib/server/libjvm.so 2>/dev/null | grep -c 'not found'); echo CHK missing_libs=$missing; test \"$missing\" -eq 0"
+      ]
+    },
+    {
+      "name": "sundays",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p /app files",
+        "if [ -d sundays-app ]; then cp -a sundays-app/. /app/; cp -a sundays-app/. files/; else cp -a bin share /app/; cp -a bin share files/; fi",
+        "mkdir -p /app/share/applications /app/share/icons/hicolor/256x256/apps files/share/applications files/share/icons/hicolor/256x256/apps",
+        "install -Dm644 com.langbiantianya.sundays.desktop /app/share/applications/com.langbiantianya.sundays.desktop",
+        "install -Dm644 com.langbiantianya.sundays.png /app/share/icons/hicolor/256x256/apps/com.langbiantianya.sundays.png",
+        "install -Dm644 com.langbiantianya.sundays.desktop files/share/applications/com.langbiantianya.sundays.desktop",
+        "install -Dm644 com.langbiantianya.sundays.png files/share/icons/hicolor/256x256/apps/com.langbiantianya.sundays.png",
+        "test -x /app/bin/com.langbiantianya.sundays",
+        "echo CHK launcher=$(test -x /app/bin/com.langbiantianya.sundays && echo yes || echo no) modfiles=$(test -e files/bin/com.langbiantianya.sundays && echo yes || echo no) jars=$(ls /app/share/sundays/app/*.jar 2>/dev/null | wc -l)"
+      ],
+      "sources": [
+        { "type": "dir", "path": "sundays-app" },
+        { "type": "file", "path": "com.langbiantianya.sundays.desktop" },
+        { "type": "file", "path": "com.langbiantianya.sundays.png" }
+      ]
+    }
+  ]
+}

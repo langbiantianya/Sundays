@@ -19,7 +19,7 @@ engine-protocol/
     ├── proto/
     │   ├── idb_engine.proto          # gRPC service + 全部 message schemas（Category/Action + 13 类请求响应，含 v2.16 的 IMPORT）
     │   └── idb_export.proto          # 导出子进程 RPC（ExportHub）
-    └── kotlin/com/kxxnzstdsw/client/
+    └── kotlin/com/langbiantianya/client/
         └── EngineClient.kt           # 调用层契约接口
 ```
 
@@ -55,7 +55,7 @@ v2.15 起：
 ## `EngineClient` 接口
 
 ```kotlin
-package com.kxxnzstdsw.client
+package com.langbiantianya.client
 
 interface EngineClient : AutoCloseable {
     /** 主入口 —— 与 gRPC stub `IdbEngineCoroutineStub.handle(req)` 语义完全一致 */

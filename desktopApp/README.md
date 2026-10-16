@@ -172,10 +172,10 @@ dependencies {
 启动与实现选择（`main.kt`）：
 
 ```kotlin
-import com.kxxnzstdsw.client.EngineClient
-import com.kxxnzstdsw.client.grpc.GrpcClientConfig
-import com.kxxnzstdsw.client.grpc.GrpcEngineClient
-import com.kxxnzstdsw.engine.IdbEngine
+import com.langbiantianya.client.EngineClient
+import com.langbiantianya.client.grpc.GrpcClientConfig
+import com.langbiantianya.client.grpc.GrpcEngineClient
+import com.langbiantianya.engine.IdbEngine
 
 /** 选择 gRPC 引擎端点的系统属性名。 */
 const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"

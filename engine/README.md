@@ -19,7 +19,7 @@
 > - **`IpcConfig.fromArgs` 修复（v2.15）** —— `--mode <value>` 现在被跳过（由 `IdbEngineServer.parseMode` 单独解析），此前 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 会以 `Unknown argument: '--mode'` 失败
 > - **619 个测试全通过（277 engine + 63 H2 + 81 DuckDB + 62 SQLite + 97 shared + 21 engine-grpc-client + 18 desktopApp；1 个 Windows-only `IpcConfigTest` 用例跳过）**
 > - **双模式架构**：默认 `--mode grpc` 启动 gRPC server；`--mode direct` 启动 standalone direct 模式；KMP Desktop 通过 `implementation(project(":engine"))` 走 library 直调路径
-> - **`IdbEngine` —— `EngineClient` 的同进程实现（v2.9）** —— `com.kxxnzstdsw.engine.IdbEngine`，KMP Desktop 与引擎共享同一个 JVM，直接调用 `engine.handle(request): Flow<Response>`，零 gRPC channel、零 IPC、零子进程；与 gRPC stub `Flow<Response>` 语义完全一致（含 `stream`/`end` 流式分帧、envelope options `traceId`/`dryRun`/`timeoutMs`）。`invoke` 与 `testConnection(jdbcUrl, user, password)` 是接口上的 default 方法，不在类里
+> - **`IdbEngine` —— `EngineClient` 的同进程实现（v2.9）** —— `com.langbiantianya.engine.IdbEngine`，KMP Desktop 与引擎共享同一个 JVM，直接调用 `engine.handle(request): Flow<Response>`，零 gRPC channel、零 IPC、零子进程；与 gRPC stub `Flow<Response>` 语义完全一致（含 `stream`/`end` 流式分帧、envelope options `traceId`/`dryRun`/`timeoutMs`）。`invoke` 与 `testConnection(jdbcUrl, user, password)` 是接口上的 default 方法，不在类里
 > - **`IdbEngineImpl.handle` 薄壳化（v2.9）** —— gRPC server 重构为直接桥接 `IdbEngine.handle`，两条路径共享 `RequestDispatcher` 与全部 envelope options 语义
 > - **`--mode <grpc|direct>` CLI（v2.9）** —— `IdbEngineServer` 新增 mode 选择；`direct` 模式仅 bootstrap drivers/dialects 后阻塞主线程，供 shell 测试或守护进程使用
 > - **`RequestDispatcher.dispatch` catch 移到 `.catch{}` operator（v2.9）** —— 修复 `AbortFlowException`（kotlinx-coroutines 内部异常，下游取消时上游 emit 抛出）被 `flow{}` 内部 try/catch 错误捕获并再次 emit 而触发的 *"Flow exception transparency violated"* 异常；让 direct 调用方能正常用 `first()` / `takeWhile` 等短路算子
@@ -76,7 +76,7 @@ idb_engine/
 
 产物位于 `engine/build/libs/`：
 ```
-idb-engine.jar          主引擎瘦包（Main-Class: com.kxxnzstdsw.MainKt）
+idb-engine.jar          主引擎瘦包（Main-Class: com.langbiantianya.MainKt）
 libs/                   运行时依赖（gRPC、HikariCP、LuaJIT、POI、Parquet…）
 drivers/                JDBC 驱动（mysql-connector-j / postgresql / h2 / duckdb_jdbc / sqlite-jdbc）
 dialects/               方言插件（idb-dialect-{mysql,postgresql,h2,duckdb,sqlite}.jar，5 个 SPI 动态加载）
@@ -242,9 +242,9 @@ for {
 
 ## Direct 直接模式（v2.9 新增）
 
-除了 gRPC 服务端入口外，引擎还提供**进程内实现** —— `com.kxxnzstdsw.engine.IdbEngine`，允许**同 JVM 客户端**（典型场景：KMP Desktop Compose Multiplatform 应用）直接调用引擎方法，**完全跳过 gRPC channel、IPC transport、序列化**。
+除了 gRPC 服务端入口外，引擎还提供**进程内实现** —— `com.langbiantianya.engine.IdbEngine`，允许**同 JVM 客户端**（典型场景：KMP Desktop Compose Multiplatform 应用）直接调用引擎方法，**完全跳过 gRPC channel、IPC transport、序列化**。
 
-> **v2.15 —— `IdbEngine` 只是 `EngineClient` 的两个实现之一。** 接口 `com.kxxnzstdsw.client.EngineClient`（在 `:engine-protocol`）是 transport-agnostic 的调用层契约：
+> **v2.15 —— `IdbEngine` 只是 `EngineClient` 的两个实现之一。** 接口 `com.langbiantianya.client.EngineClient`（在 `:engine-protocol`）是 transport-agnostic 的调用层契约：
 >
 > | 实现 | 模块 | 通道 | 场景 |
 > |---|---|---|---|
@@ -273,7 +273,7 @@ KMP Desktop 前端（Compose Multiplatform）与引擎部署在同一个 JVM 进
 
 ```kotlin
 // 位于 :engine-protocol —— 两个实现（IdbEngine / GrpcEngineClient）共用的调用层契约
-package com.kxxnzstdsw.client
+package com.langbiantianya.client
 
 interface EngineClient : AutoCloseable {
     /** 主入口：与 gRPC stub `IdbEngineCoroutineStub.handle()` 签名一致 */
@@ -303,7 +303,7 @@ interface EngineClient : AutoCloseable {
 }
 ```
 
-同进程实现（`package com.kxxnzstdsw.engine`，位于 `:engine`）：
+同进程实现（`package com.langbiantianya.engine`，位于 `:engine`）：
 
 ```kotlin
 class IdbEngine(
@@ -351,8 +351,8 @@ dependencies {
 
 `desktopApp/src/main/kotlin/.../main.kt`：
 ```kotlin
-import com.kxxnzstdsw.client.EngineClient
-import com.kxxnzstdsw.engine.IdbEngine
+import com.langbiantianya.client.EngineClient
+import com.langbiantianya.engine.IdbEngine
 import kotlinx.coroutines.flow.first
 
 fun main() = application {
@@ -420,7 +420,7 @@ check(resp.success) { "engine error: ${resp.error}" }
 
 ### 契约测试
 
-`engine/src/test/kotlin/com/kxxnzstdsw/integration/IdbEngineDirectTest.kt`（4 项）覆盖：
+`engine/src/test/kotlin/com/langbiantianya/integration/IdbEngineDirectTest.kt`（4 项）覆盖：
 1. **非流式响应**：`handle(request).first()` 返回单条 `Response`（`stream=false, end=false`，proto 默认）
 2. **`invoke` 便捷方法**：等价于 `handle().first()`，适合单条查询
 3. **错误传播**：handler 抛异常 → `Response.success=false, error=<msg>`（不抛异常、不污染 Flow）
@@ -717,7 +717,7 @@ SYSTEM 还支持 `TEST_CONNECTION` / `SERVER_INFO` / **`LIST_DRIVERS`**（v2.8 �
 
 #### 多语句脚本 — `multi_statement = true`（v2.16 新增）
 
-`SqlExecuteRequest` 增加 `multi_statement`（字段 3，默认 `false`）。为 `true` 时，`sql` 字段被当作**整段脚本**：`com.kxxnzstdsw.engine.SqlScriptSplitter.split(script)` 在**词法层面**把它切成顶层语句列表，逐条按序执行。
+`SqlExecuteRequest` 增加 `multi_statement`（字段 3，默认 `false`）。为 `true` 时，`sql` 字段被当作**整段脚本**：`com.langbiantianya.engine.SqlScriptSplitter.split(script)` 在**词法层面**把它切成顶层语句列表，逐条按序执行。
 
 ```json
 // 一次提交多条语句
@@ -833,7 +833,7 @@ val closed = engine.disconnect(connection)   // true = 确实关掉了池
 
 #### CANCEL — 取消正在执行的请求（v2.16 新增，`Action.CANCEL = 20`）
 
-**为什么只靠协程取消不够**：`SqlEngineHandler.execute` 里的 `rs.next()` 跑在 `Dispatchers.IO` 线程上，是**阻塞的 JDBC 调用**。取消上游 Flow 只会让协程挂起，那条 IO 线程仍在数据库里把查询跑完 —— 只有对**那条正在执行的 `Statement`** 调 `Statement.cancel()` 才能真正让数据库侧停下来。`com.kxxnzstdsw.engine.StatementRegistry` 就是「运行中的请求 id → 可取消目标」的**单一取消通道**（基于 `ConcurrentHashMap<String, CancelTarget>`，`CancelTarget` 是一个 `fun interface { fun cancel() }`，因此既能包装 JDBC `Statement`，也能承载任意取消动作）。
+**为什么只靠协程取消不够**：`SqlEngineHandler.execute` 里的 `rs.next()` 跑在 `Dispatchers.IO` 线程上，是**阻塞的 JDBC 调用**。取消上游 Flow 只会让协程挂起，那条 IO 线程仍在数据库里把查询跑完 —— 只有对**那条正在执行的 `Statement`** 调 `Statement.cancel()` 才能真正让数据库侧停下来。`com.langbiantianya.engine.StatementRegistry` 就是「运行中的请求 id → 可取消目标」的**单一取消通道**（基于 `ConcurrentHashMap<String, CancelTarget>`，`CancelTarget` 是一个 `fun interface { fun cancel() }`，因此既能包装 JDBC `Statement`，也能承载任意取消动作）。
 
 ```json
 // 取消 id 为 "r22" 的请求（target_request_id 即被取消请求的 Request.id）
@@ -861,7 +861,7 @@ val closed = engine.disconnect(connection)   // true = 确实关掉了池
 
 #### BEGIN / COMMIT / ROLLBACK / SESSION_INFO — 事务会话（v2.16 新增，`Action = 22 / 23 / 24 / 25`）
 
-**模型**：事务的前提是「一批写操作落在**同一条**连接上」，而连接池每次借出都可能是不同的物理连接。因此 `SystemHandler.begin` 从池里**钉住**一条连接、置 `autocommit=false`，把它交给 `com.kxxnzstdsw.pool.TransactionManager` 持有，直到 COMMIT / ROLLBACK 才归还。调用方拿到 `session_id` 后，随每个请求顶层的 `Request.session_id` 下发。
+**模型**：事务的前提是「一批写操作落在**同一条**连接上」，而连接池每次借出都可能是不同的物理连接。因此 `SystemHandler.begin` 从池里**钉住**一条连接、置 `autocommit=false`，把它交给 `com.langbiantianya.pool.TransactionManager` 持有，直到 COMMIT / ROLLBACK 才归还。调用方拿到 `session_id` 后，随每个请求顶层的 `Request.session_id` 下发。
 
 ```json
 // 开启会话
@@ -1284,7 +1284,7 @@ val closed = engine.disconnect(connection)   // true = 确实关掉了池
 
 1. 创建 Gradle 模块，依赖 `api` 项目
 2. 实现 `DatabaseDialect` 接口，声明 `override val driverName = "YourDriver"`
-3. 在 `src/main/resources/META-INF/services/com.kxxnzstdsw.dialect.DatabaseDialect` 中写入实现类全限定名
+3. 在 `src/main/resources/META-INF/services/com.langbiantianya.dialect.DatabaseDialect` 中写入实现类全限定名
 4. 构建后将 JAR 放入 `engine/build/libs/dialects/` 目录
 5. 重启引擎即自动加载，无需修改主引擎代码
 
@@ -1388,11 +1388,11 @@ SQLite 方言支持：SCHEMA / TABLE（含自增 PK 走 inline `INTEGER PRIMARY 
 | v2.6 | 表驱动 Dispatcher + 跨切面 Envelope Options | `RequestDispatcher` 重构：9 个 `handleX` 函数 + 11 个 `wrapTypedResponse` when 分支 → 单个 typed `routes` map（`Pair<Category, Action>` → `Route`）；新 (Category, Action) 仅需一个 map 条目；消除 `wrapTypedResponse` 中静默 `else -> {}` 兜底；`SQL.EXPLAIN` 路由打通（之前 handler 存在但 dispatcher 未路由）。新增 `RequestOptions { trace_id, dry_run, timeout_ms }`：MDC 注入 `trace_id`；`dryRun=true` + write action 直接短路返回 success（不修改数据库）；`timeoutMs>0` 包 `withTimeoutOrNull` 超时返回 `error="timeout"`。`if_exists` / `if_not_exists` 在 SCHEMA/TABLE/INDEX/FOREIGN_KEY 路径下贯通（v2.6 之前仅 VIEW/FUNCTION.DELETE 支持）。191 测试全通过（128 engine + 63 H2）|
 | **v2.7** | **DuckDB 方言插件（本地嵌入式 OLAP）** | 新增 `dialect-duckdb` 模块（driver `Duckdb`，JDBC `org.duckdb.DuckDBDriver` 1.5.5.1），仅本地嵌入式（内存 / `.duckdb` / `.csv` / `.parquet` / `.json` / `.xlsx`）；`host`/`port` 完全忽略，`database` 字段即路径。Excel 走 Apache POI 5.5.1 预转换为临时 DuckDB（`ExcelToDuckDbCache` 缓存避免重复转换）。**自增主键**用 `SEQUENCE + DEFAULT nextval + 表级 PRIMARY KEY` 兜底（因 DuckDB 1.5.5.1 不接受 `IDENTITY`+表级 PK 组合，也不支持 `INTEGER PRIMARY KEY` ROWID 自填充）。**FK** 走 table-rebuild（因 DuckDB 不支持 `ALTER TABLE ADD/DROP CONSTRAINT` + 忽略 `CONSTRAINT fk_name`，自动生成 `<table>_<cols>_fkey`）。`SHOW CREATE TABLE/VIEW` 解析失败 → 手动从 `information_schema` 重建 DDL。`duckdb_functions()` MACRO 列名 `macro_definition`（不是 `definition`/`description`）。`duckdb_constraints()` 无 `column_name`，只有 `constraint_column_names` (LIST)。FK `ON DELETE/UPDATE CASCADE/SET NULL/SET DEFAULT` 不支持 → 全部改写为 `NO ACTION`。同文件不同连接配置冲突 → 测试 fixture 强制走 `PoolManager`（不混用 `DriverManager`）。**新 SPI 方法** `DatabaseDialect.buildPreCreateStatements(tableName, autoIncrementColumns): List<String>`（默认空实现）。gRPC 依赖 `1.76.0` → `1.83.1`，`grpc-kotlin-stub` `1.4.1` → `1.5.0`，`protobuf-kotlin-lite` `3.25.8` → `4.35.1`。299 测试全通过（81 DuckDB + 63 H2 + 155 engine）|
 | **v2.8** | **SQLite 方言插件 + SPI 连接元数据扩展 + SYSTEM.LIST_DRIVERS** | 新增 `dialect-sqlite` 模块（driver `Sqlite`，JDBC `org.sqlite.JDBC` 3.46.1.3），仅本地嵌入式（`:memory:` / `.db` 文件）；`host`/`port`/`user`/`password` 全部忽略，`database` 字段即路径。**自增主键**走 inline `INTEGER PRIMARY KEY AUTOINCREMENT`（必须 INTEGER 类型；`TableHandler.create` 检测到 `autoIncrementColumns` 时跳过表级 `PRIMARY KEY` 子句避免 "more than one primary key"）。**FK** 走 table-rebuild（CREATE temp AS SELECT → DROP → CREATE with FK → INSERT → DROP temp），`addForeignKey` 不支持 CONSTRAINT 子句名（SQLite CREATE TABLE 语法）。`MODIFY_COLUMN` 仅支持 RENAME（SQLite 无 ALTER COLUMN）。`TRUNCATE` 用 `DELETE FROM` + 重置 `sqlite_sequence`。多 database 走 `ATTACH/DETACH`。USER / PRIVILEGE / TRIGGER / FUNCTION（routines）抛 `UnsupportedOperationException`。SQL 危险关键词额外禁用 `ATTACH` / `DETACH` / `PRAGMA` / `REPLACE` / `VACUUM` / `REINDEX`。**SPI 元数据扩展**：`DatabaseDialect` 新增 `displayName` / `connectionType` / `requiresHost` / `requiresPort` / `defaultPort` / `supportsUser` / `supportsPassword` / `supportsSchema` / `supportsCrossDatabase` / `jdbcUrlExample` / `capabilities` 11 个属性（默认实现，**完全向后兼容**）。新增 `ConnectionType` 枚举（`CLIENT_SERVER` / `EMBEDDED` / `FILE_BASED` / `IN_MEMORY`）+ `DialectCapability` 枚举（12 个能力标签）。**`SYSTEM.LIST_DRIVERS` action（Action 18）**：枚举所有已加载方言并返回 `repeated DialectInfo` 元数据，供前端**动态渲染"新建连接"表单**；`RequestDispatcher` 表驱动新增 `(SYSTEM, LIST_DRIVERS) → Route` 一条；`DialectLoader.getAllDialects()` 提供枚举入口；`items` 按 `driverName` 字典序升序。**376 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 170 engine）|
-| **v2.9** | **KMP Desktop Direct 模式 + 双模式架构** | 前端框架从 Wails（v3 gRPC 子进程）正式迁移到 **Kotlin Multiplatform Compose Desktop**（`desktopApp/` Gradle 模块），引擎与 UI 同 JVM 部署。为消除 gRPC channel / IPC transport / protobuf 序列化等冗余开销，新增 **`com.kxxnzstdsw.engine.IdbEngine` facade**：`handle(Request): Flow<Response>` 与 gRPC stub 同形，`invoke(connection, configure): Response` 为单条便捷方法；`IdbEngineImpl` 重构为 `IdbEngine.handle()` 的薄壳，两条路径共享 `RequestDispatcher` 与全部 envelope options（`traceId` / `dryRun` / `timeoutMs`）。新增 CLI 参数 `--mode <grpc\|direct>`：`direct` 模式仅 bootstrap drivers/dialects 后阻塞主线程，供 shell 测试 / 守护进程 / 嵌入式场景使用。**`RequestDispatcher.dispatch` catch 移到 `.catch{}` operator**（v2.9 修复）：原 `flow{}` 内部 try/catch 会错误捕获下游短路算子（如 `first()` / `takeWhile`）抛出的 `AbortFlowException` 并再次 emit，触发 *"Flow exception transparency violated"*；外置后 `AbortFlowException` 正常向上传播。`desktopApp/build.gradle.kts` 新增 `implementation(project(":engine"))`，UI 与引擎共享方言 / 驱动 / 连接池 / 线程池生命周期。**新增 IdbEngineDirectTest（4 项 direct 模式契约测试）**：非流式响应、`invoke` 便捷、错误传播、bootstrap 幂等性。**380 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 174 engine）|
+| **v2.9** | **KMP Desktop Direct 模式 + 双模式架构** | 前端框架从 Wails（v3 gRPC 子进程）正式迁移到 **Kotlin Multiplatform Compose Desktop**（`desktopApp/` Gradle 模块），引擎与 UI 同 JVM 部署。为消除 gRPC channel / IPC transport / protobuf 序列化等冗余开销，新增 **`com.langbiantianya.engine.IdbEngine` facade**：`handle(Request): Flow<Response>` 与 gRPC stub 同形，`invoke(connection, configure): Response` 为单条便捷方法；`IdbEngineImpl` 重构为 `IdbEngine.handle()` 的薄壳，两条路径共享 `RequestDispatcher` 与全部 envelope options（`traceId` / `dryRun` / `timeoutMs`）。新增 CLI 参数 `--mode <grpc\|direct>`：`direct` 模式仅 bootstrap drivers/dialects 后阻塞主线程，供 shell 测试 / 守护进程 / 嵌入式场景使用。**`RequestDispatcher.dispatch` catch 移到 `.catch{}` operator**（v2.9 修复）：原 `flow{}` 内部 try/catch 会错误捕获下游短路算子（如 `first()` / `takeWhile`）抛出的 `AbortFlowException` 并再次 emit，触发 *"Flow exception transparency violated"*；外置后 `AbortFlowException` 正常向上传播。`desktopApp/build.gradle.kts` 新增 `implementation(project(":engine"))`，UI 与引擎共享方言 / 驱动 / 连接池 / 线程池生命周期。**新增 IdbEngineDirectTest（4 项 direct 模式契约测试）**：非流式响应、`invoke` 便捷、错误传播、bootstrap 幂等性。**380 测试全通过（1 个 Windows-only skip），0 失败 / 0 错误**（62 SQLite + 81 DuckDB + 63 H2 + 174 engine）|
 | **v2.11** | **仅凭 JDBC URL 初始化连接 + 连接生命周期直连方法** | proto `ConnectionConfig` 新增 `jdbc_url`：非空时 `PoolManager` 直接用它建 HikariCP 池（`host`/`port`/`database` 忽略），pool key 纳入 `jdbc_url`。方言反查：`DatabaseDialect.jdbcUrlPrefix`（默认 `jdbc:<driverName 小写>:`）+ `DialectLoader.getDialectByJdbcUrl()` 最长前缀匹配；无匹配时 `PoolManager.resolveDialect` 抛可读错误而非回退 `driver`。`IdbEngine` facade 新增 `testConnection(config)` / `testConnection(jdbcUrl, user, password)` —— 不经 gRPC / IPC / `RequestDispatcher` envelope，直接调 `SystemHandler.testConnection`，首次调用即建/复用连接池（**连接初始化**）并做 JDBC `isValid(5)` |
 | **v2.12** | **连接生命周期补全（disconnect）+ 方言装配双通道** | `IdbEngine.disconnect(config)` → `PoolManager.close(config)`：释放该配置下**所有** schema 维度的连接池，与 `testConnection` 构成对称生命周期；pool key 由单段 hash 改为两段式 `sha256(配置)#sha256(schema)`（单段 hash 无法按配置定位池），新增 `activePoolCount()` 供诊断 / 测试断言。`DialectLoader.loadFromDir` 新增**应用类路径 SPI**通道（`ServiceLoader<DatabaseDialect>`，用自身类加载器）并在其后用 `dialects/` 目录插件覆盖同名方言 —— Direct 模式（UI 与引擎同 JVM）无需外部 `dialects/` 目录，`desktopApp` 以 `runtimeOnly(project(":dialect-*"))` + 5 个 JDBC 驱动装配；修复了此前 Direct 模式下方言注册表为空、`testConnection` 必然报 `No dialect plugin matches JDBC URL` 的问题 |
-| **v2.15** | **调用层抽象：`EngineClient` + proto 下沉 + `SYSTEM.DISCONNECT`** | 新增 **`EngineClient` 接口**（`:engine-protocol`，`package com.kxxnzstdsw.client`）：`handle` / `invoke`（default）/ `testConnection(config)` / `testConnection(jdbcUrl, user, password)`（default）/ `disconnect` / `close`。`IdbEngine` 改为其**同进程实现**（`invoke` 与 JDBC URL 重载从类中移除，成为接口 default 方法）。proto 契约（`idb_engine.proto` / `idb_export.proto`）与 protobuf gradle 插件块从 `:engine` 移入新模块 **`:engine-protocol`**（`engine` 改为 `api(project(":engine-protocol"))`）；新增 **`:engine-grpc-client`** 提供同一接口的**跨进程 gRPC 实现** `GrpcEngineClient`（仅依赖 `:engine-protocol`）。新增 `SYSTEM.DISCONNECT`（`Action = 19`）：`SystemDisconnectResponse { bool closed = 1; }` + `SystemResponse.disconnect = 5`，handler `SystemHandler.disconnect(config)`（`suspend`，`withContext(Dispatchers.IO)` 内 `PoolManager.close(config)`），dispatcher 表驱动路由 `SYSTEM/DISCONNECT` → `b.system = systemResponse { disconnect = ... }`，并列入 `writeActions` 使 `dryRun` 短路；**原因**：连接池在引擎进程内，远端调用方需要 wire 路由才能释放；**幂等**（第二次 `closed=false`）。`IpcConfig.fromArgs` 修复：`--mode <value>` 跳过（由 `IdbEngineServer.parseMode` 单独解析），此前 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 报 `Unknown argument: '--mode'`。**394 测试全通过（188 engine + 63 H2 + 81 DuckDB + 62 SQLite）** |
-| **v2.16 (当前)** | **四大写路径能力：查询取消 + 数据导入 + 事务会话 + 多语句脚本** | 新增 6 个 action：`CANCEL = 20` / `RUN_IMPORT = 21` / `BEGIN = 22` / `COMMIT = 23` / `ROLLBACK = 24` / `SESSION_INFO = 25`，新 Category `IMPORT = 14`，`Request.session_id = 6`。**查询取消**：`com.kxxnzstdsw.engine.StatementRegistry`（`ConcurrentHashMap<String, CancelTarget>`，`CancelTarget` 为 `fun interface { fun cancel() }`）登记「运行中请求 → 可取消目标」，`SYSTEM.CANCEL` 对其调 `Statement.cancel()`（协程取消无法中断阻塞的 JDBC 调用）；接入 `SQL.EXECUTE` / `DATA.LIST`（`pageSize=0`）/ `DATA.GENERATE`（Lua 阻塞在 JNI，改由 `GenerateState.cancelled` 标志 + `activeStmt` 阻断，已跑批次不回滚）；被取消请求以**原 id** 返回 `success=false, error="cancelled"`。**数据导入**：新 Kotlin 包 `com.kxxnzstdsw.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）+ `ImportHandler.executeInMainProcess`，**主进程**运行（正因如此批次可登记取消），CSV / JSON_LINES 批量插入；`has_header` 为 `optional bool`（未设置默认 `true`）；`ignore_errors=true` 改逐行 `executeUpdate`（坏行可归因，牺牲吞吐），默认 `false` 批量遇错即停；非事务导入失败可能残留已提交批次，需「全有或全无」时配合事务会话回滚。**事务**：`com.kxxnzstdsw.pool.TransactionManager` 钉住连接 + `autocommit=false`，`Request.session_id` 留空 = 无事务（与 v2.15 完全一致，向后兼容）；未知会话的写操作**拒绝**而非静默自动提交；`maximumPoolSize = 5` → 单配置最多 5 个并发会话（刻意背压）。**多语句**：`SqlScriptSplitter` 单趟词法分句（引号 / 注释 / PG dollar-quoting，仅顶层 `;`），按序执行、遇错即停，逐条结果入 `SqlExecuteResponse.statements`。**619 测试全通过（277 engine + 63 H2 + 81 DuckDB + 62 SQLite + 97 shared + 21 engine-grpc-client + 18 desktopApp）** |
+| **v2.15** | **调用层抽象：`EngineClient` + proto 下沉 + `SYSTEM.DISCONNECT`** | 新增 **`EngineClient` 接口**（`:engine-protocol`，`package com.langbiantianya.client`）：`handle` / `invoke`（default）/ `testConnection(config)` / `testConnection(jdbcUrl, user, password)`（default）/ `disconnect` / `close`。`IdbEngine` 改为其**同进程实现**（`invoke` 与 JDBC URL 重载从类中移除，成为接口 default 方法）。proto 契约（`idb_engine.proto` / `idb_export.proto`）与 protobuf gradle 插件块从 `:engine` 移入新模块 **`:engine-protocol`**（`engine` 改为 `api(project(":engine-protocol"))`）；新增 **`:engine-grpc-client`** 提供同一接口的**跨进程 gRPC 实现** `GrpcEngineClient`（仅依赖 `:engine-protocol`）。新增 `SYSTEM.DISCONNECT`（`Action = 19`）：`SystemDisconnectResponse { bool closed = 1; }` + `SystemResponse.disconnect = 5`，handler `SystemHandler.disconnect(config)`（`suspend`，`withContext(Dispatchers.IO)` 内 `PoolManager.close(config)`），dispatcher 表驱动路由 `SYSTEM/DISCONNECT` → `b.system = systemResponse { disconnect = ... }`，并列入 `writeActions` 使 `dryRun` 短路；**原因**：连接池在引擎进程内，远端调用方需要 wire 路由才能释放；**幂等**（第二次 `closed=false`）。`IpcConfig.fromArgs` 修复：`--mode <value>` 跳过（由 `IdbEngineServer.parseMode` 单独解析），此前 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 报 `Unknown argument: '--mode'`。**394 测试全通过（188 engine + 63 H2 + 81 DuckDB + 62 SQLite）** |
+| **v2.16 (当前)** | **四大写路径能力：查询取消 + 数据导入 + 事务会话 + 多语句脚本** | 新增 6 个 action：`CANCEL = 20` / `RUN_IMPORT = 21` / `BEGIN = 22` / `COMMIT = 23` / `ROLLBACK = 24` / `SESSION_INFO = 25`，新 Category `IMPORT = 14`，`Request.session_id = 6`。**查询取消**：`com.langbiantianya.engine.StatementRegistry`（`ConcurrentHashMap<String, CancelTarget>`，`CancelTarget` 为 `fun interface { fun cancel() }`）登记「运行中请求 → 可取消目标」，`SYSTEM.CANCEL` 对其调 `Statement.cancel()`（协程取消无法中断阻塞的 JDBC 调用）；接入 `SQL.EXECUTE` / `DATA.LIST`（`pageSize=0`）/ `DATA.GENERATE`（Lua 阻塞在 JNI，改由 `GenerateState.cancelled` 标志 + `activeStmt` 阻断，已跑批次不回滚）；被取消请求以**原 id** 返回 `success=false, error="cancelled"`。**数据导入**：新 Kotlin 包 `com.langbiantianya.importer`（`ImportSource` / `ImportFormat` / `CsvReader`（RFC-4180 状态机）/ `JsonLinesReader` / `ImportSourceFactory`）+ `ImportHandler.executeInMainProcess`，**主进程**运行（正因如此批次可登记取消），CSV / JSON_LINES 批量插入；`has_header` 为 `optional bool`（未设置默认 `true`）；`ignore_errors=true` 改逐行 `executeUpdate`（坏行可归因，牺牲吞吐），默认 `false` 批量遇错即停；非事务导入失败可能残留已提交批次，需「全有或全无」时配合事务会话回滚。**事务**：`com.langbiantianya.pool.TransactionManager` 钉住连接 + `autocommit=false`，`Request.session_id` 留空 = 无事务（与 v2.15 完全一致，向后兼容）；未知会话的写操作**拒绝**而非静默自动提交；`maximumPoolSize = 5` → 单配置最多 5 个并发会话（刻意背压）。**多语句**：`SqlScriptSplitter` 单趟词法分句（引号 / 注释 / PG dollar-quoting，仅顶层 `;`），按序执行、遇错即停，逐条结果入 `SqlExecuteResponse.statements`。**619 测试全通过（277 engine + 63 H2 + 81 DuckDB + 62 SQLite + 97 shared + 21 engine-grpc-client + 18 desktopApp）** |
 
 ---
 

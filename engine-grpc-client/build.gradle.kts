@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "1.0-SNAPSHOT"
 
 // gRPC 调用模块 —— EngineClient 接口的跨进程实现。

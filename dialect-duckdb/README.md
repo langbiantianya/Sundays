@@ -39,10 +39,10 @@ dialect-duckdb/
 ├── build.gradle.kts              # 依赖 :api + kotlinx-coroutines + slf4j + POI + POI-OOXML
 │                                # test: JUnit 5 + duckdb
 └── src/
-    ├── main/kotlin/com/kxxnzstdsw/dialect/
+    ├── main/kotlin/com/langbiantianya/dialect/
     │   ├── DuckDBDialect.kt      # 主实现（1249 行）
     │   └── ExcelToDuckDbCache.kt # Excel → 临时 DuckDB 转换缓存（v2.26 起含表头判定）
-    └── test/kotlin/com/kxxnzstdsw/dialect/
+    └── test/kotlin/com/langbiantianya/dialect/
         ├── DuckDBDialectTest.kt      # 81 个方言测试
         └── ExcelToDuckDbCacheTest.kt # 6 项：转换产物的**行为**（库名 / 列名 / 行数 / 缓存 / 退化）
 ```

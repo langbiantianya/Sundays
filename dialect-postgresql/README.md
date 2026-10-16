@@ -33,7 +33,7 @@ idb_engine 的 **PostgreSQL 方言实现**，以 SPI 插件形式提供。
 ```
 dialect-postgresql/
 ├── build.gradle.kts          # 依赖 :api + kotlinx-coroutines + slf4j
-└── src/main/kotlin/com/kxxnzstdsw/dialect/
+└── src/main/kotlin/com/langbiantianya/dialect/
     └── PostgreSQLDialect.kt  # 单文件实现（1695 行，最大方言文件）
 ```
 

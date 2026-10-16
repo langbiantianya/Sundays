@@ -69,8 +69,8 @@ i18n  ──api──▶ shared
 ### Composable 上下文（UI 层）
 
 ```kotlin
-import com.kxxnzstdsw.sundays.ui.str
-import com.kxxnzstdsw.sundays.ui.plural
+import com.langbiantianya.sundays.ui.str
+import com.langbiantianya.sundays.ui.plural
 
 Text(str(StrKey.CANCEL))
 Text(str(StrKey.CONFIRM_DELETE_CONNECTION, connection.name))   // 占位符按顺序传
@@ -83,7 +83,7 @@ Text(plural(PluralStrKey.ROWS_COUNT, rowCount, rowCount))
 ### 非组合上下文（引擎、方言、日志）
 
 ```kotlin
-import com.kxxnzstdsw.i18n.Msg
+import com.langbiantianya.i18n.Msg
 
 throw IllegalArgumentException(Msg.format(StrKey.DUCKDB_NO_ON_DELETE, table, ref))
 Msg.text(StrKey.EXPORT_FAILED)

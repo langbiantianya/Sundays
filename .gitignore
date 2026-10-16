@@ -65,7 +65,7 @@ bin/
 /flatpak-build/
 /flatpak-repo/
 /packaging/flatpak/sundays-app/
-/packaging/flatpak/com.kxxnzstdsw.sundays.png
+/packaging/flatpak/com.langbiantianya.sundays.png
 /*.flatpak
 
 ### Mac OS ###

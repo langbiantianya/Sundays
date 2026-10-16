@@ -8,7 +8,7 @@ dependencies {
     implementation(project(":i18n"))
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "0.1.0"
 
 tasks.jar {

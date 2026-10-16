@@ -89,8 +89,8 @@
 **调用层契约（v2.15 — `EngineClient` 接口，位于 `:engine-protocol`）**：
 
 ```kotlin
-// engine-protocol/src/main/kotlin/com/kxxnzstdsw/client/EngineClient.kt
-// package com.kxxnzstdsw.client
+// engine-protocol/src/main/kotlin/com/langbiantianya/client/EngineClient.kt
+// package com.langbiantianya.client
 interface EngineClient : AutoCloseable {
     fun handle(request: Request): Flow<Response>
 
@@ -141,7 +141,7 @@ interface EngineClient : AutoCloseable {
 | 新消息 | `SystemDisconnectResponse { bool closed = 1; }` —— `true` = 确实关闭了至少一个池；`false` = 该配置当前没有活跃池 |
 | `SystemResponse` oneof | 新增 `SystemDisconnectResponse disconnect = 5;` |
 
-**Handler**（`engine/src/main/kotlin/com/kxxnzstdsw/handlers/SystemHandler.kt`）：
+**Handler**（`engine/src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt`）：
 
 ```kotlin
 suspend fun disconnect(config: ConnectionConfig): SystemDisconnectResponse =
@@ -337,7 +337,7 @@ v2.16 新增 6 个 action 与 1 个 category：
 
 ### 3.6 跨平台 IPC 传输抽象 (Cross-Platform IPC Transport Abstraction)
 
-引擎在 gRPC 之上抽象了一层 **IPC Transport SPI**（`com.kxxnzstdsw.ipc.IpcTransport`），允许通过 CLI 参数在三种传输方式之间切换，无需修改业务代码。`IdbEngineServer` 在启动时调用 `IpcConfig.fromArgs(args)` 解析配置，再通过 `IpcTransportRegistry.resolve(cfg)` 获取传输实例，进而拿到 `ServerBuilder<*>` / `ManagedChannelBuilder<*>`，业务层完全不感知底层传输。
+引擎在 gRPC 之上抽象了一层 **IPC Transport SPI**（`com.langbiantianya.ipc.IpcTransport`），允许通过 CLI 参数在三种传输方式之间切换，无需修改业务代码。`IdbEngineServer` 在启动时调用 `IpcConfig.fromArgs(args)` 解析配置，再通过 `IpcTransportRegistry.resolve(cfg)` 获取传输实例，进而拿到 `ServerBuilder<*>` / `ManagedChannelBuilder<*>`，业务层完全不感知底层传输。
 
 **三种传输方式**：
 
@@ -395,7 +395,7 @@ v2.16 的三个写路径能力（**查询取消** / **事务** / **数据导入*
 
 #### 3.7.1 `StatementRegistry` —— 单一取消通道
 
-`com.kxxnzstdsw.engine.StatementRegistry`（object）把「运行中的请求 id」映射到「可取消目标」：
+`com.langbiantianya.engine.StatementRegistry`（object）把「运行中的请求 id」映射到「可取消目标」：
 
 ```kotlin
 object StatementRegistry {
@@ -428,7 +428,7 @@ Lua 脚本通过 luajava **在 JNI 里阻塞执行**，协程取消与 `Statemen
 
 #### 3.7.3 事务会话（`SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`）
 
-`com.kxxnzstdsw.pool.TransactionManager`（object）持有活跃会话（`ConcurrentHashMap<String, TransactionSession>`）：
+`com.langbiantianya.pool.TransactionManager`（object）持有活跃会话（`ConcurrentHashMap<String, TransactionSession>`）：
 
 - `begin(config, schema)`：从池借一条连接、置 `autoCommit=false`、分配 UUID、登记会话。
 - `connectionFor(sessionId, config, schema)`：返回会话钉住的连接，且**仅当 schema 与 `appliedSchema` 不同时**才 `setSearchPath`（避免每条语句重复 `SET`）。
@@ -1077,7 +1077,7 @@ MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重�
 **架构要点**：
 
 - **主进程运行**（非子进程）：导入只是「读文件 + 批量 prepared insert」，没有 POI / Parquet / Hadoop 重依赖；放主进程的直接收益是**取消可用** —— 批次语句登记到 `StatementRegistry`，`SYSTEM.CANCEL` 能立刻打断正在执行的 `executeBatch()`，无需 kill 子进程。
-- **Kotlin 包 `com.kxxnzstdsw.importer`**（引擎模块内）：`ImportSource`（`ApiAutoCloseable`，`columns` + `rows(): Iterator<Map<String,String>>`）/ `ImportFormat`（`CSV` / `JSON_LINES`，`parse` 大小写不敏感）/ `CsvReader` / `JsonLinesReader` / `ImportSourceFactory`。
+- **Kotlin 包 `com.langbiantianya.importer`**（引擎模块内）：`ImportSource`（`ApiAutoCloseable`，`columns` + `rows(): Iterator<Map<String,String>>`）/ `ImportFormat`（`CSV` / `JSON_LINES`，`parse` 大小写不敏感）/ `CsvReader` / `JsonLinesReader` / `ImportSourceFactory`。
 - **`ImportSourceFactory.open(req, targetColumns)`** 集中决策默认值：`delimiter` 取第一个字符（空 → `,`）、`encoding` 空 → UTF-8、`has_header` **未设置 → true**（`optional bool` 保留 presence 语义，与 `DataListRequest.page_size` 同一套处理）；文件缺失 / 不可读 / 空路径 → `IllegalArgumentException` 并带路径。
 - **`ImportHandler.executeInMainProcess(request): Flow<Response>`**：若干 `ImportProgressFrame`（`stream=true, end=false`）+ 一条终止帧（`end=true`，携带 `ImportResultResponse`）。
 - `truncate_first` 委托方言 SPI `Dialect.truncateTable`。

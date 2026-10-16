@@ -4,23 +4,23 @@
 > 用例覆盖的是**已经落地**的能力（见 [`FEATURES.md` §3.1](./FEATURES.md)），
 > 逐条在**真实 H2 与真实 SQLite** 上执行，界面用 `runComposeUiTest` 驱动真实渲染与点击。
 >
-> - 执行代码：[`FeatureWalkthroughTest.kt`](./src/test/kotlin/com/kxxnzstdsw/sundays/FeatureWalkthroughTest.kt)
-> - 方言能力差异：[`WalkthroughTarget.kt`](./src/test/kotlin/com/kxxnzstdsw/sundays/WalkthroughTarget.kt)
+> - 执行代码：[`FeatureWalkthroughTest.kt`](./src/test/kotlin/com/langbiantianya/sundays/FeatureWalkthroughTest.kt)
+> - 方言能力差异：[`WalkthroughTarget.kt`](./src/test/kotlin/com/langbiantianya/sundays/WalkthroughTarget.kt)
 > - 截图落盘：`desktopApp/build/gui-shots/`
 >
 > **方言层的冒烟另有两份**（不经界面，直接打引擎，验的是方言 / 引擎那一层）：
 >
 > | 文档 / 测试 | 覆盖 |
 > |---|---|
-> | [`DialectSmokeTest`](./src/test/kotlin/com/kxxnzstdsw/sundays/DialectSmokeTest.kt) | **五个方言**（H2 / SQLite / DuckDB / MySQL / PostgreSQL）× 7 项：连通 / 写读闭环 / 过滤排序搜索下推 / 对象浏览 / 取 DDL / 多语句 / 事务可见性 |
-> | [`DuckDbFileSourceTest`](./src/test/kotlin/com/kxxnzstdsw/sundays/DuckDbFileSourceTest.kt) | **文件型数据源**：CSV / JSON Lines / Parquet / Excel |
+> | [`DialectSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectSmokeTest.kt) | **五个方言**（H2 / SQLite / DuckDB / MySQL / PostgreSQL）× 7 项：连通 / 写读闭环 / 过滤排序搜索下推 / 对象浏览 / 取 DDL / 多语句 / 事务可见性 |
+> | [`DuckDbFileSourceTest`](./src/test/kotlin/com/langbiantianya/sundays/DuckDbFileSourceTest.kt) | **文件型数据源**：CSV / JSON Lines / Parquet / Excel |
 
 ---
 
 ## 0. 怎么执行
 
 ```powershell
-.\gradlew.bat :desktopApp:test --tests "com.kxxnzstdsw.sundays.FeatureWalkthroughTest" --console=plain
+.\gradlew.bat :desktopApp:test --tests "com.langbiantianya.sundays.FeatureWalkthroughTest" --console=plain
 ```
 
 **为什么是 `runComposeUiTest` 而不是手点真窗口**：本机合成鼠标输入（`SendInput` /
@@ -288,7 +288,7 @@
 ## 6. 连上真数据源之后的功能测试（`ConnectedSourceEndToEndTest`）
 
 > 这一节补的是此前**三类测试各覆盖一半、没人串起来**的那道缝。
-> 执行代码：[`ConnectedSourceEndToEndTest.kt`](./src/test/kotlin/com/kxxnzstdsw/sundays/ConnectedSourceEndToEndTest.kt)
+> 执行代码：[`ConnectedSourceEndToEndTest.kt`](./src/test/kotlin/com/langbiantianya/sundays/ConnectedSourceEndToEndTest.kt)
 
 ### 6.1 补的是哪条缺口
 

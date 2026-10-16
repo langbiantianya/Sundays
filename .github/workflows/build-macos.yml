@@ -152,7 +152,7 @@ jobs:
           set -o pipefail
           EXPECTED="${{ matrix.machoCpu }}"
           APP_DIR="desktopApp/build/compose/binaries/main/app"
-          APP="$APP_DIR/com.kxxnzstdsw.sundays.app"
+          APP="$APP_DIR/com.langbiantianya.sundays.app"
           fail=0
 
           # 不用 find 的 -quit：那是 GNU/BSD 的扩展，macOS 自带的 BSD find
@@ -178,7 +178,7 @@ jobs:
             exit 1
           fi
 
-          launcher="$APP/Contents/MacOS/com.kxxnzstdsw.sundays"
+          launcher="$APP/Contents/MacOS/com.langbiantianya.sundays"
           if [ ! -f "$launcher" ]; then
             echo "::warning::CHK1 启动器缺失"
             echo "::warning::CHK1b MacOS 目录: $(brief "$(ls -A "$APP/Contents/MacOS" 2>&1 || true)")"

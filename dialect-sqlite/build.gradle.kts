@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "0.1.0"
 
 dependencies {

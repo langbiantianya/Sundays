@@ -991,7 +991,7 @@ onEditConnection = { conn -> wizard = WizardState(conn, BASIC_INFO, NORMAL) }
 
 ### 4.7 `SqlIdentifier` —— 前端侧的标识符引用（对象树「复制引用名」）
 
-[`connection/SqlIdentifier.kt`](./src/commonMain/kotlin/com/kxxnzstdsw/sundays/connection/SqlIdentifier.kt)
+[`connection/SqlIdentifier.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/SqlIdentifier.kt)
 把一个裸名按方言包成可粘贴进 SQL 编辑器的引用：`quote` / `path` / `qualified` / `tableRef` / `databaseRef`。
 
 `path(dialect, vararg parts)` 是逐段引用后用 `.` 连接，**跳过空段**——
@@ -1690,9 +1690,9 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 
 | shared/ 是否能引用 | 是 / 否 |
 |---|---|
-| `com.kxxnzstdsw.engine.*` | ❌ 任何情况下禁止 |
+| `com.langbiantianya.engine.*` | ❌ 任何情况下禁止 |
 | `idb_engine.proto` / protobuf | ❌ 禁止 |
-| `com.kxxnzstdsw.dialect.*` | ❌ 禁止 |
+| `com.langbiantianya.dialect.*` | ❌ 禁止 |
 | `kotlinx-coroutines` | ✅ 允许（仅 `LaunchedEffect` 用到） |
 | Compose Foundation / Material3 | ✅ 允许 |
 | `androidx.lifecycle.viewmodelCompose` | ✅ 允许（`shared/build.gradle.kts` 已声明） |
@@ -1798,7 +1798,7 @@ typealias ContextMenuState = ContextMenuState<TableRow>   // 注意：表格包�
 | [根 `README.md`](../../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`engine/ARCHITECTURE.md`](../../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式架构下，二者在 `desktopApp/` 集成层组合） |
-| [`sundays`](../../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 演示 `SundaysTheme` + `AppDestination` + `ConnectionManagerScreen` 的端到端用法 |
+| [`sundays`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt) | 演示 `SundaysTheme` + `AppDestination` + `ConnectionManagerScreen` 的端到端用法 |
 
 ---
 

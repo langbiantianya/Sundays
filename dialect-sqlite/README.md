@@ -41,9 +41,9 @@ idb_engine 的 **SQLite 方言实现** —— **本地嵌入式关系型数据�
 dialect-sqlite/
 ├── build.gradle.kts              # 依赖 :api + kotlinx-coroutines + slf4j + JUnit 5 + sqlite
 └── src/
-    ├── main/kotlin/com/kxxnzstdsw/dialect/
+    ├── main/kotlin/com/langbiantianya/dialect/
     │   └── SQLiteDialect.kt      # 单文件实现（778 行）
-    └── test/kotlin/com/kxxnzstdsw/dialect/
+    └── test/kotlin/com/langbiantianya/dialect/
         └── SQLiteDialectTest.kt  # 62 个方言测试
 ```
 

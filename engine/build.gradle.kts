@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "1.0-SNAPSHOT"
 
 dependencies {
@@ -149,7 +149,7 @@ tasks.jar {
     archiveClassifier.set("")
     archiveVersion.set("")
     manifest {
-        attributes["Main-Class"] = "com.kxxnzstdsw.server.IdbEngineServer"
+        attributes["Main-Class"] = "com.langbiantianya.server.IdbEngineServer"
         attributes["Class-Path"] = configurations.runtimeClasspath.get().joinToString(" ") {
             "libs/${it.name}"
         }

@@ -53,7 +53,7 @@ dependencies {
     implementation(libs.compose.uiToolingPreview)
 
     // Compose UI 测试（runComposeUiTest）+ JUnit4：连接管理流程端到端验证见
-    // src/test/kotlin/com/kxxnzstdsw/sundays/ConnectionManagerFlowTest.kt
+    // src/test/kotlin/com/langbiantianya/sundays/ConnectionManagerFlowTest.kt
     testImplementation(libs.compose.uiTest)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.testJunit)
@@ -81,11 +81,11 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.kxxnzstdsw.sundays.MainKt"
+        mainClass = "com.langbiantianya.sundays.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.kxxnzstdsw.sundays"
+            packageName = "com.langbiantianya.sundays"
             packageVersion = "1.0.0"
 
             // ---------------------------------------------------------------
@@ -153,7 +153,7 @@ compose.desktop {
                 // 所以光给 menuGroup 也算开了；两个都写是为了让意图不必靠 getter 猜。
                 menu = true
                 // 不给 menuGroup 的话，开始菜单文件夹名会退回产品名
-                // com.kxxnzstdsw.sundays。
+                // com.langbiantianya.sundays。
                 menuGroup = "Sundays"
 
                 // ---------------------------------------------------------------

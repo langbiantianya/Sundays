@@ -13,8 +13,8 @@ bash .github/scripts/assemble-flatpak-app.sh
 flatpak install flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08 \
   org.freedesktop.Sdk.Extension.openjdk//26.08
 flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
-  packaging/flatpak/com.kxxnzstdsw.sundays.json
-flatpak build-bundle flatpak-repo sundays.flatpak com.kxxnzstdsw.sundays master
+  packaging/flatpak/com.langbiantianya.sundays.json
+flatpak build-bundle flatpak-repo sundays.flatpak com.langbiantianya.sundays master
 ```
 
 bundle 里含的是本应用（外加同 repo 里的 debug runtime）；
@@ -23,7 +23,7 @@ freedesktop 运行时与 JDK 扩展来自 Flathub，
 
 **导出时分支取 ref 的最后一段。**
 `flatpak-builder` 导出的 ref 完整形状是 `app/<id>/<arch>/<branch>` ——
-实测就是 `app/com.kxxnzstdsw.sundays/x86_64/master`。取「`app/<id>/` 之后的
+实测就是 `app/com.langbiantianya.sundays/x86_64/master`。取「`app/<id>/` 之后的
 全部」会把 `<arch>` 一并当成分支名，`flatpak build-bundle` 会回一句
 `Branch can't contain /` 而失败。`${ref##*/}` 取的才是分支。
 
@@ -31,14 +31,14 @@ freedesktop 运行时与 JDK 扩展来自 Flathub，
 
 | 文件 | 作用 |
 | --- | --- |
-| `com.kxxnzstdsw.sundays.json` | manifest，flatpak-builder 读它 |
-| `com.kxxnzstdsw.sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
-| `com.kxxnzstdsw.sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
+| `com.langbiantianya.sundays.json` | manifest，flatpak-builder 读它 |
+| `com.langbiantianya.sundays.desktop` | 桌面项，导出后才有开始菜单/启动器图标 |
+| `com.langbiantianya.sundays.png` | 图标，由组装脚本从 `desktopApp/src/main/resources/icons/sundays_256.png` 拷来，**不入库** |
 | `sundays-app/` | 组装好的应用目录（只有 jar + 资源 + 启动脚本），**不入库** |
 
 改 `desktopApp/build.gradle.kts` 里的 `nativeDistributions.packageName` 时，
 `.github/scripts/assemble-flatpak-app.sh` 的 `LAUNCHER_NAME` 与
-`com.kxxnzstdsw.sundays.json` 的 `command` 要一起改。
+`com.langbiantianya.sundays.json` 的 `command` 要一起改。
 **主类不用改**：启动器里的主类是从 jpackage 生成的 `.cfg` 的 `app.mainclass`
 读出来的，脚本里没有第二份。
 
@@ -360,7 +360,7 @@ if [ -z "$JAVA" ] || [ ! -x "$JAVA" ]; then
   echo "Sundays: 找不到可用的 java（期望 /app/jre/bin/java，来自 org.freedesktop.Sdk.Extension.openjdk）" >&2
   exit 127
 fi
-exec "$JAVA" '-Djpackage.app-version=1.0.0' '-Dcompose.application.resources.dir=/app/share/sundays/app/resources' '-Dcompose.application.configure.swing.globals=true' '-Dskiko.library.path=/app/share/sundays/app' -cp "$APPDIR/*" 'com.kxxnzstdsw.sundays.MainKt' "$@"
+exec "$JAVA" '-Djpackage.app-version=1.0.0' '-Dcompose.application.resources.dir=/app/share/sundays/app/resources' '-Dcompose.application.configure.swing.globals=true' '-Dskiko.library.path=/app/share/sundays/app' -cp "$APPDIR/*" 'com.langbiantianya.sundays.MainKt' "$@"
 ```
 
 两个细节：
@@ -375,14 +375,14 @@ exec "$JAVA" '-Djpackage.app-version=1.0.0' '-Dcompose.application.resources.dir
 
 **组装脚本用「目录里有 jar 也有 `.cfg`」定位应用本体，不看目录叫什么。**
 Linux 的 app-image 是 `lib/app/`，Windows 是 `app/`；更关键的是 Windows 布局
-**根本没有 `bin/`**（启动器就是根下的 `com.kxxnzstdsw.sundays.exe`）。
+**根本没有 `bin/`**（启动器就是根下的 `com.langbiantianya.sundays.exe`）。
 第一版的定位判据是「含 `bin/` 且旁边有 `app` 或 `lib/app` 的根」，
 在 Linux 上成立、在 Windows 上从来没成立过 —— 而这个仓库主要在 Windows 上
 开发，一条只对一半平台成立的判据意味着本地永远复现不了 CI 的路径，
 也就失去了「能在本地跑」这个唯一价值。
 
-**应用 ID 必须全小写：`com.kxxnzstdsw.sundays`。**
-Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.kxxnzstdsw.Sundays`
+**应用 ID 必须全小写：`com.langbiantianya.sundays`。**
+Flatpak 的应用 ID 只允许 `[a-z0-9_-]` 与点。首版写成 `com.langbiantianya.Sundays`
 （跟着 `mainClass` 的大写 S 走），`flatpak-builder` 当场拒收，**0 秒退出**。
 
 **不装 `Platform.GL` / `Platform.Vulkan` / `GL.default` 扩展。**
@@ -432,8 +432,8 @@ else if (g_str_has_prefix (self->command, "/app/"))
 ```
 
 **相对路径的 `command` 会被整个当作文件名挂到 `files/bin/` 下面。**
-所以 `bin/com.kxxnzstdsw.sundays` 实际找的是
-`files/bin/bin/com.kxxnzstdsw.sundays` —— 哪怕 `files/bin/com.kxxnzstdsw.sundays`
+所以 `bin/com.langbiantianya.sundays` 实际找的是
+`files/bin/bin/com.langbiantianya.sundays` —— 哪怕 `files/bin/com.langbiantianya.sundays`
 明明存在且可执行（build-commands 末尾那行 `CHK` 会打出 `exists=yes exec=yes`
 佐证），也照样报 `Command not found`。相对写法只适合「command 就是个
 可执行文件名」的老式用法，官方测试清单里就是 `"command": "hello.sh"`。

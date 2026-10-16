@@ -102,8 +102,8 @@ shared/
 ### 1. CodeEditor（编辑器）
 
 ```kotlin
-import com.kxxnzstdsw.sundays.editor.ui.CodeEditorWithToolbar
-import com.kxxnzstdsw.sundays.editor.ui.registerBuiltinEditors
+import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
+import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 
 registerBuiltinEditors()  // 注册 SQL / Lua + formatter（启动时调一次，幂等）
 
@@ -124,10 +124,10 @@ fun SqlEditor() {
 ### 2. DataTable（数据表格）
 
 ```kotlin
-import com.kxxnzstdsw.sundays.table.DataTable
-import com.kxxnzstdsw.sundays.table.TableColumn
-import com.kxxnzstdsw.sundays.table.TableRow
-import com.kxxnzstdsw.sundays.table.PageSize
+import com.langbiantianya.sundays.table.DataTable
+import com.langbiantianya.sundays.table.TableColumn
+import com.langbiantianya.sundays.table.TableRow
+import com.langbiantianya.sundays.table.PageSize
 
 @Composable
 fun UserTable() {
@@ -157,11 +157,11 @@ fun UserTable() {
 ### 3. ConnectionManagerScreen（连接管理）
 
 ```kotlin
-import com.kxxnzstdsw.sundays.connection.ConnectionManagerScreen
-import com.kxxnzstdsw.sundays.connection.ConnectionStorage
-import com.kxxnzstdsw.sundays.connection.TestResult
-import com.kxxnzstdsw.sundays.connection.WizardFlow
-import com.kxxnzstdsw.sundays.connection.WizardStep
+import com.langbiantianya.sundays.connection.ConnectionManagerScreen
+import com.langbiantianya.sundays.connection.ConnectionStorage
+import com.langbiantianya.sundays.connection.TestResult
+import com.langbiantianya.sundays.connection.WizardFlow
+import com.langbiantianya.sundays.connection.WizardStep
 
 var list by remember { mutableStateOf(ConnectionStorage.load()) }
 var selected by remember { mutableStateOf<ConnectionConfig?>(null) }
@@ -206,9 +206,9 @@ ConnectionManagerScreen(
 
 > 调用方需自行维护 `WizardState(editingConnection, wizardStep, flow)`，并在切换入口（新建 / 快速连接 / 编辑）时**同步**设置 `flow` —— 详见 [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) §4.6。
 >
-> 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开 → 重连」全链路。
+> 完整的可测状态机实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt)：它把上述回调逻辑收敛成一个类，`ConnectionManagerFlowTest` 用真引擎 + 真点击跑通「选方言 → 填字段 → 测试 → 连接 → 断开 → 重连」全链路。
 
-端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) —— `MainScreen` 用本模块的 `AppDestination` + `ConnectionManagerScreen` 组成顶层导航。
+端到端 demo：见 [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt) —— `MainScreen` 用本模块的 `AppDestination` + `ConnectionManagerScreen` 组成顶层导航。
 
 ---
 
@@ -281,4 +281,4 @@ ConnectionManagerScreen(
 | [根 `README.md`](../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`shared/ARCHITECTURE.md`](./ARCHITECTURE.md) | **内部架构设计**：高度策略、可扩展性、databind 模式、与引擎解耦边界 |
 | [`engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（v2.9 Direct 模式下通过 `desktopApp/` 集成） |
-| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/kxxnzstdsw/sundays/main.kt) | 端到端演示：`AppDestination` 顶层导航 + `ConnectionManagerScreen` 连接管理 |
+| [`desktopApp/main.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt) | 端到端演示：`AppDestination` 顶层导航 + `ConnectionManagerScreen` 连接管理 |

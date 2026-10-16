@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.protobuf)
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "1.0-SNAPSHOT"
 
 // 协议层：proto 源 + 生成的 typed 消息 / gRPC stub + 调用层契约（EngineClient）。
@@ -73,7 +73,7 @@ protobuf {
                 id("grpc")
                 id("grpckt")
             }
-            // 生成 Kotlin DSL（com.kxxnzstdsw.grpc.ColumnDefKt 等），业务层通过 columnDef { ... } 构造
+            // 生成 Kotlin DSL（com.langbiantianya.grpc.ColumnDefKt 等），业务层通过 columnDef { ... } 构造
             task.builtins {
                 id("kotlin") {
                     option("lite")

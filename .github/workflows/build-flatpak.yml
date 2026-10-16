@@ -144,7 +144,7 @@ jobs:
           fi
 
           # 启动器现在是 /bin/sh 脚本，不再是 ELF 可执行文件，只查存在且可执行。
-          launcher="$STAGE/bin/com.kxxnzstdsw.sundays"
+          launcher="$STAGE/bin/com.langbiantianya.sundays"
           if [ ! -x "$launcher" ]; then
             echo "::error::$launcher 不存在或不可执行"
             fail=1
@@ -211,7 +211,7 @@ jobs:
       - name: 校验 manifest 与 env 一致
         run: |
           set -u
-          M=packaging/flatpak/com.kxxnzstdsw.sundays.json
+          M=packaging/flatpak/com.langbiantianya.sundays.json
           flat() { sed '/^[[:space:]]*"\/\/":/d' "$M"; }
           pick() { flat | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n1; }
           fail=0
@@ -385,7 +385,7 @@ jobs:
           #   相对且带 '/'   → files/bin/<整串>（整串当文件名挂到 bin 下）
           #   相对裸文件名   → files/bin/<该文件名>
           cmd="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-                 com.kxxnzstdsw.sundays.json | head -n1)"
+                 com.langbiantianya.sundays.json | head -n1)"
           case "$cmd" in
             /*) rel="${cmd#/app/}" ;;
             */*)
@@ -404,7 +404,7 @@ jobs:
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --repo="$GITHUB_WORKSPACE/flatpak-repo" \
             "$GITHUB_WORKSPACE/flatpak-build" \
-            com.kxxnzstdsw.sundays.json > "$GITHUB_WORKSPACE/builder.log" 2>&1
+            com.langbiantianya.sundays.json > "$GITHUB_WORKSPACE/builder.log" 2>&1
           rc=$?
           cd "$GITHUB_WORKSPACE"
           echo "::warning::flatpak-builder 退出码 = $rc"
@@ -433,7 +433,7 @@ jobs:
           # 上一版它写死了 files/sundays，那还是几轮前嵌套布局时的路径，
           # 应用改到 /app 根之后它就一直误报，把已经成功的构建判成失败。
           built="$(sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-                  packaging/flatpak/com.kxxnzstdsw.sundays.json | head -n1)"
+                  packaging/flatpak/com.langbiantianya.sundays.json | head -n1)"
           built="${built#/app/}"
           if [ ! -e "flatpak-build/files/$built" ]; then
             echo "::error::退出码 0 但 flatpak-build/files/$built 不存在 —— 产物没落到应用目录"
@@ -492,9 +492,9 @@ jobs:
           set +e
           ostree --repo=flatpak-repo refs > repo-refs.txt 2>&1
           sed 's/^/::warning::repo ref: /' repo-refs.txt
-          ref="$(grep '^app/com\.kxxnzstdsw\.sundays/' repo-refs.txt | head -n1)"
+          ref="$(grep '^app/com\.langbiantianya\.sundays/' repo-refs.txt | head -n1)"
           if [ -z "$ref" ]; then
-            echo "::error::repo 里没有 app/com.kxxnzstdsw.sundays 的 ref —— flatpak-builder 那步多半没真导出"
+            echo "::error::repo 里没有 app/com.langbiantianya.sundays 的 ref —— flatpak-builder 那步多半没真导出"
             echo "::error::repo 目录内容：$(ls -A flatpak-repo 2>&1 | tr '\n' ' ')"
             exit 1
           fi
@@ -502,7 +502,7 @@ jobs:
           echo "::warning::ref=$ref，分支=$branch"
           flatpak build-bundle flatpak-repo \
             "sundays-flatpak-${{ matrix.flatpakArch }}.flatpak" \
-            com.kxxnzstdsw.sundays "$branch" > bundle.log 2>&1
+            com.langbiantianya.sundays "$branch" > bundle.log 2>&1
           rc=$?
           # 同样只取末尾 9 行，理由见「构建 Flatpak」那步的注释。
           tail -n 9 bundle.log | while IFS= read -r line; do echo "::error::$line"; done

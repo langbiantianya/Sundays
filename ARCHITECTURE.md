@@ -19,7 +19,7 @@
 
 ## 2. 调用层架构（v2.15 核心）
 
-调用方只面向 **`EngineClient` 接口**（`com.kxxnzstdsw.client.EngineClient`）编程，**不感知引擎在同进程还是跨进程**：
+调用方只面向 **`EngineClient` 接口**（`com.langbiantianya.client.EngineClient`）编程，**不感知引擎在同进程还是跨进程**：
 
 | 模式 | 实现 | 模块 | 通道 | 适用场景 |
 |---|---|---|---|---|

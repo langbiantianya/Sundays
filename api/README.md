@@ -15,7 +15,7 @@
 ```
 api/
 ├── build.gradle.kts                                  # 零外部依赖
-└── src/main/kotlin/com/kxxnzstdsw/dialect/
+└── src/main/kotlin/com/langbiantianya/dialect/
     ├── DatabaseDialect.kt                            # 核心 SPI 接口（621 行，~50 个方法/属性）
     ├── ConnectionType.kt                             # CLIENT_SERVER / EMBEDDED / FILE_BASED / IN_MEMORY
     ├── DialectCapability.kt                          # 12 个能力标签（USERS / VIEWS / ROUTINES ...）
@@ -129,7 +129,7 @@ val dialect = DialectLoader.getDialectByJdbcUrl("jdbc:mysql://localhost:3306/db"
 
 1. **Gradle 依赖**：新建 `dialect-mydb/` 模块，`implementation(project(":api"))`
 2. **实现接口**：创建 `class MyDbDialect : DatabaseDialect { override val driverName = "Mydb" ... }`
-3. **注册 SPI**：在 `dialect-mydb/src/main/resources/META-INF/services/com.kxxnzstdsw.dialect.DatabaseDialect` 写入：
+3. **注册 SPI**：在 `dialect-mydb/src/main/resources/META-INF/services/com.langbiantianya.dialect.DatabaseDialect` 写入：
    ```
    com.mydb.MyDbDialect
    ```

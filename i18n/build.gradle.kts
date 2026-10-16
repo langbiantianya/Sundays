@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.kxxnzstdsw"
+group = "com.langbiantianya"
 version = "1.0-SNAPSHOT"
 
 // 刻意**不**声明 `jvmToolchain(…)` / `sourceCompatibility` —— 与 :api / :engine 保持一致，
