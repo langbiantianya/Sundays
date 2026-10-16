@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.dialect
 
 import com.langbiantianya.i18n.Msg
@@ -26,10 +34,33 @@ interface DatabaseDialect {
     fun buildJdbcUrl(host: String, port: Int, database: String): String
 
     /**
-     * 该方言的 JDBC URL 前缀（如 `jdbc:mysql:`）—— 用于从裸 JDBC URL 反查方言实例。
+     * 该方言的 JDBC URL 前缀（如 `jdbc:mysql:`）—— 用于从**裸 JDBC URL** 反查方言实例。
      *
-     * 默认按 `jdbc:<driverName 小写>:` 推导；不满足该约定的方言**必须**显式覆盖，
-     * 否则仅凭 URL 无法定位方言。
+     * ## 为什么需要它
+     *
+     * `ConnectionConfig` 里除了 `driver` 还有一个 `jdbc_url` 字段。两者不一致时，
+     * 引擎以 **URL 为准**：`PoolManager.resolveDialect(config)` 拿到非空 `jdbc_url`
+     * 就按前缀定位方言，**忽略** `driver` / `host` / `port` / `database`。
+     *
+     * ```kotlin
+     * DialectLoader.getDialectByJdbcUrl("jdbc:mysql://localhost:3306/db")   // → MySQLDialect
+     * ```
+     *
+     * 反查**失败时抛可读错误，不回退 `driver`** —— 回退会让用户拿到「连的是 A 库、
+     * 却按 B 库的能力渲染界面」的状态，那种静默错配比连不上危险得多。
+     *
+     * ## 匹配规则
+     *
+     * 多个方言同时匹配时取**最长前缀**，为将来更具体的嵌套前缀留出余地
+     * （例如 `jdbc:h2:` 与某个更长的子前缀共存）。
+     *
+     * ## 契约
+     *
+     * 默认按 `jdbc:<driverName 小写>:` 推导，**仅当命名恰好对上时**才正确。
+     * 5 个内置方言全部显式覆盖了本属性，不依赖命名巧合：
+     * `jdbc:mysql:` / `jdbc:postgresql:` / `jdbc:h2:` / `jdbc:duckdb:` / `jdbc:sqlite:`。
+     * 新增方言时若 `driverName` 与 URL scheme 不一致（很常见），
+     * **必须**覆盖它，否则仅凭 URL 无法定位。
      */
     val jdbcUrlPrefix: String get() = "jdbc:${driverName.lowercase()}:"
 

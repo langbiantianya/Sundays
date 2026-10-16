@@ -1,3 +1,11 @@
+<#
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  
+  Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+#>
+
 param(
   [Parameter(Mandatory=$true)][int]$TargetProcessId,
   # 可选：把窗口缩到指定尺寸（逻辑像素）。不给就不动尺寸。

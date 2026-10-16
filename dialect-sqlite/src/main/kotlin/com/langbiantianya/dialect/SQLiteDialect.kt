@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.dialect
 
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +35,15 @@ import java.sql.Connection
  * - 不支持 `ALTER TABLE DROP COLUMN`（3.35+ 才支持，默认保守禁用）
  * - 无 schema 概念（除 `main` / `temp`）
  * - 多 database 走 `ATTACH '<path>' AS <alias>`
+ *
+ * ## 流式查询：必须临时关掉 `autoCommit`
+ *
+ * SQLite 不认 MySQL 那条 `Statement.setFetchSize(Integer.MIN_VALUE)` 服务端游标约定，
+ * 流式读取只能靠事务内的 cursor —— 与 PostgreSQL / H2 同理，
+ * `configureConnectionForStreaming` 保存原状态再关闭，`restoreConnectionAfterStreaming` 恢复。
+ *
+ * ⚠️ 关掉 `autoCommit` 之后若不恢复，这条连接会**一直留在一个未提交的事务里**，
+ * 后续写语句会被同一个事务吞掉，且可能被 `SQLITE_BUSY` 锁住读不到别人未提交的改动。
  */
 class SQLiteDialect : DatabaseDialect {
     private val logger = LoggerFactory.getLogger(SQLiteDialect::class.java)

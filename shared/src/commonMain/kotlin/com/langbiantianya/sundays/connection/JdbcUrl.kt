@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays.connection
 
 /**
@@ -77,9 +85,19 @@ private fun decodeUserInfo(raw: String): String {
 /**
  * 从 [ConnectionConfig] 的字段构建 JDBC URL。
  *
+ * ## 排障入口：PG 一律「尝试连线已失败」而 MySQL 正常
+ *
+ * 先看第 3 步（凭据页）的 URL 框里**有没有多出 `user:pass@`**。
+ * `org.postgresql.Driver` 根本不认 userinfo，会把整段当主机名，最终抛
+ * `UnknownHostException`，外层再包成一句无信息量的「尝试连线已失败」。
+ * 正常形状应是 `jdbc:postgresql://host:5432/db`（凭据走 Hikari 的
+ * `username`/`password` 与持久化的独立字段，两条路都不经过 URL）。
+ * 存量脏 URL 由 [normalizeJdbcUrl] 在加载时摘掉。
+ *
  * @param extraQuery 显式 query 参数（不含 `?`）。非空时**完全替代**方言默认参数；为空时补 MySQL 默认参数。
  *   向导的 JDBC URL 输入框把用户书写/解析出的参数经此参数回传，保证 `?...` 不丢失。
- * @return 字段不足以构成 URL 时返回 `""`（例如 CLIENT_SERVER 缺主机、H2 缺库名）。
+ * @return 字段不足以构成 URL 时返回 `""`（例如 CLIENT_SERVER 缺主机、H2 缺库名）——
+ *   向导据此禁用「下一步 / 保存 / 连接 / 测试连接」，保证交给引擎的配置一定有合法 URL。
  */
 internal fun buildJdbcUrl(config: ConnectionConfig, extraQuery: String = ""): String {
     val database = config.database.trim()

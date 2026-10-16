@@ -1,4 +1,12 @@
 <#
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  
+  Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+#>
+
+<#
 .SYNOPSIS
     启动后的 sundays 桌面应用探针 —— 用**真实窗口**截图 + 注入按键/文本。
 

@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.handlers
 
 import com.langbiantianya.grpc.ConnectionConfig
@@ -25,8 +33,33 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+/**
+ * 用户与权限 Handler —— `USER` category 的 5 个 action。
+ *
+ * ## 两个「一个 action 两种语义」的约定
+ *
+ * - [list] 带 `user` → 列**该用户的权限**；不带 `user` → 列**用户清单**。
+ * - [updatePrivileges] 带 `password` 且**不带** `privileges` → 改密码；
+ *   带 `privileges` → 授予（`is_grant=true`）或回收（`is_grant=false`）。
+ *
+ * 这两处复用 action 是协议层的历史约定，不要为了“更清晰”拆成新 action ——
+ * 那会让已发布的客户端全部失配。
+ *
+ * ## 为什么只有 `USER.LIST` 保留 `google.protobuf.Value`
+ *
+ * 权限条目的**形状**按方言差异显著：MySQL 返回 `SHOW GRANTS` 的原始文本
+ * （`GRANT SELECT ON \`db\`.* TO 'dev'@'%'`），PostgreSQL / H2 返回结构化的
+ * `{schema, table, privilege}`。强行统一成 typed item 会有一边永远是空的，
+ * 因此这两处刻意保留 Value 打包。其余 action 全部 typed。
+ */
 object UserHandler {
 
+    /**
+     * LIST —— 见类 KDoc 的双语义约定。
+     *
+     * `host` 留空按 `%` 处理：MySQL 的账号是 `(user, host)` 二元组，不指定 host
+     * 就取「任意主机」，与 `SHOW GRANTS FOR 'dev'@'%'` 的语义一致。
+     */
     suspend fun list(config: ConnectionConfig, req: UserListRequest): UserListResponse = withContext(Dispatchers.IO) {
         val connection = PoolManager.getConnection(config)
         val dialect = DialectLoader.getDialect(config.driver)
@@ -53,6 +86,13 @@ object UserHandler {
         }
     }
 
+    /**
+     * GRANTS —— 聚合成**表级**的授权清单（`schema` / `table` / `privileges`）。
+     *
+     * 与 `LIST` 带 user 的区别：这里返回的是结构化、可直接渲染成表格的
+     * `UserGrantItem[]`；`privileges` 字段同时接受方言给的 `privileges` 与 `privilege`，
+     * 拼写差异由这一行吸收。
+     */
     suspend fun listAllGrants(config: ConnectionConfig, req: UserGrantsRequest): UserGrantsResponse = withContext(Dispatchers.IO) {
         if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
         val host = req.host.ifBlank { "%" }
@@ -74,6 +114,12 @@ object UserHandler {
         }
     }
 
+    /**
+     * CREATE —— `user` + `password` 都必填（`host` 默认 `%`）。
+     *
+     * **不支持用户体系的方言**（SQLite / DuckDB）在这里抛
+     * `UnsupportedOperationException`，由方言自己声明「我不会」，引擎不做兜底。
+     */
     suspend fun create(config: ConnectionConfig, req: UserCreateRequest): UserCreateResponse = withContext(Dispatchers.IO) {
         if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
         if (req.password.isBlank()) throw IllegalArgumentException("Missing 'password'")
@@ -88,6 +134,7 @@ object UserHandler {
         }
     }
 
+    /** DELETE —— `user` 必填，`host` 默认 `%`。不静默吞「用户不存在」。 */
     suspend fun delete(config: ConnectionConfig, req: UserDeleteRequest): UserDeleteResponse = withContext(Dispatchers.IO) {
         if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
         val host = req.host.ifBlank { "%" }
@@ -101,6 +148,15 @@ object UserHandler {
         }
     }
 
+    /**
+     * UPDATE —— 改密码 / 授权 / 收权三合一（见类 KDoc 的双语义约定）。
+     *
+     * 走授权分支时 `schema` 必填（表级授权必须指明库），`tableName` 可空表示库级授权；
+     * `with_grant_option` 只在 `is_grant=true` 时有意义。
+     *
+     * **判据是「password 非空 **且** privileges 为空」**，两个条件缺一不可：
+     * 只看 password 会把「同时改密码并授权」的请求悄悄降级成只改密码。
+     */
     suspend fun updatePrivileges(config: ConnectionConfig, req: UserUpdateRequest): UserUpdateResponse = withContext(Dispatchers.IO) {
         if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
 

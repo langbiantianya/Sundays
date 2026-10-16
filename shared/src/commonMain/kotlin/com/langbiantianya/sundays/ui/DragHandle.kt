@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays.ui
 
 import androidx.compose.foundation.background
@@ -42,6 +50,17 @@ import androidx.compose.ui.unit.dp
  * 1. **命中区比视觉宽度宽**（[hitWidth] = 8dp，画线 1dp）。1dp 的线在鼠标下极难点中，
  *    这是所有 IDE 分隔条的通行做法。
  * 2. **拖动时高亮**。让用户知道「抓住了」，否则拖到一半不知道从哪松手。
+ *
+ * ## 宽度该存在哪一层 —— 本组件不持有宽度
+ *
+ * [width] 由调用方持有（纯受控组件）。存哪一层有个可复用的判据：
+ * **布局宽度应提升到「同一时刻只渲染一个实例」的那一层之外。**
+ *
+ * 浏览屏踩过这个坑：宽度若存在 `ActiveSheetContent` 里，因为同一时刻只渲染**一个**激活
+ * sheet，切 sheet 时那棵组合被拆掉重建、`remember` 随之丢失 —— 表现是「在 A 连接把树
+ * 拉宽，切到 B 连接又缩回默认」。布局宽度是**窗口级偏好**，不是每个 sheet 各自的。
+ * （对照：树本身的展开 / 滚动 / 已加载表仍由每 sheet 的 `DatabaseBrowserState` 持有，
+ * 那是真正的 per-sheet 状态，两回事。）
  *
  * @param width 当前宽度，由调用方持有（这样切视图 / 切 sheet 时能保持）
  * @param onWidthChange 拖动过程中的实时回调

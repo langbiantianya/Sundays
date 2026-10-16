@@ -1,9 +1,36 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.dialect
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.sql.Connection
 
+/**
+ * MySQL 方言实现 —— 以 SPI 插件形式提供，引擎经 `ServiceLoader<DatabaseDialect>` 动态加载。
+ *
+ * ## 流式查询：唯一不需要关 `autoCommit` 的方言
+ *
+ * MySQL 流式读取靠 `Statement.setFetchSize(Integer.MIN_VALUE)` 打开服务端游标，
+ * **不需要关闭 `autoCommit`** —— 这与 PostgreSQL / SQLite 正好相反，那两边必须临时
+ * 关掉 `autoCommit`，因为它们不认 `MIN_VALUE` 这个约定（见
+ * `configureConnectionForStreaming` / `restoreConnectionAfterStreaming`）。
+ *
+ * ## 三个容易踩空的约束
+ *
+ * - **DDL 不在事务里。** MySQL 对 DDL 隐式提交，所以 `DDL_TRANSACTION` 这个 capability
+ *   在这里是**软支持**：引擎会把它当成「能包在事务里」，但真出 DDL 错误时，前面已经
+ *   执行成功的 `CREATE TABLE` 回滚不回来 —— 引擎只能把整批语句里已成功的部分记为失败。
+ * - **schema 就是 database。** 一条连接只对应一个 database，`level=schema` 永远返回
+ *   单元素，不存在二级导航；跨库则靠同一条连接上 `USE` 换库。
+ * - **触发器 DDL 依赖 `SHOW CREATE TRIGGER`，而它在 MySQL 5.7 与 8.0 上输出有差异。**
+ */
 class MySQLDialect : DatabaseDialect {
     override val driverName = "Mysql"
     override val jdbcDriverClassName = "com.mysql.cj.jdbc.Driver"

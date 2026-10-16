@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays.editor
 
 import com.langbiantianya.i18n.StrKey
@@ -25,8 +33,10 @@ import com.langbiantianya.i18n.StrKey
  *
  * 本清单是静态的，不会随引擎运行而变化 —— 这对一批本项目自己定义、变更极低频的函数
  * 是合适的取舍（比新开一条 `SYSTEM.LIST_HELPERS` 协议路由便宜得多，且没有异步时序问题）。
- * 代价是「引擎加了函数、忘了加这里」，因此 `GenerateHandlerContractTest` 断言
- * 两侧集合一致：引擎侧一改，那个测试立刻变红。
+ * 代价是「引擎加了函数、忘了加这里」，因此 `:engine` 的
+ * `GenerateSandboxContractTest`（读 `GenerateHandler.kt` 源码抽取实际注册的全局名）
+ * 断言两侧**集合相等** —— 只有相等才能同时挡住「引擎加了 UI 没同步」与
+ * 「引擎删了 UI 还留着」两个方向。该测试也解释了「为什么读源码而不是跑 Lua 枚举全局」。
  *
  * 新增函数时**两边都要改**：`GenerateHandler.registerHelpers` + 本清单。
  */

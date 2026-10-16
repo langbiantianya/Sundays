@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# 
+# Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
 # shell 脚本在 Linux 上执行。CRLF 会让它在每一个换行处报
 # `\r: command not found` —— 而且这类错往往只在真正跑起来的 Linux runner 上
 # 才显形，本地 Windows 上完全看不出来。

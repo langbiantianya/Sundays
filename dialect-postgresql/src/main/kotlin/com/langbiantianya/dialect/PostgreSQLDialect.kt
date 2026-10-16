@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.dialect
 
 import kotlinx.coroutines.Dispatchers
@@ -5,6 +13,28 @@ import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.sql.Connection
 
+/**
+ * PostgreSQL 方言实现 —— 以 SPI 插件形式提供，是 5 个方言里 capability 最多的一个
+ * （多 schema + 跨 database + 用户/权限 + 例程 + 触发器 + 导出 + DDL 事务）。
+ *
+ * ## 流式查询：必须临时关掉 `autoCommit`
+ *
+ * PostgreSQL **不支持**用 `Statement.setFetchSize(Integer.MIN_VALUE)` 打开服务端游标
+ * （那是 MySQL 的约定），只能依靠事务内的 cursor 机制。所以 `configureConnectionForStreaming`
+ * 先保存原 `autoCommit` 状态再关掉，`restoreConnectionAfterStreaming` 负责恢复 ——
+ * **成对出现，漏了恢复会把连接留在事务里**。
+ *
+ * ## 四条约束
+ *
+ * - **DDL 事务是真支持。** PG 是少数支持 DDL 事务的关系型数据库之一，所有
+ *   `CREATE` / `ALTER` / `DROP` 都能回滚，所以 `DDL_TRANSACTION` 在这里是硬支持
+ *   （与 MySQL 的「软支持」相对）。
+ * - **schema 字段必传。** 执行 SQL 时若想用无前缀的表名正确解析，必须带上 `schema`
+ *   —— 引擎在执行前自动注入 `SET search_path TO <schema>`。
+ * - **`pg_get_triggerdef()` 在 PG 14+ 上输出格式有差异**，解析必须容错。
+ * - **危险关键词额外禁掉 `COPY` 与 `DO`**（它们会绕过正常的事务与权限路径）；
+ *   ORDER BY 的标识符允许双引号包裹。
+ */
 class PostgreSQLDialect : DatabaseDialect {
     private val logger = LoggerFactory.getLogger(PostgreSQLDialect::class.java)
     override val driverName = "Postgresql"

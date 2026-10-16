@@ -1,3 +1,11 @@
+<#
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  
+  Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+#>
+
 # 统一行尾为 CRLF 并去掉 UTF-8 BOM（core.autocrlf=true 的仓库约定）
 # 用法：powershell -File tools/fix-crlf.ps1 <文件路径>...
 param([Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)][string[]]$Paths)

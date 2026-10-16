@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# 
+# Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
 name: Flatpak 打包
 
 # 与 Windows 那条腿一样：推 main / 打 tag / 手动触发。
@@ -25,7 +31,8 @@ env:
   # 但 GNOME 51 只是架在 freedesktop 26.08 之上的一层扩展，本应用一个 GNOME 库都
   # 用不上，多带一整层平台而已；而启动器里那个绕不开的空指针
   # （GTKLookAndFeel 拆 gnome-shell 版本，沙箱里没这个二进制）跟运行时是哪一家
-  # 无关，换回去也不会自己好。详细推导见 packaging/flatpak/README.md。
+  # 无关，换回去也不会自己好。推导与证据见本文件下面的预检断言，
+  # 结论索引见 packaging/flatpak/README.md。
   #
   # 这个值必须与 manifest 的 runtime-version 一致，下面有一道校验专门比对。
   FREEDESKTOP_RUNTIME: '26.08'

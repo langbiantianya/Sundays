@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# 
+# Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
 # 从 Gradle 打出来的 app-image 里**只取应用本体**（jar + resources + 原生资源），
 # 另写一个 shell 启动器，JDK 交给 Flathub 的 freedesktop 扩展提供。
 #
@@ -214,7 +220,7 @@ if [ ! -d "$STAGE/$APPDIR_REL/resources" ]; then
   # 干脆没有也没验证过，而 jpackage 的 .cfg 里那句 -Dcompose.application.resources.dir
   # 指向的就是它 —— 目录不存在时 Compose 会回退到 classpath，功能不受影响。
   # 曾经这里是个硬失败：为一个「本来就可以没有」的东西卡住整条流水线，
-  # 是这个仓库吃过好几次的亏（见 packaging/flatpak/README.md 末尾）。
+  # 是这个仓库吃过好几次的亏（同类教训另见本脚本开头的 annotation 额度那段）。
   echo "提示：没有 resources 目录，Compose 会回退到 classpath 取资源"
 fi
 if [ -z "$(find "$STAGE/$APPDIR_REL" -maxdepth 1 -name '*.jar' -print -quit 2>/dev/null)" ]; then

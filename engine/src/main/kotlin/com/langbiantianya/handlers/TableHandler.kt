@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.handlers
 
 import com.langbiantianya.grpc.ConnectionConfig
@@ -32,7 +40,31 @@ import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * 表结构元数据 Handler —— `TABLE` category 的 7 个 action。
+ *
+ * 表层只做三件事：**校验必填参数**、**把 SQL 拼装交给方言 SPI**、**维护列类型缓存**。
+ * 真正的方言差异（DDL 语法、标识符引用、`GET_DDL` 的重建策略）全在 `DatabaseDialect` 里，
+ * 这里看不到方言分支。
+ *
+ * ## 三个跨 action 的不变量
+ *
+ * 1. **建表 / 改表 / 删表 / 重命名 / 清空后都要 [DataHandler.invalidateColumnTypeCache]。**
+ *    `DATA.*` 的参数绑定靠这个缓存决定 `setLong` / `setString` / `setBytes`，
+ *    漏掉一次失效就会把新列按旧类型绑定进去。
+ * 2. **每个 action 都在 `withContext(Dispatchers.IO)` 里借连接并 `use {}` 归还**，
+ *    因此**不接受 `session_id`** —— 表结构变更不参与事务会话。
+ * 3. **SQL 片段校验由方言做**（`validateSqlFragment` / `validateOrderBy`），
+ *    本层不重复实现一份关键词黑名单。
+ */
 object TableHandler {
+    /**
+     * LIST —— 列出表（`schema` 可选，PostgreSQL / H2 有效，MySQL 忽略）。
+     *
+     * 走 `information_schema`（方言内部），因此天然跨库 —— 这也是
+     * “表列得出来、点开却报 `Table 'x.y' doesn't exist`” 这个缺陷的指纹：
+     * 能列出来不代表会话当前库就是用户在树上点的那一个。
+     */
     suspend fun list(config: ConnectionConfig, req: TableListRequest): TableListResponse = withContext(Dispatchers.IO) {
         val schema = req.schema
         val connection = PoolManager.getConnection(config, schema)
@@ -51,6 +83,11 @@ object TableHandler {
         }
     }
 
+    /**
+     * LIST 的列分支 —— 请求带了 `columnList` 时由 dispatcher 路由到这里（同一个 `Action.LIST`）。
+     *
+     * 返回每个列的 name / type / size / nullable / isPrimaryKey / defaultValue / autoIncrement。
+     */
     suspend fun columnList(config: ConnectionConfig, req: TableColumnListRequest): TableColumnListResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName' in payload")
         val schema = req.schema
@@ -66,7 +103,11 @@ object TableHandler {
     }
 
     /**
-     * Convert a dialect-returned Map<String, Any?> column descriptor into a typed ColumnDef proto.
+     * 把方言返回的 `Map<String, Any?>` 列描述转成 typed `ColumnDef`。
+     *
+     * `nullable` / `defaultValue` 用**有则设、无则不设**的方式写入：它们在 proto3 里带
+     * presence（`optional` / 字符串非空判定），无条件写会把「方言没给这个信息」和
+     * 「方言说它是 null」混成同一个值，调用方无法区分。
      */
     private fun buildColumnDef(col: Map<String, Any?>) = columnDef {
         name = col["name"]?.toString() ?: ""
@@ -81,6 +122,19 @@ object TableHandler {
         if (defaultValue != null) this.defaultValue = defaultValue
     }
 
+    /**
+     * CREATE —— `tableName` + `columns[]` 必填。
+     *
+     * ## 自增主键为什么可能不追加表级 `PRIMARY KEY`
+     *
+     * 方言在处理自增列时已经**内联**输出了主键（SQLite 的 `INTEGER PRIMARY KEY AUTOINCREMENT`、
+     * DuckDB 的 `SEQUENCE + DEFAULT nextval`），此时再追加 `PRIMARY KEY (cols)` 会得到
+     * “more than one primary key”。因此只要存在 `isPrimaryKey && autoIncrement` 的列，
+     * 就以方言的内联形式为准。
+     *
+     * `options` 由方言翻译（MySQL `engine`/`charset`/`collate`/`comment`；
+     * PostgreSQL 只认 `comment`，走 `COMMENT ON TABLE`）。
+     */
     suspend fun create(config: ConnectionConfig, req: TableCreateRequest): TableCreateResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         if (req.columnsList.isEmpty()) throw IllegalArgumentException("Missing 'columns' array")
@@ -144,6 +198,16 @@ object TableHandler {
         }
     }
 
+    /**
+     * UPDATE —— `operation` 必须是 `ADD_COLUMN` / `DROP_COLUMN` / `MODIFY_COLUMN`，否则抛
+     * `IllegalArgumentException("Unknown operation: …")`。
+     *
+     * `MODIFY_COLUMN` 的契约：`column.name` 必填，且 `type` 与 `newName` **至少有其一** ——
+     * 两者都空就等于什么也没改，直接拒绝比让方言猜要好。
+     *
+     * **能力按方言不同**：SQLite 只支持 RENAME（无 `ALTER COLUMN`），
+     * DuckDB / SQLite 改约束类操作走 table-rebuild，都由方言 SPI 自己判断。
+     */
     suspend fun update(config: ConnectionConfig, req: TableUpdateRequest): TableUpdateResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         if (req.operation.isBlank()) throw IllegalArgumentException("Missing 'operation' (ADD_COLUMN|DROP_COLUMN|MODIFY_COLUMN)")
@@ -192,6 +256,15 @@ object TableHandler {
         }
     }
 
+    /**
+     * GET_DDL —— 返回建表语句原文（字符串）。
+     *
+     * 取法按方言不同，是**引擎层契约**而不是偶然行为：MySQL 用 `SHOW CREATE TABLE`；
+     * PostgreSQL 从 `information_schema` + `pg_catalog` 重建（主键 / UNIQUE / CHECK / 索引）；
+     * H2 按列重建并用 `TABLE_CONSTRAINTS` 过滤同名系统表；
+     * SQLite / DuckDB 直接读 `sqlite_master` / `duckdb` 内部目录里的原文。
+     * 只有「读原文」的那些方言能保证给出用户当时写的那份 DDL。
+     */
     suspend fun getDDL(config: ConnectionConfig, req: TableGetDdlRequest): TableGetDdlResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName' in payload")
         val schema = req.schema
@@ -202,6 +275,7 @@ object TableHandler {
         }
     }
 
+    /** DELETE —— `if_exists` 未设置时按「不存在就报错」处理，不做静默忽略。 */
     suspend fun delete(config: ConnectionConfig, req: TableDeleteRequest): TableDeleteResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val schema = req.schema
@@ -218,6 +292,11 @@ object TableHandler {
         }
     }
 
+    /**
+     * RENAME —— `oldName` 留空时回退读 `tableName`（两个字段都空才拒绝）。
+     *
+     * 新旧两个名字都要失效列类型缓存：缓存 key 里带表名，只清一个会在另一半上留下脏数据。
+     */
     suspend fun rename(config: ConnectionConfig, req: TableRenameRequest): TableRenameResponse = withContext(Dispatchers.IO) {
         val oldName = req.oldName.ifBlank { req.tableName.ifBlank {
             throw IllegalArgumentException("Missing 'oldName' (or 'tableName')")
@@ -238,6 +317,12 @@ object TableHandler {
         }
     }
 
+    /**
+     * TRUNCATE —— 委托方言 SPI `truncateTable`。
+     *
+     * SQLite 没有 `TRUNCATE`，方言用 `DELETE FROM` + 清 `sqlite_sequence` 模拟；
+     * MySQL 走真正的 `TRUNCATE TABLE`（会隐式提交）。差异全部收敛在方言里。
+     */
     suspend fun truncate(config: ConnectionConfig, req: TableTruncateRequest): TableTruncateResponse = withContext(Dispatchers.IO) {
         if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
         val schema = req.schema

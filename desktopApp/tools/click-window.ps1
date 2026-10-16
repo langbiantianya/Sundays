@@ -1,3 +1,11 @@
+<#
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  
+  Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+#>
+
 param(
     [Parameter(Mandatory = $true)][int]$TargetProcessId,
     [int]$X = -1,          # 窗口内相对坐标（物理像素，左上角为 0,0）

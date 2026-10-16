@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays.table
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -100,6 +108,11 @@ import com.langbiantianya.sundays.ui.winShape
  * ├── TableDetailPanel (default or caller-provided)
  * └── ContextMenu (DropdownMenu, pop-up on right-click)
  * ```
+ *
+ * 跨组件的架构原则（slot-based 扩展点、databind 模式、合理默认值）见
+ * `shared/ARCHITECTURE.md` §7 —— 本组件遵守它们，但它们不属于某一个组件。
+ * 其中唯一的例外是选中行：调用方未传 `selectedRowId` 时由内部 state 兜底，
+ * 以保持调用方零样板代码。
  *
  * ## 用法示例
  *

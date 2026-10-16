@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.dialect
 
 import com.langbiantianya.i18n.Msg
@@ -32,6 +40,20 @@ import java.sql.Connection
  * - 不支持 `ON UPDATE CASCADE`：检测到时强制改写为 `NO ACTION`
  * - 嵌入式无用户/权限/触发器概念，对应方法抛 `UnsupportedOperationException`
  * - 存储过程不支持；函数仅支持 `MACRO` / 标量 `FUNCTION`
+ *
+ * ## 流式查询：必须临时关掉 `autoCommit`
+ *
+ * DuckDB 与 PostgreSQL / SQLite 同理，不认 MySQL 那条
+ * `Statement.setFetchSize(Integer.MIN_VALUE)` 服务端游标约定，只能靠事务内 cursor，
+ * 因此 `configureConnectionForStreaming` 保存原 `autoCommit` 状态再关闭，
+ * `restoreConnectionAfterStreaming` 恢复。
+ *
+ * ## 为什么 Excel 要先转成临时 DuckDB 文件
+ *
+ * 嵌入式模式没有 JDBC 直读 Excel 的能力，而 POI 是重量级依赖，不能进驱动路径。
+ * 因此 `ExcelToDuckDbCache` 负责把 Excel 预转换成临时 `.duckdb` 文件，再按普通
+ * DuckDB 文件源打开 —— 转换结果带缓存签名（源文件路径 + 修改时间 + 大小），
+ * 源文件没变时复用，避免每次查询都重新转一遍。
  */
 class DuckDBDialect : DatabaseDialect {
     private val logger = LoggerFactory.getLogger(DuckDBDialect::class.java)

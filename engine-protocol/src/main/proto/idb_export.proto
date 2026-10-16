@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// 
+// Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
 // IDB Engine — 导出子进程 RPC
 // 设计：主进程在端口 P0 上托管 IdbEngine 服务；同进程同时托管一个 ExportHub gRPC 服务（端口 P1）。
 // 导出子进程以 gRPC client 形式连接到 ExportHub，发送 ExportCommand 流，接收流式 ExportHubResponse。

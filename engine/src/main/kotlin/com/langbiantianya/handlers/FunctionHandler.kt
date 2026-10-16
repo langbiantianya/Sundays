@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.handlers
 
 import com.langbiantianya.grpc.ConnectionConfig
@@ -43,8 +51,29 @@ import kotlinx.serialization.json.buildJsonObject
 /**
  * 数据库函数/存储过程（Routine）管理 Handler。
  */
+/**
+ * 函数 / 存储过程 / 触发器 Handler —— `FUNCTION` category 的 8 个 action。
+ *
+ * **触发器也从这里走**：创建 / 删除触发器用 `FUNCTION.CREATE` / `FUNCTION.DELETE`
+ * 并把 `routine_type` 置为 `TRIGGER`。`TRIGGER` category 只提供 LIST 与 GET_DDL
+ * （见 [TriggerHandler]），没有 CREATE / DELETE —— 协议上就这么设计的。
+ *
+ * 所有查询都走方言 SPI 的 `INFORMATION_SCHEMA.ROUTINES` + `PARAMETERS` + `TRIGGERS`，
+ * MySQL / PostgreSQL / H2 三方方言均完整实现；SQLite / DuckDB 没有 routine 概念，
+ * 由方言抛 `UnsupportedOperationException`。
+ *
+ * **DDL 走「直接传原文」路线**：[create] 与 [validate] 都接收完整 DDL 字符串，
+ * 引擎不解析、不重建。因此改这两个方法时不要指望有结构化字段可用 ——
+ * 用户写什么就执行什么，语法错误由数据库自己报错（[validate] 则把它翻译成 `valid=false`）。
+ */
 object FunctionHandler {
 
+    /**
+     * LIST —— 列出 schema 下的 FUNCTION / PROCEDURE / TRIGGER。
+     *
+     * `description` 与 `trigger_table` 对非触发器条目留空字符串（不是 null），
+     * 因为 proto3 标量没有 presence，调用方按空串判断即可。
+     */
     suspend fun list(config: ConnectionConfig, req: FunctionListRequest): FunctionListResponse = withContext(Dispatchers.IO) {
         val schema = req.schema
         val connection = PoolManager.getConnection(config, schema)

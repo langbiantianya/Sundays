@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,6 +83,31 @@ import org.junit.Test
  * 无头 `captureToImage` 对走 `SelectionContainer` 的文本层漏绘（`H2GuiWalkthroughTest`
  * 已确认），数据行的文字不会出现在 PNG 里。所以分工固定：
  * **状态机 + 独立 JDBC 连接负责「对不对」，截图只负责「长什么样」**。
+ *
+ * ## 执行结果（2026-10-06，一次执行 = H2 × 5 条 + SQLite × 5 条 = **10 条**）
+ *
+ * 10 条全过。**首轮执行是 4 / 10**，四条红测全部是真缺陷：
+ *
+ * | # | 缺陷 | 影响面 | 根因 | 修在哪 |
+ * |---|---|---|---|---|
+ * | 1 | 表内搜索**完全不可用** —— 发出去的 SQL 是 `WHERE LIKE '%词%'`，**没有左操作数** | H2 / SQLite / PG **全部方言** | `SqlLiterals.likeContains` 只返回裸片段，而 `SqlLiteralsTest` 把这个片段当正确输出断言了下来 —— 整条链**一次没跑过真库** | [SqlLiterals.likeContains] |
+ * | 2 | 表级对象（索引 / 外键）**首次展开必然为空** | 全部方言 | schema 还没解析完就发查询 → schema 传空串 → 请求**成功**、返回空列表、**不重试** | TC-OB2 |
+ * | 3 | **一类对象失败会连累其它类** —— SQLite 上触发器不支持，整个「对象」区被一行红字顶掉，**能正常列出的视图一起消失** | 有不支持项的方言 | 渲染层「任意一类出错 → 整个对象区换成一行错误」 | TC-OB1 |
+ * | 4 | 表内搜索无谓地**要求**转义正确却从不真正执行 | — | 与 #1 同源，已随 #1 修复 | — |
+ *
+ * **#1 是最值得记的一条**：缺陷在「片段的**拼接**」上，而测试只盯「片段的**转义**」。
+ * 判据必须落在**发出去的那条语句**上 —— 这也是本次走查把它逼出来的唯一原因。
+ *
+ * ## 走查过程中修掉的**测试自身**缺陷
+ *
+ * 这四条都不是被测代码的问题，但每一条都让走查**误报**过一次：
+ *
+ * | 判据缺陷 | 后果 |
+ * |---|---|
+ * | 等待条件用 `(库, 类型)` 而集合里存的是 `(slot, 类型)` | 条件恒真，白等 → 把「应用没写数据」误报成「界面没显示」 |
+ * | `hasText("视图")` 用了默认 `substring = false`，而实际文本是 `"视图："` | 永远匹配不上，误报「界面没渲染」 |
+ * | 等待条件只看 `loadingObjects` 清空 | `loadDatabaseObjects` 先撤占位再逐类置上，中间有窗口 → 在数据落地前就断言（见 [settledObjectKinds]） |
+ * | 用 `onNode(hasScrollAction())` 找树 | 整屏有多个可滚动节点，且**按序号取会随库名长度漂移**；改用「逐个候选试一遍」 |
  */
 @RunWith(Parameterized::class)
 @OptIn(ExperimentalTestApi::class)
@@ -178,14 +211,24 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     // ==================================================================
 
     /**
-     * **TC-OB1：对象浏览** —— 库级的**视图 / 触发器 / 过程·函数**。
+     * ## TC-OB1 — 库级对象：视图 / 触发器 / 过程·函数
      *
-     * 三条判据，缺一不可：
-     * 1. **必须先解析 schema 名**。引擎要的是 schema（`PUBLIC` / `main`），不是库名 ——
-     *    拿库名去填会变成 `SET SCHEMA "<库名>"` → `Schema not found`，列表全空。
-     * 2. **不支持的种类要有话说**，且**不许连累同组其他种类**。
-     *    SQLite 没有触发器与函数，正确表现是这一行给出错误、视图照常列出来。
-     * 3. **不许永远转圈**：`loadingObjects` 必须清空。
+     * | | |
+     * |---|---|
+     * | **前置** | 连接已建立，库列表已加载 |
+     * | **步骤** | ① 展开库节点 ② 等待三类对象分组落定 |
+     * | **预期** | ① **schema 名先被解析出来**（H2 → `PUBLIC`，SQLite → `main`）<br>② 支持的种类列出真实对象名<br>③ 不支持的种类要么报错、要么为空，但**绝不能永远转圈**，也**绝不能把支持的种类一起弄没** |
+     * | **实际** | **H2 ✅ / SQLite ✅**。首轮执行时是红的 —— 两个方言都过是修完之后的结果 |
+     *
+     * ### 判据为什么这样写
+     *
+     * - **「先解析 schema」是硬前提**：`VIEW.LIST` / `TRIGGER.LIST` / `FUNCTION.LIST` 的
+     *   `schema` 要的是 schema 名而**不是库名**。拿库名去填会变成 `SET SCHEMA "<库名>"`
+     *   → `Schema not found`，列表全空 —— 而请求**成功**、返回空列表，界面上看不出任何异常。
+     * - **「不支持的一侧」只有跑 SQLite 才走得到**：H2 三样都有，这条路径永远测不到。
+     *   首轮缺陷 #3 正是在这里暴露的：渲染层「任意一类出错 → 整个对象区换成一行错误」，
+     *   于是 SQLite 上触发器不支持，**能正常列出的视图一起消失**。
+     * - **等待条件必须判「每一类都落定」，不能判「loading 清空」** —— 见 [settledObjectKinds]。
      */
     @Test
     fun `OB1 object browser lists views and reports unsupported kinds`() = runComposeUiTest(testTimeout = 3.minutes) {
@@ -310,10 +353,23 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     }
 
     /**
-     * **TC-OB2：对象浏览** —— 表级的**索引 / 外键**。
+     * ## TC-OB2 — 表级对象：索引 / 外键
      *
-     * 这两类引擎侧要 `table_name`，所以挂在**表节点**下而不是库节点下；两个方言都支持，
-     * 因此这里是全矩阵强断言。
+     * | | |
+     * |---|---|
+     * | **前置** | 库已展开、表列表已加载 |
+     * | **步骤** | ① 展开某张表的「索引 / 外键」节点 ② 等待加载完成 |
+     * | **预期** | 索引列表含 `idx_orders_status`；外键列表含 `fk_orders_user` |
+     * | **实际** | **H2 ✅ / SQLite ✅**。首轮红过：表级对象**首次展开必然为空**（缺陷 #2）——schema 还没解析完就发了查询，schema 传空串，请求**成功**、返回空列表、**不重试**，用户必须收起再展开一次 |
+     *
+     * ### 判据为什么这样写
+     *
+     * - **这两个挂表节点下而不是库节点下**：引擎侧 `IndexListRequest` / `ForeignKeyListRequest`
+     *   要 `table_name`，跟库级对象一起拉就是「每张表一次往返」，几十张表的库直接爆炸。
+     * - **外键名在 SQLite 上只能断言「列出来了」**：见 [target.exposesForeignKeyName] 的分支 ——
+     *   `SQLiteDialect.listForeignKeys` 走 `PRAGMA foreign_key_list`，而该 PRAGMA
+     *   **不暴露约束名**，方言只能拼一个 `fk_<表>_<序号>`。H2 / PG / MySQL 走
+     *   `INFORMATION_SCHEMA`，名字是真的。
      */
     @Test
     fun `OB2 table objects list indexes and foreign keys`() = runComposeUiTest(testTimeout = 3.minutes) {
@@ -370,13 +426,22 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     // ==================================================================
 
     /**
-     * **TC-DQ1 / DQ2 / DQ3：过滤 / 排序 / 表内搜索**
+     * ## TC-DQ1 / DQ2 / DQ3 — 过滤 / 排序 / 表内搜索
      *
-     * 三者都必须**下推给引擎**（`DATA.LIST` 带 `where` / `order_by`），不能前端本地筛 ——
-     * 本地筛在服务端分页下只能看到当前页，界面看着正常但结果是错的。
+     * | | |
+     * |---|---|
+     * | **前置** | `USERS` 预览已打开（250 行） |
+     * | **步骤** | ① 填过滤 `id > 200` → 应用<br>② 清过滤，排序 `id DESC` → 应用<br>③ 清排序，搜索 `user_25`<br>④ 手工过滤与搜索同时存在 |
+     * | **预期** | ① 总数 = 50（201..250），且**回到第 1 页**<br>② 首行 `id` = 250<br>③ 总数 = 2（`user_25` 与 `user_250`；`user_251..259` 在 1..250 里根本不存在）<br>④ 两者是 **AND** 关系 |
+     * | **实际** | **H2 ✅ / SQLite ✅**。TC-DQ3 首轮红过（缺陷 #1：表内搜索**完全不可用**） |
      *
-     * 判据用**引擎回的总数**，不用「界面上出现了某一行」：后者在本地筛与真下推两种实现下
-     * 都可能成立。三个子场景之间**必须先互相清干净**，否则过滤条件会被 AND 叠加。
+     * ### 判据为什么这样写
+     *
+     * - **必须下推给引擎**（`DATA.LIST` 带 `where` / `order_by`），不能前端本地筛 ——
+     *   本地筛在服务端分页下只能看到当前页，**界面看着正常但结果是错的**。
+     * - **判据用引擎回的总数**，不用「界面上出现了某一行」：后者在本地筛与真下推
+     *   两种实现下**都可能成立**。
+     * - **三个子场景之间必须先互相清干净**，否则过滤条件会被 AND 叠加。
      */
     @Test
     fun `DQ1 filter sort and search are pushed down to the engine`() = runComposeUiTest(testTimeout = 3.minutes) {
@@ -444,10 +509,18 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     // ==================================================================
 
     /**
-     * **TC-MS1：多语句执行**
+     * ## TC-MS1 — 多语句执行
      *
-     * 判据刻意用「**建表 + 插数据**」两条语句：开多语句时两条都执行（表里 2 行），
-     * 只跑第一条的话表压根不存在。只用单条 `CREATE` 是区分不出这两种情况的。
+     * | | |
+     * |---|---|
+     * | **前置** | SQL 工作台 |
+     * | **步骤** | 打开「多语句」，执行 `CREATE TABLE …; INSERT …; INSERT …` |
+     * | **预期** | 无报错，且**探针表里恰好 2 行** |
+     * | **实际** | **H2 ✅ / SQLite ✅**（首轮即过） |
+     *
+     * 判据刻意用「建表 + 插数据」两条语句：开多语句时两条都执行；只跑第一条的话
+     * 表压根不存在。**只用单条 `CREATE` 区分不出这两种情况** —— 判据必须落在
+     * 跨语句的副作用上。
      */
     @Test
     fun `MS1 multi statement runs every statement in the script`() = runComposeUiTest(testTimeout = 3.minutes) {
@@ -478,15 +551,22 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     }
 
     /**
-     * **TC-TX1 / TX2 / TX3：事务 —— BEGIN / ROLLBACK / COMMIT**
+     * ## TC-TX1 / TX2 / TX3 — 事务（BEGIN / ROLLBACK / COMMIT）
      *
-     * 本轮唯一能真正验到**数据可见性**的用例，所以判据全部落在「另一条独立 JDBC 连接
-     * 看得到吗」上。只断言「按钮能点」是不够的：事务没开、连接没钉住，
-     * 界面一样会显示「已开启」。
+     * | | |
+     * |---|---|
+     * | **前置** | SQL 工作台 |
+     * | **步骤** | ① 点「事务」BEGIN<br>② 在事务里 `INSERT`<br>③ 用**另一条独立 JDBC 连接**查<br>④ 点「回滚」，再查<br>⑤ 再 BEGIN → INSERT → 「提交」，再查 |
+     * | **预期** | ① `transactionSessionId` **非空**（拿不到等于事务没开）<br>②③ 独立连接**看不到**这行<br>④ 回滚后**仍看不到**<br>⑤ 提交后独立连接**看得到** |
+     * | **实际** | **H2 ✅ / SQLite ✅**（首轮即过） |
      *
-     * ⚠️ SQLite 侧另有一层：文件库在别人持写事务时可能直接返回 `SQLITE_BUSY`。
-     * 「被锁」与「读到了旧值」一样都证明**未提交的数据对他人不可见** ——
-     * 语义上等价，但必须显式写出来，否则换个平台它就变成一个查不到的错误。
+     * ### 判据为什么这样写
+     *
+     * - **只断言「按钮能点」是不够的**：事务没开、连接没钉住，界面一样显示「已开启」。
+     *   本轮唯一能真正验到**数据可见性**的用例，判据全部落在「另一条独立连接看得到吗」。
+     * - **SQLite 另有一层**：文件库在他人持写事务时可能直接 `SQLITE_BUSY`。
+     *   「被锁」与「读到旧值」一样都证明**未提交的数据对他人不可见**，语义等价 ——
+     *   但必须显式写出来，否则换个平台它就变成一个查不到的错误。见 [countElsewhere]。
      */
     @Test
     fun `TX1 rollback discards writes and commit keeps them`() = runComposeUiTest(testTimeout = 3.minutes) {
@@ -536,10 +616,18 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     }
 
     /**
-     * **TC-RO1 / RO2：只读模式**
+     * ## TC-RO1 / RO2 — 只读模式
      *
-     * 只读必须**在发出去之前**拦（`rejectIfReadOnly`），代价才是零 —— 引擎那边什么都没发生。
-     * 所以除了断言返回值，还要**回头查库确认表还在**（区分「没发」与「发了被引擎拒」）。
+     * | | |
+     * |---|---|
+     * | **前置** | 表预览已打开 |
+     * | **步骤** | ① 关闭只读，试 `DROP TABLE`<br>② 打开只读，试 `DROP` / `UPDATE` / `SELECT 1`<br>③ **回头查库**确认表还在<br>④ 关掉只读 |
+     * | **预期** | ① 不拦<br>② `DROP` / `UPDATE` 被拦，`SELECT` 放行<br>③ 表还在、行数不变 —— 证明**根本没发出去**，而不是发出去被引擎拒<br>④ 不再拦 |
+     * | **实际** | **H2 ✅ / SQLite ✅**（首轮即过） |
+     *
+     * 只读必须**在发出去之前**拦（[DatabaseBrowserState.rejectIfReadOnly]），代价才是零 ——
+     * 引擎那边什么都没发生。所以除了断言返回值，还要**回头查库确认表还在**
+     * （区分「没发」与「发了被引擎拒」）。
      */
     @Test
     fun `RO1 read only blocks writes before they reach the engine`() = runComposeUiTest(testTimeout = 3.minutes) {

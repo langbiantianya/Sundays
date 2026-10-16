@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+ */
+
 package com.langbiantianya.sundays.editor.ui
 
 import androidx.compose.foundation.background
@@ -143,6 +151,49 @@ fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
    SQL / Lua 典型体量（< 10K 行）足够快；大文本如需异步化见 §8.2 未来扩展
  * - **共享 ScrollState**：行号 gutter 与代码编辑区是同一个 `verticalScroll` 容器的两个子节点，
  *   因此垂直滚动天然同步（用户滚编辑器时行号同步移动，反之亦然）
+ *
+ * 跨组件的架构原则（slot-based 扩展点、databind 模式）见 `shared/ARCHITECTURE.md` §7 ——
+ * 本组件遵守它们，但它们不属于某一个组件。
+ *
+ * ## 高度策略：默认填满父容器，不设上限
+ *
+ * | [maxLines] | 行为 |
+ * |---|---|
+ * | `null`（**默认**） | **填充父容器剩余高度**（`fillMaxHeight()`），不超出父容器；内容溢出由内部 [verticalScroll] 承担 |
+ * | 传入整数（如 `15`） | `heightIn(min = minHeight, max = maxHeightDp)`，高度夹在 [minLines] × 字号 与 [maxLines] × 字号 之间 |
+ *
+ * **为什么默认 `null`**：v2.9 之前调用方必须显式传 `maxLines`，否则编辑器只占最小行数、
+ * 视觉上「缩成一条」。统一成 `maxLines = null → fillMaxHeight()` 之后，**默认行为即
+ * 自适应父容器**，只有真正需要硬上限时才显式传入。与 `DataTable.fillParentHeight`
+ * 是同一条策略。
+ *
+ * ## [!] 陷阱：`verticalScroll` 的子项无法 `fillMaxHeight`
+ *
+ * `Modifier.verticalScroll` 用**无界**高度测量内容，因此滚动容器**内部**的子项拿到
+ * `Infinity`，`fillMaxHeight()` 会退化成 wrap content。若把 `fillMaxHeight()` 直接挂在
+ * `BasicTextField` 上，输入区只有**一行高**（实测 19dp）—— 编辑框下方大片区域点不到，
+ * 表现为「点编辑器没反应、无法输入」。
+ *
+ * 正确做法（当前实现）：外层 `BoxWithConstraints` 持尺寸（`fillMaxHeight()` / `heightIn`），
+ * **在滚动之前**读 `constraints.maxHeight`，再以 `heightIn(min = 框高)` 把 `BasicTextField`
+ * 撑满整框 —— 点击任意位置都能聚焦，内容溢出时仍由 `verticalScroll` 滚动。
+ *
+ * ```kotlin
+ * BoxWithConstraints(modifier = …then(sizeModifier)) {
+ *     val boxHeightDp =
+ *         if (constraints.hasBoundedHeight) with(LocalDensity.current) { constraints.maxHeight.toDp() }
+ *         else null                       // 父容器高度无界 → 退回 wrap content（旧行为）
+ *     Row(Modifier.fillMaxSize().verticalScroll(sharedScrollState)) {
+ *         LineNumberGutter(...)
+ *         BasicTextField(modifier = Modifier.weight(1f)
+ *             .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier))
+ *     }
+ * }
+ * ```
+ *
+ * 注意**变量遮蔽**：`BoxWithConstraintsScope` 有 `maxHeight: Dp`，函数内若有同名局部变量，
+ * lambda 内会优先解析到局部变量。本文件的局部变量因此改名 `maxHeightDp`，取框高时
+ * 显式用 `constraints.maxHeight`。
  *
  * ## 用法
  *
@@ -776,6 +827,20 @@ private class CodeVisualTransformation(
  * 或 KMP `commonMain` 初始化路径中调用一次。
  *
  * 重复调用是**幂等**的（registry 内部用 `synchronized` + 覆盖语义）。
+ *
+ * ## 不注册会怎样 —— 与「注册错」是完全不同的两种症状
+ *
+ * - **没注册**：[CodeLanguageRegistry.get] 返回 `null`，编辑器**静默退化为无高亮的纯文本**
+ *   （不报错、不空屏，只是没有颜色）。所以「界面突然没有颜色了」要先想到这条。
+ * - **注册了语言但没注册 formatter**：高亮正常，只有「格式化」按钮因为
+ *   [CodeFormatterRegistry.get] 返回 `null` 而禁用。SQL 家族由 [SqlFormatter.register]
+ *   一次注册「语言 + formatter」配对，因此不会出现只高亮不能格式化的中间态
+ *   （`SqlDialectProfileTest` 也把这条钉成不变量）。
+ *
+ * ## 测试里必须自己调一次
+ *
+ * 渲染 `CodeEditor` 的 UI 测试**不会**经过应用的 `main()`，因此它们必须自己调用本函数 ——
+ * 否则测试是在验证「一个没注册任何语言的编辑器」，看起来全绿却什么都没覆盖。
  */
 fun registerBuiltinEditors() {
     // SQL 家族：SqlFormatter.register() 一次注册全部方言档位（"sql" / "sql-mysql" / …）的语言 + formatter
