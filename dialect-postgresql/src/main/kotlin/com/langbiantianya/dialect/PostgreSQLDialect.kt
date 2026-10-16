@@ -484,7 +484,7 @@ class PostgreSQLDialect : DatabaseDialect {
     private fun sanitizeIdentifier(name: String, label: String): String {
         if (name.isBlank()) throw IllegalArgumentException("$label cannot be empty")
         // 拒绝 null 字节（0x00）— 防 SQL 截断
-        if (name.contains(' ')) throw IllegalArgumentException("$label contains null byte")
+        if (name.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         // 拒绝单引号 — 防 SQL 注入跳出字面量
         if (name.contains('\'')) throw IllegalArgumentException("$label contains single quote")
         // 拒绝反斜杠 — 防转义序列注入
@@ -499,7 +499,7 @@ class PostgreSQLDialect : DatabaseDialect {
      * 拒绝 null 字节、分号、换行；保留单引号转义为 \\\'
      */
     internal fun escapeSqlString(value: String, label: String): String {
-        if (value.contains(' ')) throw IllegalArgumentException("$label contains null byte")
+        if (value.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         if (value.contains(';')) throw IllegalArgumentException("$label contains semicolon")
         if (value.contains('\n')) throw IllegalArgumentException("$label contains newline")
         return value.replace("'", "''")

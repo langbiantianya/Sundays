@@ -1245,7 +1245,7 @@ class DuckDBDialect : DatabaseDialect {
     private fun sanitizeIdentifier(name: String, kind: StrKey): String {
         val label = Msg.text(kind)
         if (name.isBlank()) throw IllegalArgumentException(Msg.format(StrKey.IDENT_EMPTY, label))
-        if (name.contains(' ')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_NULL_BYTE, label))
+        if (name.contains('\u0000')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_NULL_BYTE, label))
         if (name.contains('\'')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_SINGLE_QUOTE, label))
         if (name.contains('\\')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_BACKSLASH, label))
         if (name.contains(';')) throw IllegalArgumentException(Msg.format(StrKey.IDENT_HAS_SEMICOLON, label))

@@ -759,7 +759,7 @@ class SQLiteDialect : DatabaseDialect {
 
     private fun sanitizeIdentifier(name: String, label: String): String {
         if (name.isBlank()) throw IllegalArgumentException("$label cannot be empty")
-        if (name.contains(' ')) throw IllegalArgumentException("$label contains null byte")
+        if (name.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         if (name.contains('\'')) throw IllegalArgumentException("$label contains single quote")
         if (name.contains('\\')) throw IllegalArgumentException("$label contains backslash")
         if (name.contains(';')) throw IllegalArgumentException("$label contains semicolon")
