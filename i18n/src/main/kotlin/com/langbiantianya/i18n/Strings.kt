@@ -152,7 +152,7 @@ object StringsRegistry {
         built
     }
 
-    /** 取指定语言的文案表。 [AppLanguage] 是封闭枚举，故永远取得��。 */
+    /** 取指定语言的文案表。 [AppLanguage] 是封闭枚举，故永远取得到。 */
     fun of(language: AppLanguage): Strings = tables.getValue(language)
 
     /** 当前系统语言对应的文案表 —— 首次启动、设置未落盘时使用。 */

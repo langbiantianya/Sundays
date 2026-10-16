@@ -32,7 +32,7 @@ class SqlLiteralsTest {
 
     @Test
     fun `a single quote is doubled`() {
-        // SQL 标准里字符串字面量内部���单引号就靠 '' 转义。
+        // SQL 标准里字符串字面量内部的单引号就靠 '' 转义。
         // 不转义的话 `'; DROP TABLE users; --` 会闭合字面量、后面全是 SQL。
         assertEquals("'O''Brien'", SqlLiterals.quote("O'Brien"))
     }

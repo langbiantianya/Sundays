@@ -67,7 +67,7 @@ object TestStrings {
      * （见 `SettingsScreen` 的 `plural(PluralStrKey.AVAILABLE_PROCESSORS_COUNT, n, n)`）。
      *
      * 少传一次的后果很隐蔽：`Strings.substitute` 在 `args` 为空时**原样返回**，
-     * 于是断言拿到的���`"查询结果 · {0} 行"` 而不是 `"查询结果 · 2 行"`，
+     * 于是断言拿到的是`"查询结果 · {0} 行"` 而不是 `"查询结果 · 2 行"`，
      * 界面上当然找不到节点，报错还会指向「文案变了」而不是「调用方漏传参数」。
      */
     fun zh(key: PluralStrKey, count: Int, vararg args: Any?): String = table.plural(key, count, *args)

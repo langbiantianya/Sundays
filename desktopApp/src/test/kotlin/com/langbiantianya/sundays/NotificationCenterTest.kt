@@ -221,7 +221,7 @@ class ErrorReconciliationTest {
     }
 
     @Test
-    fun `错误文本变化视为新的一��`() {
+    fun `错误文本变化视为新的一条`() {
         val c = NotificationCenter()
         fun reconcile(sheets: List<SheetDescriptor>) {
             val sources = collectErrorSources(sheets)

@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
  * ## 为什么 `typeWithSize` 要单独测
  *
  * proto 的 `ColumnDef.size` 是 `int32`，**未指定时是 0**。而绝大多数列的类型
- * 是带长度的（`VARCHAR(64)` / `DECIMAL(10,2)`），但也有不带��（`TEXT` / `JSONB` /
+ * 是带长度的（`VARCHAR(64)` / `DECIMAL(10,2)`），但也有不带的（`TEXT` / `JSONB` /
  * `DATETIME`）—— 后者的 size 同样是 0。
  *
  * 所以「无条件加括号」会把 `TEXT` 显示成 `TEXT(0)`，那是个不存在的类型，
