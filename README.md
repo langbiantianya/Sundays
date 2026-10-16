@@ -491,6 +491,27 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
 
 几点值得知道：
 
+- **jlink 运行时的模块集必须自己补全，否则打出来的包一律起不来。** 这一条踩过，
+  而且症状具有极强的误导性：Compose 的 `nativeDistributions` 默认只链接四个模块
+  （`java.base` / `java.desktop` / `java.logging` / `jdk.crypto.ec`），jlink 顺带补齐后
+  一共 7 个 —— **不含 `java.sql` 与 `java.naming`**。对这个项目来说是致命的：
+  `java.sql` 是 JDBC 的命根子，`java.naming` 是 logback/slf4j 初始化时第一个要的东西。
+  运行时缺模块并不影响包本身的完整性（文件一个不少、DLL 依赖全通、启动器也能建起 VM），
+  应用是在 `<clinit>` 里抛 `NoClassDefFoundError`；而打包出来的是**无控制台的 GUI 程序**，
+  jpackage 启动器只弹一句 **`Failed to launch JVM`** —— 一句跟「模块缺了」毫无关系的话。
+  **换便携版、换机器、换安装目录全都一样**，因为问题从头到尾不在安装环节。
+  现在的模块清单由 jdeps 按字节码算出（`build.gradle.kts` 里有注释写明怎么重算）：
+  14 个模块减掉 jlink 自带的 7 个，补进去 12 个。升级依赖后要重算一遍 ——
+  靠异常去撞，永远只会看到最后崩的那一个。
+  **Windows 与 macOS 都受这条影响**（共用同一份 jlink 配置）；
+  Flatpak 不受影响，它用的是 `org.freedesktop.Sdk.Extension.openjdk` 提供的完整 OpenJDK。
+- **桌面图标与开始菜单要显式开，默认一个都不建。**
+  Compose 的 `WindowsPlatformSettings` 里 `shortcut` 与 `menu` 默认都是 `false`
+  （`menu` 的 getter 是 `field || menuGroup != null`，所以只给 `menuGroup` 也算数），
+  jpackage 拿不到 `--win-shortcut` / `--win-menu`，**MSI 里连 `Shortcut` 表都不生成** ——
+  装完开始菜单和桌面自然空空如也。这不是 jpackage 的毛病，是它本来就不替应用做这个决定。
+  另外 `iconFile` 不给就用插件自带的 JetBrains 默认图标；仓库里的 `sundays.ico` 需要显式接上，
+  否则建出来的快捷方式挂着 JetBrains 的图标。
 - **便携版里的 exe 不是单文件。** `com.kxxnzstdsw.sundays.exe` 是 jpackage 的启动器，
   依赖同级的 `app/` 与 `runtime/` 目录；单独拷走会报缺 DLL。要分发就分发整个目录。
 - **CI 里会把 Gradle 分发源换回官方。** 仓库的 `gradle-wrapper.properties` 指向腾讯云镜像，
@@ -498,6 +519,10 @@ java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /run/idb/engine.sock
   这个替换只在 CI 生效，不改仓库文件。依赖仓库的 aliyun 镜像则保留 —— 它在境外同样可达。
 - **JDK 钉在 25。** 仓库没有 `jvmToolchain` 声明，构建跟着跑它的 JDK 走，
   所以 CI 的 JDK 同时决定了产物的字节码目标与 jlink 运行时版本。
+  ⚠️ 但**本地实测与 CI 不一致**，且原因还没查清：本机 Gradle 跑在 JDK 25.0.4.1 上，
+  打出来的字节码却是 major 65（Java 21）、`runtime/release` 也写着 `JAVA_VERSION="21.0.11"`。
+  这与上面那个启动失败无关（字节码与运行时同为 21，跑得起来，已实测），但意味着
+  **本地包与 CI 包的运行时版本不是同一个**。要靠本地包验 CI 的行为时得先留意这一条。
 - **arm64 腿换成了 Zulu。** Temurin 至今没有发布 Windows ARM64 的 JDK 25
   （Adoptium 的 assets 接口查 `25 / aarch64 / windows` 返回空数组），照用 Temurin 会在装 JDK 那步就失败。
   Zulu 有 `win_aarch64` 的 25.0.4.1，与 x64 腿的 Temurin 25.0.4.1+1 是同一个 JDK 版本。

@@ -87,6 +87,88 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "com.kxxnzstdsw.sundays"
             packageVersion = "1.0.0"
+
+            // ---------------------------------------------------------------
+            // jlink 运行时的模块集。**少一个模块，打出来的包就起不来。**
+            //
+            // Compose 的默认值只有四个（dsl/JvmApplicationDistributions.kt）：
+            //   java.base, java.desktop, java.logging, jdk.crypto.ec
+            // jlink 顺着 requires 补齐后是 7 个：
+            //   java.base java.datatransfer java.xml java.prefs
+            //   java.desktop java.logging jdk.crypto.ec
+            // 这对本项目**远远不够** —— 缺 java.sql（JDBC，数据库工具的命根子）、
+            // 缺 java.naming（logback/slf4j 初始化就要它）等等。
+            //
+            // 症状极其有欺骗性：jlink 运行时是完整的、文件一个不缺、
+            // 启动器也能建起 VM，但应用在 <clinit> 里就抛
+            // NoClassDefFoundError，而打包出来的是**无控制台的 GUI 程序**，
+            // jpackage 启动器只弹一句：
+            //     Failed to launch JVM
+            // 一句跟「模块缺了」毫无关系的话。
+            // 换成便携版、换成另一台机器、换个安装目录，全都一样，
+            // 因为问题从头到尾不在安装环节，而在链接出来的运行时里。
+            //
+            // 下面这份清单不是猜的，是 jdeps 按字节码算出来的：
+            //   jdeps --multi-release 21 --ignore-missing-deps \
+            //         --print-module-deps -R -cp "<app>\*" desktopApp-*.jar
+            // 输出 14 个模块，减去 runtime 里已有的 7 个，得到下面这 12 个。
+            // **升级依赖后要重算一遍** —— 新依赖引到哪个模块，jdeps 会知道，
+            // 靠异常去撞则永远只会看到最后崩的那一个。
+            // ---------------------------------------------------------------
+            modules(
+                "java.sql",           // JDBC：MySQL / PostgreSQL / H2 / SQLite / DuckDB
+                "java.naming",        // logback + slf4j 的 LoggerFactory 初始化
+                "java.management",    // 部分驱动/诊断工具
+                "java.instrument",    // 字节码增强类库
+                "java.compiler",      // 运行时编译（脚本/规则引擎）
+                "java.scripting",     // 脚本引擎
+                "java.rmi",           // JDBC 驱动里对 RMI 的引用
+                "java.security.jgss",
+                "java.security.sasl",
+                "java.xml.crypto",
+                "jdk.jfr",            // 运行期诊断
+                "jdk.unsupported",    // sun.misc 等被大量第三方库直接引用
+            )
+
+            windows {
+                // ---------------------------------------------------------------
+                // 快捷方式：默认一个都不建，必须显式开。
+                //
+                // 源码（compose-gradle-plugin 1.11.1 的 dsl/PlatformSettings.kt）：
+                //   var shortcut: Boolean = false
+                //   var menu: Boolean = false
+                //       get() = field || menuGroup != null
+                //
+                // 两个默认值都是 false，于是 jpackage 拿不到 --win-shortcut 与
+                // --win-menu，**MSI 里连 Shortcut 表都不生成**（实测：表清单里
+                // 根本没有 Shortcut 这一项），安装完开始菜单与桌面自然空空如也。
+                // 这不是 jpackage 的毛病，是 Compose 把 jpackage 的默认值原样
+                // 透传下来了 —— 而 jpackage 本来就不替应用做这个决定。
+                // ---------------------------------------------------------------
+
+                // 桌面图标
+                shortcut = true
+
+                // 开始菜单。menu 的 getter 是 `field || menuGroup != null`，
+                // 所以光给 menuGroup 也算开了；两个都写是为了让意图不必靠 getter 猜。
+                menu = true
+                // 不给 menuGroup 的话，开始菜单文件夹名会退回产品名
+                // com.kxxnzstdsw.sundays。
+                menuGroup = "Sundays"
+
+                // ---------------------------------------------------------------
+                // 图标：不给就用插件自带的 JetBrains 默认图标。
+                //
+                // configureJvmApplication.kt 里是
+                //   packageTask.iconFile.set(win.iconFile.orElse(defaultResources.get { windowsIcon }))
+                // —— 只有显式给了 iconFile 才用自己的，否则一律落到 default-icon-windows.ico。
+                // 仓库里的 sundays.ico 从来没接上过（main.kt 的注释也提过
+                // 「要用 iconFile 设图标」）。快捷方式的图标取自 exe，
+                // 所以这一步和上面的 shortcut 是同一件事的两半：
+                // 开了快捷方式却不给图标，用户看到的是 JetBrains 的默认图标。
+                // ---------------------------------------------------------------
+                iconFile = file("src/main/resources/icons/sundays.ico")
+            }
         }
     }
 }
