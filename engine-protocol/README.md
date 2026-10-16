@@ -1,221 +1,63 @@
 # engine-protocol — 引擎调用层契约
 
-**v2.15 新增** —— 把「调用层」从 `engine` 里抽出来，做成独立模块：proto 协议 + 生成的强类型消息 + `EngineClient` 调用接口。
+把「调用层」从 `engine` 里抽出来做成独立模块：**proto 协议 + 生成的强类型消息 + `EngineClient` 调用接口**。
 
-本模块**不含任何业务逻辑**（无 handler、无连接池、无方言、无导出），因此服务端与客户端可以同时依赖它而不产生循环依赖，也不会把 Hadoop / POI / LuaJIT 等重依赖带进纯客户端进程。
+本模块**不含任何业务逻辑**（无 handler、无连接池、无方言、无导出），因此服务端与客户端可以同时依赖它而不产生循环依赖，也不会把 Hadoop / POI / LuaJIT 等重依赖带进纯客户端进程。调用方只面向 `EngineClient` 编程，**换实现不改调用代码**：`:engine` 的 `IdbEngine` 是同进程实现，`:engine-grpc-client` 的 `GrpcEngineClient` 是跨进程实现。
 
-**v2.16 新增** —— 在上面的连接 / 查询 / 导出能力之外，协议补齐四类功能：**查询取消**（`SYSTEM.CANCEL`）、**数据导入**（`IMPORT.RUN_IMPORT`）、**事务会话**（`SYSTEM.BEGIN / COMMIT / ROLLBACK / SESSION_INFO`）、**多语句脚本**（`SQL.EXECUTE` 的 `multi_statement`）。均为新增枚举值与 message 字段，不改动既有路由。
-
-> **当前版本**：v2.16
-
----
+> **当前版本**：v2.16。v2.15 抽出本模块；v2.16 在连接 / 查询 / 导出之外补齐四类功能：查询取消、数据导入、事务会话、多语句脚本。
 
 ## 模块结构
 
-```
-engine-protocol/
-├── build.gradle.kts                  # protobuf 插件 + api 依赖导出
-└── src/main/
-    ├── proto/
-    │   ├── idb_engine.proto          # gRPC service + 全部 message schemas（Category/Action + 13 类请求响应，含 v2.16 的 IMPORT）
-    │   └── idb_export.proto          # 导出子进程 RPC（ExportHub）
-    └── kotlin/com/langbiantianya/client/
-        └── EngineClient.kt           # 调用层契约接口
-```
+| 文件 | 内容 |
+|---|---|
+| [`EngineClient.kt`](./src/main/kotlin/com/langbiantianya/client/EngineClient.kt) | 调用层契约接口 —— **逐方法语义、生命周期、线程安全约定以该文件 KDoc 为权威** |
+| [`RequestLanguage.kt`](./src/main/kotlin/com/langbiantianya/grpc/RequestLanguage.kt) | `Request.withLanguageTag(tag)` —— 出站请求的界面语言标记 |
+| [`idb_engine.proto`](./src/main/proto/idb_engine.proto) | gRPC service + 全部 message schema（Category / Action + 各请求响应） |
+| [`idb_export.proto`](./src/main/proto/idb_export.proto) | 导出子进程 RPC（ExportHub） |
 
----
-
-## 为什么要有这个模块
-
-v2.14 之前，proto 定义在 `engine/src/main/proto/`，调用方想用 gRPC 客户端就必须依赖整个 `engine`
-（连带 Hadoop、POI、LuaJIT、5 个方言插件）。前端想「换个进程跑引擎」时没有干净的接缝。
-
-v2.15 起：
-
-```
-              ┌──────────────────────────────┐
-              │      engine-protocol         │   proto 契约 + EngineClient 接口
-              │  Request/Response/IdbEngine  │   （无业务逻辑、无重依赖）
-              └───────────┬──────────────────┘
-                          │ api(...)
-              ┌───────────┴───────────┐
-              ▼                       ▼
-      ┌───────────────┐       ┌────────────────────┐
-      │    engine     │       │ engine-grpc-client │
-      │  IdbEngine    │       │ GrpcEngineClient   │
-      │  (同进程实现)  │       │ (跨进程 gRPC 实现)  │
-      │  + gRPC 服务端 │       │                    │
-      └───────────────┘       └────────────────────┘
-```
-
-调用方只面向 `EngineClient` 编程，**换实现不改调用代码**。
-
----
+**消息与字段的定义、默认值、逐字段注释都在 proto 文件里**，本 README 不重复罗列。
 
 ## `EngineClient` 接口
 
-```kotlin
-package com.langbiantianya.client
-
-interface EngineClient : AutoCloseable {
-    /** 主入口 —— 与 gRPC stub `IdbEngineCoroutineStub.handle(req)` 语义完全一致 */
-    fun handle(request: Request): Flow<Response>
-
-    /** 单次非流式便捷方法（默认实现：构造 Request 并 collect 终止帧） */
-    suspend fun invoke(connection: ConnectionConfig, configure: RequestKt.Dsl.() -> Unit): Response
-
-    /** 建立（或复用）连接池 + `isValid(5)` 校验 —— 即「初始化连接」 */
-    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse
-
-    /** 仅凭 JDBC URL + 凭据（默认实现，driver 由 URL scheme 反查） */
-    suspend fun testConnection(jdbcUrl: String, user: String = "", password: String = ""): SystemTestConnectionResponse
-
-    /** 释放该配置的全部连接池；@return 是否真的关闭了池 */
-    suspend fun disconnect(config: ConnectionConfig): Boolean
-
-    /** 释放实现自身持有的资源（幂等） */
-    override fun close()
-}
-```
-
-| 方法 | 抽象原因 |
+| 方法 | 语义与契约 |
 |---|---|
-| `handle` | 流式分帧（`stream` / `end`）、envelope options（`traceId` / `dryRun` / `timeoutMs`）、错误帧（`success=false, error=…`）在两条路径上必须一致 |
-| `invoke` | 默认实现放在接口里 —— 两个实现共用同一套「构造请求 + 收集终止帧」逻辑，不会漂移 |
-| `testConnection` | **必须可跨进程** —— 远程连接初始化是 gRPC 客户端的基本能力 |
-| `disconnect` | **必须可跨进程** —— 连接池活在引擎进程里，客户端本地无池可关（见下文 `SYSTEM.DISCONNECT`） |
-| `close` | 语义随实现而变（本地=池/驱动/方言，gRPC=channel），故收敛到接口而不是暴露具体类型 |
+| `handle(request): Flow<Response>` | **唯一主入口**，与 gRPC stub `IdbEngineCoroutineStub.handle(req)` 语义完全一致。非流式返回 1 条（`stream=false`）；流式返回 N 条，最后一条 `end=true`。流式分帧、envelope options（`traceId` / `dryRun` / `timeoutMs`）、错误帧三条在同进程与跨进程两条路径上必须一致 —— 每次 `handle` 是一次独立调用。 |
+| `invoke(connection) { … }` | 单次**非流式**便捷方法：构造 Request 并 collect 终止帧。默认实现放在接口里，两个实现共用同一套逻辑因而不会漂移。流式调用请用 `handle` + `collect`。 |
+| `testConnection(config)` | 建立（或复用）该配置的 HikariCP 连接池并做 JDBC `isValid(5)` 校验，即「初始化连接」。池按配置 hash key 缓存，重复调用不会重复建池。另有仅凭 `jdbcUrl` + 凭据的重载（driver 由 URL scheme 反查）。**必须可跨进程** —— 远程连接初始化是 gRPC 客户端的基本能力。 |
+| `disconnect(config): Boolean` | 释放该配置下的**全部**连接池（含各 schema 维度），与 `testConnection` 对称。**必须可跨进程** —— 池活在引擎进程里，客户端本地无池可关。返回 `false` 表示该配置当前没有活跃池，是幂等结果而非错误。 |
+| `close()` | 释放实现自身持有的资源，**幂等**：本地实现 = 池 / 驱动 / 方言，gRPC 实现 = channel。语义随实现而变，故收敛到接口而不是暴露具体类型。窗口关闭 / 进程退出时调用。 |
 
----
+实现须**允许多个协程并发调用**。`close()` 之后的行为由各实现定义。
 
-## v2.15 协议新增：`SYSTEM.DISCONNECT`
+## 错误包装约定
 
-`Action.DISCONNECT = 19` + `SystemDisconnectResponse { bool closed = 1; }`（`SystemResponse` oneof 新增 `disconnect = 5`）。
+**引擎侧**：业务异常一律由 `RequestDispatcher` 包成 `success=false, error=…` 的 Response，**不向调用方抛异常**。未知 session、未知 cancel id、缺字段等都是「`false` + 说明性 `error`」而非异常 —— 调用方只需检查 `success` / `ok`。
 
-- **为什么加**：连接池由引擎进程持有。远程调用方要「断开连接」就必须有一条线上路由，否则 `EngineClient.disconnect` 对 gRPC 实现只能是空实现 —— 接口就成了谎言。
-- **路由**：`RequestDispatcher.routes[SYSTEM to DISCONNECT]` → `SystemHandler.disconnect(config)` → `PoolManager.close(config)`（按两段式 key 一次关掉该配置下所有 schema 维度的池）
-- **dryRun**：`DISCONNECT` 已加入 `writeActions` —— 「试运行」不得真的掐断用户的连接
-- **幂等**：第二次调用返回 `closed=false`（当前没有活跃池），不是错误
+**传输侧**：gRPC 的 `StatusException`（引擎未启动、channel 已关、UDS 不存在）会以异常形式抛进 Flow，**实现必须收口成同样的 `success=false, error=<message>` 终止帧**，否则「换个传输就炸」，跨进程与同进程的契约就不再等价。
 
----
+`testConnection` 拿不到 `system` 负载时（传输失败）返回 `ok=false` + `error`，与 `SystemHandler.testConnection` 自身的 catch 分支同形。
 
-## v2.16 协议新增：取消 / 导入 / 事务 / 多语句
+## 协议能力
 
-### 枚举新增
-
-| 枚举成员 | 值 | 含义 |
+| 版本 | 能力 | 关键结论 |
 |---|---|---|
-| `Category.IMPORT` | `14` | 数据导入（与 `EXPORT` 对称的读方向） |
-| `Action.CANCEL` | `20` | 取消运行中的请求（`Statement.cancel`） |
-| `Action.RUN_IMPORT` | `21` | 启动一次数据导入 |
-| `Action.BEGIN` | `22` | 开启事务会话 |
-| `Action.COMMIT` | `23` | 提交事务会话 |
-| `Action.ROLLBACK` | `24` | 回滚事务会话 |
-| `Action.SESSION_INFO` | `25` | 查询活跃事务会话 |
+| v2.15 | `SYSTEM.DISCONNECT`（`Action.DISCONNECT = 19`） | 连接池由引擎进程持有，远程调用方必须有线上路由才能释放，否则 `EngineClient.disconnect` 对 gRPC 实现只能是空实现、接口就成了谎言。已加入 `writeActions`（`dryRun` 不得真的掐断用户连接），幂等。 |
+| v2.16 | `SYSTEM.CANCEL`（`Action.CANCEL = 20`） | 协程取消**无法**中断阻塞中的 JDBC 调用（`Dispatchers.IO` 上的 `rs.next()` 不理会协程取消），只有 `Statement.cancel()` 能真正叫停数据库。未知 id 或缺 `target_request_id` 返回 `cancelled=false` + 说明性 `error`，**不抛异常**；被取消的请求走它自己的错误路径，以原请求 id 返回 `success=false, error="cancelled"` 的终止帧。 |
+| v2.16 | 事务会话 `BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action` 22–25） | `Request.session_id` **留空 = 无事务**，每条语句各自独立提交 —— 旧调用方不传该字段即完全向后兼容。非空时所有 DATA 写操作与 `SQL.EXECUTE` 都落在 `BEGIN` 固定的那条连接上，直到 `COMMIT` / `ROLLBACK`；未知 `session_id` 的写操作**被拒绝**（`success=false`），绝不静默自动提交。未知会话的 `COMMIT` / `ROLLBACK` 返回 `false` + `error`（客户端断线后可能重试）。 |
+| v2.16 | 多语句脚本 `SqlExecuteRequest.multi_statement` | `false`（默认）= 整段当一个语句执行，即 v2.15 及之前的行为；`true` = 按语句边界顺序拆分逐条执行。**遇错即停**（第一条失败后不再执行后续，与 psql / DBeaver 默认一致），失败语句在对应 `index` 上记 `success=false` + `error`，`affected_rows` 只累计成功语句。末尾不带 `;` 的语句仍会执行；整段无可执行语句时返回 `success=false` 且 `error` 非空。取消时以 `"$requestId#$index"` 为 key 精确指向当前运行的那条语句。 |
+| v2.16 | 数据导入 `IMPORT.RUN_IMPORT`（`Category.IMPORT = 14` / `Action.RUN_IMPORT = 21`） | 进度帧走 `Response.import_progress`、终止帧走 `Response.import`，与 `DATA.LIST` 行帧 / `DATA.GENERATE` 进度帧同一分帧约定。`has_header` 是 `optional bool` 而非裸 `bool`：裸 `bool` 分不清「没传」与「显式传 false」，而这两者意图相反（若把 `false` 当成未传而套用默认 `true`，首行数据会被误当列名吃掉），故用 presence 语义、`unset` 才回退默认 —— 与 `DataListRequest.page_size` 同一手法。`stop_import_id` 设为运行中的导入 id 即取消该任务。 |
 
-`Request.body` 相应新增 `import_request = 22`（`ImportRequest`）。
+## 界面语言
 
-### `Request.session_id = 6`
+`RequestLanguage.kt` 的 `Request.withLanguageTag(tag)` 给请求盖上 BCP-47 标签（空串 = 不标记，引擎按自身 locale 探测）。**两条实现路径都要用它**：gRPC 模式下引擎是独立进程，`ThreadLocal` 跨不过进程边界；同进程实现上 UI 线程的 `ThreadLocal` 也到不了 `Dispatchers.IO` 上的 dispatcher。落点统一是 `Request.options.language`。为何签名只收 `String` 而非 `AppLanguage`（避免 `:i18n` 反向依赖协议模块）见该文件 KDoc。
 
-顶层 `Request` 新增 `string session_id = 6`，由 `SYSTEM.BEGIN` 分配。
+## 接入自己的实现
 
-- **留空 = 无事务**：每条语句各自独立提交 —— 与 v2.15 及之前完全一致，这是本次的**向后兼容保证**，旧调用方不传该字段即可。
-- **非空时**：该会话下的所有 DATA 写操作与 `SQL.EXECUTE` 都落在 `BEGIN` 时**固定（pin）的那条连接**上，直到 `COMMIT` / `ROLLBACK` 结束会话。
-- **连接所有权**：无会话时 handler 借出连接后自行归还；有会话时连接归 `TransactionManager` 持有，handler 不得提前归还 —— 否则下一条语句会落到池里另一条物理连接上，事务会被**静默降级**成「只有最后一条语句在事务内」。
-
-### `SYSTEM.CANCEL`（`Action.CANCEL = 20`）
-
-**为什么需要它**：协程取消（coroutine cancellation）**无法**中断一个阻塞中的 JDBC 调用 —— 跑在 `Dispatchers.IO` 上的 `rs.next()` 不会因为协程被 cancel 就停下来，数据库侧的查询仍在继续。只有 `Statement.cancel()` 才能真正叫停数据库工作，因此协议必须提供一条「请求引擎对正在运行的 statement 调用 `Statement.cancel()`」的路由。
-
-`SystemRequest` 由**空 message** 扩展为两个字段：
-
-| 字段 | 号 | 说明 |
-|---|---|---|
-| `target_request_id` | `1` | `CANCEL` 指定要取消的请求 id |
-| `session_id` | `2` | `SESSION_INFO` 指定会话（留空 = 列出全部活跃会话） |
-
-`SystemResponse.cancel = 6`，携带 `SystemCancelResponse { bool cancelled = 1; string request_id = 2; string error = 3; }`：
-
-- `cancelled=true` 表示找到目标并已发出取消。
-- 未知 id 返回 `cancelled=false` + 说明性 `error`，**不抛异常**；`target_request_id` 留空同样返回 `cancelled=false` 并指出缺失字段。
-- 被取消的请求走它**自己的错误路径**，以原请求 id 返回一条 `success=false, error="cancelled"` 的终止帧。
-
-### 事务会话（`BEGIN / COMMIT / ROLLBACK / SESSION_INFO`）
-
-`SystemResponse` oneof 新增四个分支及对应 message：
-
-| oneof 分支 | 号 | message |
-|---|---|---|
-| `begin` | `7` | `SystemBeginResponse { session_id=1; started_at=2; driver=3; database=4; }` |
-| `commit` | `8` | `SystemCommitResponse { session_id=1; committed=2; error=3; }` |
-| `rollback` | `9` | `SystemRollbackResponse { session_id=1; rolled_back=2; error=3; }` |
-| `session_info` | `10` | `SystemSessionInfoResponse { active_sessions=1; sessions=2; }` |
-
-每个活跃会话由 `TransactionSession { session_id=1; started_at=2; driver=3; database=4; schema=5; auto_commit=6; }` 描述（`auto_commit` 在会话内恒为 `false`）。
-
-- `BEGIN` 之后引擎为该会话固定一条池中连接并置 `autoCommit=false`；同一 `session_id` 的后续请求全部落在这条连接上，直到 `COMMIT` / `ROLLBACK`。
-- 写操作若带上**未知** `session_id`，会被**拒绝**（`success=false`），绝不静默自动提交。
-- `COMMIT` / `ROLLBACK` 对未知会话返回 `committed=false` / `rolled_back=false` + `error`，不抛异常（客户端断线后可能重试）。
-- `SYSTEM.SESSION_INFO` 无参时列出全部活跃会话，有参时按 `session_id` 查询。
-
-### 多语句脚本（`SqlExecuteRequest.multi_statement = 3`）
-
-`SqlExecuteRequest` 新增 `bool multi_statement = 3`：
-
-- `false`（默认）= 整段当一个语句执行，即 v2.15 及之前的行为。
-- `true` = 按语句边界**顺序拆分逐条执行**，结果逐条回填到 `SqlExecuteResponse.statements`。
-
-`SqlExecuteResponse.affected_rows = 1` 为**全部成功语句的行数合计**；新增 `repeated SqlStatementResult statements = 2`（仅 `multi_statement=true` 时填充，顺序即执行顺序）：
-
-```
-SqlStatementResult { int32 index = 1; string sql = 2; int32 affected_rows = 3; bool success = 4; string error = 5; }
-```
-
-**遇错即停（stop-on-error）**：语句按顺序执行，**第一条失败后不再执行后续语句**（与 psql / DBeaver 默认行为一致）。失败语句在对应 `index` 上记录 `success=false` + `error`，`affected_rows` 只累计成功语句；末尾不带 `;` 的语句仍会执行；整段没有任何可执行语句时返回 `success=false` 且 `error` 非空。取消时以 `"$requestId#$index"` 为 key 精确指向当前运行的那条语句。
-
-### 数据导入（`IMPORT.RUN_IMPORT`，`Category.IMPORT = 14 / Action.RUN_IMPORT = 21`）
-
-`ImportRequest { ImportRunRequest run_import = 1; }`：
-
-| `ImportRunRequest` 字段 | 号 | 说明 |
-|---|---|---|
-| `file_path` | `1` | 待导入的本地文件绝对路径 |
-| `format` | `2` | `CSV` / `JSON_LINES` |
-| `table_name` | `3` | 目标表（必填） |
-| `schema` | `4` | schema |
-| `batch_size` | `5` | 每批 insert 行数，default `500` |
-| `delimiter` | `6` | CSV 专用，default `","`（取首字符） |
-| `has_header` | `7` | `optional bool`，default `true` |
-| `encoding` | `8` | default `UTF-8` |
-| `truncate_first` | `9` | 导入前 `TRUNCATE` 目标表 |
-| `ignore_errors` | `10` | `true` = 跳过坏行继续并计入 `rows_failed`；`false` = 遇错即停 |
-| `stop_import_id` | `11` | 设为运行中的导入 id 即取消该任务 |
-
-响应：
-
-| message | 字段 | 说明 |
-|---|---|---|
-| `ImportProgressFrame` | `rows_read=1; rows_inserted=2; rows_failed=3; message=4;` | 进度帧（`stream=true, end=false`） |
-| `ImportResultResponse` | `rows_read=1; rows_inserted=2; rows_failed=3; success=4; error=5;` | 终止帧（`end=true`）统计 |
-| `ImportResponse` | `oneof { progress=1; result=2; }` | 上面两者之一 |
-
-`Response.import = 23` 承载终止帧，流式进度帧走 `Response.import_progress = 33`（与 `DATA.LIST` 行帧、`DATA.GENERATE` 进度帧同一分帧约定）。
-
-**为什么 `has_header` 是 `optional bool`**：proto3 的裸 `bool` 无法区分「调用方没传」与「显式传 `false`」，而这两者意图**完全相反** —— 有表头 vs 无表头。若 `has_header=false` 被当成「未传」而套用默认值 `true`，首行数据就会被误当作列名吃掉。因此用 `optional` 保留 presence 语义，`unset` 才回退到默认 `true`；这与 `DataListRequest.page_size` 是同一套处理手法。
-
----
-
-## 依赖
-
-```kotlin
-dependencies {
-    api(project(":engine-protocol"))   // engine / engine-grpc-client / desktopApp 均经此拿到契约
-}
-```
-
-本模块自身只导出 `protobuf-java` / `protobuf-kotlin-lite` / `grpc-stub` / `grpc-protobuf` / `grpc-kotlin-stub` / `kotlinx-coroutines-core` / `slf4j-api` —— 全部以 `api` 声明，因为它们出现在 `EngineClient` 的公开签名里。
-
----
+1. **依赖**：`api(project(":engine-protocol"))`。protobuf / grpc / coroutines / slf4j 全部以 `api` 声明 —— 它们出现在 `EngineClient` 的公开签名里，必须导出。
+2. **实现 `EngineClient`**：`handle` 是唯一必须自己写的方法；`invoke` 与 `testConnection(jdbcUrl…)` 复用接口默认实现。`testConnection` / `disconnect` 想真正可用，就得有自己的连接管理。
+3. **守住三条契约**：流式分帧一致、envelope options 一致、错误统一 `success=false, error=…`。这三条正是本模块存在的意义。
+4. **挂到运行时**：同进程场景（desktopApp / shell）直接构造你的实现；跨进程场景不需要自己写，用 [`engine-grpc-client`](../engine-grpc-client/README.md) 的 `GrpcEngineClient` 即可。
+5. 若目标是新增**数据库方言**而不是新引擎实现，步骤见 [`api/README.md`](../api/README.md)「扩展自定义方言」。
 
 ## 跨链接
 
@@ -224,4 +66,5 @@ dependencies {
 | [`../engine/README.md`](../engine/README.md) | 引擎实现（`IdbEngine` 本地实现 + gRPC 服务端） |
 | [`../engine-grpc-client/README.md`](../engine-grpc-client/README.md) | gRPC 客户端实现（`GrpcEngineClient`） |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | Dispatcher 路由表 / envelope / 连接池 |
+| [`../api/README.md`](../api/README.md) | 方言 SPI 与自定义方言扩展 |
 | [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | 整体架构与模块导航 |

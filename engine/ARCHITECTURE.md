@@ -1,1140 +1,126 @@
-# Engine Architecture (V2.16)
+# Engine 架构（大纲）
 
-> 引擎模块（`engine/`）的内部架构设计文档，供在引擎内部工作的开发者使用。
-> 完整模块拓扑、构建/运行 CLI 与用户级 API 示例见 `engine/README.md`，项目整体架构与版本演进历史见根目录 `../ARCHITECTURE.md`。
+> 引擎模块（`engine/`）内部架构的**索引页**：只保留模块定位、分层职责、关键设计决策的落点、以及请求链路。
+> 每个决策的完整论证、字段语义与实现细节都在对应源文件的 KDoc 里，就地维护、以代码为准。
+>
+> - 用户级用法、构建与运行 CLI：[`README.md`](./README.md)
+> - gRPC 协议字段与枚举：[`idb_engine.proto`](../engine-protocol/src/main/proto/idb_engine.proto)
+> - 跨进程客户端：[`engine-grpc-client/README.md`](../engine-grpc-client/README.md)
+> - 项目整体拓扑与版本演进：根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
-## 1. Overview
+## 1. 模块定位
 
-引擎模块是无头（headless）的数据库算力引擎，**对外通过 gRPC 协议提供服务，对内实现方言无关的请求分发与连接管理**。模块以多模块 Gradle 工程组织：`api/` 抽象 `DatabaseDialect` SPI；`dialect-mysql/` / `dialect-postgresql/` / `dialect-h2/` / `dialect-duckdb/` / `dialect-sqlite/` 五个方言插件以独立 JAR 通过 `ServiceLoader` 动态加载；`engine-protocol/`（v2.15 新增）承载 proto 定义、生成的 gRPC stub 与 `EngineClient` 调用层接口；`engine/` 是主模块，包含 gRPC 服务端、IPC 传输抽象、连接池、14 个业务 handler、RequestDispatcher 路由、导出子进程管理、LuaJIT 造数引擎；`engine-grpc-client/`（v2.15 新增）提供 `EngineClient` 的跨进程 gRPC 实现。
+引擎是**无头（headless）的数据库算力引擎**：对外以 gRPC 服务（或同进程直连）提供能力，对内做方言无关的请求分发与连接管理。
+它不持久化业务状态、不认识界面语言以外的任何客户端语义 —— 每次请求自带完整连接凭证，连接用完即归还。
 
-**核心设计原则**：
+三条不变量贯穿整个模块：
 
-- **强类型端到端**（v2.5 起）：14 个 handler 全部直接接收 `Request.body` oneof 中的 typed per-Category proto 消息、返回 typed `<Category><Action>Response` proto 消息；`RequestDispatcher` 是 (Category, Action) → handler 的薄路由层，业务层无任何 `JsonObject` 编解码、无 `Request.newBuilder()...build()` 残留。
-- **绝对无状态**：每次请求必须携带完整连接凭证（driver/host/port/user/password/database），引擎内部不维护"当前选中的数据库"等业务状态。
-- **方言插件化**：新增数据库方言只需实现 `DatabaseDialect` SPI 并提供 `META-INF/services` 注册，无需修改引擎主代码。
-- **调用层接口优先**（v2.15 起）：调用方只面向 `EngineClient` 接口编程 —— 同进程用 `IdbEngine`（`:engine`），跨进程用 `GrpcEngineClient`（`:engine-grpc-client`）；两者共享同一份 proto 消息与同一套路由语义。
+- **强类型端到端** —— handler 直接收发 typed per-Category proto 消息，业务层没有 JSON 编解码边界。
+- **绝对无状态** —— 不记忆「当前选中的数据库」，连接凭证随请求而来。
+- **方言插件化** —— 新增一种数据库只需实现 `DatabaseDialect` SPI，不改引擎主代码。
 
-**双模式架构**（v2.9）：gRPC 模式（默认，`--mode grpc`）通过 IPC transport（TCP / UDS / Named Pipe）提供跨进程服务；Direct 直接模式（v2.9 新增，`--mode direct` 或同 JVM `IdbEngine().handle(request)`）跳过 gRPC channel、protobuf 序列化、IPC 派发，让同 JVM 客户端（同进程的 KMP Desktop Compose UI 或 shell 工具）以零开销调用引擎。两条路径共享同一个 `RequestDispatcher`，envelope options（`traceId` / `dryRun` / `timeoutMs`）、流式帧分装、横切语义完全一致。v2.15 起两条路径（以及 `:engine-grpc-client`）统一由 `EngineClient` 接口抽象，跨进程调用方通过 `SYSTEM.DISCONNECT` 获得与本地直连对等的连接池释放能力。
+## 2. 分层与包职责
 
-**v2.16 —— 四大引擎能力（补齐与 DBeaver / Navicat / DataGrip 的功能差距）**：
+| 包 | 一句话职责 |
+|---|---|
+| [`engine/`](./src/main/kotlin/com/langbiantianya/engine/IdbEngine.kt) | `IdbEngine`（`EngineClient` 的同进程实现）、`StatementRegistry`（取消通道）、`SqlScriptSplitter`（多语句分句）、`EngineLanguageContext`（请求语言上下文） |
+| [`dispatcher/`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) | `RequestDispatcher`：`(Category, Action)` → handler 的薄路由；dryRun 短路、超时、语言上下文、异常兜底都在这里 |
+| [`handlers/`](./src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt) | 14 个业务 handler，typed proto 进 / typed proto 出（System / Schema / User / Table / Data / SQL / Function / View / Index / ForeignKey / Trigger / Export / Import / Generate） |
+| [`pool/`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) | `PoolManager`（SHA-256 keyed HikariCP 连接池）与 `TransactionManager`（事务会话钉连接） |
+| [`loader/`](./src/main/kotlin/com/langbiantianya/loader/DialectLoader.kt) | JDBC 驱动与方言 SPI 的双通道加载（应用类路径 + `dialects/` 目录） |
+| [`ipc/`](./src/main/kotlin/com/langbiantianya/ipc/IpcTransport.kt) | IPC Transport SPI 与 CLI 配置解析；[`ipc/impl/`](./src/main/kotlin/com/langbiantianya/ipc/impl/TcpIpcTransport.kt) 是 TCP / UDS / Named Pipe 三种实现 |
+| [`server/`](./src/main/kotlin/com/langbiantianya/server/IdbEngineServer.kt) | `IdbEngineServer`（bootstrap、CLI、优雅关闭）与 `IdbEngineImpl`（gRPC 路径薄壳） |
+| [`grpc/`](./src/main/kotlin/com/langbiantianya/grpc/PayloadAdapter.kt) | `PayloadAdapter`：protobuf `Value` ↔ Kotlin 值的边界适配 |
+| [`export/`](./src/main/kotlin/com/langbiantianya/export/ExportEngine.kt) | 导出引擎、各格式写器、以及导出子进程的编排与生命周期管理 |
+| [`importer/`](./src/main/kotlin/com/langbiantianya/importer/ImportSource.kt) | 导入读源（CSV / JSON_LINES）、格式解析与默认值推导 |
 
-- **查询取消 `SYSTEM.CANCEL`（Action = 20）**：协程取消**无法**中断阻塞的 JDBC 调用（`rs.next()` 跑在 `Dispatchers.IO` 上，取消协程只把它挂起，数据库那条语句照跑），因此新增对运行中的 `Statement` 调 `Statement.cancel()` 的真正中止能力。
-- **数据导入 `IMPORT.RUN_IMPORT`（Category `IMPORT` = 14，Action = 21）**：与 EXPORT 对称的读方向，把本地 CSV / JSON_LINES 批量插入目标表；**在主进程**运行（无 POI / Parquet / Hadoop 负担），这也是取消可用的前提。
-- **事务会话 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（Action = 22 / 23 / 24 / 25）**：`Request.session_id` 留空 = 无事务（**与 v2.15 行为完全一致**），非空时一组写操作钉在同一条连接上。
-- **多语句脚本（`SQL.EXECUTE` 的 `multi_statement = true`）**：词法分句器按顶层 `;` 切分，按序执行、遇错即停。
+方言 SPI 本身不在本模块：[`api/.../dialect/DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt)。
 
-## 2. Technology Stack
+## 3. 关键设计决策索引
 
-| 范畴 | 技术 | 版本 | 用途 |
+> 每行只给结论与落点；「为什么」与失败模式读 KDoc。改引擎前先读落点文件顶部注释。
+
+| # | 决策 | 结论（一句话） | 源码 KDoc |
 |---|---|---|---|
-| 核心语言 | Kotlin | 2.4.0 | 整个引擎 + 5 个方言 |
-| 运行时 | JDK | 25 | 编译目标 |
-| 异步框架 | kotlinx-coroutines | 1.11.0 | 协程服务端、流式响应聚合 |
-| 序列化 | kotlinx-serialization-json | 1.11.0 | 业务层 JSON（仅方言差异显著的 item shape 保留 `google.protobuf.Value`） |
-| gRPC 服务端 | grpc-netty-shaded | 1.83.1 | gRPC HTTP/2 + 传输层（**`:engine` 直接声明** `implementation(libs.grpc.netty.shaded)`，供 IPC transport SPI 构造 `ServerBuilder` / `ManagedChannelBuilder`） |
-|  | grpc-stub + grpc-protobuf | — | gRPC 运行时（**经 `api(project(":engine-protocol"))` 传递继承**） |
-|  | grpc-kotlin-stub | 1.5.0 | 协程服务端 `IdbEngineCoroutineImplBase` + Kotlin DSL 生成（同上，传递继承） |
-| Protobuf | protobuf-kotlin-lite | 4.35.1 | 生成 *Kt DSL builder（`xxxRequest { ... }` / `xxxResponse { ... }` / `xxxItem { ... }`）（同上，传递继承） |
-| Protobuf 工具链 | protoc | 3.25.5 | proto3 编译（锁定）— **归属 `:engine-protocol` 的 protobuf gradle plugin 块** |
-|  | protoc-gen-grpc-java | 1.68.0 | Java gRPC stub 生成（锁定）— 同上 |
-|  | protoc-gen-grpc-kotlin | 1.4.1 | Kotlin gRPC stub 生成（锁定）— 同上 |
-| 连接池 | HikariCP | 7.0.2 | 动态数据库连接池 |
-| 数据库驱动 | MySQL Connector/J | 9.7.0 | MySQL 协议 |
-|  | PostgreSQL JDBC | 42.7.11 | PostgreSQL 协议 |
-|  | H2 | 2.3.232 | 嵌入式 + 测试 |
-|  | DuckDB JDBC | 1.5.5.1 | 嵌入式 OLAP（v2.7 新增，driver 名 `Duckdb`） |
-|  | SQLite JDBC | 3.46.1.3 | 嵌入式关系型（v2.8 新增，driver 名 `Sqlite`） |
-| 脚本引擎 | LuaJIT + Lua 5.1~5.5 | luajava 4.1.0 | 造数引擎（`DATA.GENERATE`）沙箱 |
-| Excel 导出 | Apache POI | 5.5.1 | SXSSF 流式 + DuckDB `.xlsx` 预转换 |
-| Parquet 导出 | Apache Parquet + Hadoop | 1.17.1 / 3.5.0 | 动态 Schema Parquet 写出 |
-| 日志 | SLF4J + Logback | 2.0.18 / 1.5.13 | 日志门面 + 实现 |
-| 构建与分发 | Gradle + ShadowJar | — / 9.3.0+ | 多模块构建 + 瘦包 |
-| 测试 | JUnit 5 + kotlin.test | — | 单元 + 集成测试 |
+| 1 | 强类型端到端路由 | handler 只接 typed per-Category proto，dispatcher 只路由，无 `JsonObject` 中间层 | [`RequestDispatcher.kt`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) |
+| 2 | 异常兜底外置 | try/catch 必须在 `.catch{}` **外侧**，否则 `AbortFlowException` 被吞、触发 flow 透明性违例 | [`RequestDispatcher.kt`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) |
+| 3 | dryRun 短路含副作用路由 | `DISCONNECT` / `RUN_IMPORT` 列入 `writeActions`：预演必须真的跳过，否则会关掉线上池、清空目标表 | [`RequestDispatcher.kt`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) |
+| 4 | 绝对无状态 | 引擎不记「当前库」，凭证随请求而来；连接池只是缓存，不是状态 | [`PoolManager.kt`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) |
+| 5 | 两段式 pool key | `sha256(config)#sha256(schema)`，让 `close(config)` 能按配置前缀反查该配置下**所有** schema 维度的池 | [`PoolManager.kt`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) |
+| 6 | 池容量即背压 | `maximumPoolSize=5` / `connectionTimeout=5s`；会话数触顶是刻意背压，不是 bug | [`PoolManager.kt`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) |
+| 7 | catalog 运行时切换 | `switchCatalog` 默认空实现（不切换、永不抛），只有 MySQL 覆盖；每次借出连接时切一次 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) |
+| 8 | catalog 建池时改写 | PG 的库是连接启动参数，`jdbcUrlForCatalog` 在建池时改 URL 的库名段，并校验 catalog 不重解析 URL 结构 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) |
+| 9 | 切库失败必须照抛 | 吞掉异常会让查询静默跑在**错误的库**上；H2 的 `setCatalog` 是静默 no-op，跨库行为只能打真 MySQL 验证 | [`MySQLDialect.kt`](../dialect-mysql/src/main/kotlin/com/langbiantianya/dialect/MySQLDialect.kt) |
+| 10 | 连接所有权决定归还时机 | 无 `session_id` 时 handler 在 `finally` 归还连接；有 `session_id` 时由会话钉住，直到 COMMIT / ROLLBACK | [`TransactionManager.kt`](./src/main/kotlin/com/langbiantianya/pool/TransactionManager.kt) |
+| 11 | 关池前先关会话 | `PoolManager.close` 必须先 `closeSessionsFor`，否则钉住的连接被从会话底下关掉，COMMIT 落在死连接上 | [`PoolManager.kt`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) |
+| 12 | 未知 session 直接拒绝 | 已提交 / 已回滚 / 引擎重启后的 `sessionId` 写操作失败，绝不静默降级成自动提交 | [`TransactionManager.kt`](./src/main/kotlin/com/langbiantianya/pool/TransactionManager.kt) |
+| 13 | 单一取消通道 | `CancelTarget` 抽象成 `fun cancel()`，JDBC 语句 / 导入 / 造数共用一条 `SYSTEM.CANCEL` 路径 | [`StatementRegistry.kt`](./src/main/kotlin/com/langbiantianya/engine/StatementRegistry.kt) |
+| 14 | LuaJIT 阻塞靠显式标志 | luajava 在 JNI 里阻塞，协程取消与 `Statement.cancel()` 都进不去：`cancelled` 入口检查抛异常解开脚本 + `activeStmt` 打断当前批次；已执行批次不回滚 | [`GenerateHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/GenerateHandler.kt) |
+| 15 | 多语句词法分句 | 引号 / 注释 / dollar-quoting 感知的顶层 `;` 切分，按序执行、遇错即停 | [`SqlScriptSplitter.kt`](./src/main/kotlin/com/langbiantianya/engine/SqlScriptSplitter.kt) |
+| 16 | 导入在主进程运行 | CSV / JSON_LINES 流式直插，主进程不背 POI / Parquet / Hadoop 负担 —— 这也是导入可取消的前提 | [`ImportHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/ImportHandler.kt) |
+| 17 | 读源是状态机 | CSV 处理引号转义 / CRLF / 参差行补齐；JSON Lines 单趟读取并带行号报错 | [`CsvReader.kt`](./src/main/kotlin/com/langbiantianya/importer/CsvReader.kt) · [`JsonLinesReader.kt`](./src/main/kotlin/com/langbiantianya/importer/JsonLinesReader.kt) |
+| 18 | 导出子进程隔离 | 导出跑在 `-Xmx512m` 子进程，父进程只转发进度帧，避免大导出让主进程 OOM | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
+| 19 | 每层流式路由必须收口 | 缺一层收口就退化成静默失败，界面表现是「点了导出，什么也没发生」 | [`ExportHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt) |
+| 20 | `onNext` 不是线程安全的 | 并发导出时父子两侧都要加锁（子进程侧发帧锁、父进程侧发命令锁），否则整条流当场废掉 | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
+| 21 | hub 地址写死 `127.0.0.1` | `localhost` 在 Windows 可能解析成 `::1`，同机进程没有「跨主机」，一律走 IPv4 回环 | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
+| 22 | 子进程存活用两个判据 | `hasUsableChannel` 判「能不能发命令」、`Process.isAlive` 判「要不要重启」；重启前先 `stop()` 清陈旧标记 | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
+| 23 | 导出排障入口 | 父子日志同落 `export-manager.log`、子进程 stderr 重定向到 `export-subprocess.log`；断流先看父进程侧 | [`ExportSubProcess.kt`](./src/main/kotlin/com/langbiantianya/export/ExportSubProcess.kt) |
+| 24 | `Value` 只有 double | 整数经 protobuf 往返变 `3.0`，业务层 `?: 0` 兜底会安静地变成 0；边界统一还原 | [`PayloadAdapter.kt`](./src/main/kotlin/com/langbiantianya/grpc/PayloadAdapter.kt) |
+| 25 | 方言双通道加载 | 先扫应用类路径（`ServiceLoader`），再扫 `dialects/` 目录（`URLClassLoader`，同名覆盖），Direct 模式必须同类加载器 | [`DialectLoader.kt`](./src/main/kotlin/com/langbiantianya/loader/DialectLoader.kt) |
+| 26 | 调用层接口优先 | 调用方只面向 `EngineClient`；同进程 `IdbEngine` 与跨进程 `GrpcEngineClient` 是同一接口的可替换实现，共享 proto 与路由语义 | [`EngineClient.kt`](../engine-protocol/src/main/kotlin/com/langbiantianya/client/EngineClient.kt) · [`GrpcEngineClient.kt`](../engine-grpc-client/src/main/kotlin/com/langbiantianya/client/grpc/GrpcEngineClient.kt) |
+| 27 | 两条路径汇合于一处 | gRPC 路径是薄壳，direct 路径跳过序列化与 IPC 派发，两者共用同一 dispatcher，横切语义完全一致 | [`IdbEngine.kt`](./src/main/kotlin/com/langbiantianya/engine/IdbEngine.kt) · [`IdbEngineImpl.kt`](./src/main/kotlin/com/langbiantianya/server/IdbEngineImpl.kt) |
+| 28 | 连接生命周期对称 | `testConnection` 旁路 envelope 调 handler，首次调用即建池（= 初始化连接）；`disconnect` 释放同配置全部池，远程调用方经 `SYSTEM.DISCONNECT` 获得对等能力 | [`SystemHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt) |
+| 29 | 两级导航是引擎层契约 | `listDatabases` / `listSchemas` 每个方言都要按约定实现，前端据此构建 database → schema 两级导航 | [`SchemaHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/SchemaHandler.kt) |
+| 30 | 错误原样上屏，语言随请求走 | `Response.error` 不翻译就是缺陷；语言经 `ThreadContextElement` + `flowOn` 搬进 handler，协程换线程才不丢 | [`EngineLanguageContext.kt`](./src/main/kotlin/com/langbiantianya/engine/EngineLanguageContext.kt) · [`RequestLanguage.kt`](../engine-protocol/src/main/kotlin/com/langbiantianya/grpc/RequestLanguage.kt) |
+| 31 | 严重级别必须结构化 | 上层不得靠文案前缀（如 `startsWith("导出失败")`）判断错误，否则翻译后错误被静默染成成功色 | [`RequestDispatcher.kt`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) |
+| 32 | IPC 传输 SPI | TCP / UDS / Named Pipe 三选一，业务层不感知底层传输；UDS 不选 Linux abstract namespace（macOS / BSD 不支持） | [`IpcTransport.kt`](./src/main/kotlin/com/langbiantianya/ipc/IpcTransport.kt) |
+| 33 | Windows 命名管道无服务端 API | grpc-java 未公开 server 侧实现，`serverBuilder()` 抛 `UnsupportedOperationException`；Windows 上改用 `--ipc tcp` | [`NamedPipeIpcTransport.kt`](./src/main/kotlin/com/langbiantianya/ipc/impl/NamedPipeIpcTransport.kt) |
+| 34 | `--mode` 归 server 解析 | `IpcConfig.fromArgs` 显式跳过 `--mode` 及其取值；缺取值时仍显式报错 | [`IpcConfig.kt`](./src/main/kotlin/com/langbiantianya/ipc/IpcConfig.kt) |
+| 35 | 优雅关闭顺序 | shutdown hook 依次 transport cleanup → 关会话与连接池 → 关驱动与方言类加载器 | [`IdbEngineServer.kt`](./src/main/kotlin/com/langbiantianya/server/IdbEngineServer.kt) |
+| 36 | SQL 注入防护 | DATA 强制 `PreparedStatement`；`where` / `orderBy` 原始片段由方言 `validateSqlFragment` / `validateOrderBy` 校验 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) |
 
-**强制依赖**：`protobuf-java 3.25.8`（grpc-protobuf 1.83 传递依赖，不可强制升至 4.x）；`grpc-core` / `protobuf-java-util` / `ksp` / `kotlinx-serialization-protobuf` 均为已移除的无用依赖。
+## 4. 请求处理链路
 
-**v2.15 — protobuf 生成归属上移**：proto 文件（`idb_engine.proto` / `idb_export.proto`）与 protobuf gradle plugin 块连同 `src/main/proto/` 一起移入新模块 `:engine-protocol`。`engine/build.gradle.kts` **不再声明 protobuf / grpc-stub / grpc-kotlin / protobuf-kotlin-lite**，也不再应用 protobuf plugin —— 它们统一通过 `api(project(":engine-protocol"))` 传递继承。`:engine` 自身只保留 `implementation(libs.grpc.netty.shaded)`（IPC 传输 SPI 所需）与 `implementation(project(":api"))`（方言 SPI）。
+```
+调用方（desktopApp / shell / 远程 JVM）
+  └─ EngineClient.handle(Request): Flow<Response>        ← :engine-protocol 接口
+       ├─ IdbEngine         同进程直调                     :engine
+       └─ GrpcEngineClient  gRPC over TCP/UDS/Pipe         :engine-grpc-client
+              │  [服务端 IdbEngineImpl 是薄壳，桥接回同一入口]
+              ▼
+       IdbEngine.handle(request)                          ← gRPC 与 direct 汇合点
+              ▼
+       RequestDispatcher.dispatch(request)                ← 薄路由：dryRun / timeoutMs / 语言上下文 / 异常兜底
+              ▼
+       <Category><Action>Handler(config, typedRequest)   ← 14 个 handler
+              ├─ PoolManager / TransactionManager.getConnection(config, schema, sessionId)
+              ├─ DialectLoader → DatabaseDialect（SPI）
+              └─ StatementRegistry.register(requestId, …)  ← 可被 SYSTEM.CANCEL 命中
+              ▼
+       Flow<Response>  →  单次帧 或 流式帧（以 end=true 收口）
+```
 
-**模块依赖图**（v2.15 调用层抽象）：
+跨切面语义：envelope options（`traceId` / `dryRun` / `timeoutMs` / `language`）、流式帧分装、`if_exists` 语义。
+逐跳的字段含义与 handler 行为，见各自 KDoc 与 proto：[`idb_engine.proto`](../engine-protocol/src/main/proto/idb_engine.proto)。
+
+## 5. 与其他模块的依赖关系
 
 | 模块 | 依赖 | 说明 |
 |---|---|---|
-| `:engine-protocol` | protobuf gradle plugin + `src/main/proto/` | proto 定义 + 生成的 gRPC stub + `EngineClient` 接口；**不依赖 `:engine`** |
-| `:engine` | `api(:engine-protocol)` + `implementation(:api)` + `implementation(grpc-netty-shaded)` | 引擎实现（handler / dispatcher / 连接池 / gRPC 服务端）；`IdbEngine` 是 `EngineClient` 的**同进程实现** |
-| `:engine-grpc-client` | `api(:engine-protocol)` | `GrpcEngineClient` —— `EngineClient` 的 **gRPC 实现**；**不依赖 `:engine`**，任意 JVM 调用方可用（详见 `engine-grpc-client/README.md`） |
-
-> 调用方只面向 `EngineClient` 编程，**不感知引擎在同进程还是跨进程**。`:engine` 与 `:engine-grpc-client` 是同一接口的两个可替换实现，共享同一份 proto 消息与同一套 (Category, Action) 路由语义。
-
-## 3. Core Mechanisms
-
-### 3.1 通信协议（gRPC）
-
-引擎以 **gRPC 服务端** 方式运行（端口默认 `:50051`，可通过 `--port` 覆盖），调用方通过标准 gRPC stub 与引擎通信。
-
-- **服务定义**（`engine-protocol/src/main/proto/idb_engine.proto` — v2.15 起 proto 定义归属 `:engine-protocol` 模块）：
-  ```proto
-  service IdbEngine {
-    rpc Handle(Request) returns (stream Response);
-  }
-  ```
-- **传输**：HTTP/2 + 标准 protobuf（强类型 per-Category 消息），由 `grpc-netty-shaded` 驱动
-- **消息边界**：gRPC 自动处理帧切分，无需手动 length-prefix
-- **Wire 类型**：`Request` 与 `Response` 均为强类型 — `Request` 使用 `oneof body { schema_request, user_request, ... }` 路由到 per-Category 消息（共 13 个：`SystemRequest`/`SchemaRequest`/`UserRequest`/`TableRequest`/`DataRequest`/`SqlRequest`/`FunctionRequest`/`ViewRequest`/`IndexRequest`/`ForeignKeyRequest`/`TriggerRequest`/`ExportRequest`/`ImportRequest`（v2.16））；`Response` 同样使用 `oneof body` 镜像 13 个 per-Category 响应消息 + 4 个流式帧类型（`DataRowFrame`/`SqlSelectRowFrame`/`GenerateProgressFrame`/`ImportProgressFrame`（v2.16））+ `GenerateTerminalResponse`
-- **业务层**：14 个 handler 全部直接接收 typed per-Category proto 消息（`ConnectionConfig` + `<Category><Action>Request`），返回 typed per-Action proto 消息（`<Category><Action>Response`）；`RequestDispatcher` 是按 (Category, Action) 路由的薄层，把 typed handler 返回值装入 `Response.body` 对应 oneof 分支。**无 `JsonObject` 边界映射**
-- **Kotlin DSL（v2.5 起）**：业务层全部使用 protoc-gen-grpc-kotlin + protobuf-kotlin-lite 生成的 Kotlin DSL builder（`xxxRequest { ... }` / `xxxResponse { ... }` / `xxxItem { ... }` / `request { ... }` / `response { ... }`），无 `Request.newBuilder()...build()` 残留；`google.protobuf.Value` 因属 Well-Known Type 仍用 `Value.newBuilder()`（无生成 DSL）
-- **最大消息大小**：`maxInboundMessageSize = 256 MiB`
-- **异步处理**：服务端基于 grpc-kotlin `IdbEngineCoroutineImplBase`（suspend `handle()` → `Flow<Response>`）+ Kotlin 协程 (`kotlinx-coroutines`)；`addService` 改为 `.addService(IdbEngineImpl().bindService())`
-- **错误响应**：业务异常被 `RequestDispatcher` 拦截，提取 `e.message` 包装入 `Response.error`，`success` 置为 `false`，`id` 保持请求的 id
-
-**调用层契约（v2.15 — `EngineClient` 接口，位于 `:engine-protocol`）**：
-
-```kotlin
-// engine-protocol/src/main/kotlin/com/langbiantianya/client/EngineClient.kt
-// package com.langbiantianya.client
-interface EngineClient : AutoCloseable {
-    fun handle(request: Request): Flow<Response>
-
-    // 接口默认实现 —— 构造 Request 并 collect 终止帧（非流式单次调用的便捷包装）
-    suspend fun invoke(connection: ConnectionConfig, configure: RequestKt.Dsl.() -> Unit): Response { ... }
-
-    // 抽象成员 —— 由各实现自行提供
-    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse
-    suspend fun disconnect(config: ConnectionConfig): Boolean
-
-    // 接口默认实现 —— testConnection(config) 的 JDBC-URL 便捷重载
-    suspend fun testConnection(
-        jdbcUrl: String, user: String = "", password: String = "",
-    ): SystemTestConnectionResponse = testConnection(connectionConfig { ... })
-
-    override fun close()
-}
-```
-
-**v2.15 — 两个实现**：
-
-| 实现 | 模块 | 通道 | 实现的成员 |
-|---|---|---|---|
-| `IdbEngine(driversDir, dialectsDir)`（`class IdbEngine(...) : EngineClient`） | `:engine` | 同 JVM 直接方法调用 | `handle` / `testConnection(config)` / `disconnect` / `close` 均为 `override`；**`invoke` 与 `testConnection(jdbcUrl, user, password)` 已从类中移除**，改由接口默认实现提供 |
-| `GrpcEngineClient` | `:engine-grpc-client` | gRPC over TCP / UDS / 命名管道 | 同一接口的 gRPC 实现（详见 `engine-grpc-client/README.md`） |
-
-`IdbEngine` 的 `disconnect` 语义（v2.12 起不变）：直接调 `PoolManager.close(config)`，关闭该配置下**所有** schema 维度的池；与 `testConnection` 构成对称的连接生命周期（建池 / 释放池）。为此 pool key 由单段 hash 改为两段式 `sha256(配置)#sha256(schema)` —— 单段 hash 无法反查池归属（同一配置的 schema 池无法枚举），两段式让 `close(config)` 能按配置前缀定位。`PoolManager.activePoolCount()` 暴露当前活跃池数供诊断 / 集成测试断言。
-
-`IdbEngineImpl.handle`（gRPC 路径）在 v2.9 重构为**薄壳** — 直接桥接 `IdbEngine.handle`，消除重复路由路径。两条路径共享 `RequestDispatcher`，因此 envelope options（`traceId`/`dryRun`/`timeoutMs`）、stream frame assembly、`if_exists` 语义等横切关注点完全一致。跨进程的 `GrpcEngineClient` 复用同一份 stub 与同一套路由，语义同样一致。
-
-**v2.11 — 连接生命周期直连方法**：`testConnection` 旁路 `handle()`，直接调 `SystemHandler.testConnection`，跳过 envelope 包装。首次调用会用 `config` 创建（或复用）HikariCP 连接池 —— **这一步即“初始化连接”**；随后借一条连接做 JDBC `isValid(5)` 校验。池按 `PoolManager` 的 pool key（含 `jdbc_url`）缓存，重复调用不会重复建池。
-
-**v2.12 — 方言来源双通道**：`DialectLoader.loadFromDir` 先扫**应用类路径**（`ServiceLoader<DatabaseDialect>`，用 `DialectLoader` 自身类加载器），再扫 `dialects/` 目录（`URLClassLoader`，同名方言覆盖）。Direct 模式下 UI 与引擎同 JVM，方言插件作为普通依赖随应用类路径加载（`desktopApp` 的 `runtimeOnly(project(":dialect-*"))`），必须由同一类加载器解析 `DatabaseDialect` 接口实例；JAR 分发场景仍走目录加载。
-
-**v2.15 — `SYSTEM.DISCONNECT` wire 路由**：连接池活在引擎进程内，本地调用方可直接调 `EngineClient.disconnect`，但**远程（gRPC）调用方此前没有任何线路由来释放引擎侧的池**。v2.15 新增 `SYSTEM.DISCONNECT` 协议路由，让 `GrpcEngineClient` 与 `IdbEngine` 拥有完全对等的连接生命周期语义（详见 §3.1.1）。
-
-**v2.9 修复**：`RequestDispatcher.dispatch` 之前把 try/catch 放在 `flow{}` 内部，导致下游 `first()` / `takeWhile` 等短路算子取消时抛出的 `AbortFlowException` 被错误捕获并再次 emit，触发 *"Flow exception transparency violated"*。v2.9 把 try/catch 移到 `.catch{}` operator 外置，`AbortFlowException` 现在能正常向上传播，direct 调用方与 gRPC 调用方都受益。
-
-### 3.1.1 `SYSTEM.DISCONNECT`（v2.15）
-
-**动机**：引擎进程独占 HikariCP 连接池。对同进程调用方，`EngineClient.disconnect` 一次方法调用即可释放；对跨进程调用方（`:engine-grpc-client`），必须有一条 wire 路由才能触发引擎侧的 `PoolManager.close`。v2.15 补上这条路由，使两种 `EngineClient` 实现在连接生命周期上语义一致。
-
-**proto 变更**（`engine-protocol/src/main/proto/idb_engine.proto`）：
-
-| 变更 | 内容 |
-|---|---|
-| `Action` 枚举 | 新增 `DISCONNECT = 19;`（同为 `SYSTEM` category 的无参 action） |
-| 新消息 | `SystemDisconnectResponse { bool closed = 1; }` —— `true` = 确实关闭了至少一个池；`false` = 该配置当前没有活跃池 |
-| `SystemResponse` oneof | 新增 `SystemDisconnectResponse disconnect = 5;` |
-
-**Handler**（`engine/src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt`）：
-
-```kotlin
-suspend fun disconnect(config: ConnectionConfig): SystemDisconnectResponse =
-    withContext(Dispatchers.IO) {
-        systemDisconnectResponse { closed = PoolManager.close(config) }
-    }
-```
-
-**Dispatcher 路由**（`RequestDispatcher`）：
-
-```kotlin
-put(Category.SYSTEM to Action.DISCONNECT, Route(
-    invoke = { c, _ -> SystemHandler.disconnect(c) },
-    wrap  = { b, m -> b.system = systemResponse { disconnect = m as SystemDisconnectResponse } },
-))
-```
-
-- **列入 `writeActions`**（`Category.SYSTEM to Action.DISCONNECT`）—— `dryRun` 短路是**有意为之**：释放连接池有副作用，预演必须真的跳过它，否则 dryRun 会把线上池关掉。
-- **幂等**：同一配置重复调用安全 —— 首次返回 `closed=true` 并释放该配置全部 schema 维度的池，再次调用返回 `closed=false`（无活跃池可释放），不抛异常。
-
-### 3.1.2 `IpcConfig.fromArgs` 的 `--mode` 处理（v2.15）
-
-`--mode <grpc|direct>` 由 `IdbEngineServer.parseMode` 单独解析，但它同样出现在 argv 中。v2.15 起 `IpcConfig.fromArgs` 显式**跳过 `--mode`（及其取值）**，因此 `java -jar idb-engine.jar --mode grpc --ipc tcp --port 50051` 不再报 `Unknown argument: '--mode'`；而 `--mode` 缺少取值时仍显式报 `--mode requires a value (grpc|direct)`。
-
-### 3.1.3 v2.16 新增路由（`SYSTEM.*` / `IMPORT.*`）
-
-v2.16 新增 6 个 action 与 1 个 category：
-
-| Route | Action | 说明 |
-|---|---|---|
-| `SYSTEM.CANCEL` | `CANCEL = 20` | 取消运行中的请求，`SystemResponse.cancel = 6` |
-| `SYSTEM.BEGIN` | `BEGIN = 22` | 开启事务会话，`SystemResponse.begin = 7` |
-| `SYSTEM.COMMIT` | `COMMIT = 23` | 提交并结束会话，`SystemResponse.commit = 8` |
-| `SYSTEM.ROLLBACK` | `ROLLBACK = 24` | 回滚并结束会话，`SystemResponse.rollback = 9` |
-| `SYSTEM.SESSION_INFO` | `SESSION_INFO = 25` | 查询会话状态，`SystemResponse.session_info = 10` |
-| `IMPORT.RUN_IMPORT` | Category `IMPORT = 14` · `RUN_IMPORT = 21` | 数据导入，`Response.import = 23` / `Response.import_progress = 33` |
-
-- `Request` 新增顶层字段 `session_id = 6`（**留空 = 无事务**，与 v2.15 完全一致）；`SystemRequest` 新增 `target_request_id = 1` / `session_id = 2`。
-- `RequestDispatcher`：`SYSTEM.*` 走表驱动 `put(...)` 条目；`IMPORT.RUN_IMPORT` 因返回**流式帧**，在 `dispatch` 内以 `ImportHandler.executeInMainProcess(request).collect { emit(it) }` 分支处理。
-- `IMPORT.RUN_IMPORT` 也列入 `writeActions`（`truncate_first` 清表有副作用），`dryRun` 短路。
-- 机制细节见 §3.7；用户级示例见 [`README.md`](./README.md) 的 `SYSTEM.CANCEL` / 事务 / `IMPORT` 三节。
-
-### 3.2 绝对无状态设计 (Stateless Design)
-
-引擎进程不维护"当前选中的数据库"等业务状态。**每一次**请求都必须在其 protobuf `connection` 字段中携带完整的数据库连接凭证（driver / host / port / user / password / database）。
-
-### 3.3 动态连接池管理器 (Dynamic Pool Manager)
-
-为了解决无状态带来的频繁 TCP 握手开销，引擎内部实现基于 SHA-256 Hash Key 的智能缓存连接池。
-
-1. **连接复用**：根据传入的凭证生成 SHA-256 Hash，若缓存中已有对应的 HikariCP 实例且活跃，则直接复用。
-   pool key 为**两段式**：`sha256(driver:jdbcUrl:host:port:user:password:database)[#sha256(schema)]` ——
-   单段 hash 无法反查池归属，两段式让 `PoolManager.close(config)` 能按配置前缀定位该配置下**所有** schema 维度的池
-   （即 `EngineClient.disconnect` / `IdbEngine.disconnect` / `SYSTEM.DISCONNECT` 的实现基础）。
-2. **资源自动回收**：`idleTimeout` 设为 10 分钟，`minimumIdle` 为 0。若某个库 10 分钟无操作，该连接池将自动缩容直至完全销毁。
-3. **极限并发**：最大连接数 (`maximumPoolSize`) 限制为 5。
-4. **连接超时**：`connectionTimeout` 设为 5 秒。
-5. **最大生命周期**：`maxLifetime` 为 30 分钟。
-6. **显式断开**：`close(config)` 释放单个配置的全部池并返回是否真的关闭；`activePoolCount()` 报告当前活跃池数（诊断 / 测试）。
-   列表里删除连接、或编辑后字段变化时，调用方应显式断开，否则旧池（按旧字段建 key）将无法再被取用，只会随 `idleTimeout` 或进程退出回收。
-   **v2.16 起** `close(config)` 会**先**调 `TransactionManager.closeSessionsFor(config)`（`closeAll()` 先调 `TransactionManager.closeAll()`），否则会话钉住的连接会被从会话底下关掉，后续 `COMMIT` 会在一条死连接上失败。
-7. **会话连接（v2.16）**：`getConnection(config, schema, sessionId)` 在 `sessionId` 为空时即原有「从池里借」；非空时返回 `TransactionManager.connectionFor(...)` 钉住的那条连接（`autocommit=false`），由会话而非 handler 决定归还时机（详见 §3.7）。
-8. **catalog 切换（v2.17）**：每次借出连接时把会话 catalog 切到 `config.database`（`PoolManager.applyCatalog`）。
-
-   > **为什么「按 database 分池」不等于「按 database 生效」**
-   >
-   > `config.database` 进了 pool key，于是每个库拿到各自的池 —— 看起来这件事已经做了。
-   > 但 `createDataSource` 里 `resolvedJdbcUrl = config.jdbcUrl`，**每个池都用同一个 URL**，
-   > 而 URL 里钉死的就是连接时指定的那个库。于是**池按库分开了，连接却全都连到同一个库**。
-   >
-   > `DataHandler.list` 拼的是裸表名（`SELECT * FROM <table>`），裸表名按会话默认库解析，
-   > 于是 `Table '默认库.表名' doesn't exist`。表列表却正常，因为 `TableHandler.list` 走
-   > `information_schema`（本来就跨库）—— **「表列得出来、点开就报错」正是这个缺陷的指纹**。
-   >
-   > 与 schema 完全同构（每次借出都设一遍，不靠建池时的 `connectionInitSql`）。
-   > **切换能力下沉到方言 SPI `DatabaseDialect.switchCatalog`（默认空实现 = 不切换，永远不抛）**，
-   > 只有 `MySQLDialect` 覆盖它。原因：`ConnectionConfig.database` 是**重载**字段 ——
-   > MySQL 放 catalog 名，DuckDB 放 `.duckdb` **文件路径**，而 DuckDB JDBC 的
-   > `setCatalog(x)` 内部发的是 `SET schema = 'x'`，拿路径去当 schema 直接炸
-   > （实测 `DialectSmokeTest [DuckDB]` / `DuckDBHandlerIntegrationTest` 全红）。
-   > 「有没有 catalog 可切」只有方言自己知道，不要在调用方猜异常类型。
-   >
-   > **真实失败必须照抛**：吞掉会让查询静默跑在**错误的库**上、读到别的库的同名表。
-
-   ⚠️ **方言支持度不等价**：实测 H2 的 `Connection.setCatalog` 是**静默 no-op**
-   （`CREATE SCHEMA` 建出来的名字被当 schema 处理，切完 catalog 纹丝不动）。
-   只有 MySQL 这类「一个实例多个 database」的服务端方言真正需要它；
-   验证跨库行为**只能打真 MySQL**，用 H2 写出来的测试会永远绿、却什么都验不到。
-
-9. **catalog 切换的第二条路（v2.18）**：`DatabaseDialect.jdbcUrlForCatalog(jdbcUrl, catalog)`
-   （默认原样返回），由 `createDataSource` 在**建池时**改写 URL 的库名段。
-
-   > **为什么光有 `switchCatalog` 不够**
-   >
-   > 上面第 8 条处理的是「**能在已有连接上切**」的方言（MySQL：`USE x`）——
-   > 建池用什么 URL 无所谓，借出时补一刀即可。
-   >
-   > 而 PostgreSQL 的**数据库是连接的启动参数**，JDBC 没有 `USE`，
-   > 连接一建立就锁死在 URL 指的那个库上 —— **建完池再切已经晚了**。
-   >
-   > 这个坑之所以能活到现在，是因为当初的判断写着「PG catalog == database，连上就锁死，
-   > 切 catalog 无意义」。那句话只覆盖了「连接配置的库就是用户唯一要用的库」这一种情形，
-   > 漏掉了 sundays 的实际用法：**一个连接浏览多个库**（PG 方言 `supportsCrossDatabase = true`）。
-   > 真窗口走查的后果是：用户点 `examquestions`，看到的却是连接配置里那个
-   > `postgres` 库的内容 —— **静默读到错的库，比报错危险得多**。
-   >
-   > 两条路都要留着：MySQL 走 `switchCatalog`（运行时），PG 走 `jdbcUrlForCatalog`（建池时），
-   > 后者对 MySQL 是 no-op。实现必须校验 `catalog` ——
-   > 库名里含 `/` `?` `#` 空白 `%` 会**重解析 URL 结构**、连到别的库，一律拒绝而不是拼接。
-
-### 3.4 导出子进程隔离机制 (Export Subprocess Isolation)
-
-数据导出模块独立运行在子进程中，通过 `ExportProcessManager` 管理。
-
-- **设计目标**：防止大数据量导出时 OOM 影响主进程稳定性；支持任务取消；主进程关闭时自动停止子进程
-- **子进程模式**：`java -Didb.subprocess=true -jar idb-engine.jar`，由 `ExportProcessManager` 通过 gRPC `ExportHub` side server 编排
-- **内存限制**：子进程 `-Xmx512m`
-- **响应流管线**：子进程通过 `ExportHub` 将进度帧转发回主进程，主进程再 emit 到上游 gRPC StreamObserver
-
-#### 这条链路上的四条硬约束（踩过的坑，改动前请先读）
-
-1. **每一层流式路由都必须保证「一定会以成功或失败收口」。** 缺一层就变成静默：
-   `EXPORT.RUN_EXPORT` 的帧从子进程 `ExportEngine` → `ExportHandler.executeAsSubprocess`
-   （`callbackFlow` + `Channel`，工作协程只 `trySend`，`send` 全在 flow 自己的协程里 ——
-   在别人的协程里 `emit` 会撞 Flow 不变量）→ ExportHub → 主进程 `ExportProcessManager`
-   → 上游 gRPC。任何一环没兜底，界面上的表现都是「点了导出，什么也没发生」。
-   兜底点包括：`startExport` 返回 Boolean、订阅早于下发、子进程退出补失败帧、
-   hub 流断开补失败帧、上游 `withTimeoutOrNull` 看门狗。
-
-2. **gRPC 的 `StreamObserver.onNext` 不是线程安全的。** 多个导出并发时，
-   父子两侧都会并发调 `onNext`，内层 `sendHeaders` 直接 checkState 失败抛
-   `sendHeaders has already been called`，**整条流当场废掉**。
-   子进程侧每条流配一把对象锁（`sendLock` / `sendFrame`），
-   父进程侧配一把发命令锁（`ExportProcessManager.sendLock` / `sendCommand`）。
-
-3. **地址写死 `127.0.0.1`，不要用 `localhost`。** `localhost` 在 Windows 上会解析出 `::1`，
-   一旦挑了 IPv6 去连只监听 IPv4 的子进程，得到的是无法复现的
-   `UNAVAILABLE: io exception`。同机进程没有「跨主机」这一说，见
-   `ExportProcessManager.EXPORT_HUB_HOST`。
-
-4. **`Value` 只有 `double number_value`。** 任何整数经 protobuf 往返都会变成 `3.0`，
-   而 `JsonPrimitive(3.0).content` 是 `"3.0"`，`longOrNull` / `intOrNull` 对它返回 null。
-   业务层普遍写 `?: 0` 兜底，于是数字**安静地变成 0** —— 不报错、不抛异常，只是错了。
-   `PayloadAdapter.numberPrimitive` 在边界把整数还原回去。
-
-5. **判据问「上次拉起时它在不在」还是「它现在还在不在」，是两道不同的题。**
-   `ExportProcessManager` 维护两个互不一致的标记：
-
-   | 标记 | 语义 | 用来回答 |
-   |---|---|---|
-   | `hasUsableChannel` | 进程标记在 **且** 流在 | **能不能发命令** |
-   | `isProcessAlive`（`Process.isAlive`） | 进程**此刻**还在跑吗 | **要不要重启** |
-   | ~~`isRunning`~~ | **曾经**拉起过一个 | 只能用来挡住重复拉起 |
-
-   子进程**自己崩掉**时（OOM / 驱动炸 / 被外部杀），`isRunning` 还留在 true。
-   拿它当「要不要重启」的判据，漂移态下就会走成「不重启、只等端口」——
-   等的是一个**已经没人监听的端口**，白等满 30 秒后报「导出子进程通道未就绪」，
-   **永远不会自愈**（实测：那条用例 30.14s 后失败，修完 2.79s 成功）。
-   `ensureSubprocessRunning` 判据换成 `isProcessAlive`，重启前先 `stop()`
-   清掉陈旧标记（`start()` 的 CAS 要求它为 false；对已死进程 `stop()` 是安全 no-op）。
-
-#### 排障入口
-
-子进程 stdout / stderr 重定向到 **`engine/build/libs/export-subprocess.log`**
-（每次启动会覆盖）。父进程侧关键点打 `[export]…`、子进程打 `[export-sub]…`，
-两边都落 **`engine/build/libs/export-manager.log`**（父子同文件，顺序连得起来）。
-桌面应用被 IDE / Gradle 拉起时 stdout 用户看不到，SLF4J 还可能是 NOP，
-所以这里用的是 `System.err.println` 而不是 logger。
-
-> 排查「导出成功过、之后开始失败」时**先看 `export-manager.log`**：
-> 断流发生在**父进程**这一侧，而子进程日志里什么异常都没有 —— 曾经只看得见后者，
-> 于是整个排查扑空。日志里搜 `等待 hub 端口 … 就绪超时` 能一眼认出「死等端口」这种死法。
-
-### 3.5 Schema 导航层级 (Navigation Hierarchy)
-
-数据库连接后，前端导航分为两级（PG/H2 支持两级，MySQL 仅支持 database）：
-
-| 方言 | level=database | level=schema |
-|---|---|---|
-| MySQL | `SHOW DATABASES` 过滤系统库（information_schema / mysql / performance_schema / sys） | 不支持 — 单元素列表（database == schema） |
-| PostgreSQL | `pg_database WHERE NOT datistemplate` | `pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'` |
-| H2 | `[conn.catalog]` 单元素 | `INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?` |
-| DuckDB | 文件路径 / `memory` / 单元素 | `information_schema.schemata` |
-| SQLite | 单元素（`database` 路径或 `:memory:`） | 单元素（`main`） |
-
-> 上述行为表是**引擎层契约** — 每个方言插件必须按此规则实现 `listDatabases` / `listSchemas`，供前端构建两级导航 UI。
-
-`SchemaHandler.list` 按 `payload["level"]` 分发（默认 `"database"`）：
-- `level="database"` → `dialect.listDatabases(conn)` → 返回 `{level: "database", items: [...]}`
-- `level="schema"` → 必须同时传 `payload["database"]` → `dialect.listSchemas(conn, database)` → 返回 `{level: "schema", database, items: [...]}`
-
-所有 TABLE / DATA / SQL / FUNCTION / VIEW / INDEX / FOREIGN_KEY / TRIGGER 操作均支持可选 `schema` 参数（PostgreSQL 有效，MySQL 忽略，H2 默认 PUBLIC）；引擎自动 `SET search_path TO <schema>`（PG）或 `SET SCHEMA <schema>`（H2），确保无前缀表名能正确解析。
-
-### 3.6 跨平台 IPC 传输抽象 (Cross-Platform IPC Transport Abstraction)
-
-引擎在 gRPC 之上抽象了一层 **IPC Transport SPI**（`com.langbiantianya.ipc.IpcTransport`），允许通过 CLI 参数在三种传输方式之间切换，无需修改业务代码。`IdbEngineServer` 在启动时调用 `IpcConfig.fromArgs(args)` 解析配置，再通过 `IpcTransportRegistry.resolve(cfg)` 获取传输实例，进而拿到 `ServerBuilder<*>` / `ManagedChannelBuilder<*>`，业务层完全不感知底层传输。
-
-**三种传输方式**：
-
-| `--ipc` | 传输方式 | 适用平台 | 服务端实现 | 客户端实现 |
-|---|---|---|---|---|
-| `tcp`（默认） | TCP loopback | 全平台 | `NettyServerBuilder.forPort(port)`（生产路径，失败回退 `ServerBuilder.forPort`） | `ManagedChannelBuilder.forAddress("localhost", port).usePlaintext()` |
-| `unix` | Unix Domain Socket（filesystem namespace） | Linux / macOS / BSD | Linux + epoll native 可用：`EpollServerDomainSocketChannel` + `EpollEventLoopGroup`；其它：`NioServerDomainSocketChannel` + `NioEventLoopGroup` | `NettyChannelBuilder.forAddress(DomainSocketAddress(path))` + 对应 channelType + eventLoopGroup |
-| `pipe` | Windows 命名管道 | Windows | grpc-java 1.68（及最新 1.83）**无公开 server-side API**，`serverBuilder()` 抛 `UnsupportedOperationException` | `Grpc.newChannelBuilder("pipe:<name>", InsecureChannelCredentials.create())` |
-
-**CLI 参数**：
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--mode <grpc\|direct>` | `grpc` | 启动模式（v2.9 新增 `direct`：仅 bootstrap 后阻塞主线程，不监听 IPC） |
-| `--ipc <kind>` | OS 自动检测 | `tcp` / `unix` / `pipe`；未传时 Windows → `pipe`，POSIX → `unix` |
-| `--port <int>` | `50051` | TCP 端口（仅 `tcp` 模式生效） |
-| `--uds-path <path>` | `/tmp/idb-engine.sock` | UDS 文件路径（POSIX） |
-| `--pipe-name <name>` | `idb-engine` | 命名管道名称（Windows） |
-| `--help` / `-h` | — | 打印用法到 stdout 并退出 0 |
-
-**SPI 接口**（`engine/.../ipc/IpcTransport.kt`）：
-
-| 方法 | 职责 |
-|---|---|
-| `scheme()` | 诊断用标识（`tcp` / `unix` / `pipe`） |
-| `displayTarget()` | 显示用地址（端口号 / UDS 路径 / `pipe:<name>`） |
-| `prepare()` | 启动前资源准备（UDS 删除 stale 文件并 `Files.createFile` + `chmod 600`；Pipe 校验名称格式） |
-| `serverBuilder()` | 返回 `ServerBuilder<*>`（UDS 路径下需额外配置 `bossEventLoopGroup` + `workerEventLoopGroup`） |
-| `channelBuilder()` | 返回 `ManagedChannelBuilder<*>`（UDS 路径下需配置 `eventLoopGroup`） |
-| `cleanup()` | shutdown 后资源回收（UDS 删除 socket 文件） |
-
-**资源隔离**：
-- EventLoopGroup 通过 `NettyServerBuilder.bossEventLoopGroup()` / `workerEventLoopGroup()` 设置后，grpc 在 `server.shutdown()` 时自动释放
-- UDS 文件权限：默认 `rw-------`（POSIX）；启动时若存在则删除后重建
-- 命名管道名称校验：`^[A-Za-z0-9_.-]{1,64}$`，由 `prepare()` 抛出 `IllegalArgumentException` 终止启动
-
-**为什么不用 Linux abstract namespace UDS**：macOS / BSD 不支持 abstract namespace。
-
-**Windows 服务端限制**：grpc-java 1.76.0（当前依赖版本，最新 1.83.0 亦未公开）未暴露用于 Windows Named Pipes 的 server-side API。`NamedPipeIpcTransport.serverBuilder()` 抛 `UnsupportedOperationException`，提示需 JNA + Win32 `CreateNamedPipe` 自实现（标记为未来工作）；客户端 `channelBuilder()` 可用。引擎在 Windows 上仍可通过切换到 `tcp` 模式运行（`--ipc tcp`）。
-
-### 3.7 写路径共性：连接所有权与取消通道（v2.16）
-
-v2.16 的三个写路径能力（**查询取消** / **事务** / **数据导入**）看似彼此独立，实际收敛到同一条规则：
-
-> **连接的拥有者决定它何时被释放。**
-
-| 场景 | 谁拥有连接 | 何时归还池 |
-|---|---|---|
-| 无 `session_id` | 借出连接的 handler | handler 在 `finally` 中 `conn.close()`（HikariCP 的 `close()` = 归还，不是物理关闭） |
-| 有 `session_id` | `TransactionManager`（会话钉住的连接） | `SYSTEM.COMMIT` / `SYSTEM.ROLLBACK`（或 `closeSessionsFor` / `closeAll` 兜底） |
-
-对应实现：`PoolManager.getConnection(config, schema, sessionId)` 在 `sessionId` 为空时就是原有的「从池里借」；非空时走 `TransactionManager.connectionFor(...)` 返回会话钉住的那条连接。接收 `sessionId` 的 handler（`DataHandler.list/create/update/delete`、`SqlEngineHandler.execute`、`ImportHandler.runImport`）必须以 `withBoundConnection` / `releaseIfUnbound` 收尾：**只有 `sessionId` 为空时才关闭连接**。
-
-**为什么必须显式写死这条规则**：池每次借出都可能是不同的物理连接。如果会话激活时 handler 仍把连接 `close()` 归还 HikariCP，下一条语句会落到**另一条物理连接**上 —— 事务会**静默**退化成「只有最后一条语句」，没有任何报错。这正是它被写进代码注释、并被集成测试钉死的原因。
-
-#### 3.7.1 `StatementRegistry` —— 单一取消通道
-
-`com.langbiantianya.engine.StatementRegistry`（object）把「运行中的请求 id」映射到「可取消目标」：
-
-```kotlin
-object StatementRegistry {
-    fun interface CancelTarget { fun cancel() }        // 抽象「怎么停下来」
-    private val running = ConcurrentHashMap<String, CancelTarget>()
-
-    fun register(requestId: String, statement: Statement)          // 包装 Statement.cancel()
-    fun registerCanceler(requestId: String, action: () -> Unit)    // 任意取消动作
-    fun unregister(requestId: String)
-    fun cancel(requestId: String): Boolean
-    fun activeCount(): Int
-    fun clear()
-}
-```
-
-`CancelTarget` 之所以是抽象而不是直接存 `Statement`，是因为取消目标**不只有 JDBC 语句**：导入的取消是「置停标志 + 打断当前批次」，造数的取消同样是标志位 + `activeStmt`。把它们统一到同一个 `fun cancel()` 上，`SYSTEM.CANCEL` 就只需要一条通道。
-
-- **注册点**：`SqlEngineHandler.execute`（`SQL.EXECUTE`；多语句脚本按 `"$requestId#$index"` 逐条注册 / 注销，因此取消总命中当前正在跑的那一条）、`DataHandler.list`（`DATA.LIST` 流式，`pageSize=0`）、`GenerateHandler.execute`（`DATA.GENERATE`）、`ImportHandler.executeInMainProcess`（`IMPORT.RUN_IMPORT`）。
-- 处理器在创建语句后立即 `register`，在 `finally` 中 `unregister`（否则会泄漏已关闭的 `Statement` 引用）。
-- `SYSTEM.CANCEL` → `SystemHandler.cancel(targetRequestId)` → `StatementRegistry.cancel(...)`；未命中返回 `cancelled=false` + 说明性 `error`，**不抛异常**。被取消的请求由其**自身**的异常路径收口成**原请求 id** 上的 `success=false, error="cancelled"`。
-
-#### 3.7.2 为什么 `DATA.GENERATE` 需要显式标志检查
-
-Lua 脚本通过 luajava **在 JNI 里阻塞执行**，协程取消与 `Statement.cancel()` 都打不进 Lua 解释器本身。因此 `GenerateState` 携带两件东西：
-
-- `cancelled: AtomicBoolean` —— 在 Lua `insert(...)` 回调的**入口**检查；被置位时抛异常，让异常穿过 `L.run()` 把脚本解开。
-- `activeStmt: AtomicReference<PreparedStatement?>` —— 在 `executeBatch()` 前后设置；`SYSTEM.CANCEL` 除了置 `cancelled`，还会对当前批次语句调 `cancel()`，从而打断正在跑的那一批。
-
-**已执行的批次不回滚**：`DATA.GENERATE` 不在事务语义内，取消只保证脚本立即停止，不保证已插入的数据消失。
-
-#### 3.7.3 事务会话（`SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`）
-
-`com.langbiantianya.pool.TransactionManager`（object）持有活跃会话（`ConcurrentHashMap<String, TransactionSession>`）：
-
-- `begin(config, schema)`：从池借一条连接、置 `autoCommit=false`、分配 UUID、登记会话。
-- `connectionFor(sessionId, config, schema)`：返回会话钉住的连接，且**仅当 schema 与 `appliedSchema` 不同时**才 `setSearchPath`（避免每条语句重复 `SET`）。
-- `commit` / `rollback` → `finish(...)`：提交或回滚后还原 `autoCommit=true`、`conn.close()` 归还池中。会话不存在返回 `false`，不抛异常。
-- `closeSessionsFor(config)` / `closeAll()`：回滚并释放会话；`PoolManager.close(config)` / `PoolManager.closeAll()` **先**调用它们，否则钉住的连接会被从会话底下关掉，随后 `COMMIT` 会在一条死连接上失败。
-- **未知会话不静默降级**：写操作携带未知（已 COMMIT/ROLLBACK、或引擎重启清掉）的 `sessionId` → **拒绝**（`success=false`），绝不悄悄退化成自动提交。
-- **池容量**：`maximumPoolSize = 5` → 单配置最多 5 个并发会话；第 6 个 `BEGIN` 在 5 秒后命中 HikariCP `connectionTimeout`。**刻意背压，不是 bug**。
-
-## 4. 数据交互契约 (gRPC Wire Contract)
-
-引擎与调用方之间通过标准 gRPC 传递强类型结构化数据。所有 `Request` / `Response` 的字段含义通过 proto3 schema 定义；下文中的 JSON 示例仅为业务层理解用的逻辑表示，**实际 wire 上是 typed protobuf 的二进制紧凑编码**（不再使用 `map<string, Value>`）。
-
-### 4.0 Wire 传输 (Wire Transport)
-
-- **传输层**：gRPC over HTTP/2（`grpc-netty-shaded`）
-- **消息类型**：强类型 per-Category protobuf 消息（`oneof body` 路由）
-- **最大消息大小**：`maxInboundMessageSize = 256 MiB`
-- **消息边界**：由 gRPC HTTP/2 帧头管理
-- **流式响应**：客户端调用 `Handle(req)` 后持续 `stream.Recv()`，直到收到 `end: true` 的最后一帧 `Response`
-
-### 4.1 统一请求体 (Request Envelope)
-
-`Request` 的 protobuf schema（`engine-protocol/src/main/proto/idb_engine.proto`）：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | `string` | 请求唯一 ID（`SYSTEM.CANCEL` 的 `target_request_id` 即以此为准） |
-| `category` | `enum Category` | `SCHEMA` / `USER` / `TABLE` / `DATA` / `SQL` / `SYSTEM` / `FUNCTION` / `EXPORT` / `VIEW` / `INDEX` / `FOREIGN_KEY` / `TRIGGER` / `IMPORT`（14，v2.16） |
-| `action` | `enum Action` | `LIST` / `CREATE` / `UPDATE` / `DELETE` / `EXECUTE` / `GET_DDL` / `INFO` / `GRANTS` / `GENERATE` / `DEBUG` / `CALL` / `RUN_EXPORT` / `RENAME` / `TRUNCATE` / `EXPLAIN` / `TEST_CONNECTION` / `SERVER_INFO` / `LIST_DRIVERS` / `DISCONNECT`（19，v2.15） / `CANCEL`（20）/ `RUN_IMPORT`（21）/ `BEGIN`（22）/ `COMMIT`（23）/ `ROLLBACK`（24）/ `SESSION_INFO`（25）（v2.16） |
-| `session_id` | `string` | **v2.16** — 由 `SYSTEM.BEGIN` 分配的事务会话 id。**留空 = 无事务**（每条语句独立提交，即 v2.15 及以前的行为）；非空时该请求的 `DATA.*` 写与 `SQL.EXECUTE` DML 落在会话钉住的连接上（见 §3.7.3） |
-| `connection` | `ConnectionConfig` | 见下表 |
-| `body` | `oneof` | per-Category typed 消息（`schema_request`/`user_request`/.../`export_request`/`import_request`），见下方表格 |
-
-> **注意**：`Action.EXPORT` 在 proto3 中与 `EXPORT` category 命名冲突，因此历史 wire 协议中的 `EXPORT` action 在新协议中重命名为 **`RUN_EXPORT`**（12），仍是 `EXPORT` category 的唯一合法 action；同理数据导入使用 `IMPORT.RUN_IMPORT`（`IMPORT` category 的唯一合法 action）。
-
-**Per-Category Request 消息**（`Request.body` 选择项）：
-
-| Category | Request body | 关键字段 |
-|---|---|---|
-| `SYSTEM` | `SystemRequest` | `target_request_id`（CANCEL）/ `session_id`（SESSION_INFO / COMMIT / ROLLBACK）；INFO/TEST_CONNECTION/DISCONNECT/BEGIN/SERVER_INFO/LIST_DRIVERS 无 payload |
-| `SCHEMA` | `SchemaRequest` | `list { level, database }` / `create { name, options }` / `delete { name }` |
-| `USER` | `UserRequest` | `list { user, host }` / `create { user, password, host }` / `update { user, password, host, schema, privileges[], is_grant, table_name, with_grant_option }` / `delete { user, host }` / `grants { user, host }` |
-| `TABLE` | `TableRequest` | `list { schema }` / `column_list { table_name, schema }` / `create { table_name, columns[], options, schema }` / `update { table_name, operation, column, column_name, schema }` / `get_ddl { table_name, schema }` / `rename { old_name, table_name, new_name, schema }` / `delete { table_name, schema }` / `truncate { table_name, schema }` |
-| `DATA` | `DataRequest` | `list { table_name, page, page_size, where, order_by, schema }` / `create { table_name, values, schema }` / `update { table_name, changes, where, schema }` / `delete { table_name, where, schema }` / `generate { schema, tables[], lua_version }` |
-| `SQL` | `SqlRequest` | `execute { sql, schema, multi_statement }`（v2.16 新增 `multi_statement`）/ `explain { sql, schema }` |
-| `FUNCTION` | `FunctionRequest` | `list { schema }` / `info { name, schema }` / `get_ddl { name, schema }` / `create { ddl }` / `delete { name, routine_type, schema, if_exists, cascade }` / `call { name, routine_type, schema, args[] }` / `debug { name, schema }` / `update { ddl }` |
-| `VIEW` | `ViewRequest` | `list { schema }` / `create { name, definition, schema }` / `delete { name, if_exists, schema }` / `get_ddl { name, schema }` |
-| `INDEX` | `IndexRequest` | `list { table_name, schema }` / `create { table_name, index_name, columns[], unique, schema }` / `delete { index_name, table_name, schema }` |
-| `FOREIGN_KEY` | `ForeignKeyRequest` | `list { table_name, schema }` / `create { table_name, fk_name, columns[], ref_table, ref_columns[], on_delete, on_update, schema }` / `delete { table_name, fk_name, schema }` |
-| `TRIGGER` | `TriggerRequest` | `list { schema }` / `get_ddl { name, schema }` |
-| `EXPORT` | `ExportRequest` | `run_export { sql, output_dir, file_name, format, table_name, fetch_size, stop_export_id }` |
-| `IMPORT`（v2.16） | `ImportRequest` | `run_import { file_path, format, table_name, schema, batch_size, delimiter, has_header (optional), encoding, truncate_first, ignore_errors, stop_import_id }` |
-
-**共享子消息**：
-
-| 消息 | 字段 |
-|---|---|
-| `ColumnDef` | `name, type, size, nullable (optional, default true), is_primary_key, default_value, auto_increment, new_name` |
-| `GenerateTable` | `script` |
-
-`ConnectionConfig`：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `driver` | `string` | `Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite` |
-| `host` | `string` | 数据库主机 |
-| `port` | `int32` | 数据库端口 |
-| `user` | `string` | 用户名 |
-| `password` | `string` | 密码（参与 `toHashKey()` 连接池缓存 key） |
-| `database` | `string` | 数据库名（PG 也可作为 schema 容器） |
-| `schema` | `string` | 可选 — PG search_path 上下文；H2 视为 schema 名；MySQL 忽略 |
-| `use_ssl` | `bool` | 是否启用 SSL |
-| `properties` | `map<string,string>` | JDBC 扩展参数 / SSH 配置 |
-| `jdbc_url` | `string` | **v2.11** — 完整 JDBC URL。非空时 `PoolManager` 直接用它建池，`host`/`port`/`database` 被忽略；方言由 URL scheme 反查（`DialectLoader.getDialectByJdbcUrl`）。允许调用方仅凭 URL 初始化连接 |
-
-### 4.1.1 `RequestOptions` —— 随请求走的一次性上下文
-
-`Request.options` 是 envelope 上的横切配置，与「连哪个库」无关，只作用于这一条请求：
-
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `trace_id` | `string` | `""` | 贯穿一帧全部响应的追踪 ID |
-| `dry_run` | `bool` | `false` | 写路径短路（见 §3 的 `writeActions` 集合） |
-| `timeout_ms` | `int32` | `0` | 单请求超时，`0` = 不限 |
-| `language` | `string` | `""` | **界面语言**（BCP-47，如 `de` / `zh-Hant`），见下 |
-
-#### `language` —— 界面语言为什么要一路带进引擎
-
-`Response.error` 的内容是**原样上屏**的（见 `RequestDispatcher` 的 catch 分支）。
-引擎抛的错误如果不带语言，德语界面里就会蹦出英文/中文报错 —— 这和界面本身漏翻译是同一种缺陷。
-
-```
-客户端
-  IdbEngine.handle() / GrpcEngineClient.handle()
-      → Request.withLanguageTag(LanguageScope.currentLanguage().persistedValue())
-引擎进程
-  RequestDispatcher.dispatch()
-      → { ... }.flowOn(EngineLanguageContext(language))
-handler 内
-  Msg.text(StrKey.EXPORT_FAILED)   // 读到的是本次请求的语言
-```
-
-四条设计约束：
-
-1. **`RequestLanguage.kt` 只收 `String`，不收 `AppLanguage`。**
-   它住在 `:engine-protocol`，如果接收 `:i18n` 的类型就会形成
-   `:i18n → :engine-protocol → :engine` 的依赖环 —— 而 `:i18n` 恰恰是 `:engine` 的依赖。
-2. **`RequestDispatcher` 只在客户端真的填了 language 时才装上下文元素**，不填就不装。
-   免得把客户端没打算指定的服务端默认语言给顶掉。
-3. **协程换线程要跟着走**，所以 `EngineLanguageContext` 实现 `ThreadContextElement`，
-   dispatcher 用 `flowOn(...)` 搬运 —— 只用 `ThreadLocal` 会在 `flow` 切线程后丢语言。
-4. **字段号 4 之前未占用**，老客户端不填时行为不变（向后兼容）。
-
-> **「是不是报错」是状态，不是文案。** 上层如果靠 `error.startsWith("导出失败")` 之类解析文案来决定错误色，
-> 翻译之后这个判断恒为 false，报错会被静默染成成功色。严重级别必须走结构化字段。
-
-### 4.2 统一响应体 (Response Envelope)
-
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `id` | `string` | — | 对应请求的 `id` |
-| `success` | `bool` | `false` | 是否成功 |
-| `error` | `string` | `""` | 错误信息；非空即视为错误响应 |
-| `stream` | `bool` | `false` | 流式响应标记 |
-| `end` | `bool` | `false` | 流式结束标记 |
-| `body` | `oneof` | （空） | 业务结果 — per-Category typed 消息（`schema`/`user`/...） + 4 个流式帧（`data_row_frame`/`sql_row_frame`/`gen_progress_frame`/`import_progress`（v2.16）） + `generate_terminal` |
-
-**Per-Category Response 消息**（`Response.body` 单次响应选项）：
-
-| Category | Response body | 关键字段 |
-|---|---|---|
-| `SCHEMA` | `SchemaResponse` | `list { level, database, items[] }` / `create { created }` / `delete { deleted }` |
-| `USER` | `UserResponse` | `list { items[] }` / `create { created }` / `update { user, schema, table, action, with_grant_option }` / `delete { deleted }` / `grants { items[] }` |
-| `TABLE` | `TableResponse` | `list { items[] }` / `columns { items[] }` / `create { created }` / `update { table_name, operation }` / `get_ddl { ddl }` / `rename { renamed, new_name }` / `delete { deleted }` / `truncate { truncated }` |
-| `DATA` | `DataResponse` | `list { total, page, page_size, rows[] }` / `create { affected_rows }` / `update { affected_rows }` / `delete { affected_rows }` |
-| `SQL` | `SqlResponse` | `execute { affected_rows, statements[] }`（v2.16 多语句逐条结果 `index / sql / affected_rows / success / error`）/ `explain { rows[] }` |
-| `SYSTEM` | `SystemResponse` | `info { jvm_version, ..., memory { max, total, used, free }, uptime, pid }` / `test_connection { ok, driver, host, port, database, error }` / `server_info { version, catalog, current_database, mode, extras }` / `list_drivers { items[] }` / `disconnect { closed }`（v2.15） / `cancel { cancelled, request_id, error }` / `begin { session_id, started_at, driver, database }` / `commit { session_id, committed, error }` / `rollback { session_id, rolled_back, error }` / `session_info { active_sessions, sessions[] }`（v2.16） |
-| `FUNCTION` | `FunctionResponse` | `list { items[] }` / `info { info }` / `get_ddl { ddl }` / `create { success, message }` / `delete { success, message, name, routine_type }` / `call { result }` / `debug { items[] }` / `update { valid, message }` |
-| `VIEW` | `ViewResponse` | `list { items[] }` / `create { created }` / `delete { deleted }` / `get_ddl { ddl }` |
-| `INDEX` | `IndexResponse` | `list { items[] }` / `create { created, table_name }` / `delete { deleted }` |
-| `FOREIGN_KEY` | `ForeignKeyResponse` | `list { items[] }` / `create { created, table_name }` / `delete { deleted }` |
-| `TRIGGER` | `TriggerResponse` | `list { items[] }` / `get_ddl { ddl }` |
-| `EXPORT` | `ExportResponse` | `progress { exported_rows, column_count, completed, file_path, error }` / `stop { stopped }` |
-| `IMPORT`（v2.16） | `ImportResponse` | `progress { rows_read, rows_inserted, rows_failed, message }` / `result { rows_read, rows_inserted, rows_failed, success, error }` |
-
-**流式帧类型**（`Response.body` 流式选项）：
-
-| Frame | 字段 | 用途 |
-|---|---|---|
-| `DataRowFrame` | `total, page=0, page_size=1, row` | `DATA.LIST pageSize=0` 每行一帧 |
-| `SqlSelectRowFrame` | `total=-1, page, page_size=1, row` | `SQL.EXECUTE SELECT` 每行一帧 |
-| `GenerateProgressFrame` | `table, inserted, script_inserted, script_index, total_scripts, sql, data` | `DATA.GENERATE` 每条 INSERT 一帧 |
-| `GenerateTerminalResponse` | `success, tables_processed` | `DATA.GENERATE` 终止帧（end=true） |
-| `ExportProgressFrame` | （见 `EXPORT.progress`） | `EXPORT.RUN_EXPORT` 进度帧 |
-| `ImportProgressFrame` | `rows_read, rows_inserted, rows_failed, message` | `IMPORT.RUN_IMPORT` 进度帧（v2.16；每读入 5000 行一帧），终止帧携带 `ImportResponse.result` |
-
-**流式响应字段说明**：
-- `stream: true` — 当前响应属于流式序列（一条请求产生多帧响应）
-- `end: true` — 流式序列的最后一帧
-- 普通（非流式）响应中 `stream` 和 `end` 均为 `false`
-
-### 4.3 流式 vs 单次响应矩阵
-
-| Category.Action | 响应模式 | 备注 |
-|---|---|---|
-| `DATA.LIST`（`pageSize == 0`） | **流式** | 每行一帧；JDBC 游标防 OOM；`end=true` 终止 |
-| `SQL.EXECUTE`（SELECT） | **流式** | 每行一帧；PG 临时 `autoCommit=false` 启用服务端游标 |
-| `DATA.GENERATE` | **流式** | 每条 INSERT 回报一次进度 |
-| `EXPORT.RUN_EXPORT` | **流式** | 进度帧 throttled（每 1000 行或每 200ms） |
-| `IMPORT.RUN_IMPORT`（Category 14 · Action 21） | **流式** | 进度帧（每读入 5000 行一帧）+ 终止帧携带 `ImportResultResponse`；`writeActions`，`dryRun` 短路（v2.16） |
-| `SYSTEM.CANCEL`（`Action 20`） | 单次 | `SystemHandler.cancel(targetRequestId)` → `StatementRegistry.cancel`；未命中返回 `cancelled=false` + error，不抛异常（v2.16） |
-| `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO`（`Action 22`–`25`） | 单次 | 事务会话生命周期（`TransactionManager`）；COMMIT/ROLLBACK 遇未知会话返回 `false` + error（v2.16） |
-| `SYSTEM.DISCONNECT`（`Action 19`） | 单次 | 由 `SystemHandler.disconnect` → `RequestDispatcher` 路由（v2.15）；在 `writeActions` 中，`dryRun` 会短路 |
-| 其它所有 `(Category, Action)` | 单次 | 一次性 Response |
-| `SQL.EXPLAIN`（Action 15） | 单次 | 由 `SqlEngineHandler.explain` → `RequestDispatcher` 路由（v2.6 起打通） |
-
-## 5. 功能模块详细设计 (Feature Modules)
-
-采用 **方言抽象层 (Dialect Abstraction Layer) + SPI 插件动态加载** 设计模式：
-
-- **DatabaseDialect SPI**（`api` 模块）：定义所有数据库特定操作的抽象方法 + 连接元数据扩展（v2.8）
-- **MySQLDialect / PostgreSQLDialect / H2Dialect / DuckDBDialect（v2.7）/ SQLiteDialect（v2.8）**（独立插件模块）：具体方言实现
-- **DialectLoader**（`engine` 模块）：通过 `ServiceLoader<DatabaseDialect>` 发现并注册方言，来源两条：**应用类路径**（Direct 模式 / 开发运行的方言插件随类路径加载）与 **`dialects/` 目录**（JAR 分发的插件 JAR，同名覆盖类路径版本）；提供 `getAllDialects()` 返回所有已加载方言供 `SYSTEM.LIST_DRIVERS` 路由使用
-
-**关键事实**（v2.8）：五个方言均完整实现了 SPI 接口的**全部方法**（`listRoutines`、`getRoutineInfo`、`callRoutine`、`validateRoutineDDL`、`debugRoutine`、`createRoutine`、`dropRoutine` 等），不再有占位实现；并且**全部声明**各自连接元数据（`displayName` / `connectionType` / `requiresHost` / `defaultPort` / `capabilities` 等）。
-
-> **Wire vs 业务层**：下面示例中的 JSON `payload` 字段展示的是**业务参数**的逻辑形状，便于理解业务参数。**实际 wire 上** 这些字段是强类型 per-Category protobuf 消息（`Request.body.schema_request.list.level` / `Request.body.schema_request.list.database` 等），handler 直接读取这些 typed 字段，不再经过任何 `JsonObject` 中间层。
-
-### 5.1 架构管理 (Schema Management) — `category: "SCHEMA"`
-
-**支持的 Action**：`LIST` / `CREATE` / `DELETE`
-
-**所有 Action 均需要 connection。**
-
-#### LIST — 两级导航
-
-| 方言 | level=database | level=schema |
-|---|---|---|
-| MySQL | `SHOW DATABASES` 过滤系统库 | 单元素 `[database]` |
-| PostgreSQL | `pg_database WHERE NOT datistemplate` | `pg_namespace` 过滤 `pg_%` / `information_schema` |
-| H2 | `[conn.catalog]` 单元素 | `INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?` |
-
-#### CREATE — 创建 Database / Schema
-
-| payload 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `name` | string | ✓ | schema 名称 |
-| `options` | object | — | MySQL 支持 `charset` / `collate`；PG 忽略 |
-
-#### DELETE — 删除 Database / Schema
-
-```json
-{"id":"r3","category":"SCHEMA","action":"DELETE","connection":{...},"payload":{"name":"old_db"}}
-```
-
-**Response data**：`{"deleted":"old_db"}`
-
-### 5.2 用户权限 (User & Privilege) — `category: "USER"`
-
-**支持的 Action**：`LIST` / `CREATE` / `UPDATE` / `DELETE` / `GRANTS`
-
-#### LIST — 用户列表 或 用户权限列表
-
-- payload 不含 `user` → 返回用户列表
-- payload 含 `user` → 返回该用户的权限列表
-
-#### UPDATE — 两种模式
-
-**模式 1：修改密码**（payload 含 `password` 但无 `privileges`）
-
-```json
-{"id":"r7","category":"USER","action":"UPDATE","connection":{...},"payload":{"user":"dev","password":"new_secret","host":"%"}}
-// Response: {"user":"dev","action":"password_changed"}
-```
-
-**模式 2：授予/回收权限**（payload 含 `privileges`）
-
-```json
-// 授予
-{"id":"r8","category":"USER","action":"UPDATE","connection":{...},"payload":{"user":"dev","schema":"my_app_db","privileges":["SELECT","INSERT","UPDATE"],"isGrant":true,"tableName":"users","withGrantOption":false}}
-// Response: {"user":"dev","schema":"my_app_db","table":"users","withGrantOption":false,"action":"granted"}
-
-// 回收
-{"id":"r8b","category":"USER","action":"UPDATE","connection":{...},"payload":{"user":"dev","schema":"my_app_db","privileges":["DELETE"],"isGrant":false}}
-// Response: {"user":"dev","schema":"my_app_db","action":"revoked"}
-```
-
-### 5.3 表结构元数据 (Table Metadata) — `category: "TABLE"`
-
-**支持的 Action**：`LIST` / `CREATE` / `UPDATE` / `DELETE` / `GET_DDL` / `RENAME` / `TRUNCATE`
-
-#### LIST — 表列表（payload 无 `tableName`）
-
-```json
-{"id":"r9","category":"TABLE","action":"LIST","connection":{...},"payload":{}}
-{"id":"r9","category":"TABLE","action":"LIST","connection":{...},"payload":{"schema":"public"}}  // PG
-// Response: [{"name":"users","type":"TABLE"}, {"name":"orders","type":"TABLE"}]
-```
-
-#### LIST — 列与主键（payload 含 `tableName`，自动路由到 `columnList`）
-
-```json
-{"id":"r10","category":"TABLE","action":"LIST","connection":{...},"payload":{"tableName":"users"}}
-// Response: [{"name":"id","type":"INT","size":10,"nullable":false,"isPrimaryKey":true,"defaultValue":null}, ...]
-```
-
-#### CREATE — 创建表
-
-| payload 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `tableName` | string | ✓ | 表名 |
-| `columns` | array | ✓ | 列定义数组 |
-| `options` | object | — | MySQL: `engine`/`charset`/`collate`/`comment`；PG: `comment`（走 `COMMENT ON TABLE`） |
-| `schema` | string | — | PG schema |
-
-列定义（每个 column 对象）：
-
-| 字段 | 类型 | 必填 | 默认 | 说明 |
-|---|---|---|---|---|
-| `name` | string | ✓ | — | 列名 |
-| `type` | string | ✓ | — | SQL 类型（如 `INT` / `VARCHAR` / `DECIMAL` / `TIMESTAMP`） |
-| `size` | int | — | — | 类型尺寸（如 VARCHAR 长度） |
-| `nullable` | bool | — | `true` | 是否可空 |
-| `isPrimaryKey` | bool | — | `false` | 是否主键 |
-| `defaultValue` | string | — | — | 默认值（字符串字面量，如 `"0.00"` / `"CURRENT_TIMESTAMP"`） |
-| `autoIncrement` | bool | — | `false` | 自增主键（PG: `INT` → `SERIAL`，`BIGINT` → `BIGSERIAL`） |
-
-#### UPDATE — 修改表结构（ADD_COLUMN / DROP_COLUMN / MODIFY_COLUMN）
-
-| payload 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `tableName` | string | ✓ | 目标表 |
-| `operation` | string | ✓ | `ADD_COLUMN` / `DROP_COLUMN` / `MODIFY_COLUMN` |
-| `schema` | string | — | PG schema |
-| **ADD_COLUMN**：`column` | object | ✓ | 列定义（`name`, `type`, 可选 `size`/`nullable`/`defaultValue`） |
-| **DROP_COLUMN**：`columnName` | string | ✓ | 要删除的列名 |
-| **MODIFY_COLUMN**：`column` | object | ✓ | `name` 必填；`type` 或 `newName` 至少有其一；可选 `size`/`nullable`/`defaultValue` |
-
-#### GET_DDL — 获取建表语句
-
-MySQL 用 `SHOW CREATE TABLE`；PG 从 `information_schema` + `pg_catalog` 重建（含主键、UNIQUE、CHECK 约束及索引）；H2 列重建 + `TABLE_CONSTRAINTS` 过滤掉同名系统表。
-
-### 5.4 表数据运维 (Table Data CRUD) — `category: "DATA"`
-
-**支持的 Action**：`LIST` / `CREATE` / `UPDATE` / `DELETE`（外加 `GENERATE` 造数，详见 §5.7）
-
-> **v2.16**：`DATA.LIST`（流式）/ `CREATE` / `UPDATE` / `DELETE` 均接收 `Request.session_id` —— 非空时在事务会话钉住的连接上执行（见 §3.7.3）；`list` 还会把游标语句登记到 `StatementRegistry` 以支持 `SYSTEM.CANCEL`。
-
-#### LIST — 分页查询 / 流式查询
-
-**分页模式**（`pageSize > 0`，默认 50）：
-
-| payload 字段 | 类型 | 必填 | 默认 | 说明 |
-|---|---|---|---|---|
-| `tableName` | string | ✓ | — | 表名 |
-| `page` | int | — | 1 | 页码 |
-| `pageSize` | int | — | 50 | 每页行数 |
-| `where` | string | — | — | 原始 WHERE 片段（不含 `WHERE` 关键字） |
-| `orderBy` | string | — | — | 原始 ORDER BY 片段（不含 `ORDER BY` 关键字） |
-| `schema` | string | — | — | PG schema |
-
-**流式模式**（`pageSize == 0`）：逐行流式返回，使用 JDBC 游标（`TYPE_FORWARD_ONLY` + `CONCUR_READ_ONLY` + `fetchSize=100`），PostgreSQL 端临时关闭 `autoCommit` 启用服务端游标。
-
-**LOB 列**（`BLOB` / `LONGTEXT` / `BYTEA` / `TEXT`）始终返回 `"[LOB Data]"`。
-
-**安全校验**（方言层 `validateSqlFragment` / `validateOrderBy`）：
-- **通用**：去除单引号内容后禁止分号 `;`、注释 `--` `/*`，禁止引号外出现 `INSERT/UPDATE/DELETE/DROP/UNION/EXEC/CREATE/ALTER/GRANT/REVOKE/TRUNCATE`
-- **MySQL 额外**：ORDER BY 标识符允许反引号 `` `col` ``
-- **PostgreSQL 额外**：ORDER BY 标识符允许双引号 `"col"`；额外禁止 `COPY`、`DO`
-
-#### CREATE — 插入一行
-
-```json
-{"id":"r19","category":"DATA","action":"CREATE","connection":{...},"payload":{"tableName":"users","values":{"name":"Charlie","email":"charlie@example.com"}}}
-// Response: {"affectedRows":1}
-```
-
-所有 `values` 值以字符串形式通过 `PreparedStatement.setString` 绑定；列类型由方言层 `listColumns` 解析后按类型 dispatch（详见 `DataHandler.bindTypedValue`：整数 → `setLong`，浮点 → `setDouble`，布尔 → `setBoolean`，日期/时间 → `setDate`/`setTime`/`setTimestamp`，二进制 → `setBytes`）。
-
-### 5.5 原生 SQL 引擎 (Arbitrary SQL Engine) — `category: "SQL"`
-
-**支持的 Action**：`EXECUTE` / `EXPLAIN`
-
-#### EXECUTE — 接收任意 SQL
-
-- **SELECT**：流式输出（每行一帧），`total: -1`，JDBC 游标防 OOM
-- **非 SELECT**（INSERT/UPDATE/DELETE/DDL）：单次响应 `{"affectedRows": N}`
-- **PostgreSQL schema 上下文**：payload 可选 `schema` 字段，引擎在执行 SQL 前自动 `SET search_path TO <schema>`
-- **LOB 列**：`BLOB`/`LONGTEXT`/`BYTEA`/`TEXT` 返回 `"[LOB Data]"`
-
-> **注意**：`Action.EXPLAIN`（15）由 `SqlEngineHandler.explain` → `RequestDispatcher` 路由（v2.6 起打通）；调用成功返回单次 `SqlResponse.explain` 响应。也可用 `SQL.EXECUTE` 直接提交 `EXPLAIN <sql>` 语句。
-
-#### 多语句脚本（v2.16，`multi_statement = true`）
-
-`SqlExecuteRequest.multi_statement`（字段 3）为 `true` 时，`sql` 被当作整段脚本：`SqlScriptSplitter.split(script)` 只在**顶层** `;` 切分，`SqlEngineHandler.executeScript` 逐条执行。
-
-- **按序执行、遇错即停**：失败语句在其 `index` 上记录 `success=false` + error，**其后语句不再执行**（`break`），与 psql / DBeaver 默认一致；`affected_rows` = 所有成功语句行数之和。
-- 每条第 `index` 条语句以 `"$requestId#$index"` 单独登记到 `StatementRegistry`，因此 `SYSTEM.CANCEL` 命中当前正在跑的那一条。
-- 无有效语句（纯空白 / 注释）→ `IllegalArgumentException("multi_statement script contains no executable statement")`。
-- 传入 `Request.session_id` 时全部语句落在会话钉住的连接上。
-- 分句器支持：`'...'`（`''` / 反斜杠转义）、`"..."`（`""`）、`` `...` ``（双反引号）、`--` / `#` 行注释、`/* */` 块注释（未闭合 → 剩余整体视为注释）、PG `$tag$...$tag$` / `$$...$$`（tag 精确匹配，`$1` 占位符不误判）。注释文本**原样保留**（MySQL 可执行注释携带语义）。**嵌套块注释不支持**（PG 允许、MySQL/SQLite 不允许；误判方向是过度切分而非静默吞数据）。
-
-### 5.6 系统信息 (System Info) — `category: "SYSTEM"`
-
-**支持的 Action**：`INFO` / `TEST_CONNECTION` / `DISCONNECT` / `CANCEL` / `BEGIN` / `COMMIT` / `ROLLBACK` / `SESSION_INFO` / `SERVER_INFO` / `LIST_DRIVERS`
-
-#### INFO — JVM 运行时信息（无需 connection，字段被忽略）
-
-```
-{
-  "jvmVersion": "21.0.2",
-  "jvmVendor": "Oracle Corporation",
-  "jvmName": "OpenJDK 64-Bit Server VM",
-  "osName": "Windows 11", "osArch": "amd64", "osVersion": "10.0",
-  "availableProcessors": 16,
-  "memory": {"max":4294967296,"total":268435456,"used":134217728,"free":134217728},
-  "uptime": 120000, "pid": 12345
-}
-```
-
-`memory` 各字段单位为字节（Bytes）。
-
-#### TEST_CONNECTION — 测试连接（成功返回 `ok=true`，失败返回 `ok=false`，不抛异常）
-
-成功 Response: `{"ok":true,"driver":"Mysql","host":"127.0.0.1","port":3306,"database":"mysql"}`；失败 Response: `{"ok":false,"error":"Communications link failure..."}`
-
-**v2.11 — 仅凭 JDBC URL**：`connection.jdbc_url` 非空时**只依赖 URL**，`driver`/`host`/`port`/`database` 全部忽略；响应中的 `driver` 取自 URL 反查出的方言。URL 前缀无匹配方言时返回 `{"ok":false,"error":"No dialect plugin matches JDBC URL: ..."}`。
-
-**直连调用**：KMP Desktop 可跳过 gRPC 与 `RequestDispatcher`，直接调 `EngineClient.testConnection(jdbcUrl, user, password)`（`IdbEngine` 与 `GrpcEngineClient` 均有此默认实现）；该调用同时完成连接池初始化。
-
-#### DISCONNECT — 释放连接池（v2.15，需 connection）
-
-成功 Response: `{"closed":true}`；该配置当前没有活跃池时返回 `{"closed":false}`（**幂等**，重复调用不报错）。
-
-释放的是**引擎进程内**该配置下全部 schema 维度的 HikariCP 池（`PoolManager.close(config)`）。这是给跨进程调用方的对等端点 —— 本地调用方直接调 `EngineClient.disconnect` 即可，远程调用方经本路由触发完全相同的引擎侧行为（见 §3.1.1）。由于释放池有副作用，`SYSTEM.DISCONNECT` 已列入 `writeActions`，`dryRun` 预演会直接短路而不真正关闭池。
-
-#### CANCEL — 取消运行中的请求（v2.16，`Action.CANCEL = 20`）
-
-调用方在自己的 `Request.id` 之外，用 `SystemRequest.target_request_id` 指定要取消的请求。`SystemHandler.cancel(requestId)` 调 `StatementRegistry.cancel(requestId)`：
-
-- 命中 → `{"cancelled":true,"requestId":"<id>"}`；未命中（请求已结束 / 从未注册）→ `cancelled=false` + 说明性 `error`，**不抛异常**。
-- `target_request_id` 为空 → `cancelled=false` 并指明缺字段。
-- 被取消的请求**不是**在本路由里收到响应，而是由其**自身**的异常路径收口为原请求 id 上的 `success=false, error="cancelled"`。
-
-**为什么必须如此**：`rs.next()` 等 JDBC 调用是阻塞的，协程取消只会挂起协程、不会停掉数据库里的语句；只有 `Statement.cancel()` 能真正中止（详见 §3.7、§3.7.1）。
-
-#### BEGIN / COMMIT / ROLLBACK / SESSION_INFO — 事务会话（v2.16，`Action = 22 / 23 / 24 / 25`）
-
-- `BEGIN`：`SystemHandler.begin(config)` → `TransactionManager.begin(...)`，返回 `session_id` / `started_at` / `driver` / `database`。调用方把 `session_id` 放到后续请求的 `Request.session_id` 上。
-- `COMMIT` / `ROLLBACK`：`SystemHandler.commit/rollback(sessionId)`；会话不存在 → `committed` / `rolled_back = false` + `error`，不抛异常。
-- `SESSION_INFO`：`SystemRequest.session_id` 非空 → 返回该会话（不存在则 `active_sessions=0`）；留空 → 列出全部活跃会话。
-- **向后兼容**：`Request.session_id` 留空 = 无事务，行为与 v2.15 完全一致；旧调用方无需改动。
-- **未知会话不静默降级**：写操作携带未知 `session_id` → 拒绝（`success=false`），绝不悄悄退化为自动提交。
-- 机制与池容量说明见 §3.7.3。
-
-#### LIST_DRIVERS — 枚举已加载方言的连接元数据（v2.8 起新增，无需 connection）
-
-返回所有 `DialectLoader` 注册的方言的连接配置元数据，**供前端动态渲染"新建连接"表单**——不需要硬编码 driver / port / 是否需要 user 等信息。
-
-`DialectInfo` 字段（proto3 `message DialectInfo`）：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `driver_name` | `string` | 后端 driver 名（如 `"Mysql"` / `"Sqlite"`），用于 `ConnectionConfig.driver` |
-| `display_name` | `string` | 前端展示用名（如 `"MySQL"` / `"SQLite (Embedded)"`） |
-| `jdbc_driver_class_name` | `string` | JDBC driver 类全名（如 `"com.mysql.cj.jdbc.Driver"`） |
-| `jdbc_url_example` | `string` | 示例 JDBC URL，用于前端 placeholder |
-| `connection_type` | `string` | `CLIENT_SERVER` / `EMBEDDED` / `FILE_BASED` / `IN_MEMORY` |
-| `requires_host` | `bool` | 是否需要 `host` 字段 |
-| `requires_port` | `bool` | 是否需要 `port` 字段 |
-| `default_port` | `int32` | 默认端口（0 = 无） |
-| `supports_user` | `bool` | 是否需要 `user` / `password` |
-| `supports_password` | `bool` | 是否需要 `password` |
-| `supports_schema` | `bool` | 是否需要 `schema` 字段（PG/H2 = true） |
-| `supports_cross_database` | `bool` | 是否支持多 database 切换（PG = true） |
-| `capabilities` | `repeated string` | 方言能力标签（`USERS` / `VIEWS` / `INDEXES` / `ROUTINES` / `TRIGGERS` / `FOREIGN_KEYS` / `EXPORT` / `EMBEDDED_MODE` / `MULTI_SCHEMA` / `CROSS_DATABASE` / `DDL_TRANSACTION` / `PRIVILEGES`） |
-
-**5 个方言的元数据快照**（按 `driverName` 字典序升序）：
-
-| driver_name | display_name | connection_type | default_port | requiresHost | supportsUser | supportsSchema | 关键 capabilities |
-|---|---|---|---|---|---|---|---|
-| `Duckdb` | `DuckDB (Embedded OLAP)` | `EMBEDDED` | 0 | ✗ | ✗ | ✓ | `VIEWS, INDEXES, FOREIGN_KEYS, MULTI_SCHEMA, EXPORT, EMBEDDED_MODE` |
-| `H2` | `H2 (In-Memory)` | `IN_MEMORY` | 0 | ✗ | ✗ | ✓ | `+ EMBEDDED_MODE` (无 `USERS`/`TRIGGERS`) |
-| `Mysql` | `MySQL` | `CLIENT_SERVER` | 3306 | ✓ | ✓ | ✗ | `USERS, PRIVILEGES, ROUTINES, VIEWS, INDEXES, FOREIGN_KEYS, TRIGGERS, EXPORT, DDL_TRANSACTION` |
-| `Postgresql` | `PostgreSQL` | `CLIENT_SERVER` | 5432 | ✓ | ✓ | ✓ | `+ MULTI_SCHEMA, CROSS_DATABASE` |
-| `Sqlite` | `SQLite (Embedded)` | `FILE_BASED` | 0 | ✗ | ✗ | ✗ | `VIEWS, INDEXES, FOREIGN_KEYS, EXPORT, EMBEDDED_MODE` (无 `USERS`/`TRIGGERS`/`ROUTINES`) |
-
-返回顺序按 `driverName` 字典序升序，确保前端渲染顺序稳定。
-
-### 5.7 造数引擎 (Data Generation) — `category: "DATA"`, `action: "GENERATE"`
-
-基于嵌入式 Lua 脚本引擎的造数功能，支持单表或多表按序造数（自动处理外键依赖）。
-
-**核心机制**：
-- 每张表创建独立的 Lua 虚拟机，`insert()` 调用时**逐条写库**（`executeUpdate` 单条 INSERT），不在内存中积累数据
-- 每条插入后实时流式回报进度（`stream: true`）
-- 表按 `tables` 数组顺序执行
-- 通过 `RETURN_GENERATED_KEYS` 获取自增主键
-
-**Lua 沙箱**：禁用 `os`、`io`、`debug`、`package`、`require`、`loadfile`、`dofile`、`loadstring`、`load`、`rawget`、`rawset`、`rawequal`、`setfenv`、`getfenv`、`newproxy` 等危险模块。
-
-**Lua 版本**（通过 `payload.luaVersion` 选择，默认 `"luajit"`，支持 `"5.1"` / `"5.2"` / `"5.3"` / `"5.4"` / `"5.5"` 及短名 `"lua51"` 等）。
-
-**调用方须知（两个易错点）**：
-- 进度帧的 `script_index` 是 **1-based**（`GenerateHandler` 发帧时 `state.scriptIndex + 1`）；按请求 `tables` 数组定位脚本要减 1
-- 终止帧 `generate_terminal.tables_processed` = 本次请求下发的脚本数（`streamDataGenerate` 填 `tablesCount`）
-
-**Lua 内置辅助函数**：
-
-| 函数 | 说明 |
-|---|---|
-| `insert(tableName, rowTable)` | 收集一行待插入数据，立即执行 INSERT。列值支持 `string`/`number`/`boolean`/`nil`/`LocalDate`/`LocalDateTime`/`LocalTime` |
-| `lastId()` | 获取上一张表最后插入的自增 ID |
-| `random_int(min, max)` | 随机整数 `[min, max]` |
-| `random_float(min, max)` | 随机浮点数 `[min, max)` |
-| `random_string(length)` | 指定长度的随机字母数字字符串（`a-zA-Z0-9`，长度 clamp 到 `[1, 256]`） |
-| `random_date(start, end)` | 两个日期之间的随机日期（参数 `YYYY-MM-DD`，返回 `LocalDate`） |
-| `random_datetime(start, end)` | 两个日期之间的随机时间戳（参数 `YYYY-MM-DD`，返回 `LocalDateTime`） |
-| `random_time()` | 随机 `LocalTime`（`HH:mm:ss`） |
-| `random_email()` | `user_<random>@example.com` |
-| `random_phone()` | 11 位手机号 |
-| `random_name()` | 随机姓名（中文 + 英文姓名池） |
-| `random_enum(...)` | 从可变参数中随机选取一个值 |
-| `random_uuid()` | 随机 UUID 字符串 |
-
-> **注意**：嵌套 Lua table 通过 `insert()` 传递时会丢失（`readLuaTable` 中 `isTable -> null`），列值必须使用扁平 string / number / boolean / nil / java.time 类型。
-
-> **改动这批函数 = 改两处**：上表（及 `registerHelpers`）与 UI 侧的补全清单
-> `shared` 的 `GenerateHelpers.completions`。后者是**静态复制**的（`:shared` 不能反向依赖
-> `:engine`），供造数工作台的补全弹层使用。`GenerateSandboxContractTest` 读
-> `GenerateHandler.kt` 源码抽取实际注册的全局名并断言**集合相等** ——
-> 只做引擎侧增删而不改 UI 清单，那个测试会立刻变红。
->
-> 换句话说：`insert` / `random_*` 是**沙箱专属**符号，普通 Lua 编辑器里调用会报
-> `attempt to call a nil value`，因此它们**不能**进入 `shared` 的 `LuaLanguage.BUILTINS`
-> —— 那会让所有 Lua 补全都推荐不存在的函数。`shared` 侧另有一条不变量测试守着这个边界。
-
-### 5.8 函数与存储过程管理 (Routine Management) — `category: "FUNCTION"`
-
-**支持的 Action**：`LIST` / `INFO` / `GET_DDL` / `CREATE` / `DELETE` / `CALL` / `DEBUG` / `UPDATE`（语法验证）
-
-**所有三个方言均完整实现** Routine 管理（MySQL / PostgreSQL / H2 都通过 `INFORMATION_SCHEMA.ROUTINES` + `PARAMETERS` + `TRIGGERS` 查询）。
-
-#### DELETE — 删除函数/存储过程
-
-| payload 字段 | 类型 | 必填 | 默认 | 说明 |
-|---|---|---|---|---|
-| `name` | string | ✓ | — | 名称 |
-| `routineType` | string | ✓ | — | `FUNCTION` / `PROCEDURE` |
-| `schema` | string | — | — | schema 名 |
-| `ifExists` | bool | — | `false` | `IF EXISTS` |
-| `cascade` | bool | — | `false` | `CASCADE` |
-
-### 5.9 视图管理 (View Management) — `category: "VIEW"`
-
-**支持的 Action**：`LIST` / `CREATE` / `DELETE` / `GET_DDL`
-
-### 5.10 索引管理 (Index Management) — `category: "INDEX"`
-
-**支持的 Action**：`LIST` / `CREATE` / `DELETE`
-
-### 5.11 外键管理 (Foreign Key Management) — `category: "FOREIGN_KEY"`
-
-**支持的 Action**：`LIST` / `CREATE` / `DELETE`
-
-### 5.12 触发器管理 (Trigger Management) — `category: "TRIGGER"`
-
-**支持的 Action**：`LIST` / `GET_DDL`
-
-> Trigger 的创建/删除通过 `category=FUNCTION, routineType="TRIGGER"` 完成（见 §5.8）。
-
-### 5.13 数据导出 (Data Export) — `category: "EXPORT"`, `action: "RUN_EXPORT"`
-
-基于自定义 SQL 的 5 种格式数据导出，**独立子进程运行**，全链路流式处理。
-
-> **子进程隔离**：导出任务运行在独立的 JVM 子进程中（通过 `ExportProcessManager` 管理），即使导出千万级数据也不会导致主进程 OOM。
-
-**支持格式**：
-
-| 格式 | 文件扩展名 | 依赖 | 说明 |
-|---|---|---|---|
-| `CSV` | .csv | 零依赖 | UTF-8 BOM 头，自动处理字段转义 |
-| `JSON_LINES` | .jsonl | kotlinx-serialization | 每行一个独立 JSON 对象 |
-| `SQL_INSERT` | .sql | 零依赖 | 逐行生成 INSERT 语句（**必须**传 `tableName`） |
-| `EXCEL` | .xlsx | POI SXSSF 流式 | 100 万数据行/Sheet 自动分页，1000 行内存窗口 |
-| `PARQUET` | .parquet | parquet-hadoop | 动态 Schema，类型智能推断 |
-
-**请求 payload 字段**：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `sql` | string | ✓ | 自定义 SELECT SQL |
-| `outputDir` | string | ✓ | 输出目录路径（不存在会自动创建） |
-| `fileName` | string | ✓ | 文件名前缀（不含扩展名） |
-| `format` | string | ✓ | `CSV` / `JSON_LINES` / `SQL_INSERT` / `EXCEL` / `PARQUET` |
-| `tableName` | string | 条件 | `SQL_INSERT` 格式必填，用于生成 INSERT 语句前缀 |
-| `fetchSize` | int | — | JDBC 游标拉取批次大小，默认 1000 |
-| `stopExportId` | string | — | 传入则停止指定 ID 的导出任务（见下文"停止导出"） |
-
-**流式进度响应**（每 1000 行或每 200ms 一帧）：
-```json
-{"id":"r48","success":true,"stream":true,"end":false,"data":{"exportedRows":0,"columnCount":5,"completed":false,"filePath":null,"error":null}}
-{"id":"r48","success":true,"stream":true,"end":false,"data":{"exportedRows":1000,"columnCount":5,"completed":false}}
-...
-{"id":"r48","success":true,"stream":true,"end":true,"data":{"exportedRows":13308,"columnCount":5,"completed":true,"filePath":"C:\\Users\\langb\\Desktop\\users_2024.csv","error":null}}
-```
-
-**MySQL 特殊配置**：MySQL 流式读取需 `fetchSize = Integer.MIN_VALUE` 启用服务端流式游标（引擎自动处理）。
-**PostgreSQL 特殊配置**：自动临时关闭 `autoCommit` 启用服务端游标，导出完成后自动恢复。
-
-**停止导出**：在新 EXPORT 请求中指定 `stopExportId` 即可取消对应的导出任务：
-
-```json
-{"id":"r48stop","category":"EXPORT","action":"RUN_EXPORT","connection":{...},"payload":{"stopExportId":"r48"}}
-// Response: {"stopped":"r48"}
-```
-
-被取消的导出任务返回 `{"success": false, "error": "Export cancelled by user"}`。
-
-### 5.14 SQLite 嵌入式关系型数据库 (v2.8 新增) — `driver: "Sqlite"`
-
-> 本节描述 SQLite 方言的引擎层契约 — 具体方言实现细节见 `dialect-sqlite/README.md`（由另一个 agent 编写）。
-
-**支持的 Action**：与 MySQL/PG 对齐（SCHEMA / TABLE / DATA / SQL / VIEW / INDEX / FOREIGN_KEY / FUNCTION / TRIGGER / EXPORT / SYSTEM），**不暴露** USER/GRANTS（抛 `UnsupportedOperationException`）；FUNCTION/TRIGGER 因 SQLite 无过程/函数概念而抛 `UnsupportedOperationException`。
-
-#### 连接约定
-
-`host` / `port` / `user` / `password` / `use_ssl` 字段全部忽略——SQLite 是嵌入式方言，**仅由 `database` 字段承载路径**：
-
-| `database` 取值 | 实际 JDBC URL | 用途 |
-|---|---|---|
-| `""` 或 `":memory:"` | `jdbc:sqlite::memory:` | 进程内内存数据库（每连接私有） |
-| `"/path/to/data.db"` | `jdbc:sqlite:/path/to/data.db` | 本地 SQLite 文件（多连接共享，文件锁） |
-
-> 注意：SQLite 内存模式每连接私有，PoolManager 多连接不共享同一实例。集成测试一律走**临时 `.db` 文件**。
-
-#### 方言特性
-
-- **默认 schema**：SQLite 只有内置 `main` / `temp` schema，业务层不暴露 schema 字段
-- **自增主键**：`INTEGER PRIMARY KEY AUTOINCREMENT`（必须 `INTEGER` 类型，必须 inline 在列定义里）。**`TableHandler.create` 检测到 `autoIncrementColumns.isNotEmpty()` 时不再追加表级 `PRIMARY KEY (cols)`，避免 SQLite "more than one primary key" 错误**
-- **多 database**：`ATTACH DATABASE '<path>' AS <alias>`；删除走 `DETACH`
-- **DDL 重建**：`getCreateTableDDL` 直接读取 `sqlite_master.sql` 原文（用户当时建的原样）
-- **修改列**：仅支持 `RENAME COLUMN`（SQLite 不支持 `ALTER COLUMN` 类型/默认值/可空性变更）
-- **FK 管理**：SQLite 不支持 `ALTER TABLE ADD/DROP CONSTRAINT`；通过 **table-rebuild** 路径（CREATE temp AS SELECT → DROP → CREATE with FK → INSERT → DROP temp）
-- **视图**：直接读 `sqlite_master.sql`；DROP/GET_DDL 完整支持
-- **索引**：`sqlite_master` + 解析 DDL 提取列名 + UNIQUE 判定
-- **TRUNCATE**：用 `DELETE FROM <table>` + `DELETE FROM sqlite_sequence WHERE name = '<table>` 模拟
-
-#### 不支持的能力
-
-| 操作 | 抛出的异常 |
-|---|---|
-| `USER.LIST` / `USER.CREATE` / `USER.UPDATE` / `USER.DELETE` / `USER.GRANTS` | `UnsupportedOperationException("Sqlite 不支持...")` |
-| `FUNCTION.*`（routines 概念） | `UnsupportedOperationException("Sqlite 不支持函数/存储过程")` |
-| `TRIGGER.LIST` / `TRIGGER.GET_DDL` | `UnsupportedOperationException`（SPI 默认） |
-
-#### SQL 危险关键词（方言层 `validateSqlFragment` 禁用）
-
-通用集合 + SQLite 特有：`ATTACH` / `DETACH` / `PRAGMA` / `REPLACE` / `VACUUM` / `REINDEX`。
-
-#### DialectInfo 元数据
-
-| 字段 | 取值 |
-|---|---|
-| `driver_name` | `"Sqlite"` |
-| `display_name` | `"SQLite (Embedded)"` |
-| `connection_type` | `FILE_BASED` |
-| `requires_host` | `false` |
-| `requires_port` | `false` |
-| `default_port` | `0` |
-| `supports_user` | `false` |
-| `supports_password` | `false` |
-| `supports_schema` | `false` |
-| `supports_cross_database` | `false` |
-| `capabilities` | `VIEWS, INDEXES, FOREIGN_KEYS, EXPORT, EMBEDDED_MODE` |
-
-> 注：其他方言的引擎层契约见对应章节：
-> - DuckDB §5.7/5.13（嵌入式 OLAP，5 种数据源格式 + 自增 PK 走 `SEQUENCE + DEFAULT nextval`）
-> - DuckDB/SQLite FK table-rebuild 通用策略（方言无 `ALTER TABLE ADD/DROP CONSTRAINT`）
-> - 通用方言元数据快照见 §5.6 `LIST_DRIVERS`
-
-### 5.15 数据导入 (Data Import) — `category: "IMPORT"`, `action: "RUN_IMPORT"`（v2.16 新增）
-
-与 §5.13 数据导出**对称的读方向**：把本地文件读成行，批量插入目标表。
-
-**架构要点**：
-
-- **主进程运行**（非子进程）：导入只是「读文件 + 批量 prepared insert」，没有 POI / Parquet / Hadoop 重依赖；放主进程的直接收益是**取消可用** —— 批次语句登记到 `StatementRegistry`，`SYSTEM.CANCEL` 能立刻打断正在执行的 `executeBatch()`，无需 kill 子进程。
-- **Kotlin 包 `com.langbiantianya.importer`**（引擎模块内）：`ImportSource`（`ApiAutoCloseable`，`columns` + `rows(): Iterator<Map<String,String>>`）/ `ImportFormat`（`CSV` / `JSON_LINES`，`parse` 大小写不敏感）/ `CsvReader` / `JsonLinesReader` / `ImportSourceFactory`。
-- **`ImportSourceFactory.open(req, targetColumns)`** 集中决策默认值：`delimiter` 取第一个字符（空 → `,`）、`encoding` 空 → UTF-8、`has_header` **未设置 → true**（`optional bool` 保留 presence 语义，与 `DataListRequest.page_size` 同一套处理）；文件缺失 / 不可读 / 空路径 → `IllegalArgumentException` 并带路径。
-- **`ImportHandler.executeInMainProcess(request): Flow<Response>`**：若干 `ImportProgressFrame`（`stream=true, end=false`）+ 一条终止帧（`end=true`，携带 `ImportResultResponse`）。
-- `truncate_first` 委托方言 SPI `Dialect.truncateTable`。
-
-**CSV 语义**：RFC-4180 风格状态机（引号字段、`""` 转义、字段内换行 / 分隔符、CRLF、反斜杠转义），**不是 `split(",")`**。`has_header=true` → 首行是列名、不作数据；`has_header=false` → **每行都是数据**，列名来自 `targetColumns`（引擎从目标表元数据解析），两者都拿不到列名时在构造期失败、不用数据值臆造。参差行补齐 / 截断，空记录跳过。**单趟读取**：`rows(): Iterator`（非 `Sequence`）以便提前停止并释放句柄，第二次调用抛异常。
-
-**JSON_LINES 语义**：每行一个 JSON 对象；`null`→空串、数字/布尔→字面文本、字符串→反转义、嵌套对象/数组→紧凑 JSON 文本（绝不静默丢弃）；`columns` = 首行键集合；畸形 / 非对象行抛 `IllegalStateException` 并带 1-based 物理行号。
-> **已知限制**：kotlinx.serialization 即使在 `isLenient=false` 下也接受未加引号的字符串**值**（`{"id": oops}` → `{"id":"oops"}`）；拒绝它需手写 JSON 扫描器。结构性错误仍被拒。
-
-**`ignore_errors` 取舍**：H2 的 `setString` 不急切转换，类型 / 约束错误在 `executeBatch()` 才暴露，批量内无法把失败归因到某一行；PostgreSQL 还会把失败语句所在的隐式事务整体作废，「整批失败后逐行重试」只会连锁报错。故 `ignore_errors=true` 改用**逐行 `executeUpdate`**（坏行计入 `rows_failed`、`success=true`、首条原因摘要入 `error`），代价是吞吐更低；`false`（默认）保持批量并遇错即停。
-
-**原子性**：非事务导入中途失败可能留下**已提交的更早批次**；需要「全有或全无」时配合事务会话（`SYSTEM.BEGIN` → 导入带 `session_id` → `SYSTEM.ROLLBACK`）。
-
-## 6. 安全与健壮性保障 (Security & Reliability)
-
-1. **防进程孤儿 (Graceful Shutdown)**：引擎由 `IdbEngineServer` 阻塞在 `server.awaitTermination()`；JVM Shutdown Hook 在终止时调用 `transport.cleanup()` + `PoolManager.closeAll()` + `DriverLoader.closeAll()` + `DialectLoader.closeAll()`。
-
-2. **连接超时管控**：HikariCP `connectionTimeout = 5000`（5 秒）。
-
-3. **全局异常捕获**：`RequestDispatcher.dispatch` 顶层 `try/catch`（v2.9 起外置为 `.catch{}` operator 以正确传播 `AbortFlowException`），所有 JDBC `SQLException` 提取 `e.message` 包装为 `Response(success=false, error=...)`。**绝对禁止**应用因未捕获异常而崩溃退出。
-
-4. **SQL 注入防护**：DATA 模块强制 `PreparedStatement` 绑定参数；`where` / `orderBy` 原始片段由方言层 `validateSqlFragment` / `validateOrderBy` 校验。SQL 模块的 EXECUTE 接受原始 SQL，由调用方负责校验来源合法性。
-
-## 7. Implementation Status — Engine Tests
-
-**`engine:test` — 277 测试全通过（0 失败 / 0 错误；1 项 Windows-only 跳过）**：
-
-| 测试套件 | 数量 | 范围 |
-|---|---|---|
-| `ipc/IpcConfigTest` | 22 | CLI 参数解析 + 自动平台检测 + 错误路径（1 个 Windows-only 跳过）+ `--mode` 接受 / `--mode` 缺值报错（v2.15 新增 2 项） |
-| `ipc/IpcTransportTest` | 7 | SPI 各实现构造 |
-| `ipc/TcpIpcTransportIntegrationTest` | 1 | TCP loopback + gRPC round-trip |
-| `ipc/UnixSocketIpcTransportIntegrationTest` | 2 | UDS + gRPC round-trip（`@EnabledOnOs(LINUX, MAC, FREEBSD)`） |
-| `ipc/NamedPipeIpcTransportIntegrationTest` | 2 | 客户端 channel + serverBuilder 限制 |
-| `pool/PoolManagerTest` | 13 | pool key 隔离 + `close(config)` 按配置释放（可定位 schema 维度池）+ closeAll |
-| `loader/DialectLoaderTest` | 8 | SPI 自动发现（类路径 + 目录）+ JDBC URL 前缀反查 |
-| `integration/*HandlerIntegrationTest` | 66 | 11 个 handler × H2Fixture（typed proto builders 直接调 handler）+ `SystemHandlerIntegrationTest` 中 4 项 `DISCONNECT` 覆盖（幂等 / 空操作 / dispatcher 路由 / `dryRun` 短路，v2.15 新增） |
-| `integration/TypedRequestEnvelopeIntegrationTest` | 7 | 端到端 typed Request → dispatcher → typed Response |
-| `integration/UserGrantsIntegrationTest` | 2 | USER.GRANTS 路由，H2 限制场景 |
-| `integration/DataGenerateIntegrationTest` | 2 | DATA.GENERATE 流式进度 + 错误路径 |
-| `handlers/GenerateSandboxContractTest` | 3 | 造数沙箱注入的宿主函数名 / 沙箱禁用名与 UI 补全契约**集合相等**（源码契约，防 UI 侧清单漂移，见 §5.7） |
-| `integration/FunctionGetDdlIntegrationTest` | 2 | FUNCTION.GET_DDL dispatcher 路由 + H2 限制 |
-| `integration/SqlExplainRouteIntegrationTest` | 2 | SQL.EXPLAIN 端到端路由（v2.6 之前未实现） |
-| `integration/EnvelopeOptionsIntegrationTest` | 4 | dryRun / timeoutMs envelope 跨切面 |
-| `integration/DuckDBHandlerIntegrationTest` | 27 | DuckDB 端到端：SCHEMA/TABLE/DATA/SQL/VIEW/INDEX/FK/FUNCTION/SYSTEM/LOCAL FILES/EXPORT（v2.7 新增） |
-| `integration/SQLiteHandlerIntegrationTest` | 7 | SQLite 端到端：SCHEMA/TABLE/DATA/VIEW/INDEX/SYSTEM（v2.8 新增） |
-| `integration/SystemListDriversIntegrationTest` | 8 | LIST_DRIVERS 元数据枚举 + 5 方言分别验证（v2.8 新增） |
-| `integration/IdbEngineDirectTest` | 5 | `EngineClient` 同进程实现契约：非流式 / `invoke` 便捷 / URL-only 建池 / 错误传播 / `disconnect` 释放池 / bootstrap 幂等 |
-| `engine/SqlScriptSplitterTest` | 14 | 多语句分句器：引号 / 注释 / PG dollar-quoting / 顶层 `;` 切分 / 未闭合块注释（v2.16 新增） |
-| `importer/CsvReaderTest` | 18 | CSV 状态机：引号与 `""` 转义 / CRLF / 参差行补齐 / 表头语义（v2.16 新增） |
-| `importer/JsonLinesReaderTest` | 13 | JSON Lines：类型映射（null / 数字 / 布尔 / 嵌套）/ 行号报错 / 单趟读取（v2.16 新增） |
-| `importer/ImportFormatTest` | 5 | `ImportFormat.parse` 大小写不敏感 + 非法格式拒绝（v2.16 新增） |
-| `importer/ImportSourceFactoryTest` | 13 | 默认值解析（delimiter / encoding / `has_header` presence）/ 文件校验 / `targetColumns` 兜底（v2.16 新增） |
-| `integration/CancelIntegrationTest` | 4 | `SYSTEM.CANCEL`：命中运行中请求 / 未命中 / 未知 id 不抛异常（v2.16 新增） |
-| `integration/MultiStatementIntegrationTest` | 6 | 多语句脚本：按序执行 / 遇错即停 / `affected_rows` 合计（v2.16 新增） |
-| `integration/TransactionIntegrationTest` | 7 | 事务会话：BEGIN 固定连接 / COMMIT / ROLLBACK / 未知会话拒绝 / 空 `session_id` 回落（v2.16 新增） |
-| `integration/ImportIntegrationTest` | 9 | 导入端到端：CSV / JSON_LINES / `truncate_first` / `ignore_errors` 逐行 / 取消 / 事务回滚（v2.16 新增） |
-| **合计** | **277** | —（v2.16 新增 89：分句器 + `importer/*` 单测 + 4 个集成测试类） |
-
-> **方言插件测试**（位于 `dialect-*/test/`，不属于 `engine:test`）：`dialect-h2` 63 项 / `dialect-duckdb` 81 项（v2.7 新增）/ `dialect-sqlite` 62 项（v2.8 新增）。完整跨模块统计：**619 测试全通过**（277 engine + 63 H2 + 81 DuckDB + 62 SQLite + 97 shared + 21 engine-grpc-client + 18 desktopApp；1 个 Windows-only skip）；`desktopApp` 18 项含 3 项 Compose UI 端到端（`ConnectionManagerFlowTest`：连接流程 / 名称与 URL 落盘 / 无 URL 的遗留配置不可连接）。
+| `:engine-protocol` | proto + protobuf 插件（自带 `src/main/proto/`） | proto 定义、生成的 gRPC stub、`EngineClient` 接口；**不依赖 `:engine`** |
+| `:engine` | `api(:engine-protocol)` + `implementation(:api)` + `grpc-netty-shaded` | 引擎实现；`IdbEngine` 是 `EngineClient` 的同进程实现 |
+| `:engine-grpc-client` | `api(:engine-protocol)` | `GrpcEngineClient`，`EngineClient` 的跨进程实现；**不依赖 `:engine`** |
+| `:api` | — | `DatabaseDialect` SPI 的唯一归属；五个方言插件（MySQL / PostgreSQL / H2 / DuckDB / SQLite）各自独立成 JAR，经 `ServiceLoader` 加载 |
+
+调用方只面向 `EngineClient` 编程，不感知引擎在同进程还是跨进程。
+
+依赖版本不在本文件重复，统一见 [`gradle/libs.versions.toml`](../gradle/libs.versions.toml) 与
+[`engine/build.gradle.kts`](./build.gradle.kts)：`:engine` 不再自行声明 protobuf / grpc-stub / grpc-kotlin，
+统一经 `api(project(":engine-protocol"))` 传递继承，只保留 IPC 传输 SPI 所需的 `grpc-netty-shaded` 与方言 SPI。
+
+## 6. 延伸阅读
+
+- 用户视角（怎么连、怎么用、CLI 参数）：[`README.md`](./README.md)
+- wire 契约（枚举值、消息字段、流式帧）：[`idb_engine.proto`](../engine-protocol/src/main/proto/idb_engine.proto)
+- 方言 SPI 全量方法与能力声明：[`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt)
+- 引擎测试（路由、事务、取消、多语句、导入导出的行为契约）：`engine/src/test/kotlin/com/langbiantianya/`

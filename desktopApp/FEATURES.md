@@ -222,63 +222,22 @@ Navicat 9。sundays 目前 **5** 个。引擎侧是插件化 SPI（`DialectLoade
 
 ## 4. 逐模块说明
 
-### 4.1 连接管理
+各能力的用法、边界与踩过的坑都在对应源码的 KDoc 里，这里只给索引。
 
-- **两种入口**：4 步引导（基础信息 → 连接类型 → 凭据 → 确认）与快速连接（选方言直达凭据）。
-- **文件型数据源（DuckDB）**：`database` 字段填一个 `.csv` / `.jsonl` / `.parquet` / `.xlsx`
-  路径即可当数据源打开。CSV / JSONL / Parquet 由 DuckDB 直接开文件，暴露的视图名是
-  **去扩展名的文件名**（`people.csv` → 视图 `people`）；`.xlsx` 由 POI 预转换成临时
-  `.duckdb`，**表名取自 sheet 名**、库名沿用文件名、首行若是表头则用作列名。
-  ⚠️ 预转换**只发生在 `dialect.buildJdbcUrl(...)` 里** —— 任何预先算好 `jdbcUrl` 的调用方
-  都会绕过它（`PoolManager` 的取值顺序是「`jdbcUrl` 非空就用它」）。
-- **凭据可随时测**：向导内「测试连接」与总览面板的「连接」都走 `SYSTEM.TEST_CONNECTION`，
-  建 HikariCP 池 + JDBC `isValid(5)` 校验，失败时把引擎原文（常含 `Caused by`）回显。
-- **落盘安全**：`connection.json` 文件权限 0600、目录 0700；v1 → v2 自动迁移。
-- **多 sheet 是刻意设计**：一个连接一个 sheet，各自持有 `DatabaseBrowserState`。
-  切 sheet 不丢浏览进度（库展开、已开标签页、SQL 草稿都在）。
+| 模块 | 能力 | 落点 |
+|---|---|---|
+| **连接管理** | 4 步引导 + 快速连接两种入口；凭据可随时测（`SYSTEM.TEST_CONNECTION` + JDBC `isValid(5)`）；`connection.json` 权限 0600、目录 0700、v1→v2 自动迁移；一个连接一个 sheet，切 sheet 不丢浏览进度 | [`ConnectionSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt) · [`ConnectionManagerScreen`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
+| **文件型数据源** | `database` 填 `.csv` / `.jsonl` / `.parquet` / `.xlsx` 路径即可当数据源。DuckDB 直接开前三种，视图名是去扩展名的文件名；`.xlsx` 由 POI 预转换，表名取自 sheet 名、首行表头用作列名。⚠️ 预转换只发生在 `dialect.buildJdbcUrl(...)` 内，预先算好 `jdbcUrl` 的调用方会绕过它 | [`ExcelToDuckDbCache.kt`](../dialect-duckdb/src/main/kotlin/com/langbiantianya/dialect/ExcelToDuckDbCache.kt) |
+| **数据库浏览** | 库表树懒加载（展开才拉表）；分页在引擎侧，`DataTable` 必须传 `serverSidePaging = true`；窄窗口下底栏自动降级，翻页按钮绝不被挤没 | [`DatabaseBrowserScreen.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserScreen.kt) |
+| **造数工作台（差异化）** | 走 **Lua 脚本 + 引擎内沙箱**而非表单式生成 —— 表单表达不了「外键顺序」「幂等重跑」「按业务规则派生字段」。沙箱注入 13 个宿主函数，补全带签名列出且**只在这个工作台出现** | [`generateGenerateHandler`](../engine/src/main/kotlin/com/langbiantianya/handlers/GenerateHandler.kt) |
+| **SQL 工作台** | 多 sheet 优先于多标签；补全 schema 感知但**零额外往返**（库 ← 连接时的 `SCHEMA.LIST`，表 ← 展开树时的 `TABLE.LIST`，字段 ← 已打开过预览的表）；长查询可「停止」走 `SYSTEM.CANCEL` | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) · [`CodeEditor`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/editor/ui/CodeEditor.kt) |
 
-### 4.2 数据库浏览
-
-- **懒加载是硬性的**：启动只拉库列表，展开某个库才拉它的表 —— 一个连接下几十个库时，
-  全量拉表会让首屏卡住。
-- **分页在引擎侧**：`DATA.LIST` 带 `page` / `pageSize`，所以 `DataTable` 必须传
-  `serverSidePaging = true`，否则它会再切一次本地页，第 2 页起直接变成空表。
-- **窄窗口下底栏会降级**：树面板拖到最宽 + 窗口收到最小时，底栏只剩约 250dp。
-  此时自动隐藏「首页 / 末页 / 共 N 条」，且**左组（每页选择器）承担全部压缩**，
-  翻页按钮绝不会被挤没或压成竖排。
-
-### 4.3 造数工作台（差异化能力）
-
-DataGrip 和 Navicat 的「数据生成」都是**表单式**的（选表 → 配规则 → 生成）。
-sundays 走的是另一条路：**Lua 脚本 + 引擎内沙箱**。
-
-```lua
-for i = 1, 3 do
-  insert('gen_target', {id = i, label = 'row_'..i})
-end
-```
-
-- 引擎在沙箱里注入 13 个宿主函数（`insert` / `lastId` / `random_*` …），
-  补全时**带签名**列出，且**只在这个工作台出现** —— 塞进 Lua 语言词表会让普通 Lua 编辑器
-  推荐不存在的函数。
-- 执行走 `DATA.GENERATE` 流式回填进度（已插入行数 / 最后写入的表）。
-- 支持切换 Lua 版本。
-
-**为什么值得保留**：造数往往要表达「外键顺序」「幂等重跑」「按业务规则派生字段」，
-表单式工具表达不了这些，而脚本天然可以。
-
-### 4.4 SQL 工作台
-
-- **多 sheet 优先于多标签**：一个连接下开多个 SQL 草稿互不干扰，各自保留文本 / 光标 / 滚动 / 结果。
-- **补全是 schema 感知的**，但**零额外往返**：库来自连接时的 `SCHEMA.LIST`，
-  表来自展开树时的 `TABLE.LIST`，字段来自**已打开过预览的表**。
-  字段只覆盖「访问过的表」是刻意的 —— 全库全表 = 每张表一次 `TABLE.COLUMN_LIST`，
-  200 张表就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。
-- **执行可中断**：长查询点「停止」走 `SYSTEM.CANCEL`。
-  必须走引擎而不是取消协程 —— 跑在 IO 线程上的 `rs.next()` 即使协程被取消也继续阻塞，
-  只有 `Statement.cancel()` 能停掉数据库侧工作。
-
----
+> **为什么补全的字段只覆盖「访问过的表」**：全库全表意味着每张表一次
+> `TABLE.COLUMN_LIST`，200 张表就是 200 次串行往返，而用户敲 `sel` 时用不到其中 99%。
+> 零等待、零额外往返，用得越多越全。
+>
+> **为什么取消必须走引擎**：跑在 IO 线程上的 `rs.next()` 即使协程被取消也继续阻塞，
+> 只有 `Statement.cancel()` 能真正停掉数据库侧的工作。
 
 ## 5. 差距与建议路线
 
