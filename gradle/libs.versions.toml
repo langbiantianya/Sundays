@@ -14,6 +14,13 @@ ktlint = "1.8.0"
 # ktlint 的 Gradle 包装插件版本。注意它与上面那个是两个独立的发布轨道，
 # 必须分开钉：包装插件的小版本升级不应悄悄换掉被检查的 ktlint 本体。
 ktlintGradle = "14.2.0"
+# SonarScanner for Gradle 插件版本。
+# 它同时是「Gradle 插件」和「扫描器引擎」的载体：官方文档写明
+# "Installation is automatic" —— 分析入口就是一条普通的 `./gradlew sonar`，
+# 引擎由插件自己下载，不需要另外安装 sonar-scanner CLI。
+# 7.5.0 要求 Gradle 7.3+（排除 8.1/8.2）与 Java 21+（17 已被移除）；
+# 本仓库是 Gradle 9.7.1 + JDK 25，都满足。
+sonarqube = "7.5.0.8588"
 kotlinx-coroutines = "1.11.0"
 material3 = "1.11.0-alpha07"
 material-icons-extended = "1.7.3"
@@ -94,4 +101,5 @@ kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintGradle" }
+sonarqube = { id = "org.sonarqube", version.ref = "sonarqube" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobuf-plugin" }

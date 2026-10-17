@@ -146,18 +146,40 @@ python desktopApp/tools/check-config-syntax.py   # YAML / TOML / XML / JSON / pr
 python desktopApp/tools/check-doc-links.py       # markdown 链接与锚点
 ```
 
-### 本地 SonarQube（提交前扫描）
+### 本地 SonarQube（SonarScanner for Gradle）
+
+分析走官方推荐的 **SonarScanner for Gradle**：就是一条普通的 `./gradlew sonar`，
+扫描器引擎由插件自己下载，不需要另外装 sonar-scanner CLI。
 
 ```bash
 docker run --rm -p 9000:9000 sonarqube:community     # 社区版，Kotlin 分析是全版本支持的
 python desktopApp/tools/install-git-hooks.py         # 装 pre-commit hook（只需一次）
 export SONAR_TOKEN=<在 http://localhost:9000 生成>
+
+python desktopApp/tools/sonar-local-scan.py          # 跑一次完整分析
 ```
 
-之后每次 `git commit` 会自动扫描一次，结果进
-<http://localhost:9000/dashboard?id=langbiantianya_Sundays>。
+结果进 <http://localhost:9000/dashboard?id=langbiantianya_Sundays>。
 
-**这个 hook 默认只提示、不阻断提交** —— 因为绝大多数时候你本机并没有跑着 SonarQube，
+**换用 Gradle 插件省掉了三样手工维护的东西**，这些现在全部由插件从 Gradle 对象
+模型自动推导：`sonar.sources` / `sonar.tests`（原先要逐模块列 12 行，漏一个模块
+就静默不扫且不报错）、`sonar.java.binaries`（编译输出目录）、`sonar.java.libraries`
+（原先要从 Gradle 缓存里翻 253 个 jar 并剔掉 sources/javadoc，现在直接用
+`sourceSets.main.compileClasspath`）。加新模块自动纳入，没有「忘了更新」这回事。
+
+分析配置写在根 [`build.gradle.kts`](./build.gradle.kts) 的 `sonar { properties { … } }` 里。
+官方文档明确 SonarScanner for Gradle **不读** `sonar-project.properties`，所以仓库里
+不再保留那个文件 —— 留着只会让人改一个根本没人读的东西还以为生效了。
+
+`sonar` 任务会先编译全部模块（12 个，本机约 3 分钟）以产出字节码：官方文档说
+插件只用 `mustRunAfter` 保证顺序、不自动加依赖，字节码任务必须真的执行过，否则
+类型解析会退化。刚编完只想重扫，用 `SONAR_GRADLE_ARGS="-x classes -x testClasses
+-x jvmMainClasses -x jvmTestClasses"` 跳过编译。
+
+**hook 默认只做前置检查、不跑分析** —— 把一次 3 分钟的全量编译塞进每次
+`git commit` 是不能接受的设计。设 `SONAR_SCAN=1` 可让提交时也真扫一次。
+
+**hook 默认只提示、不阻断提交** —— 因为绝大多数时候你本机并没有跑着 SonarQube，
 那是正常状态而不是缺陷；把它当闸门只会挡住正常工作。要让它真拦，得设 `SONAR_REQUIRED=1`。
 临时跳过用 `git commit --no-verify`。
 
@@ -167,9 +189,8 @@ export SONAR_TOKEN=<在 http://localhost:9000 生成>
 | `SONAR_TOKEN` | 认证令牌，**只从环境变量读，绝不写进仓库** |
 | `SONAR_REQUIRED=1` | 条件不满足时判失败，hook 变成真正的闸门 |
 | `SONAR_SKIP=1` | 完全跳过 |
-| `SONAR_NO_LIBS=1` | 不传依赖 jar（快，但类型解析偏弱） |
-
-分析范围与理由写在 [`sonar-project.properties`](./sonar-project.properties) 的注释里。
+| `SONAR_SCAN=1` | hook 模式下也真跑一次完整分析 |
+| `SONAR_GRADLE_ARGS` | 追加给 Gradle 的参数，如 `-x classes -x testClasses` |
 
 ## 文档
 

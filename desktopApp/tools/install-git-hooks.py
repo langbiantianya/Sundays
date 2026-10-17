@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""安装 git pre-commit hook：提交前跑一次本地 SonarQube 扫描。
+"""安装 git pre-commit hook：提交前检查本地 SonarQube 是否就绪，并提示怎么扫。
 
 为什么是「安装脚本」而不是直接把 hook 文件提交进仓库：
 `.git/hooks/` **不在 git 的版本控制范围内**，所以无论怎么写进仓库，
@@ -32,8 +32,15 @@ HOOK_BODY = """#!/bin/sh
 # 由 desktopApp/tools/install-git-hooks.py 生成，请不要手改 ——
 # 改动会在下次安装时被覆盖。要改逻辑，改那个 .py 再重新安装。
 #
-# 它做的事：在提交前调一次本地 SonarQube 社区版扫描。
-# 那个脚本**从不因为扫描失败而拒绝提交**，除非你显式设了 SONAR_REQUIRED=1
+# 它做的事：在提交前调一次本地 SonarQube 社区版的**前置检查**
+# （服务器在不在、状态是不是 UP、token 有没有），并提示怎么跑完整分析。
+#
+# 默认**不**在提交时真跑分析 —— `./gradlew sonar` 会先触发 12 个模块的全量
+# 编译，把这个代价塞进每次 git commit 是不能接受的设计。
+# 想在提交时真扫：      export SONAR_SCAN=1
+# 想直接手动扫：        python desktopApp/tools/sonar-local-scan.py
+#
+# 那个脚本**从不因为检查失败而拒绝提交**，除非你显式设了 SONAR_REQUIRED=1
 # —— 因为绝大多数时候你本机根本没跑 SonarQube，那是正常状态，不是缺陷。
 #
 # 临时跳过这次提交：  git commit --no-verify
@@ -109,6 +116,7 @@ def main(argv):
     print("已安装：%s" % HOOK)
     print("接下来：docker run --rm -p 9000:9000 sonarqube:community")
     print("        起好之后在网页上生成令牌，再 export SONAR_TOKEN=...")
+    print("完整扫描：python desktopApp/tools/sonar-local-scan.py   （即 ./gradlew sonar）")
     return 0
 
 
