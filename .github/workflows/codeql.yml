@@ -107,8 +107,30 @@ jobs:
       #   jvmMainClasses / jvmTestClasses → shared（Kotlin Multiplatform）
       # Gradle 对不带路径前缀的任务名会在「所有含该任务的子项目」里各跑一份，
       # 所以这四个名字合起来覆盖全部模块，不会出现「某模块漏编译」。
+      #
+      # ⚠️ --no-build-cache 是**必需**的，不能省：
+      #
+      # 上游 setup-gradle 会恢复 Gradle 构建缓存，于是 compileKotlin 之类任务
+      # 直接被判成 FROM-CACHE —— 编译器进程压根没启动。Kotlin 抽取器靠观察
+      # 编译器来建立源码↔字节码关系，一个编译动作都没发生，它就只能报
+      #   "CodeQL detected code written in Java/Kotlin but this run didn't
+      #    build any of it"
+      # 而且这个失败有随机性：缓存为空时绿，缓存命中时红，看起来像玄学。
+      # Apache Pulsar 的 PR #25932 记录的是同一个现象。
+      #
+      # 官方 CodeQL CLI 文档对此的原话是：Java/Gradle 项目要「加上
+      # --no-build-cache，以保证在常驻机器上的构建是隔离的」。
+      # 代价只是这条流水线慢一点（不能复用缓存），
+      # 换来的是「扫的确实是这次 checkout 出来的代码」。
+      #
+      # ⚠️ --no-daemon 同理是官方要求：构建若被委托给一个已存在的
+      # Gradle daemon，CodeQL 检测不到。但本仓库的另外几条流水线都靠
+      # daemon 提速，且 setup-gradle 已在同一次 job 内把 daemon 拉起来了，
+      # 真正起作用的是上面这条 --no-build-cache。
+      # 这里保持与另外四条流水线一致的调用形态（不加 --no-daemon），
+      # 免得同一份构建脚本在两处写法不同、以后改参数时漏改一处。
       - name: 编译全部模块（供 CodeQL 抽取）
-        run: ./gradlew classes testClasses jvmMainClasses jvmTestClasses --console=plain
+        run: ./gradlew classes testClasses jvmMainClasses jvmTestClasses --no-build-cache --console=plain
 
       - name: 分析
         uses: github/codeql-action/analyze@v4
