@@ -42,6 +42,12 @@ out/
 
 ### Kotlin ###
 
+### Python ###
+# desktopApp/tools/ 下的体检脚本会被本地直接跑，也会被别的脚本 import；
+# import 一次就会生成 __pycache__，它没有任何可入库的价值。
+__pycache__/
+*.py[cod]
+
 ### Eclipse ###
 .apt_generated
 .classpath

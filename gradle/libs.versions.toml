@@ -9,6 +9,11 @@ androidx-lifecycle = "2.11.0-beta01"
 composeMultiplatform = "1.11.1"
 junit = "4.13.2"
 kotlin = "2.4.20"
+# ktlint 本体版本：真正的规则实现，由 org.jlleitschuh.gradle.ktlint 拉起执行。
+ktlint = "1.8.0"
+# ktlint 的 Gradle 包装插件版本。注意它与上面那个是两个独立的发布轨道，
+# 必须分开钉：包装插件的小版本升级不应悄悄换掉被检查的 ktlint 本体。
+ktlintGradle = "14.2.0"
 kotlinx-coroutines = "1.11.0"
 material3 = "1.11.0-alpha07"
 material-icons-extended = "1.7.3"
@@ -88,4 +93,5 @@ composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "k
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintGradle" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobuf-plugin" }

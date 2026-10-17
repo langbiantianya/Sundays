@@ -1,0 +1,83 @@
+# EditorConfig —— https://editorconfig.org
+#
+# 这份文件是**格式的唯一事实来源**：CI 的 ktlint 检查、命令行跑的
+# `ktlintFormat`、以及 IDE 的保存时格式化，读的都是同一套规则，
+# 所以不会出现「本地过了 CI 没过」这种最耗人时间的分歧。
+#
+# 刻意**不写** end_of_line：本仓库靠 core.autocrlf=true，工作区是 CRLF、
+# 仓库 blob 是 LF，而三条打包流水线分别落在 Windows / macOS / Linux 上，
+# 任何一种写死的行尾都会让另外两个平台的检查失真。行尾交给 .gitattributes
+# 和 git 自己处理，ktlint 也没有对应的标准规则。
+
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+# 仓库既有风格：多行调用/声明普遍带尾逗号，与 ktlint_official 的约定一致。
+ktlint_code_style = ktlint_official
+
+# ── max-line-length 故意关掉 ────────────────────────────────────────
+# 设 140 时全仓有 118 处违规，而且**没有一处能被自动修复**——ktlint 不会去
+# 拆字符串字面量。逐条看过它们的分布：i18n 的六语言文案表、各方言的 SQL
+# 模板、以及若干测试数据常量，全是「数据」不是「代码」。
+#
+# 把 SQL 模板按 140 列折行会同时坏掉两件事：读者要在缩进里找一条断掉的语句，
+# 而测试里那些对齐的期望值表格会被拆得看不出列对应关系。译文表同理——
+# 逐条对照六种语言时，横向对齐本身就是检索手段。
+#
+# 代价是新写的长表达式不再被这条规则拦。替代品是
+# `function-signature` / `argument-list-wrapping` 那几条换行规则：
+# 它们管的是「怎么折」，比「折多长」更能防住真正的失控。
+max_line_length = off
+
+# ── function-naming：Compose 的 @Composable 是 PascalCase，整条关掉 ──
+# Compose 编译器按这个大小写生成代码并识别重组边界，官方就要求 @Composable
+# 函数用 PascalCase；而 Kotlin 的通用约定是小驼峰。全仓实测 136 处命中，
+# 全部长这样：
+#     @Composable
+#     fun DatabaseBrowserScreen(...)      ← 命中
+#     private fun SheetTabRow(...)        ← 也命中
+# 跟着 ktlint 改成小驼峰，Compose 编译器照样能编过，但代码从此和官方文档、
+# 和所有 Compose 示例对不上——这属于与语言生态对抗，不是代码质量问题，
+# 所以整条关掉，而不是逐个 baseline 豁免。
+#
+# 注：关规则只能写在 .editorconfig 里。KtlintExtension 上的 disabledRules
+# 属性从 ktlint 0.48 起就已被移除，插件 README 里那段 Groovy/Kotlin 示例
+# 是历史遗留，直接写会编译失败（实测 Unresolved reference 'disabledRules'）。
+ktlint_standard_function-naming = disabled
+
+# ── 通配导入：Compose 官方包族放行，其余一律禁止 ────────────────────
+# `import androidx.compose.material3.*` 这类写法在 Compose 代码库里是主流实践：
+# material3 一屏下来能用到的符号就有上百个，逐个列出会让 import 块比业务代码还长，
+# 而且每加一个组件都要回来补一行。java.util.* 则相反——它藏起来的正是
+# 「这里用的到底是 ArrayList 还是 LinkedList」这种必须看得见的信息，
+# 所以 engine 那三处 java.util.* 是要手工展开成具名 import 的。
+#
+# 属性名是 ij_kotlin_packages_to_use_import_on_demand —— IntelliJ IDEA 自己
+# 用的同名设置，ktlint 的 no-wildcard-imports 规则直接读它（见该规则的
+# EditorConfigProperty 定义）。值是逗号分隔的包名模式，`**` 后缀表示连子包一起放行。
+# 别写成 `ktlint_standard_no-wildcard-imports = packages:androidx.compose.**`，
+# 那种写法不会被解析：实测加上后违规数一条没少（7 → 7）。
+ij_kotlin_packages_to_use_import_on_demand = androidx.compose.**
+
+# main.kt 是 JVM 入口点，由 java -jar 的 mainClass 约定决定叫什么，
+# 它不是「类名不合格的文件」，改名只会让入口声明和文件名对不上。
+# 这一节用无斜杠的文件名模式，匹配任意层级目录下的 main.kt。
+[main.kt]
+ktlint_standard_filename = disabled
+
+[*.{yml,yaml,json,toml,xml,proto,gradle}]
+indent_size = 2
+
+[*.md]
+# Markdown 用行尾两个空格表示硬换行，全局 trim 会把这些换行吃掉。
+trim_trailing_whitespace = false
+
+[*.{sh,bash}]
+indent_size = 2

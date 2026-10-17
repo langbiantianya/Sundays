@@ -123,6 +123,54 @@ GUI 走查用例（编号、前置、步骤、实际结果）已搬进对应 tes
 [`assemble-flatpak-app.sh`](./.github/scripts/assemble-flatpak-app.sh) 的段首注释。
 Flatpak 的选型结论索引见 [`packaging/flatpak/README.md`](./packaging/flatpak/README.md)。
 
+## 代码质量
+
+三项检查：格式走 **ktlint**，安全漏洞走 **CodeQL**，指标与规则集走 **SonarQube**。
+
+| 检查 | 何时跑 | 怎么跑 |
+| --- | --- | --- |
+| ktlint | 本地 + CI（含 PR） | `./gradlew ktlintCheck`；改格式用 `ktlintFormat` |
+| CodeQL | CI（含 PR、每周一） | [`codeql.yml`](./.github/workflows/codeql.yml)，结果进仓库的 Security 页 |
+| SonarQube | 本地 git hook | 见下 |
+
+规则全在 [`.editorconfig`](./.editorconfig) 里，是格式的唯一事实来源 ——
+本地、CI、IDE 保存时格式化读的是同一套，所以不存在「本地过了 CI 没过」。
+其中两条是刻意关掉的：`max_line_length`（118 处全在 i18n 文案表与方言 SQL 字面量里，
+ktlint 不会拆字符串）、`function-naming`（`@Composable` 按 Compose 编译器要求就是 PascalCase）。
+
+仓库自带的体检脚本，都可以直接跑：
+
+```bash
+python desktopApp/tools/check-encoding.py        # U+FFFD / 裸 NUL / BOM / 夹带的 U+FEFF
+python desktopApp/tools/check-config-syntax.py   # YAML / TOML / XML / JSON / proto
+python desktopApp/tools/check-doc-links.py       # markdown 链接与锚点
+```
+
+### 本地 SonarQube（提交前扫描）
+
+```bash
+docker run --rm -p 9000:9000 sonarqube:community     # 社区版，Kotlin 分析是全版本支持的
+python desktopApp/tools/install-git-hooks.py         # 装 pre-commit hook（只需一次）
+export SONAR_TOKEN=<在 http://localhost:9000 生成>
+```
+
+之后每次 `git commit` 会自动扫描一次，结果进
+<http://localhost:9000/dashboard?id=langbiantianya_Sundays>。
+
+**这个 hook 默认只提示、不阻断提交** —— 因为绝大多数时候你本机并没有跑着 SonarQube，
+那是正常状态而不是缺陷；把它当闸门只会挡住正常工作。要让它真拦，得设 `SONAR_REQUIRED=1`。
+临时跳过用 `git commit --no-verify`。
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `SONAR_HOST_URL` | 服务器地址，默认 `http://localhost:9000` |
+| `SONAR_TOKEN` | 认证令牌，**只从环境变量读，绝不写进仓库** |
+| `SONAR_REQUIRED=1` | 条件不满足时判失败，hook 变成真正的闸门 |
+| `SONAR_SKIP=1` | 完全跳过 |
+| `SONAR_NO_LIBS=1` | 不传依赖 jar（快，但类型解析偏弱） |
+
+分析范围与理由写在 [`sonar-project.properties`](./sonar-project.properties) 的注释里。
+
 ## 文档
 
 | 文档 | 内容 |

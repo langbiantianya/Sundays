@@ -124,9 +124,10 @@ dependencies {
     implementation(libs.grpc.netty.shaded)
 
     // JDBC Drivers — 不编译依赖，构建时复制到 drivers/
-    val jdbcDrivers = configurations.create("jdbcDrivers") {
-        isTransitive = false
-    }
+    val jdbcDrivers =
+        configurations.create("jdbcDrivers") {
+            isTransitive = false
+        }
     jdbcDrivers(libs.mysql.connector)
     jdbcDrivers(libs.postgresql)
     jdbcDrivers(libs.h2)
@@ -157,48 +158,59 @@ tasks.jar {
     archiveVersion.set("")
     manifest {
         attributes["Main-Class"] = "com.langbiantianya.server.IdbEngineServer"
-        attributes["Class-Path"] = configurations.runtimeClasspath.get().joinToString(" ") {
-            "libs/${it.name}"
-        }
+        attributes["Class-Path"] =
+            configurations.runtimeClasspath.get().joinToString(" ") {
+                "libs/${it.name}"
+            }
     }
 }
 
 // 复制运行时依赖到 build/libs/libs/（不含 JDBC 驱动和方言插件）
 // 关键：必须在 task 配置阶段就把 jdbcNames / dialectNames 物化为纯 Kotlin Set<String>，
 // 否则 exclude 闭包会捕获 Provider<Set<String>>（script-level 引用），configuration cache 无法序列化。
-val copyDeps = tasks.register<Copy>("copyDeps") {
-    val jdbcNames = configurations.named("jdbcDrivers").get().files.map { it.name }.toSet()
-    val dialectNames = setOf(
-        "idb-dialect-mysql",
-        "idb-dialect-postgresql",
-        "idb-dialect-h2",
-        "idb-dialect-duckdb",
-        "idb-dialect-sqlite"
-    )
-    from(configurations.runtimeClasspath) {
-        exclude { element ->
-            jdbcNames.contains(element.file.name) ||
-                dialectNames.any { element.file.name.startsWith(it) }
+val copyDeps =
+    tasks.register<Copy>("copyDeps") {
+        val jdbcNames =
+            configurations
+                .named("jdbcDrivers")
+                .get()
+                .files
+                .map { it.name }
+                .toSet()
+        val dialectNames =
+            setOf(
+                "idb-dialect-mysql",
+                "idb-dialect-postgresql",
+                "idb-dialect-h2",
+                "idb-dialect-duckdb",
+                "idb-dialect-sqlite",
+            )
+        from(configurations.runtimeClasspath) {
+            exclude { element ->
+                jdbcNames.contains(element.file.name) ||
+                    dialectNames.any { element.file.name.startsWith(it) }
+            }
         }
+        into(layout.buildDirectory.dir("libs/libs"))
     }
-    into(layout.buildDirectory.dir("libs/libs"))
-}
 
 // 复制 JDBC 驱动到 build/libs/drivers/
-val copyDrivers = tasks.register<Copy>("copyDrivers") {
-    from(configurations.named("jdbcDrivers"))
-    into(layout.buildDirectory.dir("libs/drivers"))
-}
+val copyDrivers =
+    tasks.register<Copy>("copyDrivers") {
+        from(configurations.named("jdbcDrivers"))
+        into(layout.buildDirectory.dir("libs/drivers"))
+    }
 
 // 复制方言插件到 build/libs/dialects/
-val copyDialects = tasks.register<Copy>("copyDialects") {
-    from(project(":dialect-mysql").tasks.named("jar"))
-    from(project(":dialect-postgresql").tasks.named("jar"))
-    from(project(":dialect-h2").tasks.named("jar"))
-    from(project(":dialect-duckdb").tasks.named("jar"))
-    from(project(":dialect-sqlite").tasks.named("jar"))
-    into(layout.buildDirectory.dir("libs/dialects"))
-}
+val copyDialects =
+    tasks.register<Copy>("copyDialects") {
+        from(project(":dialect-mysql").tasks.named("jar"))
+        from(project(":dialect-postgresql").tasks.named("jar"))
+        from(project(":dialect-h2").tasks.named("jar"))
+        from(project(":dialect-duckdb").tasks.named("jar"))
+        from(project(":dialect-sqlite").tasks.named("jar"))
+        into(layout.buildDirectory.dir("libs/dialects"))
+    }
 
 // 打包完成后自动复制依赖、驱动和方言
 tasks.jar {
@@ -207,25 +219,29 @@ tasks.jar {
 
 // 下载 winutils.exe 到 build/libs/bin/winutils.exe（仅 Windows 需要，Parquet 写本地文件依赖）
 // Hadoop 3.3.5 的 winutils 与 3.5.0 二进制兼容
-val copyWinutils = tasks.register("copyWinutils") {
-    description = "下载windows上的hadoop winutils 依赖"
-    val winutilsUrl = "https://raw.githubusercontent.com/cdarlint/winutils/refs/heads/master/hadoop-3.3.6/bin/winutils.exe"
-    val outDir = layout.buildDirectory.dir("libs/bin")
-    outputs.dir(outDir)
-    doLast {
-        val target = outDir.get().file("winutils.exe").asFile
-        if (target.exists() && target.length() > 0) {
-            return@doLast
+val copyWinutils =
+    tasks.register("copyWinutils") {
+        description = "下载windows上的hadoop winutils 依赖"
+        val winutilsUrl = "https://raw.githubusercontent.com/cdarlint/winutils/refs/heads/master/hadoop-3.3.6/bin/winutils.exe"
+        val outDir = layout.buildDirectory.dir("libs/bin")
+        outputs.dir(outDir)
+        doLast {
+            val target = outDir.get().file("winutils.exe").asFile
+            if (target.exists() && target.length() > 0) {
+                return@doLast
+            }
+            outDir.get().asFile.mkdirs()
+            logger.lifecycle("Downloading winutils.exe to ${target.absolutePath}")
+            // 通过 ant.get 走 Gradle 内置 HttpClient（与 Gradle 自身下载依赖相同的网络栈，最稳）
+            ant.invokeMethod(
+                "get",
+                mapOf(
+                    "src" to winutilsUrl,
+                    "dest" to target.absolutePath,
+                    "verbose" to true,
+                    "retries" to 3,
+                ),
+            )
+            logger.lifecycle("winutils.exe downloaded (${target.length()} bytes)")
         }
-        outDir.get().asFile.mkdirs()
-        logger.lifecycle("Downloading winutils.exe to ${target.absolutePath}")
-        // 通过 ant.get 走 Gradle 内置 HttpClient（与 Gradle 自身下载依赖相同的网络栈，最稳）
-        ant.invokeMethod("get", mapOf(
-            "src" to winutilsUrl,
-            "dest" to target.absolutePath,
-            "verbose" to true,
-            "retries" to 3
-        ))
-        logger.lifecycle("winutils.exe downloaded (${target.length()} bytes)")
     }
-}

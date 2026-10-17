@@ -1,0 +1,118 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
+name: CodeQL 安全扫描
+
+# 推 main / 提 PR / 每周一凌晨 / 手动，都扫一遍。
+#
+# 定时那一档不是为了「更保险」：CodeQL 的查询库会持续更新，
+# 今天干净的代码，下周可能会因为新增的查询规则而报出问题。
+# 只在 push 时扫的话，这类问题要等到下一次有人动这块代码才会暴露。
+# 挑 03:17 是为了避开整点的 runner 排队高峰。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # 分析结果要落到 code scanning 的告警列表里，这两条是硬性要求：
+  #   security-events: write —— 写告警
+  #   actions: read          —— 读取 workflow 运行记录（action 内部要用）
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL 分析（${{ matrix.language }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 只有 Kotlin：本仓库 267 个 .kt、0 个手写 .java。
+        # （engine-protocol 下 build/generated 里有一大堆 protoc 生成的 Java，
+        #   但那是编译期产物，git 根本没跟踪，不构成扫第二个语言的理由。）
+        # 矩阵这个写法是为了对齐官方模板 —— build-mode 输入要求单语言 job，
+        # 将来真加了别的语言，只要往这个列表里加一行即可。
+        language: [kotlin]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 与另外三条打包流水线、以及 ktlint 工作流完全一致的处理：
+      # 仓库里的 wrapper 指向腾讯云镜像，给国内开发机用的；
+      # 境外 runner 从那里拉两百多 MB 的 -all.zip 既慢又不稳。
+      # 只在 CI 里换回官方源，不改仓库文件。
+      # 必须排在 setup-gradle **之前**（那个 action 加载时就会读 URL）。
+      - name: Gradle 分发源换回官方
+        shell: bash
+        run: |
+          sed -i 's|mirrors\.cloud\.tencent\.com/gradle|services.gradle.org/distributions|' \
+            gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      - uses: actions/setup-java@v6
+        with:
+          # 25 与另外四条流水线保持一致。仓库里没有 jvmToolchain 声明，
+          # 编译跟着跑它的 JDK 走。
+          #
+          # ⚠️ 这一步不是可有可无的：Kotlin 编译器要求运行时 JDK ≥ 语言版本要求，
+          # 用低版本 JDK 会直接编译失败，而 CodeQL 的报错会藏在抽取阶段里，
+          # 看起来像「CodeQL 坏了」，实际是 JDK 不对。
+          java-version: '25'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # ---------------------------------------------------------------------------
+      # build-mode 选 manual 而不是 autobuild，这是刻意的：
+      #
+      #   · Kotlin **不支持** none —— 官方文档写明「Kotlin: autobuild or manual」，
+      #     因为 Kotlin 抽取器需要看到编译器真实运行。所以必须在两者里选。
+      #   · autobuild 对 Gradle 项目会执行完整的 `build` 任务。在本仓库那意味着
+      #     ① 跑完 1277 个测试（其中一批连内网数据库 192.168.1.5，runner 上必然
+      #        走 assumeTrue 跳过，白白耗掉几分钟）；
+      #     ② 触发 desktopApp 的 jpackage 打包 —— 那是 Windows 的 WiX /
+      #        macOS 的 hdiutil 流程，在 Linux runner 上根本跑不起来。
+      #     两样都与「扫描代码」无关，却会让这条流水线常年红。
+      #
+      # manual 模式让我们只跑「把所有 Kotlin 源码编译出字节码」这一件事，
+      # 恰好是 CodeQL 需要的全部前提。
+      - name: 初始化 CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: manual
+          # security-and-quality = 默认的安全规则集，外加代码质量规则
+          # （不可达代码、无用赋值这类）。本仓库是桌面数据库工具，
+          # SQL 拼接、JDBC 调用、文件路径拼接都是审计重点，安全规则是主体；
+          # 质量规则则能顺手捞出重构线索。
+          queries: security-and-quality
+
+      # 这四个任务名是本仓库 12 个模块编译入口的**并集**，已用
+      # `./gradlew ... --dry-run` 逐条核对过：
+      #   classes / testClasses         → 10 个 Kotlin JVM 模块
+      #   jvmMainClasses / jvmTestClasses → shared（Kotlin Multiplatform）
+      # Gradle 对不带路径前缀的任务名会在「所有含该任务的子项目」里各跑一份，
+      # 所以这四个名字合起来覆盖全部模块，不会出现「某模块漏编译」。
+      - name: 编译全部模块（供 CodeQL 抽取）
+        run: ./gradlew classes testClasses jvmMainClasses jvmTestClasses --console=plain
+
+      - name: 分析
+        uses: github/codeql-action/analyze@v4
+        with:
+          # 类别要和 CodeQL 默认设置里 Kotlin 的类别一致，否则同一次分析会被
+          # 算成两个独立类别，告警数与历史趋势都会失真。
+          category: '/language:${{ matrix.language }}'

@@ -1,0 +1,134 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
+
+name: ktlint 代码风格
+
+# 与另外三条打包流水线刻意相反：这里**在 pull_request 上跑**。
+# 打包流水线不开 PR 是因为它们跑 UI 测试，而 UI 测试连的是内网数据库
+# （192.168.1.5）—— PR 场景下必然红一片，起不到把关作用。
+# ktlint 不需要任何数据库、任何网络、任何凭据，是纯静态检查，
+# 恰恰最该在合并前就拦住 —— 这也正是加它的原因。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ktlint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # 往 code scanning 传 SARIF 必须有这一条。GitHub 内置的
+  # GITHUB_TOKEN 默认是只读的，不显式声明就传不上去。
+  security-events: write
+
+jobs:
+  ktlint:
+    name: ktlint 风格检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ---------------------------------------------------------------------------
+      # 与三条打包流水线完全相同的处理：wrapper 指向腾讯云镜像，那是给国内
+      # 开发机用的。GitHub 托管 runner 在境外，从那里拉一个 -all.zip
+      # （两百多 MB）既慢又不稳，失败时报的还是一句没有指向的
+      # 「Could not download gradle-9.7.1-all.zip」。
+      #
+      # 只在 CI 里换回官方源，**不改仓库文件**。这一步必须排在 setup-gradle
+      # **之前**：那个 action 在被加载时就会去读 URL。
+      - name: Gradle 分发源换回官方
+        shell: bash
+        run: |
+          sed -i 's|mirrors\.cloud\.tencent\.com/gradle|services.gradle.org/distributions|' \
+            gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      # settings.gradle.kts 里的 aliyun 依赖镜像**刻意保留**：
+      # 阿里云镜像在境外 runner 上同样可达，只是比 mavenCentral 慢一些。
+      # 摘掉它要改构建脚本，收益只是快几十秒，不值得让 CI 去动仓库文件。
+
+      - uses: actions/setup-java@v6
+        with:
+          # 25 与三条打包流水线保持一致。仓库里没有 jvmToolchain 声明，
+          # 构建跟着跑它的 JDK 走 —— 本地是 zulu 25.0.4.1，这里用 Temurin 25，
+          # 同一大版本。ktlint 插件本身对 JDK 无特殊要求，但让整个构建跑在
+          # 与打包相同的 JDK 上，可以排除「本地过了、CI 因为 JDK 差异而炸」。
+          java-version: '25'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # 规则本身全在 .editorconfig 里：ktlint_code_style、max_line_length = off、
+      # 关掉 function-naming（@Composable 是 PascalCase）、Compose 包族放行通配导入。
+      # 这里不改任何参数 —— 本地跑 `./gradlew ktlintCheck` 得到的结果必须和
+      # CI 一模一样，否则「本地过了 CI 没过」就又回来了。
+      #
+      # 插件会对 build/ 下的 protobuf 生成代码做排除（见 build.gradle.kts 里的
+      # filter 块，**不能用 exclude("**/build/**")**，理由写在那里）。
+      - name: 跑 ktlintCheck
+        run: ./gradlew ktlintCheck --console=plain
+
+      # ---------------------------------------------------------------------------
+      # ktlint 插件给**每个模块的每个 source set** 各生成一份 SARIF，路径是
+      #   <模块>/build/reports/ktlint/<任务名>/<任务名>.sarif
+      # 文件名在不同模块之间大量重名，直接摊到同一个目录会互相覆盖，
+      # 所以这里统一加上模块名前缀再收集。
+      #
+      # 空文件跳过：某个 source set 没有违规时插件会写出 0 字节的 SARIF，
+      # 传上去没有意义。
+      #
+      # 路径里只认 *Check*：CI 只跑 ktlintCheck，不该把任何人本地跑
+      # ktlintFormat 留下的报告一起传上去。
+      - name: 汇总各模块 SARIF
+        id: collect
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ktlint-sarif
+          count=0
+          # 用 find -print0 + while read -d ''，不靠「路径里没有空格」这个假设。
+          # GitHub 的 `shell: bash` 包装器带 -e 和 pipefail，所以下面每一条
+          # 都必须自己保证成功返回：空目录的 `ls` 会返回 2，不能裸写。
+          while IFS= read -r -d '' f; do
+            [ -s "$f" ] || continue
+            module=$(echo "$f" | cut -d/ -f2)
+            task=$(basename "$f" .sarif)
+            cp "$f" "ktlint-sarif/${module}__${task}.sarif"
+            count=$((count + 1))
+          done < <(find . -path './*/build/reports/ktlint/*Check*/*.sarif' -print0)
+          echo "收集到 ${count} 个 SARIF 文件"
+          ls -l ktlint-sarif || true
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      # SARIF 是 ktlint 的问题出现在 PR「Files changed」里的唯一入口。
+      #
+      # `if: always()` 是这里的关键：ktlintCheck 一旦发现违规就会让 job 失败，
+      # 而那恰恰是最需要把结果显示出来的时刻。少了这一句，CI 只会给一句
+      # 「任务失败」，具体哪几行有问题还得自己去翻构建日志。
+      - name: 上传 SARIF 到 code scanning
+        if: always() && steps.collect.outputs.count != '0'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ktlint-sarif
+          # 不写 /language: 前缀：那样会和 CodeQL 的 Kotlin 分析抢同一个类别，
+          # 两边的告警会互相覆盖。分成两个类别才能各自独立地积累基线。
+          category: ktlint
+
+      # 文本报告留一份：SARIF 在网页上好看，但真要逐条看或贴进 issue 时，
+      # 直接读这个文件方便得多。
+      - name: 收集文本报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ktlint-report
+          path: ./**/build/reports/ktlint/*/*.txt
+          retention-days: 14
+          if-no-files-found: ignore

@@ -124,18 +124,18 @@ compose.desktop {
             // 靠异常去撞则永远只会看到最后崩的那一个。
             // ---------------------------------------------------------------
             modules(
-                "java.sql",           // JDBC：MySQL / PostgreSQL / H2 / SQLite / DuckDB
-                "java.naming",        // logback + slf4j 的 LoggerFactory 初始化
-                "java.management",    // 部分驱动/诊断工具
-                "java.instrument",    // 字节码增强类库
-                "java.compiler",      // 运行时编译（脚本/规则引擎）
-                "java.scripting",     // 脚本引擎
-                "java.rmi",           // JDBC 驱动里对 RMI 的引用
+                "java.sql", // JDBC：MySQL / PostgreSQL / H2 / SQLite / DuckDB
+                "java.naming", // logback + slf4j 的 LoggerFactory 初始化
+                "java.management", // 部分驱动/诊断工具
+                "java.instrument", // 字节码增强类库
+                "java.compiler", // 运行时编译（脚本/规则引擎）
+                "java.scripting", // 脚本引擎
+                "java.rmi", // JDBC 驱动里对 RMI 的引用
                 "java.security.jgss",
                 "java.security.sasl",
                 "java.xml.crypto",
-                "jdk.jfr",            // 运行期诊断
-                "jdk.unsupported",    // sun.misc 等被大量第三方库直接引用
+                "jdk.jfr", // 运行期诊断
+                "jdk.unsupported", // sun.misc 等被大量第三方库直接引用
             )
 
             windows {
@@ -181,7 +181,7 @@ compose.desktop {
     }
 }
 
-/**
+/*
  * 可选的 `user.home` 覆盖，供**手动启动应用**时隔离配置目录：
  *
  * ```
