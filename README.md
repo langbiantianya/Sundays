@@ -125,13 +125,12 @@ Flatpak 的选型结论索引见 [`packaging/flatpak/README.md`](./packaging/fla
 
 ## 代码质量
 
-三项检查：格式走 **ktlint**，安全漏洞走 **CodeQL**，指标与规则集走 **SonarQube**。
+两项检查：格式走 **ktlint**，安全漏洞走 **CodeQL**。
 
 | 检查 | 何时跑 | 怎么跑 |
 | --- | --- | --- |
 | ktlint | 本地 + CI（含 PR） | `./gradlew ktlintCheck`；改格式用 `ktlintFormat` |
 | CodeQL | CI（含 PR、每周一） | [`codeql.yml`](./.github/workflows/codeql.yml)，结果进仓库的 Security 页 |
-| SonarQube | 本地 git hook | 见下 |
 
 规则全在 [`.editorconfig`](./.editorconfig) 里，是格式的唯一事实来源 ——
 本地、CI、IDE 保存时格式化读的是同一套，所以不存在「本地过了 CI 没过」。
@@ -146,51 +145,24 @@ python desktopApp/tools/check-config-syntax.py   # YAML / TOML / XML / JSON / pr
 python desktopApp/tools/check-doc-links.py       # markdown 链接与锚点
 ```
 
-### 本地 SonarQube（SonarScanner for Gradle）
+### 曾评估并否决：SonarQube
 
-分析走官方推荐的 **SonarScanner for Gradle**：就是一条普通的 `./gradlew sonar`，
-扫描器引擎由插件自己下载，不需要另外装 sonar-scanner CLI。
+本机跑过社区版 26.10 的端到端分析后**移除了**。扫描本身没问题（281 个文件
+全部进分析、145 条 Kotlin 规则全部激活），但规则集对不上这个项目的风险面：
 
-```bash
-docker run --rm -p 9000:9000 sonarqube:community     # 社区版，Kotlin 分析是全版本支持的
-python desktopApp/tools/install-git-hooks.py         # 装 pre-commit hook（只需一次）
-export SONAR_TOKEN=<在 http://localhost:9000 生成>
+- Kotlin 规则总数 **145**，Java 是 **791** —— 只有 18%；
+- 31 条 Kotlin「安全」规则里约 12 条是 Android 专用，对桌面数据库客户端无意义；
+- **Kotlin 规则集里一条 SQL 规则都没有**。Java 那边有 8 条，含 `java:S2077`
+  （SQL 不得动态拼接）、`java:S6912`（JDBC 应用批处理）、`java:S1192`
+  （字符串字面量不得重复）；而本仓库 `createStatement`/`prepareStatement`
+  调用 350 处 / 41 个文件、SQL 字面量 771 处 / 79 个文件，恰好全在盲区里。
 
-python desktopApp/tools/sonar-local-scan.py          # 跑一次完整分析
-```
+结果是 33,274 行代码只报 3 条问题 —— 读起来像「很干净」，实际是「不看最容易
+出错的地方」。这种假安全感比没有工具更糟。
 
-结果进 <http://localhost:9000/dashboard?id=langbiantianya_Sundays>。
-
-**换用 Gradle 插件省掉了三样手工维护的东西**，这些现在全部由插件从 Gradle 对象
-模型自动推导：`sonar.sources` / `sonar.tests`（原先要逐模块列 12 行，漏一个模块
-就静默不扫且不报错）、`sonar.java.binaries`（编译输出目录）、`sonar.java.libraries`
-（原先要从 Gradle 缓存里翻 253 个 jar 并剔掉 sources/javadoc，现在直接用
-`sourceSets.main.compileClasspath`）。加新模块自动纳入，没有「忘了更新」这回事。
-
-分析配置写在根 [`build.gradle.kts`](./build.gradle.kts) 的 `sonar { properties { … } }` 里。
-官方文档明确 SonarScanner for Gradle **不读** `sonar-project.properties`，所以仓库里
-不再保留那个文件 —— 留着只会让人改一个根本没人读的东西还以为生效了。
-
-`sonar` 任务会先编译全部模块（12 个，本机约 3 分钟）以产出字节码：官方文档说
-插件只用 `mustRunAfter` 保证顺序、不自动加依赖，字节码任务必须真的执行过，否则
-类型解析会退化。刚编完只想重扫，用 `SONAR_GRADLE_ARGS="-x classes -x testClasses
--x jvmMainClasses -x jvmTestClasses"` 跳过编译。
-
-**hook 默认只做前置检查、不跑分析** —— 把一次 3 分钟的全量编译塞进每次
-`git commit` 是不能接受的设计。设 `SONAR_SCAN=1` 可让提交时也真扫一次。
-
-**hook 默认只提示、不阻断提交** —— 因为绝大多数时候你本机并没有跑着 SonarQube，
-那是正常状态而不是缺陷；把它当闸门只会挡住正常工作。要让它真拦，得设 `SONAR_REQUIRED=1`。
-临时跳过用 `git commit --no-verify`。
-
-| 环境变量 | 作用 |
-| --- | --- |
-| `SONAR_HOST_URL` | 服务器地址，默认 `http://localhost:9000` |
-| `SONAR_TOKEN` | 认证令牌，**只从环境变量读，绝不写进仓库** |
-| `SONAR_REQUIRED=1` | 条件不满足时判失败，hook 变成真正的闸门 |
-| `SONAR_SKIP=1` | 完全跳过 |
-| `SONAR_SCAN=1` | hook 模式下也真跑一次完整分析 |
-| `SONAR_GRADLE_ARGS` | 追加给 Gradle 的参数，如 `-x classes -x testClasses` |
+SQL 注入这一块由 CodeQL 的 `java/sql-injection` 查询集覆盖（它对 Kotlin 生效），
+真正该看的地方并没有因此失去检查。评估过程与数据记在根
+[`build.gradle.kts`](./build.gradle.kts) 顶部的注释里，免得将来重复评估。
 
 ## 文档
 
