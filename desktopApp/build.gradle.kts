@@ -95,38 +95,39 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
 
             // ------------------------------------------------------------------
-            // 程序名：Windows 用短名 `sundays`。
+            // 程序名：sundays（原来是 com.langbiantianya.sundays，跟包名走的那串）。
             //
-            // 之前这里是 com.langbiantianya.sundays（跟着包名走），用户看到的是
-            // exe、开始菜单快捷方式、控制面板里「程序和功能」的一整串域名式
-            // 名字 —— 那是从代码包名直接漏到用户界面的，不是给人看的名字。
+            // 用户看到的是 exe、开始菜单快捷方式、控制面板「程序和功能」、macOS
+            // 的 .app、Linux 的启动器 —— 一整串域名式名字。那是从代码包名直接漏
+            // 到用户界面的，不是给人看的名字。
             //
-            // ⚠️ packageName 是 nativeDistributions 级的，Dmg / Msi / Deb 三种
-            // 格式共用，所以**光改这一行会把 macOS 与 Linux 的产物名一起改掉**。
-            // 下面 macOS / linux 各自单独覆盖回原名，把影响面收在 Windows 内。
+            // ⚠️ 想「只改 Windows」是**做不到**的，这点试过：
+            //   · packageName 是 nativeDistributions 级的，Dmg/Msi/Deb 共用；
+            //   · javap 反编译 compose-gradle-plugin 1.11.1 确认
+            //     WindowsPlatformSettings 根本没有 packageName 字段，
+            //     而 macOS 与 Linux 的同名属性**写了也不生效** ——
+            //     实测 macOS { packageName = "com.langbiantianya.sundays" }
+            //     之后产出的仍是 sundays.app、app-image 仍是 app/sundays，
+            //     build-macos.yml 与 build-flatpak.yml 当场双双变红。
+            // 所以这里统一改名，把三个平台的产物名一起对齐。
             //
             // 改包名**不影响启动**：
             //   · mainClass 在上面显式写死了（com.langbiantianya.sundays.MainKt），
-            //     不由 packageName 推导 —— 这一点是 Compose 历史上最容易踩的坑，
+            //     不由 packageName 推导 —— 这是 Compose 历史上最容易踩的坑，
             //     这里先确认过才敢改；
-            //   · 应用自己的包名（源码里的 com.langbiantianya.*）是另一回事，
+            //   · 应用自己的源码包名（com.langbiantianya.*）是另一回事，
             //     与打包元数据无关，不受影响。
+            //
+            // 连带要跟着改的（都只认这一个名字）：
+            //   · .github/scripts/assemble-flatpak-app.sh 的 LAUNCHER_NAME
+            //     —— 它同时是启动器名与 jpackage 的 <packageName>.cfg 文件名；
+            //   · build-macos.yml 里 .app 包名与 Contents/MacOS/ 下的启动器名；
+            //   · build-flatpak.yml 里组装产物的启动器路径；
+            //   · packaging/flatpak/*.json 里 manifest 的 command（应用 id 不动，
+            //     那是 Linux 上的应用身份，按惯例保持反向域名）。
             // ------------------------------------------------------------------
             packageName = "sundays"
             packageVersion = "1.0.0"
-
-            // macOS 保持原包名，否则 build-macos.yml 里硬编码的
-            // `com.langbiantianya.sundays.app` 与 `Contents/MacOS/<同名>`
-            // 两条路径会同时失配（那条流水线是 CI 里唯一会验证产物架构的）。
-            macOS {
-                packageName = "com.langbiantianya.sundays"
-            }
-
-            // Linux 同理：Flatpak 流水线的 launcher 断言写的是
-            // `bin/com.langbiantianya.sundays`，manifest 的 app id 也跟着这个名字。
-            linux {
-                packageName = "com.langbiantianya.sundays"
-            }
 
             // ---------------------------------------------------------------
             // jlink 运行时的模块集。**少一个模块，打出来的包就起不来。**

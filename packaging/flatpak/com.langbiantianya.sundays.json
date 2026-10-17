@@ -8,7 +8,7 @@
   "sdk-extensions": [
     "org.freedesktop.Sdk.Extension.openjdk"
   ],
-  "command": "/app/bin/com.langbiantianya.sundays",
+  "command": "/app/bin/sundays",
 
   "finish-args": [
     "--share=ipc",
@@ -51,8 +51,8 @@
         "install -Dm644 com.langbiantianya.sundays.png /app/share/icons/hicolor/256x256/apps/com.langbiantianya.sundays.png",
         "install -Dm644 com.langbiantianya.sundays.desktop files/share/applications/com.langbiantianya.sundays.desktop",
         "install -Dm644 com.langbiantianya.sundays.png files/share/icons/hicolor/256x256/apps/com.langbiantianya.sundays.png",
-        "test -x /app/bin/com.langbiantianya.sundays",
-        "echo CHK launcher=$(test -x /app/bin/com.langbiantianya.sundays && echo yes || echo no) modfiles=$(test -e files/bin/com.langbiantianya.sundays && echo yes || echo no) jars=$(ls /app/share/sundays/app/*.jar 2>/dev/null | wc -l)"
+        "test -x /app/bin/sundays",
+        "echo CHK launcher=$(test -x /app/bin/sundays && echo yes || echo no) modfiles=$(test -e files/bin/sundays && echo yes || echo no) jars=$(ls /app/share/sundays/app/*.jar 2>/dev/null | wc -l)"
       ],
       "sources": [
         { "type": "dir", "path": "sundays-app" },

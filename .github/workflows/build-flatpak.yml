@@ -151,7 +151,7 @@ jobs:
           fi
 
           # 启动器现在是 /bin/sh 脚本，不再是 ELF 可执行文件，只查存在且可执行。
-          launcher="$STAGE/bin/com.langbiantianya.sundays"
+          launcher="$STAGE/bin/sundays"
           if [ ! -x "$launcher" ]; then
             echo "::error::$launcher 不存在或不可执行"
             fail=1
