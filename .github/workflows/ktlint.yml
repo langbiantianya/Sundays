@@ -79,14 +79,17 @@ jobs:
       # ---------------------------------------------------------------------------
       # ktlint 插件给**每个模块的每个 source set** 各生成一份 SARIF，路径是
       #   <模块>/build/reports/ktlint/<任务名>/<任务名>.sarif
-      # 文件名在不同模块之间大量重名，直接摊到同一个目录会互相覆盖，
-      # 所以这里统一加上模块名前缀再收集。
+      # 12 个模块下来是 34 份。
       #
-      # 空文件跳过：某个 source set 没有违规时插件会写出 0 字节的 SARIF，
-      # 传上去没有意义。
+      # 但 upload-sarif 源码里有一道硬性检查：
+      #   "The CodeQL Action does not support uploading multiple SARIF runs
+      #    with the same category."
+      # 同一个 category 下不能有多个 run。所以这里先把它们**合并成一个 run**
+      # 再上传，而不是分成 34 个 step 各配一个 category。
       #
       # 路径里只认 *Check*：CI 只跑 ktlintCheck，不该把任何人本地跑
-      # ktlintFormat 留下的报告一起传上去。
+      # ktlintFormat 留下的报告一起传上去。空文件跳过 —— 某个 source set
+      # 没有违规时插件会写出 0 字节的 SARIF。
       - name: 汇总各模块 SARIF
         id: collect
         if: always()
@@ -108,16 +111,26 @@ jobs:
           ls -l ktlint-sarif || true
           echo "count=${count}" >> "$GITHUB_OUTPUT"
 
+      # 34 份压成 1 个 run。脚本里有两道前置校验（%SRCROOT% 是否一致、
+      # 结果项用的是 ruleId 还是 ruleIndex），不满足会直接失败而不是硬合。
+      - name: 合并为单 run
+        id: merge
+        if: always() && steps.collect.outputs.count != '0'
+        shell: bash
+        run: |
+          python desktopApp/tools/merge-sarif.py ktlint-sarif ktlint-sarif/merged.sarif
+          echo "count=$(ls -1 ktlint-sarif/merged.sarif 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
+
       # SARIF 是 ktlint 的问题出现在 PR「Files changed」里的唯一入口。
       #
       # `if: always()` 是这里的关键：ktlintCheck 一旦发现违规就会让 job 失败，
       # 而那恰恰是最需要把结果显示出来的时刻。少了这一句，CI 只会给一句
       # 「任务失败」，具体哪几行有问题还得自己去翻构建日志。
       - name: 上传 SARIF 到 code scanning
-        if: always() && steps.collect.outputs.count != '0'
+        if: always() && steps.merge.outputs.count == '1'
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: ktlint-sarif
+          sarif_file: ktlint-sarif/merged.sarif
           # 不写 /language: 前缀：那样会和 CodeQL 的 Kotlin 分析抢同一个类别，
           # 两边的告警会互相覆盖。分成两个类别才能各自独立地积累基线。
           category: ktlint
