@@ -33,21 +33,21 @@ import org.slf4j.LoggerFactory
 class IdbEngineImpl(
     private val engine: IdbEngine = IdbEngine(),
 ) : IdbEngineGrpcKt.IdbEngineCoroutineImplBase() {
-
     private val logger = LoggerFactory.getLogger(IdbEngineImpl::class.java)
 
-    override fun handle(request: Request): Flow<Response> = flow {
-        logger.info("Handle request: id=${request.id} ${request.category}/${request.action}")
-        // IdbEngine.handle 是 direct-mode 入口 — gRPC 服务复用它保证两条路径语义一致
-        engine.handle(request).collect { emit(it) }
-    }.catch { e ->
-        logger.error("Error processing request ${request.id}", e)
-        emit(
-            response {
-                id = request.id
-                success = false
-                error = e.message ?: e.javaClass.simpleName
-            }
-        )
-    }
+    override fun handle(request: Request): Flow<Response> =
+        flow {
+            logger.info("Handle request: id=${request.id} ${request.category}/${request.action}")
+            // IdbEngine.handle 是 direct-mode 入口 — gRPC 服务复用它保证两条路径语义一致
+            engine.handle(request).collect { emit(it) }
+        }.catch { e ->
+            logger.error("Error processing request ${request.id}", e)
+            emit(
+                response {
+                    id = request.id
+                    success = false
+                    error = e.message ?: e.javaClass.simpleName
+                },
+            )
+        }
 }

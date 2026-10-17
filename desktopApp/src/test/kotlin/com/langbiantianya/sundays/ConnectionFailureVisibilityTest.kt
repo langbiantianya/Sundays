@@ -11,8 +11,8 @@ package com.langbiantianya.sundays
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -24,18 +24,18 @@ import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectType
-import java.io.File
-import java.nio.file.Files
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * 浏览屏的**连接失败可见性**契约。
@@ -51,7 +51,6 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class ConnectionFailureVisibilityTest {
-
     /** 一条足够像样的失败原因 —— 真实场景下引擎回的就是这种带 `Caused by` 的长文本。 */
     private val reason =
         "Connection refused: java.net.ConnectException: Connection refused: localhost/127.0.0.1:5432"
@@ -69,21 +68,20 @@ class ConnectionFailureVisibilityTest {
      *
      * 这类「测试之间通过全局单例互相干扰」的坑，代价总是别人付的，所以宁可直接不用。
      */
-    private val stubEngine = object : EngineClient {
-        override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> =
-            flowOf(response { end = true })
+    private val stubEngine =
+        object : EngineClient {
+            override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> = flowOf(response { end = true })
 
-        // 注意 `EngineClient` 的入参是 **proto** 的 `com.langbiantianya.grpc.ConnectionConfig`，
-        // 与 UI 层那个同名但不同包的 `shared` 侧 `ConnectionConfig` 不是同一个类型。
-        override suspend fun testConnection(
-            config: com.langbiantianya.grpc.ConnectionConfig,
-        ): com.langbiantianya.grpc.SystemTestConnectionResponse = error("FAILED 状态下不应被调用")
+            // 注意 `EngineClient` 的入参是 **proto** 的 `com.langbiantianya.grpc.ConnectionConfig`，
+            // 与 UI 层那个同名但不同包的 `shared` 侧 `ConnectionConfig` 不是同一个类型。
+            override suspend fun testConnection(
+                config: com.langbiantianya.grpc.ConnectionConfig,
+            ): com.langbiantianya.grpc.SystemTestConnectionResponse = error("FAILED 状态下不应被调用")
 
-        override suspend fun disconnect(config: com.langbiantianya.grpc.ConnectionConfig): Boolean =
-            error("FAILED 状态下不应被调用")
+            override suspend fun disconnect(config: com.langbiantianya.grpc.ConnectionConfig): Boolean = error("FAILED 状态下不应被调用")
 
-        override fun close() = Unit
-    }
+            override fun close() = Unit
+        }
 
     private lateinit var tempHome: File
     private lateinit var originalHome: String
@@ -92,14 +90,15 @@ class ConnectionFailureVisibilityTest {
 
     @Before
     fun setUp() {
-        conn = ConnectionConfig(
-            id = "c-${System.nanoTime()}",
-            name = "DemoH2",
-            dialect = DialectType.H2,
-            username = "sa",
-            password = "",
-            jdbcUrl = "jdbc:h2:mem:failbanner_${System.nanoTime()}",
-        )
+        conn =
+            ConnectionConfig(
+                id = "c-${System.nanoTime()}",
+                name = "DemoH2",
+                dialect = DialectType.H2,
+                username = "sa",
+                password = "",
+                jdbcUrl = "jdbc:h2:mem:failbanner_${System.nanoTime()}",
+            )
     }
 
     @After
@@ -132,13 +131,14 @@ class ConnectionFailureVisibilityTest {
             ProvideTestStrings {
                 MaterialTheme {
                     DatabaseBrowserScreen(
-                        sheets = listOf(
-                            SheetDescriptor(
-                                connection = conn,
-                                browser = DatabaseBrowserState(stubEngine, scope),
-                                status = status,
+                        sheets =
+                            listOf(
+                                SheetDescriptor(
+                                    connection = conn,
+                                    browser = DatabaseBrowserState(stubEngine, scope),
+                                    status = status,
+                                ),
                             ),
-                        ),
                         activeSheetId = conn.id,
                         connections = listOf(conn),
                         onSelectSheet = {},
@@ -155,38 +155,41 @@ class ConnectionFailureVisibilityTest {
     }
 
     @Test
-    fun `the failure reason is visible on the browser screen`() = runComposeUiTest {
-        render(ConnectionStatus(ConnectionState.FAILED, reason))
+    fun `the failure reason is visible on the browser screen`() =
+        runComposeUiTest {
+            render(ConnectionStatus(ConnectionState.FAILED, reason))
 
-        // 标签（语义主语）不省略号截断
-        onNodeWithText(zh(StrKey.CONNECT_FAILED)).assertIsDisplayed()
-        // 原因本身。用 substring 是因为横幅会把它压成两行（maxLines = 2），
-        // 但**不能**因此只断言首句 —— 关键信息常常在末尾。
-        onNodeWithText(reason, substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun `the retry button calls back on connect`() = runComposeUiTest {
-        var retried: ConnectionConfig? = null
-        render(ConnectionStatus(ConnectionState.FAILED, reason)) { retried = it }
-
-        onNodeWithText(zh(StrKey.RETRY)).performClick()
-        assertTrue(
-            retried != null,
-            "「重试」必须真的回调 onConnect —— 失败原因多半是瞬时的（网络抖了下），" +
-                "让用户切去连接管理页再切回来是纯粹的二次摩擦",
-        )
-    }
+            // 标签（语义主语）不省略号截断
+            onNodeWithText(zh(StrKey.CONNECT_FAILED)).assertIsDisplayed()
+            // 原因本身。用 substring 是因为横幅会把它压成两行（maxLines = 2），
+            // 但**不能**因此只断言首句 —— 关键信息常常在末尾。
+            onNodeWithText(reason, substring = true).assertIsDisplayed()
+        }
 
     @Test
-    fun `no failure banner when the connection is healthy`() = runComposeUiTest {
-        render(ConnectionStatus(ConnectionState.CONNECTED, "H2"))
+    fun `the retry button calls back on connect`() =
+        runComposeUiTest {
+            var retried: ConnectionConfig? = null
+            render(ConnectionStatus(ConnectionState.FAILED, reason)) { retried = it }
 
-        // 横幅只在 FAILED 时出现 —— 已连接时挂着一条「连接失败」比不挂更糟。
-        assertEquals(
-            0,
-            onAllNodesWithText(zh(StrKey.CONNECT_FAILED)).fetchSemanticsNodes().size,
-            "已连接时不该出现失败横幅",
-        )
-    }
+            onNodeWithText(zh(StrKey.RETRY)).performClick()
+            assertTrue(
+                retried != null,
+                "「重试」必须真的回调 onConnect —— 失败原因多半是瞬时的（网络抖了下），" +
+                    "让用户切去连接管理页再切回来是纯粹的二次摩擦",
+            )
+        }
+
+    @Test
+    fun `no failure banner when the connection is healthy`() =
+        runComposeUiTest {
+            render(ConnectionStatus(ConnectionState.CONNECTED, "H2"))
+
+            // 横幅只在 FAILED 时出现 —— 已连接时挂着一条「连接失败」比不挂更糟。
+            assertEquals(
+                0,
+                onAllNodesWithText(zh(StrKey.CONNECT_FAILED)).fetchSemanticsNodes().size,
+                "已连接时不该出现失败横幅",
+            )
+        }
 }

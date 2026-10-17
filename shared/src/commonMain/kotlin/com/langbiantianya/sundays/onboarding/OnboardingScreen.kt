@@ -133,131 +133,135 @@ fun OnboardingScreen(
             // - 垂直：外层 Box 的 `contentAlignment = Center`。`verticalScroll` 用「高度无上界」
             //   的约束量子节点，若把居中交给同一层，垂直居中会恒等于顶对齐（与 EmptyHint 同理）。
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                // 限宽并居中：窗口默认就有 1280px 宽，不限的话内容会被拉到左右两端，
-                // 单行文字拉得太长反而难读。960dp 刚好容纳 5 张 180dp 色卡 + 间距排成一行
-                // （排成一行能把配色段从两行压到一行，省下约 130px 高度）。
-                Column(
-                    modifier = Modifier.widthIn(max = 960.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = if (firstRun) str(StrKey.WELCOME) else str(StrKey.APPEARANCE_ONBOARDING),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = if (firstRun) {
-                            str(StrKey.ONBOARDING_HINT)
-                        } else {
-                            str(StrKey.ONBOARDING_SETTINGS_HINT)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    Spacer(Modifier.height(24.dp))
-
-                    // ---- 界面语言 ----
-                    // 放在最前：语言决定其余三组说明文字能不能读懂。
-                    SectionTitle(str(StrKey.LANGUAGE))
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = str(StrKey.LANGUAGE_HINT_ONBOARDING),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    LanguagePicker(
-                        selected = language,
-                        onSelect = onLanguageChange,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    Spacer(Modifier.height(24.dp))
-                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(Modifier.height(18.dp))
-
-                    // ---- 配色主题 ----
-                    SectionTitle(str(StrKey.COLOR_THEME))
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = str(StrKey.PALETTE_CARD_HINT),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        ThemePalette.entries.forEach { option ->
-                            PaletteCard(
-                                option = option,
-                                dark = dark,
-                                selected = option == palette,
-                                onClick = { onPaletteChange(option) },
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(Modifier.height(18.dp))
-
-                    // ---- 明暗模式 ----
-                    SectionTitle(str(StrKey.THEME_MODE))
-                    Spacer(Modifier.height(10.dp))
-                    ThemeMode.entries.forEach { option ->
-                        ModeOption(
-                            option = option,
-                            selected = option == themeMode,
-                            onClick = { onThemeModeChange(option) },
-                        )
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(Modifier.height(18.dp))
-
-                    // ---- 界面密度 ----
-                    SectionTitle(str(StrKey.UI_DENSITY))
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier
+                    modifier =
+                        Modifier
                             .fillMaxWidth()
-                            // 整行可点，与设置页的开关行同一手法
-                            .clickable { onCompactModeChange(!compactMode) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // 限宽并居中：窗口默认就有 1280px 宽，不限的话内容会被拉到左右两端，
+                    // 单行文字拉得太长反而难读。960dp 刚好容纳 5 张 180dp 色卡 + 间距排成一行
+                    // （排成一行能把配色段从两行压到一行，省下约 130px 高度）。
+                    Column(
+                        modifier = Modifier.widthIn(max = 960.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = str(StrKey.COMPACT_MODE),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = str(StrKey.COMPACT_HINT_ONBOARDING),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Text(
+                            text = if (firstRun) str(StrKey.WELCOME) else str(StrKey.APPEARANCE_ONBOARDING),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text =
+                                if (firstRun) {
+                                    str(StrKey.ONBOARDING_HINT)
+                                } else {
+                                    str(StrKey.ONBOARDING_SETTINGS_HINT)
+                                },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+
+                        // ---- 界面语言 ----
+                        // 放在最前：语言决定其余三组说明文字能不能读懂。
+                        SectionTitle(str(StrKey.LANGUAGE))
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = str(StrKey.LANGUAGE_HINT_ONBOARDING),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        LanguagePicker(
+                            selected = language,
+                            onSelect = onLanguageChange,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+                        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Spacer(Modifier.height(18.dp))
+
+                        // ---- 配色主题 ----
+                        SectionTitle(str(StrKey.COLOR_THEME))
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = str(StrKey.PALETTE_CARD_HINT),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            ThemePalette.entries.forEach { option ->
+                                PaletteCard(
+                                    option = option,
+                                    dark = dark,
+                                    selected = option == palette,
+                                    onClick = { onPaletteChange(option) },
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(24.dp))
+                        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Spacer(Modifier.height(18.dp))
+
+                        // ---- 明暗模式 ----
+                        SectionTitle(str(StrKey.THEME_MODE))
+                        Spacer(Modifier.height(10.dp))
+                        ThemeMode.entries.forEach { option ->
+                            ModeOption(
+                                option = option,
+                                selected = option == themeMode,
+                                onClick = { onThemeModeChange(option) },
                             )
                         }
-                        Spacer(Modifier.width(8.dp))
-                        WinSwitch(checked = compactMode, onCheckedChange = onCompactModeChange)
-                    }
+
+                        Spacer(Modifier.height(24.dp))
+                        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Spacer(Modifier.height(18.dp))
+
+                        // ---- 界面密度 ----
+                        SectionTitle(str(StrKey.UI_DENSITY))
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    // 整行可点，与设置页的开关行同一手法
+                                    .clickable { onCompactModeChange(!compactMode) }
+                                    .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = str(StrKey.COMPACT_MODE),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = str(StrKey.COMPACT_HINT_ONBOARDING),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            WinSwitch(checked = compactMode, onCheckedChange = onCompactModeChange)
+                        }
                     }
                 }
             }
@@ -268,18 +272,20 @@ fun OnboardingScreen(
             // （两个按钮反而会让「跳过到底跳到哪」变模糊）。
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 24.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 WinButton(
                     onClick = onFinish,
                     shape = SundaysPalette.buttonShape,
-                    modifier = Modifier
-                        .widthIn(max = 960.dp)
-                        .fillMaxWidth(),
+                    modifier =
+                        Modifier
+                            .widthIn(max = 960.dp)
+                            .fillMaxWidth(),
                 ) {
                     Text(
                         text = if (firstRun) str(StrKey.START_USING) else str(StrKey.DONE),
@@ -326,35 +332,37 @@ private fun PaletteCard(
     onClick: () -> Unit,
 ) {
     val scheme = option.schemeFor(dark)
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
+    val borderColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        }
     Column(
-        modifier = Modifier
-            // 180dp × 5 + 4 × 10dp 间距 = 940dp，在 960dp 的内容宽里排成一行
-            .width(180.dp)
-            .clip(winShape(6.dp))
-            .background(selectionContainerColor(selected, MaterialTheme.colorScheme.surface))
-            .border(if (selected) 2.dp else 1.dp, borderColor, winShape(6.dp))
-            // 必须是 `selectable` 而不是 `clickable(role = Role.RadioButton)`：
-            // 后者只设 role、**不设** `selected` 语义，读屏会念「单选按钮」却永远不告诉用户
-            // 「这一个选中了没有」—— 那比不给 role 更糟（它明确声称自己是单选，却缺了单选最关键的
-            // 那个状态）。`selectable` 同时给出 role 与 selected，并顺带获得键盘焦点。
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(10.dp),
+        modifier =
+            Modifier
+                // 180dp × 5 + 4 × 10dp 间距 = 940dp，在 960dp 的内容宽里排成一行
+                .width(180.dp)
+                .clip(winShape(6.dp))
+                .background(selectionContainerColor(selected, MaterialTheme.colorScheme.surface))
+                .border(if (selected) 2.dp else 1.dp, borderColor, winShape(6.dp))
+                // 必须是 `selectable` 而不是 `clickable(role = Role.RadioButton)`：
+                // 后者只设 role、**不设** `selected` 语义，读屏会念「单选按钮」却永远不告诉用户
+                // 「这一个选中了没有」—— 那比不给 role 更糟（它明确声称自己是单选，却缺了单选最关键的
+                // 那个状态）。`selectable` 同时给出 role 与 selected，并顺带获得键盘焦点。
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = onClick,
+                ).padding(10.dp),
     ) {
         // 三色取色条：用该主题**真实**的 surface / primary / onSurface
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(26.dp)
-                .clip(RoundedCornerShape(4.dp)),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .clip(RoundedCornerShape(4.dp)),
         ) {
             ColorStrip(scheme.surface, Modifier.weight(2f))
             ColorStrip(scheme.primary, Modifier.weight(1f))
@@ -395,7 +403,10 @@ private fun PaletteCard(
 }
 
 @Composable
-private fun ColorStrip(color: Color, modifier: Modifier) {
+private fun ColorStrip(
+    color: Color,
+    modifier: Modifier,
+) {
     Box(modifier = modifier.fillMaxSize().background(color))
 }
 
@@ -407,13 +418,14 @@ private fun ModeOption(
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            // 整行可点的便利区域；**选中语义由内部 RadioButton 承载**，
-            // 故这里用普通 clickable 而不是 selectable —— 再加一个 RadioButton 角色
-            // 会让读屏在同一个选项上念出两个「单选按钮」。
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                // 整行可点的便利区域；**选中语义由内部 RadioButton 承载**，
+                // 故这里用普通 clickable 而不是 selectable —— 再加一个 RadioButton 角色
+                // 会让读屏在同一个选项上念出两个「单选按钮」。
+                .clickable(onClick = onClick)
+                .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(colors = selectionIndicatorColors(), selected = selected, onClick = onClick)

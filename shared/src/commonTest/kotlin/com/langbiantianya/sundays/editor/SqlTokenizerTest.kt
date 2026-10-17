@@ -28,7 +28,6 @@ import kotlin.test.assertTrue
  * 设计原则：每个测试只验证一个行为点，便于扩展时定位失败原因。
  */
 class SqlTokenizerTest {
-
     private val lang = SqlLanguage()
 
     @Test
@@ -212,14 +211,15 @@ class SqlTokenizerTest {
 
     @Test
     fun realistic_select_query() {
-        val source = """
+        val source =
+            """
             SELECT u.id, u.name
             FROM users u
             WHERE u.created_at > '2024-01-01'
               AND u.age >= 18
             ORDER BY u.name DESC
             LIMIT 100
-        """.trimIndent()
+            """.trimIndent()
         val tokens = lang.tokenize(source)
         // 关键字个数：SELECT / FROM / WHERE / AND / ORDER / BY / LIMIT = 7
         // （ORDER BY 是两个独立关键字 token）

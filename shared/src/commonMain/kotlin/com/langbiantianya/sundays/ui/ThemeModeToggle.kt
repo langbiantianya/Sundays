@@ -55,9 +55,10 @@ fun ThemeModeToggleButton(
     IconButton(
         onClick = onCycle,
         modifier = modifier,
-        colors = IconButtonDefaults.iconButtonColors(
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
+        colors =
+            IconButtonDefaults.iconButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
     ) {
         Icon(
             imageVector = mode.next.icon(),
@@ -74,18 +75,20 @@ fun ThemeModeToggleButton(
  * 跟随系统曾用 `WbSunny`（太阳），与浅色档的 `LightMode` 撞脸，两档看上去一样；
  * 改用 `BrightnessAuto`（亮度自动）表达「由系统决定」这一层语义。
  */
-private fun ThemeMode.icon() = when (this) {
-    ThemeMode.LIGHT -> Icons.Filled.LightMode
-    ThemeMode.DARK -> Icons.Filled.NightsStay
-    ThemeMode.SYSTEM -> Icons.Filled.BrightnessAuto
-}
+private fun ThemeMode.icon() =
+    when (this) {
+        ThemeMode.LIGHT -> Icons.Filled.LightMode
+        ThemeMode.DARK -> Icons.Filled.NightsStay
+        ThemeMode.SYSTEM -> Icons.Filled.BrightnessAuto
+    }
 
 /** 当前档位的一句话描述 —— 按钮的无障碍名称，按「点下去会变成什么」措辞。 */
-private fun ThemeMode.label(): String = when (this) {
-    ThemeMode.SYSTEM -> "主题：跟随系统，切换为浅色"
-    ThemeMode.LIGHT -> "主题：浅色，切换为深色"
-    ThemeMode.DARK -> "主题：深色，切换为跟随系统"
-}
+private fun ThemeMode.label(): String =
+    when (this) {
+        ThemeMode.SYSTEM -> "主题：跟随系统，切换为浅色"
+        ThemeMode.LIGHT -> "主题：浅色，切换为深色"
+        ThemeMode.DARK -> "主题：深色，切换为跟随系统"
+    }
 
 /**
  * 设置入口按钮（⚙）—— 连接管理与数据库浏览两个面板标题行各放一个。
@@ -103,9 +106,10 @@ fun SettingsEntryButton(
     IconButton(
         onClick = onClick,
         modifier = modifier,
-        colors = IconButtonDefaults.iconButtonColors(
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
+        colors =
+            IconButtonDefaults.iconButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
     ) {
         Icon(
             imageVector = Icons.Filled.Settings,

@@ -47,7 +47,8 @@ val LocalStrings = staticCompositionLocalOf { StringsRegistry.systemDefault() }
  * 复数变体的选择（见 `PluralForm`）要的就是语言，而不是整张表。
  */
 val LocalAppLanguage: AppLanguage
-    @Composable @ReadOnlyComposable get() = LocalStrings.current.language
+    @Composable @ReadOnlyComposable
+    get() = LocalStrings.current.language
 
 /** 取一条文案 —— `str(StrKey.CANCEL)`。 */
 @Composable
@@ -63,7 +64,10 @@ fun str(key: StrKey): String = LocalStrings.current[key]
  */
 @Composable
 @ReadOnlyComposable
-fun str(key: StrKey, vararg args: Any?): String = LocalStrings.current.format(key, *args)
+fun str(
+    key: StrKey,
+    vararg args: Any?,
+): String = LocalStrings.current.format(key, *args)
 
 /**
  * 取一条**按数量选变体**的文案 —— `plural(StrKey.ROWS_COUNT, n)`。
@@ -72,8 +76,11 @@ fun str(key: StrKey, vararg args: Any?): String = LocalStrings.current.format(ke
  */
 @Composable
 @ReadOnlyComposable
-fun plural(key: PluralStrKey, count: Int, vararg args: Any?): String =
-    LocalStrings.current.plural(key, count, *args)
+fun plural(
+    key: PluralStrKey,
+    count: Int,
+    vararg args: Any?,
+): String = LocalStrings.current.plural(key, count, *args)
 
 /**
  * 提供文案表 —— 由 `main.kt` 在组合最外层调用。
@@ -84,7 +91,10 @@ fun plural(key: PluralStrKey, count: Int, vararg args: Any?): String =
  * @param language 用户选定的语言。
  */
 @Composable
-fun ProvideStrings(language: AppLanguage, content: @Composable () -> Unit) {
+fun ProvideStrings(
+    language: AppLanguage,
+    content: @Composable () -> Unit,
+) {
     val strings = remember(language) { StringsRegistry.of(language) }
     CompositionLocalProvider(LocalStrings provides strings, content = content)
 }

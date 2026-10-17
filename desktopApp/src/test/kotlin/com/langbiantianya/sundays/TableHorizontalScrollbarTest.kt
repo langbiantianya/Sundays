@@ -58,15 +58,17 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class TableHorizontalScrollbarTest {
+    private fun weightedColumns(count: Int): List<TableColumn> = (1..count).map { TableColumn(key = "c$it", header = "column_name_$it") }
 
-    private fun weightedColumns(count: Int): List<TableColumn> =
-        (1..count).map { TableColumn(key = "c$it", header = "column_name_$it") }
+    private fun rows(cols: Int): List<TableRow> =
+        (1..3).map { r ->
+            TableRow(id = r, cells = (1..cols).associate { i -> "c$i" to "value-$r-$i" })
+        }
 
-    private fun rows(cols: Int): List<TableRow> = (1..3).map { r ->
-        TableRow(id = r, cells = (1..cols).associate { i -> "c$i" to "value-$r-$i" })
-    }
-
-    private fun ComposeUiTest.render(colCount: Int, dark: Boolean = false) {
+    private fun ComposeUiTest.render(
+        colCount: Int,
+        dark: Boolean = false,
+    ) {
         setContent {
             // ⚠️ 必须显式传 `darkTheme`：默认取 `isSystemInDarkTheme()`，而测试宿主上
             // 它返回**深色**。不显式指定的话「浅色档」那条用例其实一直在跑深色，
@@ -96,7 +98,10 @@ class TableHorizontalScrollbarTest {
     }
 
     /** WCAG 对比度 = (亮 + 0.05) / (暗 + 0.05)。 */
-    private fun contrastRatio(fg: Int, bg: Int): Double {
+    private fun contrastRatio(
+        fg: Int,
+        bg: Int,
+    ): Double {
         val a = relativeLuminance(fg)
         val b = relativeLuminance(bg)
         return (maxOf(a, b) + 0.05) / (minOf(a, b) + 0.05)
@@ -139,7 +144,10 @@ class TableHorizontalScrollbarTest {
         val sampleWidth = maxOf(8, w / 10)
 
         /** 取 [from, to) 区间的众数色。 */
-        fun modeOf(from: Int, to: Int): Int {
+        fun modeOf(
+            from: Int,
+            to: Int,
+        ): Int {
             val counts = HashMap<Int, Int>()
             for (x in from until to) {
                 val c = pixels.get(x, midY).toArgb()
@@ -185,32 +193,34 @@ class TableHorizontalScrollbarTest {
     @Test
     fun `深色档下拇指与轨道底色的对比度达标`() = assertThumbContrast(true)
 
-    private fun assertThumbContrast(dark: Boolean) = runComposeUiTest {
-        render(colCount = 23, dark = dark)
+    private fun assertThumbContrast(dark: Boolean) =
+        runComposeUiTest {
+            render(colCount = 23, dark = dark)
 
-        val (thumb, background) = measureThumbAgainstBackground()
-        val thumbHex = "#%06X".format(thumb and 0xFFFFFF)
-        val bgHex = "#%06X".format(background and 0xFFFFFF)
-        assertTrue(
-            thumb != background,
-            "拇指色与轨道底色完全相同（$thumbHex）—— 拇指等于没画，" +
-                "用户完全看不出右边还有列",
-        )
+            val (thumb, background) = measureThumbAgainstBackground()
+            val thumbHex = "#%06X".format(thumb and 0xFFFFFF)
+            val bgHex = "#%06X".format(background and 0xFFFFFF)
+            assertTrue(
+                thumb != background,
+                "拇指色与轨道底色完全相同（$thumbHex）—— 拇指等于没画，" +
+                    "用户完全看不出右边还有列",
+            )
 
-        val ratio = contrastRatio(thumb, background)
-        // ⚠️ 用模板插值而不是 `+ ".format(...)"`：`.` 的优先级高于 `+`，
-        // 那样写 `format` 只会绑定到**最后一段**字面量，前一段的 `%06X` 会吃到
-        // Double 直接抛 IllegalFormatConversionException —— 而且只在断言**失败**
-        // 时才抛，测试因此以一个和被测性质无关的异常变红，把真正的原因盖掉。
-        assertTrue(
-            ratio >= 3.0,
-            "滚动条拇指与轨道底色的对比度只有 ${"%.2f".format(ratio)}:1（下限 3:1）—— " +
-                "拇指=$thumbHex，底色=$bgHex。低对比度的滚动条等于没有：用户依旧看不出右边还有列。",
-        )
-    }
+            val ratio = contrastRatio(thumb, background)
+            // ⚠️ 用模板插值而不是 `+ ".format(...)"`：`.` 的优先级高于 `+`，
+            // 那样写 `format` 只会绑定到**最后一段**字面量，前一段的 `%06X` 会吃到
+            // Double 直接抛 IllegalFormatConversionException —— 而且只在断言**失败**
+            // 时才抛，测试因此以一个和被测性质无关的异常变红，把真正的原因盖掉。
+            assertTrue(
+                ratio >= 3.0,
+                "滚动条拇指与轨道底色的对比度只有 ${"%.2f".format(ratio)}:1（下限 3:1）—— " +
+                    "拇指=$thumbHex，底色=$bgHex。低对比度的滚动条等于没有：用户依旧看不出右边还有列。",
+            )
+        }
 
     private fun ComposeUiTest.hScrollValue(tag: String) =
-        onNodeWithTag(tag).fetchSemanticsNode()
+        onNodeWithTag(tag)
+            .fetchSemanticsNode()
             .config[SemanticsProperties.HorizontalScrollAxisRange]
             ?.value
             ?.invoke()
@@ -218,19 +228,22 @@ class TableHorizontalScrollbarTest {
 
     /** 横向滚动条**存在**，且横跨整个表格宽度。 */
     @Test
-    fun `横向滚动条存在且铺满表格宽度`() = runComposeUiTest {
-        render(colCount = 23)
+    fun `横向滚动条存在且铺满表格宽度`() =
+        runComposeUiTest {
+            render(colCount = 23)
 
-        val bar = onNodeWithTag(TABLE_HSCROLLBAR_TAG).fetchSemanticsNode()
-        val table = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode()
+            val bar = onNodeWithTag(TABLE_HSCROLLBAR_TAG).fetchSemanticsNode()
+            val table = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode()
 
-        assertTrue(bar.size.width > 0f, "横向滚动条宽度为 0 —— 它根本没画出来")
-        assertEquals(
-            table.boundsInRoot.width, bar.boundsInRoot.width, 2f,
-            "滚动条应横跨整张表（表宽 ${table.boundsInRoot.width}，滚动条 ${bar.boundsInRoot.width}）—— " +
-                "只盖住中间一小段就等于告诉用户「溢出区在别处」",
-        )
-    }
+            assertTrue(bar.size.width > 0f, "横向滚动条宽度为 0 —— 它根本没画出来")
+            assertEquals(
+                table.boundsInRoot.width,
+                bar.boundsInRoot.width,
+                2f,
+                "滚动条应横跨整张表（表宽 ${table.boundsInRoot.width}，滚动条 ${bar.boundsInRoot.width}）—— " +
+                    "只盖住中间一小段就等于告诉用户「溢出区在别处」",
+            )
+        }
 
     /**
      * 滚动条**不是装饰**：拖着它要真的改变横向偏移，且表头与表体同步。
@@ -244,36 +257,44 @@ class TableHorizontalScrollbarTest {
      * Compose root bounds" —— 报错点在鼠标，不在滚动条，很容易误判成组件没画出来。
      */
     @Test
-    fun `拖动滚动条会横向滚动且表头表体同步`() = runComposeUiTest {
-        render(colCount = 23)
+    fun `拖动滚动条会横向滚动且表头表体同步`() =
+        runComposeUiTest {
+            render(colCount = 23)
 
-        val bar = onNodeWithTag(TABLE_HSCROLLBAR_TAG).fetchSemanticsNode()
-        val before = hScrollValue(TABLE_HEADER_TAG)
-        assertEquals(0f, before, 0.01f, "初始应停在最左")
+            val bar = onNodeWithTag(TABLE_HSCROLLBAR_TAG).fetchSemanticsNode()
+            val before = hScrollValue(TABLE_HEADER_TAG)
+            assertEquals(0f, before, 0.01f, "初始应停在最左")
 
-        val midY = bar.size.height / 2f
-        onNodeWithTag(TABLE_HSCROLLBAR_TAG).performMouseInput {
-            moveTo(Offset(4f, midY))
-            press()
-            moveTo(Offset(204f, midY))
-            release()
+            val midY = bar.size.height / 2f
+            onNodeWithTag(TABLE_HSCROLLBAR_TAG).performMouseInput {
+                moveTo(Offset(4f, midY))
+                press()
+                moveTo(Offset(204f, midY))
+                release()
+            }
+            waitForIdle()
+
+            val after = hScrollValue(TABLE_HEADER_TAG)
+            assertTrue(after > before, "拖动横向滚动条后横向偏移应变大（$before → $after）")
+            assertEquals(
+                hScrollValue(TABLE_HEADER_TAG),
+                hScrollValue(TABLE_BODY_TAG),
+                0.01f,
+                "拖动后表头与表体必须停在同一个横向偏移，否则列名与数据列会错位",
+            )
         }
-        waitForIdle()
-
-        val after = hScrollValue(TABLE_HEADER_TAG)
-        assertTrue(after > before, "拖动横向滚动条后横向偏移应变大（$before → $after）")
-        assertEquals(
-            hScrollValue(TABLE_HEADER_TAG), hScrollValue(TABLE_BODY_TAG), 0.01f,
-            "拖动后表头与表体必须停在同一个横向偏移，否则列名与数据列会错位",
-        )
-    }
 
     /** 反向护栏：列不多（不溢出）时不该凭空多出横向可滚量。 */
     @Test
-    fun `少列时不产生横向可滚量`() = runComposeUiTest {
-        render(colCount = 4)
-        val max = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode()
-            .config[SemanticsProperties.HorizontalScrollAxisRange]?.maxValue?.invoke() ?: -1f
-        assertEquals(0f, max, 0.01f, "4 列不该有横向可滚量 —— 滚动条会让人以为右边还有东西")
-    }
+    fun `少列时不产生横向可滚量`() =
+        runComposeUiTest {
+            render(colCount = 4)
+            val max =
+                onNodeWithTag(TABLE_BODY_TAG)
+                    .fetchSemanticsNode()
+                    .config[SemanticsProperties.HorizontalScrollAxisRange]
+                    ?.maxValue
+                    ?.invoke() ?: -1f
+            assertEquals(0f, max, 0.01f, "4 列不该有横向可滚量 —— 滚动条会让人以为右边还有东西")
+        }
 }

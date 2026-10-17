@@ -12,12 +12,12 @@ import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.sundays.ui.SystemInfoRefresh
 import com.langbiantianya.sundays.ui.ThemeMode
 import com.langbiantianya.sundays.ui.ThemePalette
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * 应用设置持久化 —— `~/.config/sundays/settings.json`。
@@ -33,18 +33,17 @@ import kotlinx.serialization.json.Json
  * 让应用起不来。
  */
 object SettingsStorage {
-
     /** 持久化格式版本 —— 供将来字段演进时按版本分派。 */
     const val PERSISTED_VERSION = 1
 
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
+    private val json =
+        Json {
+            prettyPrint = true
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
-    private fun configDir(): Path =
-        Paths.get(System.getProperty("user.home"), ".config", "sundays")
+    private fun configDir(): Path = Paths.get(System.getProperty("user.home"), ".config", "sundays")
 
     private fun configFile(): Path = configDir().resolve("settings.json")
 
@@ -117,8 +116,7 @@ object SettingsStorage {
             runCatching { Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE) }
                 .recoverCatching {
                     Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                }
-                .getOrThrow()
+                }.getOrThrow()
         }
     }
 }
@@ -188,5 +186,4 @@ private data class PersistedSettings(
 )
 
 /** 字符串 → 枚举；未知值（手改文件 / 降级安装）一律回落 [fallback]。 */
-private inline fun <reified T : Enum<T>> String.toEnumOrDefault(fallback: T): T =
-    enumValues<T>().firstOrNull { it.name == this } ?: fallback
+private inline fun <reified T : Enum<T>> String.toEnumOrDefault(fallback: T): T = enumValues<T>().firstOrNull { it.name == this } ?: fallback

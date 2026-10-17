@@ -38,7 +38,6 @@ enum class AppLanguage(
     val nativeName: String,
     private val extraTags: List<String> = emptyList(),
 ) {
-
     /** 简体中文。 */
     ZH_HANS("zh-Hans", "简体中文", extraTags = listOf("zh", "zh-CN", "zh-SG")),
 
@@ -66,7 +65,6 @@ enum class AppLanguage(
     fun persistedValue(): String = tag
 
     companion object {
-
         /** 退化目标 —— 系统语言不支持时、以及设置文件里存了非法值时都用它。 */
         val DEFAULT: AppLanguage = ZH_HANS
 
@@ -115,12 +113,18 @@ enum class AppLanguage(
             val language = locale.language.lowercase(Locale.ROOT)
             return when (language) {
                 "zh" -> if (isTraditional(locale)) ZH_HANT else ZH_HANS
+
                 // 粤语与闽南语的书写系统都是繁体，见 KDoc。
                 "yue", "nan" -> ZH_HANT
+
                 "en" -> EN
+
                 "ru" -> RU
+
                 "ja" -> JA
+
                 "de" -> DE
+
                 else -> DEFAULT
             }
         }
@@ -156,9 +160,10 @@ enum class AppLanguage(
             val normalized = raw.trim().replace('_', '-')
             if (normalized.isEmpty()) return null
             entries.firstOrNull { it.tag.equals(normalized, ignoreCase = true) }?.let { return it }
-            entries.firstOrNull { candidate ->
-                candidate.extraTags.any { it.equals(normalized, ignoreCase = true) }
-            }?.let { return it }
+            entries
+                .firstOrNull { candidate ->
+                    candidate.extraTags.any { it.equals(normalized, ignoreCase = true) }
+                }?.let { return it }
             // 前缀匹配：`zh-Hant-TW` / `zh-Hans-CN` / `en-US` 都能落到对应语言。
             // 顺序即 `entries` 声明序 —— 中文两个成员的 tag 只差 `Hans` / `Hant`，
             // 不会互相误配。

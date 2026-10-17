@@ -26,13 +26,16 @@ import java.time.LocalDateTime
  * - 内存窗口 1000 行，超出自动刷入磁盘
  * - close() 时自动清理临时文件（POI close() 已内置 dispose）
  */
-class ExcelWriter(private val outputFile: File) : ExportWriter {
-
+class ExcelWriter(
+    private val outputFile: File,
+) : ExportWriter {
     companion object {
         /** 单 Sheet 最大数据行数（不含表头） */
         const val MAX_DATA_ROWS_PER_SHEET = 1_000_000
+
         /** 内存中保留的行数 */
         const val FLUSH_WINDOW_SIZE = 1000
+
         /** Sheet 名称前缀 */
         const val SHEET_NAME_PREFIX = "Sheet"
     }
@@ -41,6 +44,7 @@ class ExcelWriter(private val outputFile: File) : ExportWriter {
     private var currentSheet: SXSSFSheet? = null
     private var columns: List<String> = emptyList()
     private var exportedRows = 0L
+
     /** 当前 Sheet 的数据行数（不含表头），达到上限时创建新 Sheet */
     private var currentSheetDataRowIndex = 0
     private var sheetNumber = 0
@@ -124,35 +128,47 @@ class ExcelWriter(private val outputFile: File) : ExportWriter {
     /**
      * 根据值类型设置单元格
      */
-    private fun setCellValue(cell: Cell, value: Any?) {
+    private fun setCellValue(
+        cell: Cell,
+        value: Any?,
+    ) {
         when (value) {
             null -> {
                 cell.setCellValue("")
             }
+
             is String -> {
                 cell.setCellValue(value)
             }
+
             is BigDecimal -> {
                 cell.setCellValue(value.toString())
             }
+
             is Number -> {
                 cell.setCellValue(value.toDouble())
             }
+
             is Boolean -> {
                 cell.setCellValue(value)
             }
+
             is Date -> {
                 cell.setCellValue(value)
             }
+
             is Timestamp -> {
                 cell.setCellValue(value)
             }
+
             is LocalDate -> {
                 cell.setCellValue(value.toString())
             }
+
             is LocalDateTime -> {
                 cell.setCellValue(value.toString())
             }
+
             else -> {
                 cell.setCellValue(value.toString())
             }

@@ -25,7 +25,6 @@ import com.langbiantianya.sundays.editor.CodeLanguage
  * @see com.langbiantianya.sundays.editor.formatter.LuaFormatter
  */
 interface CodeFormatter {
-
     /** 该 formatter 服务的语言 ID（与 [CodeLanguage.id] 对齐） */
     val languageId: String
 

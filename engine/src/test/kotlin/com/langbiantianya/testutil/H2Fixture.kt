@@ -9,8 +9,8 @@
 package com.langbiantianya.testutil
 
 import com.langbiantianya.dialect.H2Dialect
-import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.grpc.ConnectionConfig
+import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -41,17 +41,18 @@ import java.sql.DriverManager
  * HikariCP 反而是 overhead。
  */
 abstract class H2Fixture {
-
     protected val dialect = H2Dialect()
     protected val dbName: String = TestIds.uniqueName("test")
-    protected val config: ConnectionConfig = ConnectionConfig.newBuilder()
-        .setDriver("H2")
-        .setHost("mem")
-        .setPort(0)
-        .setUser("sa")
-        .setPassword("")
-        .setDatabase(dbName)
-        .build()
+    protected val config: ConnectionConfig =
+        ConnectionConfig
+            .newBuilder()
+            .setDriver("H2")
+            .setHost("mem")
+            .setPort(0)
+            .setUser("sa")
+            .setPassword("")
+            .setDatabase(dbName)
+            .build()
 
     /** JDBC URL for direct connections */
     protected val jdbcUrl: String = dialect.buildJdbcUrl(config.host, config.port, config.database)
@@ -83,53 +84,54 @@ abstract class H2Fixture {
         // 清理 HikariCP 缓存的池（如果有）
         try {
             PoolManager.closeAll()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     /** 直接拿一个 Connection（不走 Pool） */
-    protected fun newConnection(): Connection {
-        return DriverManager.getConnection(jdbcUrl, "sa", "")
-    }
+    protected fun newConnection(): Connection = DriverManager.getConnection(jdbcUrl, "sa", "")
 
     /**
      * 在 [block] 中获取连接并自动关闭。连接不经过 HikariCP，
      * 因为每个测试独立 DB，连接池反而引入状态干扰。
      */
-    protected inline fun <R> withConnection(block: (Connection) -> R): R {
-        return newConnection().use(block)
-    }
+    protected inline fun <R> withConnection(block: (Connection) -> R): R = newConnection().use(block)
 
     /** 执行更新语句并返回 affectedRows */
-    protected fun executeUpdate(sql: String): Int = withConnection { conn ->
-        conn.createStatement().use { it.executeUpdate(sql) }
-    }
+    protected fun executeUpdate(sql: String): Int =
+        withConnection { conn ->
+            conn.createStatement().use { it.executeUpdate(sql) }
+        }
 
     /** 执行单值查询（取第一行第一列） */
-    protected fun executeQuerySingle(sql: String): String? = withConnection { conn ->
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery(sql).use { rs ->
-                if (rs.next()) rs.getString(1) else null
+    protected fun executeQuerySingle(sql: String): String? =
+        withConnection { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(sql).use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
             }
         }
-    }
 
     /** 检查表是否存在（大小写不敏感 — H2 dialect 通过 quoteIdentifier 保留小写名，未引用的会自动大写） */
-    protected fun tableExists(tableName: String): Boolean = withConnection { conn ->
-        conn.metaData.getTables(null, "PUBLIC", "%", arrayOf("TABLE")).use { rs ->
-            while (rs.next()) {
-                if (rs.getString("TABLE_NAME").equals(tableName, ignoreCase = true)) return@withConnection true
+    protected fun tableExists(tableName: String): Boolean =
+        withConnection { conn ->
+            conn.metaData.getTables(null, "PUBLIC", "%", arrayOf("TABLE")).use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("TABLE_NAME").equals(tableName, ignoreCase = true)) return@withConnection true
+                }
+                false
             }
-            false
         }
-    }
 
     /** 检查 schema 是否存在 */
-    protected fun schemaExists(schemaName: String): Boolean = withConnection { conn ->
-        conn.metaData.schemas.use { rs ->
-            while (rs.next()) {
-                if (rs.getString("TABLE_SCHEM").equals(schemaName, ignoreCase = true)) return@withConnection true
+    protected fun schemaExists(schemaName: String): Boolean =
+        withConnection { conn ->
+            conn.metaData.schemas.use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("TABLE_SCHEM").equals(schemaName, ignoreCase = true)) return@withConnection true
+                }
+                false
             }
-            false
         }
-    }
 }

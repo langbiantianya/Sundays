@@ -48,8 +48,9 @@ import com.langbiantianya.sundays.editor.language.SqlDialectProfile
  *
  * **幂等性**：格式化两次的输出与格式化一次相同 —— 满足「重复格式化无副作用」。
  */
-class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.languageId) : CodeFormatter {
-
+class SqlFormatter(
+    override val languageId: String = SqlDialectProfile.STANDARD.languageId,
+) : CodeFormatter {
     override fun format(source: String): String {
         if (source.isBlank()) return source
         val language = CodeLanguageRegistry.get(languageId) ?: return source
@@ -65,11 +66,15 @@ class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.
         var prevText: String? = null
         var prevType: TokenType? = null
 
-        fun emit(type: TokenType, text: String) {
+        fun emit(
+            type: TokenType,
+            text: String,
+        ) {
             val left = prevText
             if (!atLineStart && left != null) {
-                val glued = TokenSpacing.bindsRight(left, prevType!!) ||
-                    TokenSpacing.bindsLeft(text, type, left, prevType, NO_EXTRA_TIGHT)
+                val glued =
+                    TokenSpacing.bindsRight(left, prevType!!) ||
+                        TokenSpacing.bindsLeft(text, type, left, prevType, NO_EXTRA_TIGHT)
                 if (!glued) sb.append(' ')
             }
             sb.append(text)
@@ -95,11 +100,14 @@ class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.
                     // 于是 `a:: int`、`t. col`、`( 1 )` 全被撑开一个空格。
                 }
 
-                TokenType.COMMENT ->
+                TokenType.COMMENT -> {
                     // 注释内容原样搬，只清行尾空白（[stripTrailingSpacePerLine]）
                     emit(TokenType.COMMENT, stripTrailingSpacePerLine(token.text))
+                }
 
-                TokenType.STRING, TokenType.ERROR -> emit(token.type, token.text)
+                TokenType.STRING, TokenType.ERROR -> {
+                    emit(token.type, token.text)
+                }
 
                 TokenType.KEYWORD -> {
                     val upper = token.text.uppercase()
@@ -113,7 +121,9 @@ class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.
 
                 TokenType.IDENTIFIER, TokenType.BUILTIN, TokenType.TYPE, TokenType.NUMBER,
                 TokenType.OPERATOR, TokenType.PUNCTUATION,
-                -> emit(token.type, token.text)
+                -> {
+                    emit(token.type, token.text)
+                }
             }
         }
         return sb.toString().trimEnd()
@@ -129,16 +139,32 @@ class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.
      *
      * 安全性：注释 token 一律止于行尾或块注释的闭合标记，内部空白不影响语义，删掉即可。
      */
-    private fun stripTrailingSpacePerLine(text: String): String =
-        text.trimEnd().split('\n').joinToString("\n") { it.trimEnd() }
+    private fun stripTrailingSpacePerLine(text: String): String = text.trimEnd().split('\n').joinToString("\n") { it.trimEnd() }
 
     companion object {
         /** 主子句关键字 — 强制另起一行。 */
-        private val CLAUSE_KEYWORDS: Set<String> = setOf(
-            "SELECT", "FROM", "WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT",
-            "OFFSET", "FETCH", "UNION", "INTERSECT", "EXCEPT", "VALUES", "SET",
-            "ON", "RETURNING", "WITH", "INSERT INTO", "DELETE FROM",
-        )
+        private val CLAUSE_KEYWORDS: Set<String> =
+            setOf(
+                "SELECT",
+                "FROM",
+                "WHERE",
+                "GROUP BY",
+                "HAVING",
+                "ORDER BY",
+                "LIMIT",
+                "OFFSET",
+                "FETCH",
+                "UNION",
+                "INTERSECT",
+                "EXCEPT",
+                "VALUES",
+                "SET",
+                "ON",
+                "RETURNING",
+                "WITH",
+                "INSERT INTO",
+                "DELETE FROM",
+            )
 
         /** SQL 没有「语言私有贴标点」（`:` 在 SQL 里不是独立标点，Lua 才有 `a:b()`）。 */
         private val NO_EXTRA_TIGHT: Set<String> = emptySet()
@@ -153,7 +179,8 @@ class SqlFormatter(override val languageId: String = SqlDialectProfile.STANDARD.
         fun register() {
             com.langbiantianya.sundays.editor.language.SqlDialectProfile.ALL.forEach { profile ->
                 CodeLanguageRegistry.register(
-                    com.langbiantianya.sundays.editor.language.SqlLanguage(profile),
+                    com.langbiantianya.sundays.editor.language
+                        .SqlLanguage(profile),
                 )
                 CodeFormatterRegistry.register(SqlFormatter(profile.languageId))
             }

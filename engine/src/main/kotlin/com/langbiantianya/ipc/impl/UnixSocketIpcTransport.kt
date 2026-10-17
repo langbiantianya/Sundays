@@ -43,7 +43,9 @@ import java.util.concurrent.TimeUnit as JucTimeUnit
  *
  * 仅使用 filesystem namespace（Linux abstract namespace 与 macOS/BSD 不兼容，故未启用）。
  */
-class UnixSocketIpcTransport(private val cfg: IpcConfig) : IpcTransport {
+class UnixSocketIpcTransport(
+    private val cfg: IpcConfig,
+) : IpcTransport {
     private val logger = LoggerFactory.getLogger(UnixSocketIpcTransport::class.java)
     private val sock = File(cfg.udsPath)
     private val address = DomainSocketAddress(cfg.udsPath)
@@ -52,10 +54,12 @@ class UnixSocketIpcTransport(private val cfg: IpcConfig) : IpcTransport {
     // ServerBuilder 不会关闭外部传入的 EventLoopGroup,必须我们自己关闭。
     private var bossGroup: EventLoopGroup? = null
     private var workerGroup: EventLoopGroup? = null
+
     // 由 [channelBuilder] 缓存的客户端 EventLoopGroup (一次创建,cleanup 中关闭)
     private var clientGroup: EventLoopGroup? = null
 
     override fun scheme(): String = "unix"
+
     override fun displayTarget(): String = cfg.udsPath
 
     override fun prepare() {
@@ -71,7 +75,7 @@ class UnixSocketIpcTransport(private val cfg: IpcConfig) : IpcTransport {
             Files.createFile(sock.toPath())
             Files.setPosixFilePermissions(
                 sock.toPath(),
-                PosixFilePermissions.fromString("rw-------")
+                PosixFilePermissions.fromString("rw-------"),
             )
         } catch (e: UnsupportedOperationException) {
             logger.debug("POSIX permissions not supported on this FS: ${e.message}")
@@ -101,13 +105,14 @@ class UnixSocketIpcTransport(private val cfg: IpcConfig) : IpcTransport {
     override fun channelBuilder(): ManagedChannelBuilder<*> {
         val cb = NettyChannelBuilder.forAddress(address).usePlaintext()
         val os = System.getProperty("os.name", "").lowercase()
-        val group: EventLoopGroup = if (os.contains("linux") && Epoll.isAvailable()) {
-            cb.channelType(EpollDomainSocketChannel::class.java)
-            EpollEventLoopGroup().also { clientGroup = it }
-        } else {
-            cb.channelType(NioDomainSocketChannel::class.java)
-            NioEventLoopGroup().also { clientGroup = it }
-        }
+        val group: EventLoopGroup =
+            if (os.contains("linux") && Epoll.isAvailable()) {
+                cb.channelType(EpollDomainSocketChannel::class.java)
+                EpollEventLoopGroup().also { clientGroup = it }
+            } else {
+                cb.channelType(NioDomainSocketChannel::class.java)
+                NioEventLoopGroup().also { clientGroup = it }
+            }
         cb.eventLoopGroup(group)
         return cb
     }

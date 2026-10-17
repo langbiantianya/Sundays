@@ -53,44 +53,45 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalTestApi::class)
 class CodeEditorKeyboardReachTest {
-
     @Test
-    fun `the editor is reachable by tabbing`() = runComposeUiTest(
-        testTimeout = 60.seconds,
-    ) {
-        registerBuiltinEditors()
+    fun `the editor is reachable by tabbing`() =
+        runComposeUiTest(
+            testTimeout = 60.seconds,
+        ) {
+            registerBuiltinEditors()
 
-        setContent {
-            SundaysTheme {
-                CodeEditorWithToolbar(
-                    text = "SELECT 1",
-                    onTextChange = {},
-                    languageId = "sql",
-                    onLanguageChange = {},
-                )
+            setContent {
+                SundaysTheme {
+                    CodeEditorWithToolbar(
+                        text = "SELECT 1",
+                        onTextChange = {},
+                        languageId = "sql",
+                        onLanguageChange = {},
+                    )
+                }
             }
-        }
-        waitForIdle()
-
-        // 先确认编辑器节点确实存在且可编辑 —— 否则「Tab 不到」只是因为它没渲染
-        onNode(hasSetTextAction()).assertExists("编辑器应渲染为可编辑节点")
-
-        val root = onRoot()
-        var reached = false
-        repeat(12) {
-            root.performKeyInput { pressKey(Key.Tab) }
             waitForIdle()
-            val focused = runCatching {
-                onNode(hasSetTextAction()).assertIsFocused()
-                true
-            }.getOrDefault(false)
-            if (focused) {
-                reached = true
-                return@repeat
+
+            // 先确认编辑器节点确实存在且可编辑 —— 否则「Tab 不到」只是因为它没渲染
+            onNode(hasSetTextAction()).assertExists("编辑器应渲染为可编辑节点")
+
+            val root = onRoot()
+            var reached = false
+            repeat(12) {
+                root.performKeyInput { pressKey(Key.Tab) }
+                waitForIdle()
+                val focused =
+                    runCatching {
+                        onNode(hasSetTextAction()).assertIsFocused()
+                        true
+                    }.getOrDefault(false)
+                if (focused) {
+                    reached = true
+                    return@repeat
+                }
+            }
+            check(reached) {
+                "连续 12 次 Tab 之后焦点仍未落到编辑器 —— 键盘用户将无法使用 SQL / 造数工作台"
             }
         }
-        check(reached) {
-            "连续 12 次 Tab 之后焦点仍未落到编辑器 —— 键盘用户将无法使用 SQL / 造数工作台"
-        }
-    }
 }

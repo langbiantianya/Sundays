@@ -49,27 +49,30 @@ enum class ThemePalette(
     WIN_2000(StrKey.PALETTE_WIN2000, StrKey.PALETTE_WIN2000_DESC),
 
     /** WinXP —— Luna 奶油底 `#ECE9D8` + 蓝灰 chrome，选区蓝用 `#255EA1` 才够对比度。 */
-    WIN_XP(StrKey.PALETTE_WINXP, StrKey.PALETTE_WINXP_DESC);
+    WIN_XP(StrKey.PALETTE_WINXP, StrKey.PALETTE_WINXP_DESC),
+    ;
 
     /** 该主题的浅色配色。 */
     val light: ColorScheme
-        get() = when (this) {
-            BLUE_GRAY -> SundaysPalette.LightColorScheme
-            CYBERPUNK -> SundaysPalette.CyberpunkLightColorScheme
-            BILI_PINK -> SundaysPalette.BiliPinkLightColorScheme
-            WIN_2000 -> SundaysPalette.Win2000LightColorScheme
-            WIN_XP -> SundaysPalette.WinXpLightColorScheme
-        }
+        get() =
+            when (this) {
+                BLUE_GRAY -> SundaysPalette.LightColorScheme
+                CYBERPUNK -> SundaysPalette.CyberpunkLightColorScheme
+                BILI_PINK -> SundaysPalette.BiliPinkLightColorScheme
+                WIN_2000 -> SundaysPalette.Win2000LightColorScheme
+                WIN_XP -> SundaysPalette.WinXpLightColorScheme
+            }
 
     /** 该主题的深色配色。 */
     val dark: ColorScheme
-        get() = when (this) {
-            BLUE_GRAY -> SundaysPalette.DarkColorScheme
-            CYBERPUNK -> SundaysPalette.CyberpunkDarkColorScheme
-            BILI_PINK -> SundaysPalette.BiliPinkDarkColorScheme
-            WIN_2000 -> SundaysPalette.Win2000DarkColorScheme
-            WIN_XP -> SundaysPalette.WinXpDarkColorScheme
-        }
+        get() =
+            when (this) {
+                BLUE_GRAY -> SundaysPalette.DarkColorScheme
+                CYBERPUNK -> SundaysPalette.CyberpunkDarkColorScheme
+                BILI_PINK -> SundaysPalette.BiliPinkDarkColorScheme
+                WIN_2000 -> SundaysPalette.Win2000DarkColorScheme
+                WIN_XP -> SundaysPalette.WinXpDarkColorScheme
+            }
 
     /**
      * 该主题的形状阶梯 —— 复古两套与配色一样是主题的一部分。
@@ -79,11 +82,12 @@ enum class ThemePalette(
      * 菜单 / 弹层会自动跟随；只有 `Button` 需要显式传 [buttonShape]。
      */
     val shapes: Shapes
-        get() = when (this) {
-            BLUE_GRAY, CYBERPUNK, BILI_PINK -> SundaysPalette.Shapes
-            WIN_2000 -> SundaysPalette.Win2000Shapes
-            WIN_XP -> SundaysPalette.WinXpShapes
-        }
+        get() =
+            when (this) {
+                BLUE_GRAY, CYBERPUNK, BILI_PINK -> SundaysPalette.Shapes
+                WIN_2000 -> SundaysPalette.Win2000Shapes
+                WIN_XP -> SundaysPalette.WinXpShapes
+            }
 
     /**
      * 按钮 / chip / 输入框的圆角。
@@ -99,11 +103,12 @@ enum class ThemePalette(
      * 现代三套返回 [BevelStyle.NONE]（`enabled = false`），于是 [winBevel] 是彻底的空
      * 操作，不会给现有界面带来任何变化。只有 Win2000 / WinXP 会启用。
      */
-    fun bevelStyle(useDark: Boolean): BevelStyle = when (this) {
-        BLUE_GRAY, CYBERPUNK, BILI_PINK -> BevelStyle.NONE
-        WIN_2000 -> if (useDark) SundaysPalette.Win2000DarkBevel else SundaysPalette.Win2000LightBevel
-        WIN_XP -> if (useDark) SundaysPalette.WinXpDarkBevel else SundaysPalette.WinXpLightBevel
-    }
+    fun bevelStyle(useDark: Boolean): BevelStyle =
+        when (this) {
+            BLUE_GRAY, CYBERPUNK, BILI_PINK -> BevelStyle.NONE
+            WIN_2000 -> if (useDark) SundaysPalette.Win2000DarkBevel else SundaysPalette.Win2000LightBevel
+            WIN_XP -> if (useDark) SundaysPalette.WinXpDarkBevel else SundaysPalette.WinXpLightBevel
+        }
 
     /**
      * 该主题的**全部界面外观决策** —— 加新主题时唯一需要动的地方。
@@ -113,34 +118,43 @@ enum class ThemePalette(
      * 三个 `when`（[shapes] / [bevelStyle] / 本函数）是穷举的，加枚举项时编译器会
      * 把所有漏网处指出来。
      */
-    fun uiTokens(useDark: Boolean): UiThemeTokens = when (this) {
-        BLUE_GRAY, CYBERPUNK, BILI_PINK -> UiThemeTokens.MODERN
-        WIN_2000 -> UiThemeTokens(
-            chrome = ChromeMode.CLASSIC,
-            bevel = bevelStyle(useDark),
-            buttonFace = ButtonFace.WINDOW,
-            // 纯白面上经典凹陷边的亮侧会隐形，退回 Windows Standard 的灰面
-            fieldFace = FieldFace.SURFACE_VARIANT,
-            selection = SelectionMode.INVERTED,
-            divider = DividerMode.ETCHED,
-            panelBorder = PanelBorder.BEVEL,
-            zebraRows = false,
-            disabledInk = SundaysPalette.Win2000DisabledInk,
-            syntax = if (useDark) SundaysPalette.Win2000DarkSyntax else SundaysPalette.Win2000LightSyntax,
-        )
-        WIN_XP -> UiThemeTokens(
-            chrome = ChromeMode.CLASSIC,
-            bevel = bevelStyle(useDark),
-            buttonFace = ButtonFace.WINDOW,
-            fieldFace = FieldFace.SURFACE_VARIANT,
-            selection = SelectionMode.INVERTED,
-            divider = DividerMode.ETCHED,
-            panelBorder = PanelBorder.BEVEL,
-            zebraRows = false,
-            disabledInk = SundaysPalette.WinXpDisabledInk,
-            syntax = if (useDark) SundaysPalette.WinXpDarkSyntax else SundaysPalette.WinXpLightSyntax,
-        )
-    }
+    fun uiTokens(useDark: Boolean): UiThemeTokens =
+        when (this) {
+            BLUE_GRAY, CYBERPUNK, BILI_PINK -> {
+                UiThemeTokens.MODERN
+            }
+
+            WIN_2000 -> {
+                UiThemeTokens(
+                    chrome = ChromeMode.CLASSIC,
+                    bevel = bevelStyle(useDark),
+                    buttonFace = ButtonFace.WINDOW,
+                    // 纯白面上经典凹陷边的亮侧会隐形，退回 Windows Standard 的灰面
+                    fieldFace = FieldFace.SURFACE_VARIANT,
+                    selection = SelectionMode.INVERTED,
+                    divider = DividerMode.ETCHED,
+                    panelBorder = PanelBorder.BEVEL,
+                    zebraRows = false,
+                    disabledInk = SundaysPalette.Win2000DisabledInk,
+                    syntax = if (useDark) SundaysPalette.Win2000DarkSyntax else SundaysPalette.Win2000LightSyntax,
+                )
+            }
+
+            WIN_XP -> {
+                UiThemeTokens(
+                    chrome = ChromeMode.CLASSIC,
+                    bevel = bevelStyle(useDark),
+                    buttonFace = ButtonFace.WINDOW,
+                    fieldFace = FieldFace.SURFACE_VARIANT,
+                    selection = SelectionMode.INVERTED,
+                    divider = DividerMode.ETCHED,
+                    panelBorder = PanelBorder.BEVEL,
+                    zebraRows = false,
+                    disabledInk = SundaysPalette.WinXpDisabledInk,
+                    syntax = if (useDark) SundaysPalette.WinXpDarkSyntax else SundaysPalette.WinXpLightSyntax,
+                )
+            }
+        }
 
     /**
      * 取实际生效的配色。

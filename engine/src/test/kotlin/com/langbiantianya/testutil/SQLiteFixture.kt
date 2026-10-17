@@ -28,21 +28,23 @@ import java.sql.DriverManager
  * 所有连接均走 PoolManager（与 handler 集成测试路径一致）。
  */
 abstract class SQLiteFixture {
-
     protected val dialect = SQLiteDialect()
-    protected val dbFile: File = Files.createTempFile("sqlite-it-", ".db").toFile().apply {
-        deleteOnExit()
-        delete()  // SQLite 拒绝 0 字节文件，先删除让 SQLite 首次连接时创建
-    }
+    protected val dbFile: File =
+        Files.createTempFile("sqlite-it-", ".db").toFile().apply {
+            deleteOnExit()
+            delete() // SQLite 拒绝 0 字节文件，先删除让 SQLite 首次连接时创建
+        }
 
-    protected val config: ConnectionConfig = ConnectionConfig.newBuilder()
-        .setDriver("Sqlite")
-        .setHost("embedded")
-        .setPort(0)
-        .setUser("")
-        .setPassword("")
-        .setDatabase(dbFile.absolutePath)
-        .build()
+    protected val config: ConnectionConfig =
+        ConnectionConfig
+            .newBuilder()
+            .setDriver("Sqlite")
+            .setHost("embedded")
+            .setPort(0)
+            .setUser("")
+            .setPassword("")
+            .setDatabase(dbFile.absolutePath)
+            .build()
 
     @BeforeEach
     fun registerSQLiteDialect() {
@@ -51,32 +53,40 @@ abstract class SQLiteFixture {
 
     @AfterEach
     fun cleanupSQLite() {
-        try { PoolManager.closeAll() } catch (_: Exception) {}
-        try { dbFile.delete() } catch (_: Exception) {}
+        try {
+            PoolManager.closeAll()
+        } catch (_: Exception) {
+        }
+        try {
+            dbFile.delete()
+        } catch (_: Exception) {
+        }
     }
 
     /** 走 PoolManager 的连接 */
     protected fun newConnection(): Connection = PoolManager.getConnection(config)
 
-    protected inline fun <R> withConnection(block: (Connection) -> R): R =
-        newConnection().use(block)
+    protected inline fun <R> withConnection(block: (Connection) -> R): R = newConnection().use(block)
 
-    protected fun executeUpdate(sql: String): Int = withConnection { conn ->
-        conn.createStatement().use { it.executeUpdate(sql) }
-    }
+    protected fun executeUpdate(sql: String): Int =
+        withConnection { conn ->
+            conn.createStatement().use { it.executeUpdate(sql) }
+        }
 
-    protected fun executeQuerySingle(sql: String): String? = withConnection { conn ->
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery(sql).use { rs ->
-                if (rs.next()) rs.getString(1) else null
+    protected fun executeQuerySingle(sql: String): String? =
+        withConnection { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(sql).use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
             }
         }
-    }
 
-    protected fun tableExists(tableName: String): Boolean = withConnection { conn ->
-        conn.prepareStatement("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").use { ps ->
-            ps.setString(1, tableName)
-            ps.executeQuery().use { rs -> rs.next() }
+    protected fun tableExists(tableName: String): Boolean =
+        withConnection { conn ->
+            conn.prepareStatement("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").use { ps ->
+                ps.setString(1, tableName)
+                ps.executeQuery().use { rs -> rs.next() }
+            }
         }
-    }
 }

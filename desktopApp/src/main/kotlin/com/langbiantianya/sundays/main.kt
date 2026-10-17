@@ -32,9 +32,6 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import org.jetbrains.skia.Image
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.client.grpc.GrpcClientConfig
 import com.langbiantianya.client.grpc.GrpcEngineClient
@@ -56,6 +53,9 @@ import com.langbiantianya.sundays.ui.AppearanceState
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
 import com.langbiantianya.sundays.ui.rememberPersistentAppearanceState
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import org.jetbrains.skia.Image
 
 /**
  * KMP Desktop 应用入口.
@@ -78,81 +78,82 @@ import com.langbiantianya.sundays.ui.rememberPersistentAppearanceState
  * 导航条本体 (`TopNavBar` / `AppDestination`) 与应用主题 (`SundaysTheme`) 是平台无关的纯 UI,
  * 已上移到 `:shared` 的 `commonMain` —— 本文件只剩「平台窗口 + 引擎实现装配」。
  */
-fun main() = application {
-    // 注册内置编辑器语言（SQL / Lua）+ formatter —— 幂等，启动时调一次。
-    // 不注册则 CodeLanguageRegistry.get("sql") 返回 null，编辑器退化为无高亮纯文本。
-    registerBuiltinEditors()
-    val engine: EngineClient = createEngineClient()
-    // 窗口尺寸：不设的话用平台默认（Windows 约 800×600），而浏览屏是「左树 + 右表 +
-    // 底栏」三段布局，800 宽下左树挤掉半棵、右边一列都放不下。
-    val windowState = rememberWindowState(size = DEFAULT_WINDOW_SIZE)
-    Window(
-        onCloseRequest = {
-            engine.close()
-            exitApplication()
-        },
-        state = windowState,
-        title = "sundays",
-        // 不传时标题栏 / 任务栏是系统的默认占位图。macOS 上**单窗口不能设图标**
-        // （要在 build.gradle 的 nativeDistributions 用 iconFile 设 Dock 图标），
-        // 这里传了也不报错，只是那边不生效。
-        icon = rememberAppIconPainter(),
-    ) {
-        EnforceMinimumWindowSize(windowState)
-        // 主题档位状态必须提升到这里（SundaysTheme 之外）：配色由 SundaysTheme 的 darkTheme
-        // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
-        // 会出现「按钮变了、界面没变」。见 AppearanceState 的 KDoc。
-        val appearance = rememberPersistentAppearanceState()
-        // 把界面语言同步给**同 JVM 内的引擎**（Direct 模式）。
-        //
-        // 为什么界面语言还要额外喂引擎一次：界面文案走 CompositionLocal，与引擎无关；
-        // 但引擎抛出的错误消息是**原样上屏**的，它读的是 `LanguageScope`。不设的话
-        // 引擎只会按机器 locale 猜 —— 界面是德语、报错是中文。
-        //
-        // 放在 `LaunchedEffect` 而不是组合体内直接赋值：`LanguageScope` 的进程级默认是
-        // 普通字段，直接赋值会在每次重组时都执行一遍（且从组合中写全局状态本身就不该做）。
-        LaunchedEffect(appearance.language) {
-            LanguageScope.setProcessLanguage(appearance.language)
-        }
-        SundaysTheme(
-            darkTheme = appearance.resolvedDark(),
-            palette = appearance.palette,
-            // 紧凑档与配色 / 明暗正交：只改 LocalDensity 覆盖，故照样在主题最外层消费
-            compact = appearance.compactMode,
+fun main() =
+    application {
+        // 注册内置编辑器语言（SQL / Lua）+ formatter —— 幂等，启动时调一次。
+        // 不注册则 CodeLanguageRegistry.get("sql") 返回 null，编辑器退化为无高亮纯文本。
+        registerBuiltinEditors()
+        val engine: EngineClient = createEngineClient()
+        // 窗口尺寸：不设的话用平台默认（Windows 约 800×600），而浏览屏是「左树 + 右表 +
+        // 底栏」三段布局，800 宽下左树挤掉半棵、右边一列都放不下。
+        val windowState = rememberWindowState(size = DEFAULT_WINDOW_SIZE)
+        Window(
+            onCloseRequest = {
+                engine.close()
+                exitApplication()
+            },
+            state = windowState,
+            title = "sundays",
+            // 不传时标题栏 / 任务栏是系统的默认占位图。macOS 上**单窗口不能设图标**
+            // （要在 build.gradle 的 nativeDistributions 用 iconFile 设 Dock 图标），
+            // 这里传了也不报错，只是那边不生效。
+            icon = rememberAppIconPainter(),
         ) {
-            // 文案表注入点 —— 必须在**所有**界面之上（含引导页），否则引导页读不到
-            // 用户刚选的语言，第一次进来会闪一下错误语言。刻意放在 `SundaysTheme`
-            // **内部**：引导页渲染在主题内部正是为了让外观改动即时重绘，语言同理。
-            ProvideStrings(appearance.language) {
-            // 首次启动引导 —— 放在 `SundaysTheme` **内部**是刻意的：这样每一次点选都会立刻
-            // 重绘整页，用户看到的就是真实效果，不需要「预览图 + 应用按钮」那套。
+            EnforceMinimumWindowSize(windowState)
+            // 主题档位状态必须提升到这里（SundaysTheme 之外）：配色由 SundaysTheme 的 darkTheme
+            // 参数注入，是组合最外层；状态若落在某个屏幕内部，那里的按钮只能改自己的局部位，
+            // 会出现「按钮变了、界面没变」。见 AppearanceState 的 KDoc。
+            val appearance = rememberPersistentAppearanceState()
+            // 把界面语言同步给**同 JVM 内的引擎**（Direct 模式）。
             //
-            // 判据是 `appearance.onboardingCompleted`，它由 `rememberPersistentAppearanceState`
-            // 依据「设置文件此前存不存在」初始化（见 SettingsStorage.exists 的 KDoc），
-            // 完成后经 `completeOnboarding()` 落盘。没有额外的本地 state：写状态即触发重组，
-            // 主界面自然接管，**不存在两处真相源**。
-            if (appearance.onboardingCompleted) {
-                MainScreen(engine = engine, appearance = appearance)
-            } else {
-                OnboardingScreen(
-                    palette = appearance.palette,
-                    onPaletteChange = appearance::selectPalette,
-                    themeMode = appearance.mode,
-                    onThemeModeChange = appearance::selectMode,
-                    // 色卡要展示「各主题在当前明暗下的真实取色」，故要的是**生效**明暗而非档位
-                    dark = appearance.resolvedDark(),
-                    compactMode = appearance.compactMode,
-                    onCompactModeChange = appearance::selectCompactMode,
-                    language = appearance.language,
-                    onLanguageChange = appearance::selectLanguage,
-                    onFinish = appearance::completeOnboarding,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            // 为什么界面语言还要额外喂引擎一次：界面文案走 CompositionLocal，与引擎无关；
+            // 但引擎抛出的错误消息是**原样上屏**的，它读的是 `LanguageScope`。不设的话
+            // 引擎只会按机器 locale 猜 —— 界面是德语、报错是中文。
+            //
+            // 放在 `LaunchedEffect` 而不是组合体内直接赋值：`LanguageScope` 的进程级默认是
+            // 普通字段，直接赋值会在每次重组时都执行一遍（且从组合中写全局状态本身就不该做）。
+            LaunchedEffect(appearance.language) {
+                LanguageScope.setProcessLanguage(appearance.language)
             }
+            SundaysTheme(
+                darkTheme = appearance.resolvedDark(),
+                palette = appearance.palette,
+                // 紧凑档与配色 / 明暗正交：只改 LocalDensity 覆盖，故照样在主题最外层消费
+                compact = appearance.compactMode,
+            ) {
+                // 文案表注入点 —— 必须在**所有**界面之上（含引导页），否则引导页读不到
+                // 用户刚选的语言，第一次进来会闪一下错误语言。刻意放在 `SundaysTheme`
+                // **内部**：引导页渲染在主题内部正是为了让外观改动即时重绘，语言同理。
+                ProvideStrings(appearance.language) {
+                    // 首次启动引导 —— 放在 `SundaysTheme` **内部**是刻意的：这样每一次点选都会立刻
+                    // 重绘整页，用户看到的就是真实效果，不需要「预览图 + 应用按钮」那套。
+                    //
+                    // 判据是 `appearance.onboardingCompleted`，它由 `rememberPersistentAppearanceState`
+                    // 依据「设置文件此前存不存在」初始化（见 SettingsStorage.exists 的 KDoc），
+                    // 完成后经 `completeOnboarding()` 落盘。没有额外的本地 state：写状态即触发重组，
+                    // 主界面自然接管，**不存在两处真相源**。
+                    if (appearance.onboardingCompleted) {
+                        MainScreen(engine = engine, appearance = appearance)
+                    } else {
+                        OnboardingScreen(
+                            palette = appearance.palette,
+                            onPaletteChange = appearance::selectPalette,
+                            themeMode = appearance.mode,
+                            onThemeModeChange = appearance::selectMode,
+                            // 色卡要展示「各主题在当前明暗下的真实取色」，故要的是**生效**明暗而非档位
+                            dark = appearance.resolvedDark(),
+                            compactMode = appearance.compactMode,
+                            onCompactModeChange = appearance::selectCompactMode,
+                            language = appearance.language,
+                            onLanguageChange = appearance::selectLanguage,
+                            onFinish = appearance::completeOnboarding,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             }
         }
     }
-}
 
 /**
  * 窗口**默认**尺寸 —— 打开应用时第一次呈现的大小（用户拖过之后由系统自己记住）。
@@ -219,12 +220,14 @@ internal val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
  * 退化行为与今天一致（系统默认图标）。
  */
 @Composable
-private fun rememberAppIconPainter(): Painter? = remember {
-    val bytes = runCatching {
-        AppIconPainter::class.java.getResourceAsStream("/icons/sundays_256.png")?.use { it.readBytes() }
-    }.getOrNull()
-    bytes?.let { BitmapPainter(Image.makeFromEncoded(it).toComposeImageBitmap()) }
-}
+private fun rememberAppIconPainter(): Painter? =
+    remember {
+        val bytes =
+            runCatching {
+                AppIconPainter::class.java.getResourceAsStream("/icons/sundays_256.png")?.use { it.readBytes() }
+            }.getOrNull()
+        bytes?.let { BitmapPainter(Image.makeFromEncoded(it).toComposeImageBitmap()) }
+    }
 
 /** 只作为 [rememberAppIconPainter] 取 classpath 资源的定位器，不承载任何状态。 */
 private object AppIconPainter
@@ -236,10 +239,11 @@ private fun FrameWindowScope.EnforceMinimumWindowSize(state: WindowState) {
         snapshotFlow { state.size }
             .collect { size ->
                 if (size.width < MIN_WINDOW_SIZE.width || size.height < MIN_WINDOW_SIZE.height) {
-                    state.size = DpSize(
-                        width = maxOf(size.width, MIN_WINDOW_SIZE.width),
-                        height = maxOf(size.height, MIN_WINDOW_SIZE.height),
-                    )
+                    state.size =
+                        DpSize(
+                            width = maxOf(size.width, MIN_WINDOW_SIZE.width),
+                            height = maxOf(size.height, MIN_WINDOW_SIZE.height),
+                        )
                 }
             }
     }
@@ -277,10 +281,11 @@ const val ENDPOINT_PROPERTY = "sundays.engine.endpoint"
  * 真实连接去解析方言」的捷径成立 —— 私有函数没法被测试触达。
  */
 internal suspend fun fetchSystemInfo(engine: EngineClient): SystemInfo {
-    val response = engine.invoke(connectionConfig { }) {
-        category = Category.SYSTEM
-        action = Action.INFO
-    }
+    val response =
+        engine.invoke(connectionConfig { }) {
+            category = Category.SYSTEM
+            action = Action.INFO
+        }
     if (!response.success) error(response.error.ifBlank { "引擎未返回结果" })
     val info = response.system.info
     return SystemInfo(
@@ -326,7 +331,10 @@ internal suspend fun fetchSystemInfo(engine: EngineClient): SystemInfo {
  *   `MainScreen` 只**透传**给各屏幕与设置页，不自己改 —— 状态归属见 [AppearanceState] KDoc
  */
 @Composable
-internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
+internal fun MainScreen(
+    engine: EngineClient,
+    appearance: AppearanceState,
+) {
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
     // 浏览状态按 sheet id 各自持有（而非 DatabaseBrowserScreen 内部 remember）：
@@ -356,13 +364,14 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
     fun closeSettings() {
         // 回到来处；但若来时是浏览屏而 sheet 已被关空，则回连接管理首屏 ——
         // 否则会落在一个「没有 sheet 的浏览屏」上（该屏虽有空态引导，但语义上不如回首屏）
-        destination = if (
-            destinationBeforeSettings == AppDestination.DATABASE && session.openSheets.isEmpty()
-        ) {
-            AppDestination.CONNECTIONS
-        } else {
-            destinationBeforeSettings
-        }
+        destination =
+            if (
+                destinationBeforeSettings == AppDestination.DATABASE && session.openSheets.isEmpty()
+            ) {
+                AppDestination.CONNECTIONS
+            } else {
+                destinationBeforeSettings
+            }
     }
 
     // 首屏 sheet 变更：openSheets 非空 → 切到第二屏；空 → 切回首屏
@@ -371,11 +380,12 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
     // 就会把人从设置页强行拽回浏览页。
     LaunchedEffect(session.openSheets.isEmpty()) {
         if (destination == AppDestination.SETTINGS) return@LaunchedEffect
-        destination = if (session.openSheets.isEmpty()) {
-            AppDestination.CONNECTIONS
-        } else {
-            AppDestination.DATABASE
-        }
+        destination =
+            if (session.openSheets.isEmpty()) {
+                AppDestination.CONNECTIONS
+            } else {
+                AppDestination.DATABASE
+            }
     }
 
     val wizard = session.wizard
@@ -386,178 +396,187 @@ internal fun MainScreen(engine: EngineClient, appearance: AppearanceState) {
     // 放在 MainScreen（而非 SettingsScreen 内）持有：引擎调用是 suspend + 可能失败，
     // 状态必须活过设置页自身的组合周期，否则切走再切回就重新加载、丢失上一次结果。
     var systemInfo by remember { mutableStateOf<SystemInfoState>(SystemInfoState.Idle) }
+
     fun refreshSystemInfo() {
         scope.launch {
             systemInfo = SystemInfoState.Loading
-            systemInfo = runCatching { fetchSystemInfo(engine) }
-                .fold(
-                    onSuccess = { SystemInfoState.Loaded(it) },
-                    onFailure = { SystemInfoState.Failed(it.message ?: "未知错误") },
-                )
+            systemInfo =
+                runCatching { fetchSystemInfo(engine) }
+                    .fold(
+                        onSuccess = { SystemInfoState.Loaded(it) },
+                        onFailure = { SystemInfoState.Failed(it.message ?: "未知错误") },
+                    )
         }
     }
 
     // 浮层容器：下层保持组合（设置页的分类状态、浏览屏的 sheet 与滚动位置都不受影响），
     // 引导页叠在上层不透明渲染。
     Box(modifier = Modifier.fillMaxSize()) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (destination == AppDestination.DATABASE) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (destination == AppDestination.DATABASE) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
 
-        when (destination) {
-            AppDestination.CONNECTIONS -> ConnectionManagerScreen(
-                connections = session.connectionList.connections,
-                selectedConnection = session.selectedConnection,
-                editingConnection = wizard.editingConnection,
-                wizardStep = wizard.step,
-                wizardFlow = wizard.flow,
-                connectionStatuses = session.statuses,
-                onSelectConnection = session::select,
-                onNewConnection = session::newConnection,
-                onQuickConnect = session::quickConnect,
-                onEditConnection = session::edit,
-                onSaveConnection = session::save,
-                onQuickConnectDirect = session::quickConnectDirect,
-                onDeleteConnection = session::delete,
-                onCancelEdit = session::cancelEdit,
-                onWizardNext = session::goToStep,
-                onWizardBack = session::back,
-                onUpdateEditingConnection = session::updateEditing,
-                onTestConnection = session::testConnection,
-                // 总览面板「连接」 → 建池 + 打开 sheet + 切到第二屏
-                onConnect = { cfg ->
-                    session.connect(cfg)
-                    session.openSheet(cfg)
-                },
-                onDisconnect = session::disconnect,
-                onOpenSettings = ::openSettings,
-                modifier = Modifier.fillMaxSize(),
-            )
-            AppDestination.SETTINGS -> SettingsScreen(
-                palette = appearance.palette,
-                onPaletteChange = appearance::selectPalette,
-                // 明暗档位现在**只在设置页**可改（面板标题行的日夜按钮已移除）
-                themeMode = appearance.mode,
-                onThemeModeChange = appearance::selectMode,
-                systemInfoRefresh = appearance.systemInfoRefresh,
-                onSystemInfoRefreshChange = appearance::selectSystemInfoRefresh,
-                systemInfo = systemInfo,
-                onRequestSystemInfo = ::refreshSystemInfo,
-                onBack = ::closeSettings,
-                compactMode = appearance.compactMode,
-                onCompactModeChange = appearance::selectCompactMode,
-                // 「重新打开外观引导」入口 —— 以浮层展示，不是替换当前屏
-                onOpenOnboarding = { onboardingReplay = true },
-                language = appearance.language,
-                onLanguageChange = appearance::selectLanguage,
-                modifier = Modifier.fillMaxSize(),
-            )
-            AppDestination.DATABASE -> {
-                // 通知中心**屏级共享**：连接 A 的导出失败、连接 B 的 SQL 报错、
-                // 以及任务成败，都收进同一个列表 —— 按连接分开就断了「刚才发生了什么」。
-                val notifications = remember { NotificationCenter() }
-                // 按 sheet id 懒创建浏览器 state；sheet 关闭时 entry 会被移除（见 onCloseSheet），
-                // 否则 map 的强引用会让该连接的 SQL 文本 / 造数脚本 / 预览标签页一直存活。
-                val sheetConfigs = openSheetIds  // List<ConnectionConfig>，transient + 持久化 sheet 都直接可用
-                sheetConfigs.forEach { cfg ->
-                    if (browsers[cfg.id] == null) {
-                        browsers[cfg.id] = DatabaseBrowserState(engine, scope, notifications)
-                    }
-                }
-                val sheets = sheetConfigs.map { cfg ->
-                    val browser = browsers.getValue(cfg.id)
-                    SheetDescriptor(
-                        connection = cfg,
-                        browser = browser,
-                        status = session.statuses[cfg.id] ?: ConnectionStatus(),
-                    )
-                }
-                DatabaseBrowserScreen(
-                    sheets = sheets,
-                    activeSheetId = activeSheetId,
-                    connections = session.connectionList.connections,
-                    onSelectSheet = session::selectSheet,
-                    onCloseSheet = { id ->
-                        // 关 sheet 时一并断开连接：浏览器 SCHEMA.LIST 在多 database 下建的池
-                        // 由 releasePools 负责；连接管理层的池（testConnection 初始化的那个）
-                        // 由 disconnect 负责 —— 两者 key 不同，须都释放，否则留孤儿池。
-                        val cfg = sheetConfigs.firstOrNull { it.id == id }
-                        browsers[id]?.releasePools()
-                        // 必须移除 entry：`browsers` 是强引用 map，留着会让该 sheet 的
-                        // SQL 文本 / 造数脚本 / 预览标签页在整个 MainScreen 生命周期内不可回收，
-                        // 且重开同一连接会复用这份过期状态（bindConnection 对同 id 是 no-op）。
-                        browsers.remove(id)
-                        if (cfg != null) session.disconnect(cfg)
-                        session.closeSheet(id)
-                    },
-                    onAddSheet = { addDialogVisible = true },
-                    onConnect = session::connect,
-                    onDisconnect = session::disconnect,
-                    onOpenSettings = ::openSettings,
-                    // 底部状态栏的堆占用探针：直接复用设置页那条 SYSTEM.INFO 通道，
-                    // 取的是**引擎进程**的堆（gRPC 模式下与 UI 不同进程，Direct 模式同进程）
-                    memoryProbe = {
-                        runCatching { fetchSystemInfo(engine) }
-                            .getOrNull()
-                            ?.let {
-                                EngineMemory(
-                                    usedBytes = it.memoryUsed,
-                                    totalBytes = it.memoryTotal,
-                                    freeBytes = it.memoryFree,
-                                    maxBytes = it.memoryMax,
-                                )
-                            }
-                    },
-                    notifications = notifications,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                if (addDialogVisible) {
-                    AddConnectionDialog(
-                        // 弹窗复用 ConnectionManagerScreen —— 数据 / 状态全部来自 session，与首屏同源
+            when (destination) {
+                AppDestination.CONNECTIONS -> {
+                    ConnectionManagerScreen(
                         connections = session.connectionList.connections,
                         selectedConnection = session.selectedConnection,
                         editingConnection = wizard.editingConnection,
                         wizardStep = wizard.step,
                         wizardFlow = wizard.flow,
                         connectionStatuses = session.statuses,
-                        // 弹窗上下文 = 在第二屏：点击左侧连接项 = 仅切到详情（停在弹窗里），
-                        // 由用户显式点右栏「连接」按钮（onConnect 包装）才跳过去并添加 sheet。
                         onSelectConnection = session::select,
                         onNewConnection = session::newConnection,
                         onQuickConnect = session::quickConnect,
                         onEditConnection = session::edit,
-                        onSaveConnection = { cfg ->
-                            session.save(cfg)
-                            addDialogVisible = false
-                        },
-                        onQuickConnectDirect = { cfg ->
-                            session.quickConnectDirect(cfg)
-                            addDialogVisible = false
-                        },
+                        onSaveConnection = session::save,
+                        onQuickConnectDirect = session::quickConnectDirect,
                         onDeleteConnection = session::delete,
                         onCancelEdit = session::cancelEdit,
                         onWizardNext = session::goToStep,
                         onWizardBack = session::back,
                         onUpdateEditingConnection = session::updateEditing,
-                        // 弹窗右栏「连接」按钮：在建池的同时把 cfg 推入 openSheets（添加新标签）
-                        // 并关弹窗 —— 即「点击连接按钮后才跳转过去」。
+                        onTestConnection = session::testConnection,
+                        // 总览面板「连接」 → 建池 + 打开 sheet + 切到第二屏
                         onConnect = { cfg ->
                             session.connect(cfg)
                             session.openSheet(cfg)
-                            addDialogVisible = false
                         },
                         onDisconnect = session::disconnect,
-                        onTestConnection = session::testConnection,
-                        onDismiss = {
-                            // 关闭弹窗 = 丢弃向导进度，回到 IDLE
-                            session.cancelEdit()
-                            addDialogVisible = false
-                        },
+                        onOpenSettings = ::openSettings,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
+
+                AppDestination.SETTINGS -> {
+                    SettingsScreen(
+                        palette = appearance.palette,
+                        onPaletteChange = appearance::selectPalette,
+                        // 明暗档位现在**只在设置页**可改（面板标题行的日夜按钮已移除）
+                        themeMode = appearance.mode,
+                        onThemeModeChange = appearance::selectMode,
+                        systemInfoRefresh = appearance.systemInfoRefresh,
+                        onSystemInfoRefreshChange = appearance::selectSystemInfoRefresh,
+                        systemInfo = systemInfo,
+                        onRequestSystemInfo = ::refreshSystemInfo,
+                        onBack = ::closeSettings,
+                        compactMode = appearance.compactMode,
+                        onCompactModeChange = appearance::selectCompactMode,
+                        // 「重新打开外观引导」入口 —— 以浮层展示，不是替换当前屏
+                        onOpenOnboarding = { onboardingReplay = true },
+                        language = appearance.language,
+                        onLanguageChange = appearance::selectLanguage,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+
+                AppDestination.DATABASE -> {
+                    // 通知中心**屏级共享**：连接 A 的导出失败、连接 B 的 SQL 报错、
+                    // 以及任务成败，都收进同一个列表 —— 按连接分开就断了「刚才发生了什么」。
+                    val notifications = remember { NotificationCenter() }
+                    // 按 sheet id 懒创建浏览器 state；sheet 关闭时 entry 会被移除（见 onCloseSheet），
+                    // 否则 map 的强引用会让该连接的 SQL 文本 / 造数脚本 / 预览标签页一直存活。
+                    val sheetConfigs = openSheetIds // List<ConnectionConfig>，transient + 持久化 sheet 都直接可用
+                    sheetConfigs.forEach { cfg ->
+                        if (browsers[cfg.id] == null) {
+                            browsers[cfg.id] = DatabaseBrowserState(engine, scope, notifications)
+                        }
+                    }
+                    val sheets =
+                        sheetConfigs.map { cfg ->
+                            val browser = browsers.getValue(cfg.id)
+                            SheetDescriptor(
+                                connection = cfg,
+                                browser = browser,
+                                status = session.statuses[cfg.id] ?: ConnectionStatus(),
+                            )
+                        }
+                    DatabaseBrowserScreen(
+                        sheets = sheets,
+                        activeSheetId = activeSheetId,
+                        connections = session.connectionList.connections,
+                        onSelectSheet = session::selectSheet,
+                        onCloseSheet = { id ->
+                            // 关 sheet 时一并断开连接：浏览器 SCHEMA.LIST 在多 database 下建的池
+                            // 由 releasePools 负责；连接管理层的池（testConnection 初始化的那个）
+                            // 由 disconnect 负责 —— 两者 key 不同，须都释放，否则留孤儿池。
+                            val cfg = sheetConfigs.firstOrNull { it.id == id }
+                            browsers[id]?.releasePools()
+                            // 必须移除 entry：`browsers` 是强引用 map，留着会让该 sheet 的
+                            // SQL 文本 / 造数脚本 / 预览标签页在整个 MainScreen 生命周期内不可回收，
+                            // 且重开同一连接会复用这份过期状态（bindConnection 对同 id 是 no-op）。
+                            browsers.remove(id)
+                            if (cfg != null) session.disconnect(cfg)
+                            session.closeSheet(id)
+                        },
+                        onAddSheet = { addDialogVisible = true },
+                        onConnect = session::connect,
+                        onDisconnect = session::disconnect,
+                        onOpenSettings = ::openSettings,
+                        // 底部状态栏的堆占用探针：直接复用设置页那条 SYSTEM.INFO 通道，
+                        // 取的是**引擎进程**的堆（gRPC 模式下与 UI 不同进程，Direct 模式同进程）
+                        memoryProbe = {
+                            runCatching { fetchSystemInfo(engine) }
+                                .getOrNull()
+                                ?.let {
+                                    EngineMemory(
+                                        usedBytes = it.memoryUsed,
+                                        totalBytes = it.memoryTotal,
+                                        freeBytes = it.memoryFree,
+                                        maxBytes = it.memoryMax,
+                                    )
+                                }
+                        },
+                        notifications = notifications,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (addDialogVisible) {
+                        AddConnectionDialog(
+                            // 弹窗复用 ConnectionManagerScreen —— 数据 / 状态全部来自 session，与首屏同源
+                            connections = session.connectionList.connections,
+                            selectedConnection = session.selectedConnection,
+                            editingConnection = wizard.editingConnection,
+                            wizardStep = wizard.step,
+                            wizardFlow = wizard.flow,
+                            connectionStatuses = session.statuses,
+                            // 弹窗上下文 = 在第二屏：点击左侧连接项 = 仅切到详情（停在弹窗里），
+                            // 由用户显式点右栏「连接」按钮（onConnect 包装）才跳过去并添加 sheet。
+                            onSelectConnection = session::select,
+                            onNewConnection = session::newConnection,
+                            onQuickConnect = session::quickConnect,
+                            onEditConnection = session::edit,
+                            onSaveConnection = { cfg ->
+                                session.save(cfg)
+                                addDialogVisible = false
+                            },
+                            onQuickConnectDirect = { cfg ->
+                                session.quickConnectDirect(cfg)
+                                addDialogVisible = false
+                            },
+                            onDeleteConnection = session::delete,
+                            onCancelEdit = session::cancelEdit,
+                            onWizardNext = session::goToStep,
+                            onWizardBack = session::back,
+                            onUpdateEditingConnection = session::updateEditing,
+                            // 弹窗右栏「连接」按钮：在建池的同时把 cfg 推入 openSheets（添加新标签）
+                            // 并关弹窗 —— 即「点击连接按钮后才跳转过去」。
+                            onConnect = { cfg ->
+                                session.connect(cfg)
+                                session.openSheet(cfg)
+                                addDialogVisible = false
+                            },
+                            onDisconnect = session::disconnect,
+                            onTestConnection = session::testConnection,
+                            onDismiss = {
+                                // 关闭弹窗 = 丢弃向导进度，回到 IDLE
+                                session.cancelEdit()
+                                addDialogVisible = false
+                            },
+                        )
+                    }
+                }
             }
-        }
         }
 
         if (onboardingReplay) {

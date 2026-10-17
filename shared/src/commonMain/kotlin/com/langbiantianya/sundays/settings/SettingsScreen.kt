@@ -55,24 +55,24 @@ import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.i18n.Strings
+import com.langbiantianya.sundays.ui.LanguagePicker
+import com.langbiantianya.sundays.ui.LocalStrings
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.SystemInfoRefresh
 import com.langbiantianya.sundays.ui.ThemeMode
 import com.langbiantianya.sundays.ui.ThemeModeToggleButton
 import com.langbiantianya.sundays.ui.ThemePalette
+import com.langbiantianya.sundays.ui.WinDivider
+import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.WinOutlinedButton
 import com.langbiantianya.sundays.ui.WinProgressIndicator
 import com.langbiantianya.sundays.ui.WinSwitch
-import com.langbiantianya.sundays.ui.selectionIndicatorColors
-import com.langbiantianya.sundays.ui.selectionContentColor
-import com.langbiantianya.sundays.ui.selectionContainerColor
-import com.langbiantianya.sundays.ui.LanguagePicker
-import com.langbiantianya.sundays.ui.LocalStrings
-import com.langbiantianya.sundays.ui.plural
-import com.langbiantianya.sundays.ui.str
-import com.langbiantianya.sundays.ui.WinDivider
 import com.langbiantianya.sundays.ui.WinTextButton
-import com.langbiantianya.sundays.ui.WinIconButton
+import com.langbiantianya.sundays.ui.plural
+import com.langbiantianya.sundays.ui.selectionContainerColor
+import com.langbiantianya.sundays.ui.selectionContentColor
+import com.langbiantianya.sundays.ui.selectionIndicatorColors
+import com.langbiantianya.sundays.ui.str
 import com.langbiantianya.sundays.ui.winShape
 import kotlinx.coroutines.delay
 
@@ -144,11 +144,12 @@ fun SettingsScreen(
     Row(modifier = modifier.fillMaxSize()) {
         // 左侧分类 —— 与 ConnectionManagerScreen 的左栏同款配色（surfaceVariant）
         Column(
-            modifier = Modifier
-                .width(200.dp)
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(12.dp),
+            modifier =
+                Modifier
+                    .width(200.dp)
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // 左上角返回
@@ -185,23 +186,28 @@ fun SettingsScreen(
         // 右侧内容
         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
             when (category) {
-                SettingsCategory.PERSONALIZATION -> PersonalizationPane(
-                    palette = palette,
-                    onPaletteChange = onPaletteChange,
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange,
-                    compactMode = compactMode,
-                    onCompactModeChange = onCompactModeChange,
-                    onOpenOnboarding = onOpenOnboarding,
-                    language = language,
-                    onLanguageChange = onLanguageChange,
-                )
-                SettingsCategory.SYSTEM_INFO -> SystemInfoPane(
-                    state = systemInfo,
-                    refresh = systemInfoRefresh,
-                    onRefreshChange = onSystemInfoRefreshChange,
-                    onRefreshNow = onRequestSystemInfo,
-                )
+                SettingsCategory.PERSONALIZATION -> {
+                    PersonalizationPane(
+                        palette = palette,
+                        onPaletteChange = onPaletteChange,
+                        themeMode = themeMode,
+                        onThemeModeChange = onThemeModeChange,
+                        compactMode = compactMode,
+                        onCompactModeChange = onCompactModeChange,
+                        onOpenOnboarding = onOpenOnboarding,
+                        language = language,
+                        onLanguageChange = onLanguageChange,
+                    )
+                }
+
+                SettingsCategory.SYSTEM_INFO -> {
+                    SystemInfoPane(
+                        state = systemInfo,
+                        refresh = systemInfoRefresh,
+                        onRefreshChange = onSystemInfoRefreshChange,
+                        onRefreshNow = onRequestSystemInfo,
+                    )
+                }
             }
         }
     }
@@ -215,17 +221,19 @@ private fun SettingsCategoryRow(
     onClick: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
         shape = winShape(6.dp),
         contentColor = selectionContentColor(selected, MaterialTheme.colorScheme.onSurfaceVariant),
         color = selectionContainerColor(selected, MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -245,10 +253,11 @@ private fun SettingsCategoryRow(
     }
 }
 
-private fun SettingsCategory.icon(): ImageVector = when (this) {
-    SettingsCategory.PERSONALIZATION -> Icons.Filled.Palette
-    SettingsCategory.SYSTEM_INFO -> Icons.Filled.Computer
-}
+private fun SettingsCategory.icon(): ImageVector =
+    when (this) {
+        SettingsCategory.PERSONALIZATION -> Icons.Filled.Palette
+        SettingsCategory.SYSTEM_INFO -> Icons.Filled.Computer
+    }
 
 /**
  * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）+ 紧凑模式（一个开关）+ 重进引导的入口。
@@ -270,10 +279,11 @@ private fun PersonalizationPane(
     onLanguageChange: (AppLanguage) -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
     ) {
         Text(text = str(StrKey.PERSONALIZATION), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
@@ -409,10 +419,11 @@ private fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable { onCheckedChange(!checked) }
+                .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -437,10 +448,11 @@ private fun SystemInfoPane(
     onRefreshNow: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -474,32 +486,38 @@ private fun SystemInfoPane(
 
         // 按 sealed 子类型分派而非「取字段再判空」：sealed interface 的属性无法 smart-cast。
         when (val s = state) {
-            SystemInfoState.Idle -> Text(
-                text = str(StrKey.NOT_LOADED_YET),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SystemInfoState.Idle -> {
+                Text(
+                    text = str(StrKey.NOT_LOADED_YET),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
-            SystemInfoState.Loading -> Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    WinProgressIndicator()
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = str(StrKey.LOADING_SYSTEM_INFO),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            SystemInfoState.Loading -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        WinProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = str(StrKey.LOADING_SYSTEM_INFO),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
-            is SystemInfoState.Failed -> Text(
-                text = str(StrKey.LOAD_SYSTEM_INFO_FAILED, s.message),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
+            is SystemInfoState.Failed -> {
+                Text(
+                    text = str(StrKey.LOAD_SYSTEM_INFO_FAILED, s.message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
 
             is SystemInfoState.Loaded -> {
                 val info = s.info
@@ -541,10 +559,11 @@ private fun ChoiceRow(
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(colors = selectionIndicatorColors(), selected = selected, onClick = onClick)
@@ -562,7 +581,11 @@ private fun ChoiceRow(
 
 /** 刷新间隔选项（横向 chip）。 */
 @Composable
-private fun RefreshOptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RefreshOptionChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
         shape = winShape(6.dp),
@@ -574,18 +597,26 @@ private fun RefreshOptionChip(label: String, selected: Boolean, onClick: () -> U
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            color =
+                if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
         )
     }
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(
+    label: String,
+    value: String,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
@@ -608,12 +639,13 @@ private fun InfoRow(label: String, value: String) {
  * 紧凑状态栏**那一行**另有 `formatHeapBytes`（`512M` / `2G`），那是另一种呈现密度，
  * 不归本函数管 —— 见该函数的 KDoc。
  */
-fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
-    bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
-    bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
-}
+fun formatBytes(bytes: Long): String =
+    when {
+        bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
+        bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
+    }
 
 /**
  * 毫秒 → `3 天 4 小时 5 分`（只到分，秒级噪声对运行时长没意义）。
@@ -633,7 +665,10 @@ fun formatBytes(bytes: Long): String = when {
  * @param strings 当前语言的文案表 —— [plural] 是 composable 函数，取文案需要组合上下文。
  */
 @Composable
-internal fun formatDuration(millis: Long, strings: Strings = LocalStrings.current): String {
+internal fun formatDuration(
+    millis: Long,
+    strings: Strings = LocalStrings.current,
+): String {
     val totalMinutes = millis / 60_000
     val days = totalMinutes / (60 * 24)
     val hours = (totalMinutes % (60 * 24)) / 60

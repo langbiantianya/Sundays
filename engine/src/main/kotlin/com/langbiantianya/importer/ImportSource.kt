@@ -17,7 +17,6 @@ package com.langbiantianya.importer
  * Sequence 的惰性链反而容易在协程里被挂住、迟迟不释放底层 Reader。
  */
 interface ImportSource : AutoCloseable {
-
     /**
      * 目标列顺序。CSV 有表头时来自表头行；JSON_LINES 取首行出现过的键序。
      */

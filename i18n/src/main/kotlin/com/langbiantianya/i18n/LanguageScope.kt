@@ -40,7 +40,6 @@ import java.util.concurrent.atomic.AtomicReference
  * 部署时进程所在机器的 locale 仍是一个有意义的初值。
  */
 object LanguageScope {
-
     private val current = ThreadLocal<AppLanguage?>()
 
     /**
@@ -74,8 +73,7 @@ object LanguageScope {
     fun processLanguageOrNull(): AppLanguage? = processDefault.get()
 
     /** 当前线程上生效的语言；未设置时按进程默认 → 系统区域设置逐级回落。 */
-    fun currentLanguage(): AppLanguage =
-        current.get() ?: processDefault.get() ?: AppLanguage.detectSystemLanguage()
+    fun currentLanguage(): AppLanguage = current.get() ?: processDefault.get() ?: AppLanguage.detectSystemLanguage()
 
     /**
      * 当前线程上生效的语言；**未设置时返回 `null`** 而不是探测结果。
@@ -109,7 +107,10 @@ object LanguageScope {
      * 这个重载是**同步**的（`block` 不是 `suspend`）。在协程里请用 `:engine` 侧的
      * 协程感知封装，否则 [currentLanguage] 可能在另一个线程上被读到。
      */
-    fun <T> withLanguage(language: AppLanguage, block: () -> T): T {
+    fun <T> withLanguage(
+        language: AppLanguage,
+        block: () -> T,
+    ): T {
         val previous = current.get()
         current.set(language)
         try {
@@ -148,15 +149,19 @@ object LanguageScope {
  * 后者出现在分发层，前者出现在上百个抛错的地方。
  */
 object Msg {
-
     /** 取一条文案。 */
     fun text(key: StrKey): String = LanguageScope.currentStrings()[key]
 
     /** 取一条带占位符的文案。 */
-    fun format(key: StrKey, vararg args: Any?): String =
-        LanguageScope.currentStrings().format(key, *args)
+    fun format(
+        key: StrKey,
+        vararg args: Any?,
+    ): String = LanguageScope.currentStrings().format(key, *args)
 
     /** 取一条按数量选变体的文案。 */
-    fun plural(key: PluralStrKey, count: Int, vararg args: Any?): String =
-        LanguageScope.currentStrings().plural(key, count, *args)
+    fun plural(
+        key: PluralStrKey,
+        count: Int,
+        vararg args: Any?,
+    ): String = LanguageScope.currentStrings().plural(key, count, *args)
 }

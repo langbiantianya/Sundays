@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""源码编码体检：U+FFFD 替换字符 / NUL 字节 / UTF-8 BOM。
+"""源码编码体检：U+FFFD 替换字符 / NUL 字节 / UTF-8 BOM / 夹在源码里的 BOM 字符。
 
 这三样东西在本仓库都被真实咬过：
 
@@ -11,6 +11,12 @@
   但裸 NUL 会让 git 把整个文件判成二进制，diff 不显示、grep 失效。Kotlin 里应写
   转义序列 `'\u0000'`。
 - **UTF-8 BOM** —— 仓库约定一律无 BOM；Kotlin 编译器与 jpackage 都可能因此出怪问题。
+- **夹在源码里的 U+FEFF** —— 与上一条是两回事：不是文件开头的 BOM，而是**文件中间**
+  某个字符里藏着一个真的 U+FEFF 字符（本仓库的 CSV 导出就靠它写 BOM 头）。
+  这一个被 ktlintFormat 实测咬过：它会把这个不可见字符从字符串字面量里静默删掉，
+  `write("<U+FEFF>")` 变成 `write("")`——代码、注释、KDoc 全都原样，编译照过、
+  测试照过，只有真拿 Excel 打开导出的 CSV 才看得出中文全成了乱码。
+  正确写法是转义序列 `\uFEFF`，对 ktlint 而言就是普通 ASCII。
 
 用法：python desktopApp/tools/check-encoding.py [--strict-nul]
 退出码非 0 表示有问题。
@@ -38,6 +44,7 @@ def tracked():
 def main():
     strict_nul = "--strict-nul" in sys.argv
     bad_char, bad_nul, bad_bom = [], [], []
+    bad_inline_bom = []
     checked = 0
 
     for rel in tracked():
@@ -53,12 +60,22 @@ def main():
         if BAD in data:
             text = data.decode("utf-8", errors="replace")
             for i, line in enumerate(text.splitlines(), 1):
-                if "�" in line:
+                if "\ufffd" in line:
                     bad_char.append((rel, i, line.strip()[:100]))
         if NUL in data and (strict_nul or name.endswith(".sh")):
             bad_nul.append((rel, data.count(NUL)))
         if data.startswith(BOM):
             bad_bom.append(rel)
+
+        # 去掉文件开头那个 BOM 之后，剩下的每一处 U+FEFF 都是「藏在源码里的不可见
+        # 字符」。它们在编辑器里看不见、在 review 里看不出来，却会被 ktlintFormat
+        # 悄悄删掉，从而改变字符串字面量的实际内容。必须当成错误报出来。
+        rest = data[len(BOM):] if data.startswith(BOM) else data
+        if BOM in rest:
+            text = rest.decode("utf-8", errors="replace")
+            for i, line in enumerate(text.splitlines(), 1):
+                if "\ufeff" in line:
+                    bad_inline_bom.append((rel, i, line.strip()[:100]))
 
     print("=" * 72)
     print("源码编码体检：检查 {} 个文本文件".format(checked))
@@ -85,7 +102,16 @@ def main():
     else:
         print("[OK] 无 UTF-8 BOM")
 
-    total = len(bad_char) + len(bad_nul) + len(bad_bom)
+    if bad_inline_bom:
+        print("\n[源码里夹着的 U+FEFF] {} 处 —— ktlintFormat 会把它从字符串里静默删掉".format(len(bad_inline_bom)))
+        print("  后果：`write(\"<U+FEFF>\")` 变成 `write(\"\")`，编译与测试都发现不了，")
+        print("  只有真拿 Excel 打开导出的 CSV 才看得出中文成了乱码。请改用转义 \\uFEFF。")
+        for rel, ln, line in bad_inline_bom:
+            print("  {}:{}  {}".format(rel, ln, line))
+    else:
+        print("[OK] 源码里没有夹带的 U+FEFF 不可见字符")
+
+    total = len(bad_char) + len(bad_nul) + len(bad_bom) + len(bad_inline_bom)
     print("\n问题总数 = {}".format(total))
     return 1 if total else 0
 

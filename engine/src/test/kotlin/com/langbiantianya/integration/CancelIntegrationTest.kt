@@ -49,28 +49,34 @@ import kotlin.test.assertTrue
  *    结束（甚至已关闭）的语句，正是取消功能最危险的失败模式。
  */
 class CancelIntegrationTest : H2Fixture() {
-
     /** 明确会跑上数秒的查询：两张 SYSTEM_RANGE 交叉连接，H2 无法把它优化成常量。 */
     private val longQuery = "SELECT COUNT(*) FROM SYSTEM_RANGE(1, 30000) a, SYSTEM_RANGE(1, 30000) b"
 
-    private fun executeSqlRequest(id: String, sql: String): Request = request {
-        this.id = id
-        category = Category.SQL
-        action = Action.EXECUTE
-        connection = config
-        sqlRequest = sqlRequest { execute = sqlExecuteRequest { this.sql = sql } }
-    }
+    private fun executeSqlRequest(
+        id: String,
+        sql: String,
+    ): Request =
+        request {
+            this.id = id
+            category = Category.SQL
+            action = Action.EXECUTE
+            connection = config
+            sqlRequest = sqlRequest { execute = sqlExecuteRequest { this.sql = sql } }
+        }
 
-    private fun cancelRequest(id: String, targetRequestId: String): Request = request {
-        this.id = id
-        category = Category.SYSTEM
-        action = Action.CANCEL
-        connection = config
-        systemRequest = systemRequest { this.targetRequestId = targetRequestId }
-    }
+    private fun cancelRequest(
+        id: String,
+        targetRequestId: String,
+    ): Request =
+        request {
+            this.id = id
+            category = Category.SYSTEM
+            action = Action.CANCEL
+            connection = config
+            systemRequest = systemRequest { this.targetRequestId = targetRequestId }
+        }
 
-    private suspend fun dispatchSingle(req: Request): Response =
-        RequestDispatcher.dispatch(req).toList().single()
+    private suspend fun dispatchSingle(req: Request): Response = RequestDispatcher.dispatch(req).toList().single()
 
     /** 有界轮询直到语句被登记，返回是否在期限内观察到。 */
     private suspend fun awaitRegistered(timeoutMs: Long = 10_000): Boolean =
@@ -80,81 +86,89 @@ class CancelIntegrationTest : H2Fixture() {
         } ?: false
 
     @Test
-    fun `SYSTEM CANCEL interrupts a long running SELECT`() = runBlocking<Unit> {
-        val targetId = "cancel-select-1"
-        val frames = AtomicReference<List<Response>>(emptyList())
+    fun `SYSTEM CANCEL interrupts a long running SELECT`() =
+        runBlocking<Unit> {
+            val targetId = "cancel-select-1"
+            val frames = AtomicReference<List<Response>>(emptyList())
 
-        val job = launch(Dispatchers.IO) {
-            frames.set(RequestDispatcher.dispatch(executeSqlRequest(targetId, longQuery)).toList())
+            val job =
+                launch(Dispatchers.IO) {
+                    frames.set(RequestDispatcher.dispatch(executeSqlRequest(targetId, longQuery)).toList())
+                }
+
+            assertTrue(
+                awaitRegistered(),
+                "长查询执行期间 Statement 必须被登记到 StatementRegistry（否则 SYSTEM.CANCEL 无从命中）",
+            )
+
+            // 语句已登记 = 已进入 stmt.execute()；给执行线程一点时间把 executingCommand 挂上，
+            // 让 H2 的 cancel() 能命中正在跑的 Command。缓存命中窗口是微秒级，这里只是稳态化。
+            delay(100)
+
+            val cancelResp = dispatchSingle(cancelRequest("cancel-req-1", targetId))
+
+            assertTrue(cancelResp.success, "取消请求本身应成功路由: ${cancelResp.error}")
+            assertTrue(cancelResp.hasSystem() && cancelResp.system.hasCancel(), "缺少 cancel 响应体")
+            val cancel = cancelResp.system.cancel
+            assertTrue(cancel.cancelled, "已登记的运行中请求必须被取消: ${cancel.error}")
+            assertEquals(targetId, cancel.requestId)
+
+            withTimeout(15_000) { job.join() }
+
+            val collected = frames.get()
+            assertTrue(collected.isNotEmpty(), "被取消的查询至少应产出一帧终止帧")
+            val terminal = collected.last()
+            assertFalse(terminal.success, "被取消的查询终止帧必须是失败（success=false）")
+            assertTrue(
+                terminal.error.isNotBlank(),
+                "失败帧必须带非空 error（具体措辞由驱动决定，H2/DuckDB/SQLite 各不相同）",
+            )
         }
 
-        assertTrue(
-            awaitRegistered(),
-            "长查询执行期间 Statement 必须被登记到 StatementRegistry（否则 SYSTEM.CANCEL 无从命中）",
-        )
+    @Test
+    fun `cancelling an unknown request id fails softly`() =
+        runBlocking<Unit> {
+            val resp = dispatchSingle(cancelRequest("cancel-req-unknown", "no-such-request-id"))
 
-        // 语句已登记 = 已进入 stmt.execute()；给执行线程一点时间把 executingCommand 挂上，
-        // 让 H2 的 cancel() 能命中正在跑的 Command。缓存命中窗口是微秒级，这里只是稳态化。
-        delay(100)
-
-        val cancelResp = dispatchSingle(cancelRequest("cancel-req-1", targetId))
-
-        assertTrue(cancelResp.success, "取消请求本身应成功路由: ${cancelResp.error}")
-        assertTrue(cancelResp.hasSystem() && cancelResp.system.hasCancel(), "缺少 cancel 响应体")
-        val cancel = cancelResp.system.cancel
-        assertTrue(cancel.cancelled, "已登记的运行中请求必须被取消: ${cancel.error}")
-        assertEquals(targetId, cancel.requestId)
-
-        withTimeout(15_000) { job.join() }
-
-        val collected = frames.get()
-        assertTrue(collected.isNotEmpty(), "被取消的查询至少应产出一帧终止帧")
-        val terminal = collected.last()
-        assertFalse(terminal.success, "被取消的查询终止帧必须是失败（success=false）")
-        assertTrue(
-            terminal.error.isNotBlank(),
-            "失败帧必须带非空 error（具体措辞由驱动决定，H2/DuckDB/SQLite 各不相同）",
-        )
-    }
+            assertTrue(resp.success, "路由本身不应抛异常: ${resp.error}")
+            val cancel = resp.system.cancel
+            assertFalse(cancel.cancelled, "不存在的请求不可能被取消")
+            assertTrue(cancel.error.isNotBlank(), "应给出非空错误说明")
+        }
 
     @Test
-    fun `cancelling an unknown request id fails softly`() = runBlocking<Unit> {
-        val resp = dispatchSingle(cancelRequest("cancel-req-unknown", "no-such-request-id"))
+    fun `cancelling with a blank id reports the missing field`() =
+        runBlocking<Unit> {
+            val resp = dispatchSingle(cancelRequest("cancel-req-blank", ""))
 
-        assertTrue(resp.success, "路由本身不应抛异常: ${resp.error}")
-        val cancel = resp.system.cancel
-        assertFalse(cancel.cancelled, "不存在的请求不可能被取消")
-        assertTrue(cancel.error.isNotBlank(), "应给出非空错误说明")
-    }
-
-    @Test
-    fun `cancelling with a blank id reports the missing field`() = runBlocking<Unit> {
-        val resp = dispatchSingle(cancelRequest("cancel-req-blank", ""))
-
-        assertTrue(resp.success, "空 id 也应软失败而非抛异常: ${resp.error}")
-        val cancel = resp.system.cancel
-        assertFalse(cancel.cancelled)
-        assertTrue(
-            cancel.error.contains("target_request_id"),
-            "错误信息应点名缺失字段 target_request_id，实际为: ${cancel.error}",
-        )
-    }
+            assertTrue(resp.success, "空 id 也应软失败而非抛异常: ${resp.error}")
+            val cancel = resp.system.cancel
+            assertFalse(cancel.cancelled)
+            assertTrue(
+                cancel.error.contains("target_request_id"),
+                "错误信息应点名缺失字段 target_request_id，实际为: ${cancel.error}",
+            )
+        }
 
     @Test
-    fun `a completed query does not leak its statement registration`() = runBlocking<Unit> {
-        executeUpdate("CREATE TABLE cancel_leak (id INT)")
-        executeUpdate("INSERT INTO cancel_leak VALUES (1), (2), (3)")
+    fun `a completed query does not leak its statement registration`() =
+        runBlocking<Unit> {
+            executeUpdate("CREATE TABLE cancel_leak (id INT)")
+            executeUpdate("INSERT INTO cancel_leak VALUES (1), (2), (3)")
 
-        val frames = RequestDispatcher.dispatch(
-            executeSqlRequest("cancel-normal-1", "SELECT * FROM cancel_leak")
-        ).toList()
-        assertTrue(frames.isNotEmpty(), "正常查询应产出行帧与终止帧")
-        assertTrue(frames.last().success, "正常查询的终止帧应成功: ${frames.last().error}")
+            val frames =
+                RequestDispatcher
+                    .dispatch(
+                        executeSqlRequest("cancel-normal-1", "SELECT * FROM cancel_leak"),
+                    ).toList()
+            assertTrue(frames.isNotEmpty(), "正常查询应产出行帧与终止帧")
+            assertTrue(frames.last().success, "正常查询的终止帧应成功: ${frames.last().error}")
 
-        val drained = withTimeoutOrNull(5_000) {
-            while (StatementRegistry.activeCount() != 0) delay(10)
-            true
-        } ?: false
-        assertTrue(drained, "查询结束后 Statement 必须注销，实际仍有 ${StatementRegistry.activeCount()} 条残留")
-    }
+            val drained =
+                withTimeoutOrNull(5_000) {
+                    while (StatementRegistry.activeCount() != 0) delay(10)
+                    true
+                } ?: false
+            assertTrue(drained, "查询结束后 Statement 必须注销，实际仍有 ${StatementRegistry.activeCount()} 条残留")
+        }
 }

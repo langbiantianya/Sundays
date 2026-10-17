@@ -23,7 +23,6 @@ import kotlin.test.assertTrue
  * 三者一旦错，弹层无论画得多好看都是错的。
  */
 class CompletionTest {
-
     // =========================================================================
     // 前缀切分
     // =========================================================================
@@ -99,21 +98,26 @@ class CompletionTest {
     // 候选筛选与排序
     // =========================================================================
 
-    private val pool = buildCompletionPool(
-        CompletionKind.KEYWORD to setOf("SELECT", "SET", "SERIAL"),
-        CompletionKind.TYPE to setOf("INT", "SMALLINT"),
-        CompletionKind.BUILTIN to setOf("SUM", "SUBSTRING"),
-    )
+    private val pool =
+        buildCompletionPool(
+            CompletionKind.KEYWORD to setOf("SELECT", "SET", "SERIAL"),
+            CompletionKind.TYPE to setOf("INT", "SMALLINT"),
+            CompletionKind.BUILTIN to setOf("SUM", "SUBSTRING"),
+        )
 
-    private fun labels(prefix: String, limit: Int = 10, caseSensitive: Boolean = false) =
-        selectCompletions(pool, prefix, caseSensitive, limit).map { it.label }
+    private fun labels(
+        prefix: String,
+        limit: Int = 10,
+        caseSensitive: Boolean = false,
+    ) = selectCompletions(pool, prefix, caseSensitive, limit).map { it.label }
 
     @Test
     fun `shorter words of the same category come first`() {
         // 输入 CO 时 `COLUMN`(6) / `COMMIT`(6) 该赢过 `COLLATE`(7) —— 同类别按长度升序
-        val colPool = buildCompletionPool(
-            CompletionKind.KEYWORD to setOf("COLLATE", "COLUMN", "COMMIT"),
-        )
+        val colPool =
+            buildCompletionPool(
+                CompletionKind.KEYWORD to setOf("COLLATE", "COLUMN", "COMMIT"),
+            )
         val got = selectCompletions(colPool, "CO", true, 10).map { it.label }
         assertEquals(listOf("COLUMN", "COMMIT", "COLLATE"), got)
     }
@@ -175,8 +179,10 @@ class CompletionTest {
         val labels = mysql.completionCandidates("unsi").map { it.label }
         assertTrue(labels.contains("UNSIGNED"), "MySQL 档位应能补出 UNSIGNED，实际=$labels")
         // 同一批词不能漏进标准档位 —— 档位只追加、不互相污染
-        val standard = SqlLanguage(SqlDialectProfile.STANDARD)
-            .completionCandidates("unsi").map { it.label }
+        val standard =
+            SqlLanguage(SqlDialectProfile.STANDARD)
+                .completionCandidates("unsi")
+                .map { it.label }
         assertTrue(standard.isEmpty(), "标准档位不该认识方言词 UNSIGNED，实际=$standard")
     }
 
@@ -192,11 +198,13 @@ class CompletionTest {
     @Test
     fun `a language without completion support simply returns nothing`() {
         // CodeLanguage.completionCandidates 的默认实现 —— 保证第三方语言零改动
-        val bare = object : CodeLanguage {
-            override val id = "bare"
-            override val displayName = "Bare"
-            override fun tokenize(source: String) = emptyList<CodeToken>()
-        }
+        val bare =
+            object : CodeLanguage {
+                override val id = "bare"
+                override val displayName = "Bare"
+
+                override fun tokenize(source: String) = emptyList<CodeToken>()
+            }
         assertTrue(bare.completionCandidates("se").isEmpty())
     }
 
@@ -248,9 +256,10 @@ class CompletionTest {
     @Test
     fun `a single letter still yields a bounded list not the whole language`() {
         // 「命中很多」不能变成「弹层很长」—— limit 是硬约束
-        val wide = buildCompletionPool(
-            CompletionKind.KEYWORD to setOf("A", "ADD", "ALL", "ALTER", "AND", "AS", "ASC", "AVG"),
-        )
+        val wide =
+            buildCompletionPool(
+                CompletionKind.KEYWORD to setOf("A", "ADD", "ALL", "ALTER", "AND", "AS", "ASC", "AVG"),
+            )
         assertEquals(8, selectCompletions(wide, "a", caseSensitive = false, limit = 8).size)
         assertEquals(3, selectCompletions(wide, "a", caseSensitive = false, limit = 3).size)
     }
@@ -259,15 +268,18 @@ class CompletionTest {
     // 上下文专属候选（extraCompletions）—— 造数沙箱宿主函数
     // =========================================================================
 
-    private val extras = listOf(
-        CompletionItem("insert", CompletionKind.BUILTIN, "insert(表名, {列=值})"),
-        CompletionItem("lastId", CompletionKind.BUILTIN, "lastId() → 自增ID"),
-        CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
-        CompletionItem("random_enum", CompletionKind.BUILTIN, "random_enum({候选…})"),
-    )
+    private val extras =
+        listOf(
+            CompletionItem("insert", CompletionKind.BUILTIN, "insert(表名, {列=值})"),
+            CompletionItem("lastId", CompletionKind.BUILTIN, "lastId() → 自增ID"),
+            CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
+            CompletionItem("random_enum", CompletionKind.BUILTIN, "random_enum({候选…})"),
+        )
 
-    private fun extrasFor(prefix: String, limit: Int = 10) =
-        selectExtras(prefix, extras, limit).map { it.label }
+    private fun extrasFor(
+        prefix: String,
+        limit: Int = 10,
+    ) = selectExtras(prefix, extras, limit).map { it.label }
 
     @Test
     fun `extras match by exact case`() {
@@ -309,10 +321,11 @@ class CompletionTest {
     fun `schema kinds sit after the language kinds so the pool order is preserved`() {
         // buildCompletionPool 用 kind.ordinal 当类别排序键。新类别若插在中间，
         // 「关键字 → 类型 → 函数」的既有次序会被打乱 —— 这条锁住「必须追加在末尾」。
-        val pool = buildCompletionPool(
-            CompletionKind.KEYWORD to setOf("SELECT"),
-            CompletionKind.BUILTIN to setOf("COUNT"),
-        )
+        val pool =
+            buildCompletionPool(
+                CompletionKind.KEYWORD to setOf("SELECT"),
+                CompletionKind.BUILTIN to setOf("COUNT"),
+            )
         val kinds = pool.map { it.kind }
         assertTrue(
             kinds.indexOf(CompletionKind.DATABASE) > kinds.indexOf(CompletionKind.BUILTIN) ||

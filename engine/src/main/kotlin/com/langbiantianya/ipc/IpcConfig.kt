@@ -42,7 +42,8 @@ data class IpcConfig(
          * 因此默认收紧到回环；确需跨机访问时用 `--host` 显式开启（用户知情选择）。
          */
         const val LOOPBACK = "127.0.0.1"
-        val USAGE: String = """
+        val USAGE: String =
+            """
             |IDB Engine — database compute engine (v2.9 dual-mode)
             |
             |Usage: java -jar idb-engine.jar [options]
@@ -76,7 +77,7 @@ data class IpcConfig(
             |  java -jar idb-engine.jar --mode direct                   # in-process; KMP uses lib API
             |  java -jar idb-engine.jar --mode grpc --ipc unix --uds-path /var/run/idb.sock
             |  java -jar idb-engine.jar --mode grpc --ipc pipe --pipe-name idb-engine
-        """.trimMargin()
+            """.trimMargin()
 
         /**
          * 解析 CLI 参数。
@@ -98,48 +99,61 @@ data class IpcConfig(
                         print(USAGE)
                         kotlin.system.exitProcess(0)
                     }
+
                     // `--mode <grpc|direct>` 由 IdbEngineServer.parseMode 独立解析（要先于本函数决定入口），
                     // 但它同样出现在 argv 里 —— 必须跳过，否则 `--mode grpc` 会被当成未知参数直接报错退出。
                     "--mode" -> {
                         args.getOrNull(i + 1) ?: error("--mode requires a value (grpc|direct)")
                         i += 2
                     }
+
                     "--ipc" -> {
-                        val v = args.getOrNull(i + 1)
-                            ?: error("--ipc requires a value (tcp|unix|pipe)")
+                        val v =
+                            args.getOrNull(i + 1)
+                                ?: error("--ipc requires a value (tcp|unix|pipe)")
                         explicitKind = parseKind(v)
                         i += 2
                     }
+
                     "--port" -> {
-                        val v = args.getOrNull(i + 1)
-                            ?: error("--port requires an integer value")
-                        val parsed = v.toIntOrNull()
-                            ?: error("--port expects an integer, got '$v'")
+                        val v =
+                            args.getOrNull(i + 1)
+                                ?: error("--port requires an integer value")
+                        val parsed =
+                            v.toIntOrNull()
+                                ?: error("--port expects an integer, got '$v'")
                         if (parsed !in 0..65535) {
                             error("--port must be in 0..65535, got $parsed")
                         }
                         tcpPort = parsed
                         i += 2
                     }
+
                     // 绑定地址：默认仅回环。gRPC 端口无鉴权，显式传 0.0.0.0 / :: 才对外暴露。
                     "--host" -> {
-                        val v = args.getOrNull(i + 1)
-                            ?: error("--host requires a bind address (e.g. 0.0.0.0)")
+                        val v =
+                            args.getOrNull(i + 1)
+                                ?: error("--host requires a bind address (e.g. 0.0.0.0)")
                         if (v.isBlank()) error("--host expects a non-empty bind address")
                         tcpHost = v
                         i += 2
                     }
+
                     "--uds-path" -> {
                         udsPath = args.getOrNull(i + 1)
                             ?: error("--uds-path requires a path value")
                         i += 2
                     }
+
                     "--pipe-name" -> {
                         pipeName = args.getOrNull(i + 1)
                             ?: error("--pipe-name requires a name value")
                         i += 2
                     }
-                    else -> error("Unknown argument: '$a' (try --help)")
+
+                    else -> {
+                        error("Unknown argument: '$a' (try --help)")
+                    }
                 }
             }
 
@@ -160,11 +174,12 @@ data class IpcConfig(
             return if (os.contains("win")) IpcKind.PIPE else IpcKind.UNIX
         }
 
-        private fun parseKind(raw: String): IpcKind = when (raw.trim().lowercase()) {
-            "tcp"  -> IpcKind.TCP
-            "unix" -> IpcKind.UNIX
-            "pipe" -> IpcKind.PIPE
-            else   -> error("Invalid --ipc value '$raw' (expected: tcp | unix | pipe)")
-        }
+        private fun parseKind(raw: String): IpcKind =
+            when (raw.trim().lowercase()) {
+                "tcp" -> IpcKind.TCP
+                "unix" -> IpcKind.UNIX
+                "pipe" -> IpcKind.PIPE
+                else -> error("Invalid --ipc value '$raw' (expected: tcp | unix | pipe)")
+            }
     }
 }

@@ -15,12 +15,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
-import androidx.compose.ui.LocalSystemTheme
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.LocalSystemTheme
 import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.langbiantianya.sundays.editor.ui.CodeEditorTheme
 import com.langbiantianya.sundays.table.DataTableTheme
@@ -63,60 +63,63 @@ import kotlin.test.assertNotEquals
  */
 @OptIn(ExperimentalTestApi::class, InternalComposeUiApi::class)
 class ModernThemeParityTest {
+    @Test
+    fun `modern theme keeps the M3 default shape when the caller passes none`() =
+        runComposeUiTest {
+            var resolved: Shape? = null
+            var m3Default: Shape? = null
+            var retroShape: Shape? = null
+
+            setContent {
+                SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
+                    m3Default = ButtonDefaults.shape
+                    retroShape = controlShape()
+                    resolved = resolveButtonShape(null)
+                }
+            }
+            waitForIdle()
+
+            assertEquals(
+                m3Default,
+                resolved,
+                "现代主题下未传 shape 时，包装层必须原样返回 M3 的默认形状（改造前它们拿到的就是它）",
+            )
+            // 顺带证明它确实**不是**复古形状 —— 否则这条断言会因为两边都退化成同一个值而假通过
+            assertEquals(
+                false,
+                resolved == retroShape && retroShape != m3Default,
+                "若现代形状与复古形状恰好相同，这条测试将失去分辨力，请改用其它断言",
+            )
+        }
 
     @Test
-    fun `modern theme keeps the M3 default shape when the caller passes none`() = runComposeUiTest {
-        var resolved: Shape? = null
-        var m3Default: Shape? = null
-        var retroShape: Shape? = null
+    fun `classic themes substitute the retro shape only when the caller passes none`() =
+        runComposeUiTest {
+            var win2000NoArg: Shape? = null
+            var win2000Explicit: Shape? = null
+            val explicit =
+                androidx.compose.foundation.shape
+                    .RoundedCornerShape(4.dp)
 
-        setContent {
-            SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
-                m3Default = ButtonDefaults.shape
-                retroShape = controlShape()
-                resolved = resolveButtonShape(null)
+            setContent {
+                SundaysTheme(darkTheme = false, palette = ThemePalette.WIN_2000) {
+                    win2000NoArg = resolveButtonShape(null)
+                    win2000Explicit = resolveButtonShape(explicit)
+                }
             }
+            waitForIdle()
+
+            assertEquals(
+                controlShapeExpected(ThemePalette.WIN_2000),
+                win2000NoArg,
+                "经典主题下未传 shape 时应取该主题的复古形状",
+            )
+            assertEquals(
+                explicit,
+                win2000Explicit,
+                "显式传了 shape 时必须原样使用调用方的值，包装层不得覆盖",
+            )
         }
-        waitForIdle()
-
-        assertEquals(
-            m3Default,
-            resolved,
-            "现代主题下未传 shape 时，包装层必须原样返回 M3 的默认形状（改造前它们拿到的就是它）",
-        )
-        // 顺带证明它确实**不是**复古形状 —— 否则这条断言会因为两边都退化成同一个值而假通过
-        assertEquals(
-            false,
-            resolved == retroShape && retroShape != m3Default,
-            "若现代形状与复古形状恰好相同，这条测试将失去分辨力，请改用其它断言",
-        )
-    }
-
-    @Test
-    fun `classic themes substitute the retro shape only when the caller passes none`() = runComposeUiTest {
-        var win2000NoArg: Shape? = null
-        var win2000Explicit: Shape? = null
-        val explicit = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
-
-        setContent {
-            SundaysTheme(darkTheme = false, palette = ThemePalette.WIN_2000) {
-                win2000NoArg = resolveButtonShape(null)
-                win2000Explicit = resolveButtonShape(explicit)
-            }
-        }
-        waitForIdle()
-
-        assertEquals(
-            controlShapeExpected(ThemePalette.WIN_2000),
-            win2000NoArg,
-            "经典主题下未传 shape 时应取该主题的复古形状",
-        )
-        assertEquals(
-            explicit,
-            win2000Explicit,
-            "显式传了 shape 时必须原样使用调用方的值，包装层不得覆盖",
-        )
-    }
 
     /**
      * 输入框的 M3 默认形状**不是**按钮的胶囊。
@@ -129,35 +132,39 @@ class ModernThemeParityTest {
      * 全变成圆弧。这条断言把两种默认形状的差异钉死。
      */
     @Test
-    fun `modern text field shape is the squared M3 default, not the button pill`() = runComposeUiTest {
-        var fieldShape: Shape? = null
-        var buttonShape: Shape? = null
-        var expectedField: Shape? = null
-        var expectedButton: Shape? = null
+    fun `modern text field shape is the squared M3 default, not the button pill`() =
+        runComposeUiTest {
+            var fieldShape: Shape? = null
+            var buttonShape: Shape? = null
+            var expectedField: Shape? = null
+            var expectedButton: Shape? = null
 
-        setContent {
-            SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
-                fieldShape = resolveTextFieldShape(null)
-                buttonShape = resolveButtonShape(null)
-                expectedField = androidx.compose.material3.MaterialTheme.shapes.extraSmall.squaredBottomForTest()
-                expectedButton = androidx.compose.material3.ButtonDefaults.shape
+            setContent {
+                SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
+                    fieldShape = resolveTextFieldShape(null)
+                    buttonShape = resolveButtonShape(null)
+                    expectedField =
+                        androidx.compose.material3.MaterialTheme.shapes.extraSmall
+                            .squaredBottomForTest()
+                    expectedButton = androidx.compose.material3.ButtonDefaults.shape
+                }
             }
-        }
-        waitForIdle()
+            waitForIdle()
 
-        assertEquals(expectedField, fieldShape, "现代主题下输入框未传 shape 时应取 extraSmall.top()（左/右/下为方角）")
-        assertEquals(expectedButton, buttonShape, "现代主题下按钮未传 shape 时应取 ButtonDefaults.shape")
-        assertNotEquals(
-            fieldShape,
-            buttonShape,
-            "输入框与按钮的 M3 默认形状必须不同 —— 相等即说明其中一边的兜底写错了",
-        )
-    }
+            assertEquals(expectedField, fieldShape, "现代主题下输入框未传 shape 时应取 extraSmall.top()（左/右/下为方角）")
+            assertEquals(expectedButton, buttonShape, "现代主题下按钮未传 shape 时应取 ButtonDefaults.shape")
+            assertNotEquals(
+                fieldShape,
+                buttonShape,
+                "输入框与按钮的 M3 默认形状必须不同 —— 相等即说明其中一边的兜底写错了",
+            )
+        }
 
     /** 经典档的期望形状：与 [resolveControlShape] 独立算出，避免自证。 */
     private fun controlShapeExpected(palette: ThemePalette): Shape {
         val tokens = palette.uiTokens(useDark = false)
-        return androidx.compose.foundation.shape.RoundedCornerShape(tokens.bevel.bevelRadius)
+        return androidx.compose.foundation.shape
+            .RoundedCornerShape(tokens.bevel.bevelRadius)
     }
 
     /**
@@ -247,25 +254,30 @@ class ModernThemeParityTest {
      * 形状与配色必须一致 —— 二者都是 M3 `Button` 的输入，输入相等即渲染相等。
      */
     @Test
-    fun `modern WinButton and plain Button resolve identical inputs`() = runComposeUiTest {
-        var winShape: Shape? = null
-        var plainShape: Shape? = null
+    fun `modern WinButton and plain Button resolve identical inputs`() =
+        runComposeUiTest {
+            var winShape: Shape? = null
+            var plainShape: Shape? = null
 
-        setContent {
-            SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
-                plainShape = ButtonDefaults.shape
-                winShape = resolveButtonShape(null)
+            setContent {
+                SundaysTheme(darkTheme = false, palette = ThemePalette.BLUE_GRAY) {
+                    plainShape = ButtonDefaults.shape
+                    winShape = resolveButtonShape(null)
+                }
             }
-        }
-        waitForIdle()
+            waitForIdle()
 
-        assertEquals(plainShape, winShape, "现代主题下 WinButton 的形状必须等于裸 M3 Button 的形状")
-    }
+            assertEquals(plainShape, winShape, "现代主题下 WinButton 的形状必须等于裸 M3 Button 的形状")
+        }
 }
 
 /** 测试侧的 `extraSmall.top()` 复现 —— 与生产代码 `squaredBottom` 同义，独立写一遍避免自证。 */
 private fun androidx.compose.foundation.shape.CornerBasedShape.squaredBottomForTest(): Shape =
     copy(
-        bottomStart = androidx.compose.foundation.shape.CornerSize(0.dp),
-        bottomEnd = androidx.compose.foundation.shape.CornerSize(0.dp),
+        bottomStart =
+            androidx.compose.foundation.shape
+                .CornerSize(0.dp),
+        bottomEnd =
+            androidx.compose.foundation.shape
+                .CornerSize(0.dp),
     )

@@ -18,7 +18,6 @@ import kotlin.test.assertTrue
  * 解析错误必须在连接前就以可读信息暴露，而不是变成一个连不上的 channel。
  */
 class GrpcClientConfigTest {
-
     @Test
     fun `bare host and port parses as TCP`() {
         val cfg = GrpcClientConfig.fromTarget("127.0.0.1:50051")
@@ -78,9 +77,10 @@ class GrpcClientConfigTest {
 
     @Test
     fun `target without port is rejected with supported formats listed`() {
-        val e = assertFailsWith<IllegalArgumentException> {
-            GrpcClientConfig.fromTarget("localhost")
-        }
+        val e =
+            assertFailsWith<IllegalArgumentException> {
+                GrpcClientConfig.fromTarget("localhost")
+            }
 
         assertTrue(
             e.message!!.contains("host:port"),
@@ -90,9 +90,10 @@ class GrpcClientConfigTest {
 
     @Test
     fun `non numeric port is rejected`() {
-        val e = assertFailsWith<IllegalArgumentException> {
-            GrpcClientConfig.fromTarget("localhost:not-a-port")
-        }
+        val e =
+            assertFailsWith<IllegalArgumentException> {
+                GrpcClientConfig.fromTarget("localhost:not-a-port")
+            }
 
         assertTrue(e.message!!.contains("not-a-port"), "error must echo the bad port, got: ${e.message}")
     }

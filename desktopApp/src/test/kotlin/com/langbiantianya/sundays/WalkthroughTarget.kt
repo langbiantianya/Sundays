@@ -64,7 +64,6 @@ class WalkthroughTarget(
     private val functionDdl: ((String) -> String)?,
     val exposesForeignKeyName: Boolean = true,
 ) {
-
     lateinit var jdbcUrl: String
         private set
 
@@ -75,14 +74,15 @@ class WalkthroughTarget(
     }
 
     /** 应用侧的连接描述 —— 走查全程用它渲染界面。 */
-    fun connectionConfig(): ConnectionConfig = ConnectionConfig(
-        id = "walkthrough-${name.lowercase()}",
-        name = "Demo${name}",
-        dialect = dialectType,
-        username = user,
-        password = password,
-        jdbcUrl = jdbcUrl,
-    )
+    fun connectionConfig(): ConnectionConfig =
+        ConnectionConfig(
+            id = "walkthrough-${name.lowercase()}",
+            name = "Demo$name",
+            dialect = dialectType,
+            username = user,
+            password = password,
+            jdbcUrl = jdbcUrl,
+        )
 
     /** 开一条**独立于引擎连接池**的直连 —— 事务可见性靠它判。 */
     fun openDirect(): Connection =
@@ -92,12 +92,28 @@ class WalkthroughTarget(
         }
 
     /** 建触发器。返回 `null` 表示该方言没这个概念（连试都不必试）。 */
-    fun createTrigger(stmt: java.sql.Statement, hostClass: String): String? =
-        triggerDdl?.let { runCatching { stmt.executeUpdate(it(hostClass)); "ok" }.getOrElse { "failed: ${it.message}" } }
+    fun createTrigger(
+        stmt: java.sql.Statement,
+        hostClass: String,
+    ): String? =
+        triggerDdl?.let {
+            runCatching {
+                stmt.executeUpdate(it(hostClass))
+                "ok"
+            }.getOrElse { "failed: ${it.message}" }
+        }
 
     /** 建函数别名（H2 的 `CREATE ALIAS`）。 */
-    fun createFunction(stmt: java.sql.Statement, hostClass: String): String? =
-        functionDdl?.let { runCatching { stmt.executeUpdate(it(hostClass)); "ok" }.getOrElse { "failed: ${it.message}" } }
+    fun createFunction(
+        stmt: java.sql.Statement,
+        hostClass: String,
+    ): String? =
+        functionDdl?.let {
+            runCatching {
+                stmt.executeUpdate(it(hostClass))
+                "ok"
+            }.getOrElse { "failed: ${it.message}" }
+        }
 
     /** 走查日志用的一行摘要。 */
     override fun toString(): String = name
@@ -109,22 +125,23 @@ class WalkthroughTarget(
          * 触发器必须 `CALL` 一个 Java 静态方法（H2 没有内联触发器语法），
          * 所以 DDL 里塞了 [hostClass] 这个反射宿主。
          */
-        val H2 = WalkthroughTarget(
-            name = "H2",
-            dialectType = DialectType.H2,
-            driverName = "H2",
-            registerDialect = { DialectLoader.registerForTesting("H2", H2Dialect()) },
-            // DB_CLOSE_DELAY=-1：最后一个连接关掉后库仍在，同 JVM 的独立连接才看得到同一份数据
-            urlFactory = { dir -> "jdbc:h2:mem:wt${System.nanoTime()};DB_CLOSE_DELAY=-1" },
-            user = "sa",
-            password = "",
-            supportsDatabaseObjects = setOf("VIEW", "TRIGGER", "FUNCTION"),
-            triggerDdl = { host ->
-                """CREATE TRIGGER trg_users_guard BEFORE DELETE ON users
+        val H2 =
+            WalkthroughTarget(
+                name = "H2",
+                dialectType = DialectType.H2,
+                driverName = "H2",
+                registerDialect = { DialectLoader.registerForTesting("H2", H2Dialect()) },
+                // DB_CLOSE_DELAY=-1：最后一个连接关掉后库仍在，同 JVM 的独立连接才看得到同一份数据
+                urlFactory = { dir -> "jdbc:h2:mem:wt${System.nanoTime()};DB_CLOSE_DELAY=-1" },
+                user = "sa",
+                password = "",
+                supportsDatabaseObjects = setOf("VIEW", "TRIGGER", "FUNCTION"),
+                triggerDdl = { host ->
+                    """CREATE TRIGGER trg_users_guard BEFORE DELETE ON users
                    FOR EACH ROW CALL "$host.fire""""
-            },
-            functionDdl = { host -> """CREATE ALIAS double_it FOR "$host.doubleIt"""" },
-        )
+                },
+                functionDdl = { host -> """CREATE ALIAS double_it FOR "$host.doubleIt"""" },
+            )
 
         /**
          * SQLite —— **没有**触发器与过程/函数的一方。
@@ -136,23 +153,24 @@ class WalkthroughTarget(
          * 走查用例把「读不到 / 被锁」都算作「未提交的数据对他人不可见」——
          * 这在语义上是对的，而且必须显式写出来，否则换个平台就变成一个查不到的错误。
          */
-        val SQLITE = WalkthroughTarget(
-            name = "SQLite",
-            dialectType = DialectType.SQLITE,
-            driverName = "Sqlite",
-            registerDialect = { DialectLoader.registerForTesting("Sqlite", SQLiteDialect()) },
-            urlFactory = { dir ->
-                // busy_timeout 让「别人持写锁」从立刻报错变成等待，避免用例偶发超时
-                "jdbc:sqlite:${File(dir, "wt.db").absolutePath.replace('\\', '/')}?busy_timeout=5000"
-            },
-            user = "",
-            password = "",
-            // 触发器 / 过程·函数留空 —— `SQLiteDialect` 明确对它们抛 UnsupportedOperationException
-            supportsDatabaseObjects = setOf("VIEW"),
-            triggerDdl = null,
-            functionDdl = null,
-            exposesForeignKeyName = false,
-        )
+        val SQLITE =
+            WalkthroughTarget(
+                name = "SQLite",
+                dialectType = DialectType.SQLITE,
+                driverName = "Sqlite",
+                registerDialect = { DialectLoader.registerForTesting("Sqlite", SQLiteDialect()) },
+                urlFactory = { dir ->
+                    // busy_timeout 让「别人持写锁」从立刻报错变成等待，避免用例偶发超时
+                    "jdbc:sqlite:${File(dir, "wt.db").absolutePath.replace('\\', '/')}?busy_timeout=5000"
+                },
+                user = "",
+                password = "",
+                // 触发器 / 过程·函数留空 —— `SQLiteDialect` 明确对它们抛 UnsupportedOperationException
+                supportsDatabaseObjects = setOf("VIEW"),
+                triggerDdl = null,
+                functionDdl = null,
+                exposesForeignKeyName = false,
+            )
 
         /** 走查覆盖的两个方言。 */
         fun all(): List<WalkthroughTarget> = listOf(H2, SQLITE)

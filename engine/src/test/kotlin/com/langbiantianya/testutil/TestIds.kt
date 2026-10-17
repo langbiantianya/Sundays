@@ -80,7 +80,11 @@ object TestIds {
     fun uniqueName(prefix: String): String {
         // 直接用 [java.util.UUID] 的随机性 — counter 在 JVM 重启时归零,
         // 但文件命名场景需要跨 JVM 唯一。
-        val raw = java.util.UUID.randomUUID().toString().replace("-", "")
+        val raw =
+            java.util.UUID
+                .randomUUID()
+                .toString()
+                .replace("-", "")
         return "${prefix}_${raw.take(12)}"
     }
 }

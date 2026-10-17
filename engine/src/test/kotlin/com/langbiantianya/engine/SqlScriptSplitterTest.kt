@@ -20,7 +20,6 @@ import kotlin.test.assertTrue
  * 因此带前置注释的脚本切出的语句会包含该注释文本。
  */
 class SqlScriptSplitterTest {
-
     @Test
     fun `trims and drops empty fragments`() {
         assertEquals(listOf("SELECT 1", "SELECT 2"), SqlScriptSplitter.split("SELECT 1; SELECT 2;"))
@@ -102,7 +101,8 @@ class SqlScriptSplitterTest {
 
     @Test
     fun `block comment spanning lines does not split`() {
-        val script = """
+        val script =
+            """
             CREATE TABLE t (
               a INT, -- a;b
               /* block; comment
@@ -110,7 +110,7 @@ class SqlScriptSplitterTest {
               b INT
             );
             SELECT 1;
-        """.trimIndent()
+            """.trimIndent()
         assertEquals(
             listOf(
                 "CREATE TABLE t (\n  a INT, -- a;b\n  /* block; comment\n     spanning; lines */\n  b INT\n)",
@@ -160,7 +160,8 @@ class SqlScriptSplitterTest {
 
     @Test
     fun `mixed quoting in one script`() {
-        val script = """
+        val script =
+            """
             -- setup; table
             CREATE TABLE "ord;ers" (
               id INT PRIMARY KEY,
@@ -170,7 +171,7 @@ class SqlScriptSplitterTest {
             /* insert; rows */
             INSERT INTO "ord;ers" VALUES (1, 'it''s; fine');
             SELECT * FROM "ord;ers" WHERE note = 'a;b''c' LIMIT 1;
-        """.trimIndent()
+            """.trimIndent()
         assertEquals(
             listOf(
                 "-- setup; table\nCREATE TABLE \"ord;ers\" (\n  id INT PRIMARY KEY,\n" +
@@ -184,7 +185,8 @@ class SqlScriptSplitterTest {
 
     @Test
     fun `realistic ddl and dml script`() {
-        val script = """
+        val script =
+            """
             -- 初始化; schema
             CREATE SCHEMA IF NOT EXISTS app;
             DROP TABLE IF EXISTS app.users; -- 允许; 重复执行
@@ -203,7 +205,7 @@ class SqlScriptSplitterTest {
             END;
             ${'$'}func${'$'};
             SELECT count_users FROM app.users LIMIT 1;
-        """.trimIndent()
+            """.trimIndent()
         val statements = SqlScriptSplitter.split(script)
         assertEquals(6, statements.size)
         assertEquals("-- 初始化; schema\nCREATE SCHEMA IF NOT EXISTS app", statements[0])

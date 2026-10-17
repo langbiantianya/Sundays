@@ -51,7 +51,6 @@ import androidx.compose.ui.geometry.Offset
  */
 @Stable
 class ContextMenuState<T : Any> {
-
     /** 当前右键点击的绝对坐标（相对 Composable 根的偏移）。 */
     var position: Offset by mutableStateOf(Offset.Zero)
         private set
@@ -70,7 +69,10 @@ class ContextMenuState<T : Any> {
      * @param atPosition 右键点击的坐标
      * @param payload 关联到此次点击的上下文对象（可为 `null`）
      */
-    fun show(atPosition: Offset, payload: T?) {
+    fun show(
+        atPosition: Offset,
+        payload: T?,
+    ) {
         position = atPosition
         this.payload = payload
         visible = true
@@ -87,5 +89,4 @@ class ContextMenuState<T : Any> {
  * 创建并 [remember] 一个 `ContextMenuState<Unit>` —— 适用于不需要 payload 的场景。
  */
 @Composable
-fun rememberContextMenuState(): ContextMenuState<Unit> =
-    remember { ContextMenuState() }
+fun rememberContextMenuState(): ContextMenuState<Unit> = remember { ContextMenuState() }

@@ -24,7 +24,6 @@ import kotlin.test.assertTrue
  * 就是注入面。
  */
 class SqlLiteralsTest {
-
     @Test
     fun `plain text is quoted as is`() {
         assertEquals("'alice'", SqlLiterals.quote("alice"))
@@ -79,7 +78,7 @@ class SqlLiteralsTest {
         )
     }
 
-    /**
+    /*
      * ⚠️ **本文件最重要的一条**：拼出来的片段必须**自带左操作数**。
      *
      * 上一版 `likeContains(term)` 返回的是 `"LIKE '%bob%'"` —— 一个没有列名的残句，
@@ -90,6 +89,7 @@ class SqlLiteralsTest {
      *
      * 判据必须落在**发出去的那条语句**上，而不是它的某个片段上。
      */
+
     /**
      * ⚠️ **CAST 的目标类型逐方言不同，没有公共解** —— 这条就是四方言冒烟逼出来的。
      *

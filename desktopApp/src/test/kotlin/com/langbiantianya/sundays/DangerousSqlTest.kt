@@ -23,7 +23,6 @@ import kotlin.test.assertTrue
  * 宁可误报也不漏报，所以判据往保守一侧偏；测试里对每一条都钉住。
  */
 class DangerousSqlTest {
-
     // ---------------- 应当判为危险 ----------------
 
     @Test
@@ -56,11 +55,14 @@ class DangerousSqlTest {
      */
     @Test
     fun `every dangerous statement in a script is reported`() {
-        val f = DangerousSql.scan("""
-            UPDATE users SET a = 1;
-            DELETE FROM orders;
-            DROP TABLE logs;
-        """.trimIndent())
+        val f =
+            DangerousSql.scan(
+                """
+                UPDATE users SET a = 1;
+                DELETE FROM orders;
+                DROP TABLE logs;
+                """.trimIndent(),
+            )
         assertEquals(
             listOf(
                 DangerousSql.Finding.Kind.UPDATE_WITHOUT_WHERE,

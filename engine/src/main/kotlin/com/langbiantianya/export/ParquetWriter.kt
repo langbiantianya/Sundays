@@ -32,8 +32,9 @@ import java.time.LocalDateTime
  * - 使用 ParquetWriter 直接写入
  * - 根据 JDBC 类型智能推断 Parquet 类型
  */
-class ParquetWriter(private val outputFile: File) : ExportWriter {
-
+class ParquetWriter(
+    private val outputFile: File,
+) : ExportWriter {
     private val logger = LoggerFactory.getLogger(ParquetWriter::class.java)
 
     private var writer: ParquetWriter<Group>? = null
@@ -77,12 +78,15 @@ class ParquetWriter(private val outputFile: File) : ExportWriter {
     private fun initWriterAndFactory() {
         try {
             // 构建 Schema - 根据 JDBC 类型推断 Parquet 类型
-            val fields = columns.map { col ->
-                val parquetType = inferParquetType(col)
-                val builder = org.apache.parquet.schema.Types.required(parquetType.parquetType)
-                parquetType.logicalType?.let { builder.`as`(it) } ?: builder
-                builder.named(col.name)
-            }
+            val fields =
+                columns.map { col ->
+                    val parquetType = inferParquetType(col)
+                    val builder =
+                        org.apache.parquet.schema.Types
+                            .required(parquetType.parquetType)
+                    parquetType.logicalType?.let { builder.`as`(it) } ?: builder
+                    builder.named(col.name)
+                }
             schema = MessageType("export", fields)
 
             val conf = Configuration()
@@ -118,44 +122,73 @@ class ParquetWriter(private val outputFile: File) : ExportWriter {
     /**
      * 根据 JDBC 类型推断 Parquet 类型
      */
-    private fun inferParquetType(columnInfo: ColumnInfo): ParquetTypeInfo {
-        return when (columnInfo.typeCode) {
+    private fun inferParquetType(columnInfo: ColumnInfo): ParquetTypeInfo =
+        when (columnInfo.typeCode) {
             // 整数类型
-            Types.BIT, Types.TINYINT, Types.SMALLINT, Types.INTEGER -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT32, null)
-            Types.BIGINT -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT64, null)
+            Types.BIT, Types.TINYINT, Types.SMALLINT, Types.INTEGER -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT32, null)
+            }
+
+            Types.BIGINT -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT64, null)
+            }
 
             // 浮点类型
-            Types.FLOAT, Types.REAL -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.FLOAT, null)
-            Types.DOUBLE, Types.NUMERIC, Types.DECIMAL -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.DOUBLE, null)
+            Types.FLOAT, Types.REAL -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.FLOAT, null)
+            }
+
+            Types.DOUBLE, Types.NUMERIC, Types.DECIMAL -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.DOUBLE, null)
+            }
 
             // 布尔类型
-            Types.BOOLEAN -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BOOLEAN, null)
+            Types.BOOLEAN -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BOOLEAN, null)
+            }
 
             // 字符串类型
             Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR,
-            Types.CLOB, Types.NCLOB -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BINARY, LogicalTypeAnnotation.stringType())
+            Types.CLOB, Types.NCLOB,
+            -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BINARY, LogicalTypeAnnotation.stringType())
+            }
 
             // 日期时间类型
-            Types.DATE -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT32, LogicalTypeAnnotation.dateType())
-            Types.TIME, Types.TIME_WITH_TIMEZONE -> ParquetTypeInfo(
-                PrimitiveType.PrimitiveTypeName.INT64,
-                LogicalTypeAnnotation.timeType(false, LogicalTypeAnnotation.TimeUnit.MICROS)
-            )
-            Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> ParquetTypeInfo(
-                PrimitiveType.PrimitiveTypeName.INT64,
-                LogicalTypeAnnotation.timestampType(false, LogicalTypeAnnotation.TimeUnit.MICROS)
-            )
+            Types.DATE -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.INT32, LogicalTypeAnnotation.dateType())
+            }
+
+            Types.TIME, Types.TIME_WITH_TIMEZONE -> {
+                ParquetTypeInfo(
+                    PrimitiveType.PrimitiveTypeName.INT64,
+                    LogicalTypeAnnotation.timeType(false, LogicalTypeAnnotation.TimeUnit.MICROS),
+                )
+            }
+
+            Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> {
+                ParquetTypeInfo(
+                    PrimitiveType.PrimitiveTypeName.INT64,
+                    LogicalTypeAnnotation.timestampType(false, LogicalTypeAnnotation.TimeUnit.MICROS),
+                )
+            }
 
             // 二进制类型
-            Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB ->
+            Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> {
                 ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BINARY, null)
+            }
 
             // 其他类型默认用字符串
-            else -> ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BINARY, LogicalTypeAnnotation.stringType())
+            else -> {
+                ParquetTypeInfo(PrimitiveType.PrimitiveTypeName.BINARY, LogicalTypeAnnotation.stringType())
+            }
         }
-    }
 
-    private fun writeValue(group: Group, columnInfo: ColumnInfo, value: Any?) {
+    private fun writeValue(
+        group: Group,
+        columnInfo: ColumnInfo,
+        value: Any?,
+    ) {
         val parquetType = inferParquetType(columnInfo)
         val columnName = columnInfo.name
 
@@ -180,46 +213,57 @@ class ParquetWriter(private val outputFile: File) : ExportWriter {
                         group.append(columnName, (value as Number).toInt())
                     }
                 }
+
                 PrimitiveType.PrimitiveTypeName.INT64 -> {
-                    val longValue = when (value) {
-                        is Long -> value
-                        is Number -> value.toLong()
-                        is Date -> value.time
-                        is Timestamp -> value.time
-                        is LocalDate -> value.toEpochDay() * 86400000L
-                        is LocalDateTime -> value.toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
-                        else -> value.toString().toLongOrNull() ?: 0L
-                    }
+                    val longValue =
+                        when (value) {
+                            is Long -> value
+                            is Number -> value.toLong()
+                            is Date -> value.time
+                            is Timestamp -> value.time
+                            is LocalDate -> value.toEpochDay() * 86400000L
+                            is LocalDateTime -> value.toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+                            else -> value.toString().toLongOrNull() ?: 0L
+                        }
                     group.append(columnName, longValue)
                 }
+
                 PrimitiveType.PrimitiveTypeName.DOUBLE -> {
-                    val doubleValue = when (value) {
-                        is BigDecimal -> value.toDouble()
-                        is Double -> value
-                        is Number -> value.toDouble()
-                        else -> value.toString().toDoubleOrNull() ?: 0.0
-                    }
+                    val doubleValue =
+                        when (value) {
+                            is BigDecimal -> value.toDouble()
+                            is Double -> value
+                            is Number -> value.toDouble()
+                            else -> value.toString().toDoubleOrNull() ?: 0.0
+                        }
                     group.append(columnName, doubleValue)
                 }
+
                 PrimitiveType.PrimitiveTypeName.FLOAT -> {
-                    val floatValue = when (value) {
-                        is Float -> value
-                        is Number -> value.toFloat()
-                        else -> value.toString().toFloatOrNull() ?: 0.0f
-                    }
+                    val floatValue =
+                        when (value) {
+                            is Float -> value
+                            is Number -> value.toFloat()
+                            else -> value.toString().toFloatOrNull() ?: 0.0f
+                        }
                     group.append(columnName, floatValue)
                 }
-                PrimitiveType.PrimitiveTypeName.BOOLEAN -> group.append(columnName, value as Boolean)
+
+                PrimitiveType.PrimitiveTypeName.BOOLEAN -> {
+                    group.append(columnName, value as Boolean)
+                }
+
                 else -> {
-                    val strValue = when (value) {
-                        is Date -> value.toString()
-                        is Timestamp -> value.toString()
-                        is LocalDate -> value.toString()
-                        is LocalDateTime -> value.toString()
-                        is BigDecimal -> value.toPlainString()
-                        is ByteArray -> value.joinToString("") { "%02x".format(it) }
-                        else -> value.toString()
-                    }
+                    val strValue =
+                        when (value) {
+                            is Date -> value.toString()
+                            is Timestamp -> value.toString()
+                            is LocalDate -> value.toString()
+                            is LocalDateTime -> value.toString()
+                            is BigDecimal -> value.toPlainString()
+                            is ByteArray -> value.joinToString("") { "%02x".format(it) }
+                            else -> value.toString()
+                        }
                     group.append(columnName, Binary.fromString(strValue))
                 }
             }
@@ -228,6 +272,6 @@ class ParquetWriter(private val outputFile: File) : ExportWriter {
 
     private data class ParquetTypeInfo(
         val parquetType: PrimitiveType.PrimitiveTypeName,
-        val logicalType: LogicalTypeAnnotation?
+        val logicalType: LogicalTypeAnnotation?,
     )
 }

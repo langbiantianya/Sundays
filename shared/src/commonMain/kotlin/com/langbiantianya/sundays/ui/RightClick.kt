@@ -46,17 +46,18 @@ import androidx.compose.ui.util.fastAll
  */
 fun Modifier.onRightClick(
     onRightClick: (Offset) -> Unit,
-): Modifier = this.pointerInput(Unit) {
-    awaitEachGesture {
-        val event = awaitPointerEvent(PointerEventPass.Main)
-        if (event.buttons.isSecondaryPressed &&
-            event.changes.fastAll { it.changedToDown() }
-        ) {
-            // 消费事件，防止冒泡到父级（避免与外层滚动冲突）
-            event.changes.forEach { it.consume() }
-            onRightClick(event.changes[0].position)
-            // 等到释放后才返回监听（防止单次右键多次触发）
-            waitForUpOrCancellation()?.consume()
+): Modifier =
+    this.pointerInput(Unit) {
+        awaitEachGesture {
+            val event = awaitPointerEvent(PointerEventPass.Main)
+            if (event.buttons.isSecondaryPressed &&
+                event.changes.fastAll { it.changedToDown() }
+            ) {
+                // 消费事件，防止冒泡到父级（避免与外层滚动冲突）
+                event.changes.forEach { it.consume() }
+                onRightClick(event.changes[0].position)
+                // 等到释放后才返回监听（防止单次右键多次触发）
+                waitForUpOrCancellation()?.consume()
+            }
         }
     }
-}

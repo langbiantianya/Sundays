@@ -8,11 +8,11 @@
 
 package com.langbiantianya.export
 
-import com.langbiantianya.handlers.ExportHandler
 import com.langbiantianya.grpc.ExportCommand
 import com.langbiantianya.grpc.ExportCommand.Kind
 import com.langbiantianya.grpc.ExportHubGrpc
 import com.langbiantianya.grpc.ExportHubResponse
+import com.langbiantianya.handlers.ExportHandler
 import io.grpc.ServerBuilder
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.CoroutineScope
@@ -33,7 +33,6 @@ import kotlin.system.exitProcess
  * - 推送 ExportHubResponse 流（每条命令的执行进度）
  */
 object ExportSubProcess {
-
     private val logger = LoggerFactory.getLogger(ExportSubProcess::class.java)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -53,33 +52,46 @@ object ExportSubProcess {
 
     fun run() {
         val port = System.getProperty("idb.export.hub.port")?.toIntOrNull() ?: 50099
-        logger.info("Export SubProcess starting (gRPC mode), listening on :$port"); System.err.println("[export-sub] 启动，监听 :$port")
+        logger.info("Export SubProcess starting (gRPC mode), listening on :$port")
+        System.err.println("[export-sub] 启动，监听 :$port")
 
         // 加载 drivers / dialects（子进程独立 classpath）
         try {
             val baseDir = findBaseDir()
-            com.langbiantianya.loader.DriverLoader.loadFromDir(File(baseDir, "drivers"))
-            com.langbiantianya.loader.DialectLoader.loadFromDir(File(baseDir, "dialects"))
-            logger.info("Loaded drivers and dialects from $baseDir"); System.err.println("[export-sub] 驱动/方言已加载: $baseDir")
+            com.langbiantianya.loader.DriverLoader
+                .loadFromDir(File(baseDir, "drivers"))
+            com.langbiantianya.loader.DialectLoader
+                .loadFromDir(File(baseDir, "dialects"))
+            logger.info("Loaded drivers and dialects from $baseDir")
+            System.err.println("[export-sub] 驱动/方言已加载: $baseDir")
         } catch (e: Exception) {
-            logger.warn("Failed to load drivers/dialects", e); System.err.println("[export-sub] 驱动/方言加载失败: ${e.message}")
+            logger.warn("Failed to load drivers/dialects", e)
+            System.err.println("[export-sub] 驱动/方言加载失败: ${e.message}")
         }
 
         // 优雅退出 hook
-        Runtime.getRuntime().addShutdownHook(Thread {
-            logger.info("Shutdown hook triggered")
-            shouldStop = true
-            try { server?.shutdownNow() } catch (_: Exception) {}
-            stopAllExports()
-        })
+        Runtime.getRuntime().addShutdownHook(
+            Thread {
+                logger.info("Shutdown hook triggered")
+                shouldStop = true
+                try {
+                    server?.shutdownNow()
+                } catch (_: Exception) {
+                }
+                stopAllExports()
+            },
+        )
 
-        server = ServerBuilder.forPort(port)
-            .addService(ExportHubImpl())
-            .maxInboundMessageSize(256 * 1024 * 1024)
-            .build()
-            .also { it.start() }
+        server =
+            ServerBuilder
+                .forPort(port)
+                .addService(ExportHubImpl())
+                .maxInboundMessageSize(256 * 1024 * 1024)
+                .build()
+                .also { it.start() }
 
-        logger.info("ExportHub gRPC server started on :$port"); System.err.println("[export-sub] ExportHub 已启动 :$port")
+        logger.info("ExportHub gRPC server started on :$port")
+        System.err.println("[export-sub] ExportHub 已启动 :$port")
 
         try {
             server?.awaitTermination()
@@ -99,7 +111,8 @@ object ExportSubProcess {
      */
     private class ExportHubImpl : ExportHubGrpc.ExportHubImplBase() {
         override fun stream(responseObserver: StreamObserver<ExportHubResponse>): StreamObserver<ExportCommand> {
-            logger.info("Parent connected to ExportHub"); System.err.println("[export-sub] 父进程已连接")
+            logger.info("Parent connected to ExportHub")
+            System.err.println("[export-sub] 父进程已连接")
 
             // ⚠️ gRPC 的 `StreamObserver.onNext` **不是线程安全的**。
             //
@@ -115,26 +128,34 @@ object ExportSubProcess {
             val sendLock = Any()
 
             /** 线程安全地发一帧；流已关闭时返回 false 而不是把异常抛回业务协程。 */
-            fun sendFrame(response: ExportHubResponse): Boolean = synchronized(sendLock) {
-                try {
-                    responseObserver.onNext(response)
-                    true
-                } catch (e: Exception) {
-                    // 流已被父进程关闭时会走到这里。不该让一个已废的流把导出协程带崩
-                    logger.warn("Failed to send frame on ExportHub stream", e)
-                    System.err.println("[export-sub] 发帧失败（流可能已关闭）: ${e.message}")
-                    false
+            fun sendFrame(response: ExportHubResponse): Boolean =
+                synchronized(sendLock) {
+                    try {
+                        responseObserver.onNext(response)
+                        true
+                    } catch (e: Exception) {
+                        // 流已被父进程关闭时会走到这里。不该让一个已废的流把导出协程带崩
+                        logger.warn("Failed to send frame on ExportHub stream", e)
+                        System.err.println("[export-sub] 发帧失败（流可能已关闭）: ${e.message}")
+                        false
+                    }
                 }
-            }
 
             return object : StreamObserver<ExportCommand> {
                 override fun onNext(cmd: ExportCommand) {
-                    logger.debug("Subprocess received command: ${cmd.kind}"); System.err.println("[export-sub] 收到命令 ${cmd.kind} id=${cmd.id}")
+                    logger.debug("Subprocess received command: ${cmd.kind}")
+                    System.err.println("[export-sub] 收到命令 ${cmd.kind} id=${cmd.id}")
                     when (cmd.kind) {
                         // `::sendFrame` 必须显式取引用：裸写 `sendFrame` 会被 Kotlin 当成一次调用
 // （报 "Function invocation expected"），而不是一个函数值。
-Kind.START_EXPORT -> handleStartExport(cmd, ::sendFrame)
-                        Kind.STOP_EXPORT -> handleStopExport(cmd.exportId)
+                        Kind.START_EXPORT -> {
+                            handleStartExport(cmd, ::sendFrame)
+                        }
+
+                        Kind.STOP_EXPORT -> {
+                            handleStopExport(cmd.exportId)
+                        }
+
                         Kind.SHUTDOWN -> {
                             logger.info("Received SHUTDOWN")
                             synchronized(sendLock) { runCatching { responseObserver.onCompleted() } }
@@ -143,6 +164,7 @@ Kind.START_EXPORT -> handleStartExport(cmd, ::sendFrame)
                                 server?.shutdownNow()
                             }
                         }
+
                         Kind.KIND_UNSPECIFIED, Kind.UNRECOGNIZED -> {
                             logger.warn("Received unspecified/unrecognized command, ignored")
                         }
@@ -166,68 +188,77 @@ Kind.START_EXPORT -> handleStartExport(cmd, ::sendFrame)
      *
      * @param send 线程安全的发帧函数（见 [ExportHubImpl.stream] 里关于 onNext 线程安全的说明）
      */
-    private fun handleStartExport(cmd: ExportCommand, send: (ExportHubResponse) -> Boolean) {
+    private fun handleStartExport(
+        cmd: ExportCommand,
+        send: (ExportHubResponse) -> Boolean,
+    ) {
         val id = cmd.id
         if (id.isBlank()) {
             send(
-                ExportHubResponse.newBuilder()
+                ExportHubResponse
+                    .newBuilder()
                     .setId("unknown")
                     .setSuccess(false)
                     .setError("Missing export id")
                     .setEnd(true)
-                    .build()
+                    .build(),
             )
             return
         }
         if (activeExports.containsKey(id)) {
             send(
-                ExportHubResponse.newBuilder()
+                ExportHubResponse
+                    .newBuilder()
                     .setId(id)
                     .setSuccess(false)
                     .setError("Export $id already running")
                     .setEnd(true)
-                    .build()
+                    .build(),
             )
             return
         }
 
-        val job = scope.launch {
-            try {
-                // 构造 typed Request 对象（ExportHandler.executeAsSubprocess 需要）。
-                // 注：子进程 wire 上的 ExportCommand 仍使用 map<string,Value> payload；
-                // 我们在内部把它填进 typed ExportRequest.run_export 中。
-                val request = com.langbiantianya.grpc.Request.newBuilder()
-                    .setId(id)
-                    .setCategory(com.langbiantianya.grpc.Category.EXPORT)
-                    .setAction(com.langbiantianya.grpc.Action.RUN_EXPORT)
-                    .setConnection(cmd.connection)
-                    .setExportRequest(
-                        com.langbiantianya.grpc.ExportRequest.newBuilder().setRunExport(
-                            buildExportRunFromPayload(cmd.payloadMap)
-                        )
-                    )
-                    .build()
+        val job =
+            scope.launch {
+                try {
+                    // 构造 typed Request 对象（ExportHandler.executeAsSubprocess 需要）。
+                    // 注：子进程 wire 上的 ExportCommand 仍使用 map<string,Value> payload；
+                    // 我们在内部把它填进 typed ExportRequest.run_export 中。
+                    val request =
+                        com.langbiantianya.grpc.Request
+                            .newBuilder()
+                            .setId(id)
+                            .setCategory(com.langbiantianya.grpc.Category.EXPORT)
+                            .setAction(com.langbiantianya.grpc.Action.RUN_EXPORT)
+                            .setConnection(cmd.connection)
+                            .setExportRequest(
+                                com.langbiantianya.grpc.ExportRequest.newBuilder().setRunExport(
+                                    buildExportRunFromPayload(cmd.payloadMap),
+                                ),
+                            ).build()
 
-                // executeAsSubprocess 直接返回 Flow<ExportHubResponse>（subprocess wire shape），
-                // 省去 typed Response ↔ Value 的来回转换
-                ExportHandler.executeAsSubprocess(request).collect { hubResp ->
-                    System.err.println("[export-sub] 回帧 id=${hubResp.id} end=${hubResp.end} success=${hubResp.success} 有数据=${hubResp.hasData()}")
-                    send(hubResp)
+                    // executeAsSubprocess 直接返回 Flow<ExportHubResponse>（subprocess wire shape），
+                    // 省去 typed Response ↔ Value 的来回转换
+                    ExportHandler.executeAsSubprocess(request).collect { hubResp ->
+                        System.err.println("[export-sub] 回帧 id=${hubResp.id} end=${hubResp.end} success=${hubResp.success} 有数据=${hubResp.hasData()}")
+                        send(hubResp)
+                    }
+                } catch (e: Exception) {
+                    logger.error("Export failed: $id", e)
+                    System.err.println("[export-sub] 导出抛异常 id=$id: $e")
+                    send(
+                        ExportHubResponse
+                            .newBuilder()
+                            .setId(id)
+                            .setSuccess(false)
+                            .setError(e.message ?: "Export failed")
+                            .setEnd(true)
+                            .build(),
+                    )
+                } finally {
+                    activeExports.remove(id)
                 }
-            } catch (e: Exception) {
-                logger.error("Export failed: $id", e); System.err.println("[export-sub] 导出抛异常 id=$id: $e")
-                send(
-                    ExportHubResponse.newBuilder()
-                        .setId(id)
-                        .setSuccess(false)
-                        .setError(e.message ?: "Export failed")
-                        .setEnd(true)
-                        .build()
-                )
-            } finally {
-                activeExports.remove(id)
             }
-        }
         activeExports[id] = job
     }
 
@@ -265,27 +296,41 @@ Kind.START_EXPORT -> handleStartExport(cmd, ::sendFrame)
      * Value → string 通过 com.google.protobuf.Value 的 stringValue / numberValue 字段读取。
      */
     private fun buildExportRunFromPayload(
-        payload: Map<String, com.google.protobuf.Value>
+        payload: Map<String, com.google.protobuf.Value>,
     ): com.langbiantianya.grpc.ExportRunRequest {
-        val b = com.langbiantianya.grpc.ExportRunRequest.newBuilder()
-        payload["sql"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        val b =
+            com.langbiantianya.grpc.ExportRunRequest
+                .newBuilder()
+        payload["sql"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.sql = it.stringValue }
-        payload["outputDir"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        payload["outputDir"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.outputDir = it.stringValue }
-        payload["fileName"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        payload["fileName"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.fileName = it.stringValue }
-        payload["format"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        payload["format"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.format = it.stringValue }
-        payload["tableName"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        payload["tableName"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.tableName = it.stringValue }
         payload["fetchSize"]?.let {
             when (it.kindCase) {
-                com.google.protobuf.Value.KindCase.NUMBER_VALUE -> b.fetchSize = it.numberValue.toInt()
-                com.google.protobuf.Value.KindCase.STRING_VALUE -> b.fetchSize = it.stringValue.toIntOrNull() ?: 0
+                com.google.protobuf.Value.KindCase.NUMBER_VALUE -> {
+                    b.fetchSize = it.numberValue.toInt()
+                }
+
+                com.google.protobuf.Value.KindCase.STRING_VALUE -> {
+                    b.fetchSize = it.stringValue.toIntOrNull() ?: 0
+                }
+
                 else -> {}
             }
         }
-        payload["stopExportId"]?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
+        payload["stopExportId"]
+            ?.takeIf { it.kindCase == com.google.protobuf.Value.KindCase.STRING_VALUE }
             ?.let { b.stopExportId = it.stringValue }
         return b.build()
     }

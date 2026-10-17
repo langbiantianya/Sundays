@@ -10,10 +10,10 @@ package com.langbiantianya.sundays.editor
 
 import com.langbiantianya.i18n.StrKey
 
-/**
+/*
  * 补全候选 —— 编辑器「提示」功能的数据模型。
  *
- * ## 为什么独立于 [CodeToken]
+ * ## 为什么独立于 `CodeToken`
  *
  * 高亮回答「这个 token 是什么」，补全回答「此刻可以填什么」。前者是被动的（扫一遍已有文本），
  * 后者是主动的（要结合光标位置与用户意图），两者生命周期与数据量都不同，硬塞进一套模型只会互相拖累。
@@ -25,11 +25,13 @@ import com.langbiantianya.i18n.StrKey
  *
  * Lua 关键字大小写敏感（`If` ≠ `if`），若忽略大小写把 `Pri` 补成 `print`，等于**篡改用户标识符的语义**。
  * 因此 Lua 走**大小写敏感**匹配。这条策略不进本文件，由各自语言的
- * [CodeLanguage.completionCandidates] 决定 —— 谁拥有大小写规则，谁说了算。
+ * `CodeLanguage.completionCandidates` 决定 —— 谁拥有大小写规则，谁说了算。
  */
 
 /** 候选类别 —— 决定弹层里的图标与配色。 */
-enum class CompletionKind(val displayKey: StrKey) {
+enum class CompletionKind(
+    val displayKey: StrKey,
+) {
     KEYWORD(StrKey.COMPLETION_KEYWORD),
     TYPE(StrKey.TYPE_LABEL),
     BUILTIN(StrKey.COMPLETION_FUNCTION),
@@ -95,7 +97,10 @@ const val MIN_COMPLETION_PREFIX: Int = 1
  * [caret] 可能越界（外部直接塞进来的 `TextFieldValue`），一律夹到 `text` 长度内，
  * 不抛异常 —— 这条函数在每次按键后都会跑。
  */
-fun wordPrefixBefore(text: String, caret: Int): String {
+fun wordPrefixBefore(
+    text: String,
+    caret: Int,
+): String {
     val pos = caret.coerceIn(0, text.length)
     return text.substring(wordBoundsAround(text, pos).first, pos)
 }
@@ -111,7 +116,10 @@ fun wordPrefixBefore(text: String, caret: Int): String {
  * 整个词 —— 光标落在词中间（`sel|ect`）时，接受 `SELECT` 应当得到 `SELECT` 而不是
  * `SELECTect`。两个需求方向不同，所以分成两个函数。
  */
-fun wordBoundsAround(text: String, caret: Int): IntRange {
+fun wordBoundsAround(
+    text: String,
+    caret: Int,
+): IntRange {
     val pos = caret.coerceIn(0, text.length)
     var start = pos
     while (start > 0 && isWordChar(text[start - 1])) start--
@@ -121,8 +129,7 @@ fun wordBoundsAround(text: String, caret: Int): IntRange {
 }
 
 /** 标识符词字符 —— 与两个语言的 tokenizer 规则一致（见 [wordPrefixBefore] 的说明）。 */
-private fun isWordChar(c: Char): Boolean =
-    c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_'
+private fun isWordChar(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_'
 
 /**
  * 用候选替换光标所在的**整个词**，返回「新文本 + 新光标位置」。
@@ -130,7 +137,11 @@ private fun isWordChar(c: Char): Boolean =
  * 替换范围取 [wordBoundsAround]（含光标**之后**的词字符）：光标落在词中间时，
  * 若只替换前半段会留下 `sel` + `ect` → `SELECTect` 这种半吊子结果。
  */
-fun applyCompletion(text: String, caret: Int, item: CompletionItem): Pair<String, Int> {
+fun applyCompletion(
+    text: String,
+    caret: Int,
+    item: CompletionItem,
+): Pair<String, Int> {
     val pos = caret.coerceIn(0, text.length)
     val bounds = wordBoundsAround(text, pos)
     val newText = text.substring(0, bounds.first) + item.label + text.substring(bounds.last + 1)

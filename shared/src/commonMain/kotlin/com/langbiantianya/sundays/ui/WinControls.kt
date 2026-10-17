@@ -8,30 +8,30 @@
 
 package com.langbiantianya.sundays.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -39,7 +39,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
-/**
+/*
  * 复古控件包装层 —— 让 Win2000 / WinXP 两套主题的按钮与输入框长得像当年的控件。
  *
  * ## 为什么需要这一层
@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
  *    navy `#000080`（那是它的**选区色**），于是按钮会变成深蓝底白字 —— 而真实的 Win2000
  *    按钮是 `ButtonFace` 银灰 `#C0C0C0` 配黑字。WinXP 同理：Luna 按钮是奶油面配深色字，
  *    不是高亮蓝。所以复古档必须把容器色换成窗口面（`background`）配 `onBackground`。
- * 2. **边框**。M3 自带的单色描边会与 [winBevel] 的双色斜面叠在一起变成「双层边」，
+ * 2. **边框**。M3 自带的单色描边会与 `winBevel` 的双色斜面叠在一起变成「双层边」，
  *    因此复古档要把 M3 的描边设为透明，只留斜面。
  *
  * ## 现代主题下完全透传
@@ -64,11 +64,11 @@ import androidx.compose.ui.unit.dp
  *   M3 没有「哪个按钮是默认的」这一信息，包装层无从判断。
  * - **按下凹陷态**没做（仅切换态做了）。真实经典 Win 按钮按住时凸起↔凹陷互换；M3 的按钮
  *   按下只改容器色，要跟随翻转斜面需要自行接管 `interactionSource` 的 pressed 状态。
- *   工具栏的**切换**按钮不受此限 —— 它有显式的选中态，故用 [WinButton] 的 [selected] 表达。
+ *   工具栏的**切换**按钮不受此限 —— 它有显式的选中态，故用 `WinButton` 的 `selected` 表达。
  *
- * 本文件所有外观取值都来自 [LocalUiTokens] 的派生函数（[buttonFaceColor] /
- * [buttonInkColor] / [fieldFaceColor] / [disabledInkOrNull] / [panelBorderStroke]），
- * **不含任何主题名判断** —— 新增主题只需在 [ThemePalette.uiTokens] 加一个分支。
+ * 本文件所有外观取值都来自 `LocalUiTokens` 的派生函数（`buttonFaceColor` /
+ * `buttonInkColor` / `fieldFaceColor` / `disabledInkOrNull` / `panelBorderStroke`），
+ * **不含任何主题名判断** —— 新增主题只需在 `ThemePalette.uiTokens` 加一个分支。
  */
 
 /**
@@ -99,8 +99,10 @@ import androidx.compose.ui.unit.dp
  * @param modernDefault 该组件在 M3 里的默认形状（由各包装函数按自己的组件传入）
  */
 @Composable
-fun resolveControlShape(shape: Shape?, modernDefault: Shape): Shape =
-    shape ?: if (isClassicChrome) controlShape() else modernDefault
+fun resolveControlShape(
+    shape: Shape?,
+    modernDefault: Shape,
+): Shape = shape ?: if (isClassicChrome) controlShape() else modernDefault
 
 /**
  * 只保留上方两角、下方两角置方 —— 复现 M3 `internal fun CornerBasedShape.top()`。
@@ -115,8 +117,12 @@ private fun Shape.squaredBottom(): Shape {
     // 故做一次运行时判定；非 CornerBasedShape（如 CircleShape）原样返回。
     if (this !is androidx.compose.foundation.shape.CornerBasedShape) return this
     return copy(
-        bottomStart = androidx.compose.foundation.shape.CornerSize(0.dp),
-        bottomEnd = androidx.compose.foundation.shape.CornerSize(0.dp),
+        bottomStart =
+            androidx.compose.foundation.shape
+                .CornerSize(0.dp),
+        bottomEnd =
+            androidx.compose.foundation.shape
+                .CornerSize(0.dp),
     )
 }
 
@@ -132,8 +138,7 @@ fun resolveButtonShape(shape: Shape?): Shape = resolveControlShape(shape, Button
  *）。若 M3 将来改了 token，这里需要同步 —— 见 `ModernThemeParityTest` 的断言。
  */
 @Composable
-fun resolveTextFieldShape(shape: Shape?): Shape =
-    resolveControlShape(shape, MaterialTheme.shapes.extraSmall.squaredBottom())
+fun resolveTextFieldShape(shape: Shape?): Shape = resolveControlShape(shape, MaterialTheme.shapes.extraSmall.squaredBottom())
 
 /**
  * 空操作指示器占位（经典档不再使用）。
@@ -172,31 +177,38 @@ private fun ClassicButtonBase(
     content: @Composable RowScope.() -> Unit,
 ) {
     Box(
-        modifier = modifier
-            .defaultMinSize(
-                minWidth = androidx.compose.material3.ButtonDefaults.MinWidth,
-                minHeight = androidx.compose.material3.ButtonDefaults.MinHeight,
-            )
-            .clip(shape)
-            .background(colors.containerColor)
-            .then(
-                if (enabled) {
-                    Modifier.clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                        // 必须显式给 role：现代档转调 M3 Button，自带 role = Role.Button；
-                        // 经典档是自绘基座，裸 clickable 的 role 默认为 null，读屏只会念
-                        // 「可点击」而丢掉「按钮」—— 同一个 WinButton 的语义随主题漂移。
-                        role = androidx.compose.ui.semantics.Role.Button,
-                        onClick = onClick,
-                    )
-                } else {
-                    Modifier
-                },
-            )
-            // 斜面画在最后：它是「内容之后」的一层，压在容器色之上
-            .uiBevel(raised = raised)
-            .padding(androidx.compose.material3.ButtonDefaults.contentPaddingFor(androidx.compose.material3.ButtonDefaults.MinHeight)),
+        modifier =
+            modifier
+                .defaultMinSize(
+                    minWidth = androidx.compose.material3.ButtonDefaults.MinWidth,
+                    minHeight = androidx.compose.material3.ButtonDefaults.MinHeight,
+                ).clip(shape)
+                .background(colors.containerColor)
+                .then(
+                    if (enabled) {
+                        Modifier.clickable(
+                            interactionSource =
+                                remember {
+                                    androidx.compose.foundation.interaction
+                                        .MutableInteractionSource()
+                                },
+                            indication = null,
+                            // 必须显式给 role：现代档转调 M3 Button，自带 role = Role.Button；
+                            // 经典档是自绘基座，裸 clickable 的 role 默认为 null，读屏只会念
+                            // 「可点击」而丢掉「按钮」—— 同一个 WinButton 的语义随主题漂移。
+                            role = androidx.compose.ui.semantics.Role.Button,
+                            onClick = onClick,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                // 斜面画在最后：它是「内容之后」的一层，压在容器色之上
+                .uiBevel(raised = raised)
+                .padding(
+                    androidx.compose.material3.ButtonDefaults
+                        .contentPaddingFor(androidx.compose.material3.ButtonDefaults.MinHeight),
+                ),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(
@@ -368,20 +380,21 @@ fun WinTextField(
         shape = resolveTextFieldShape(shape),
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color.Transparent,
-            unfocusedBorderColor = Color.Transparent,
-            disabledBorderColor = Color.Transparent,
-            errorBorderColor = Color.Transparent,
-            // ⚠️ 刻意用 surfaceVariant 而非 surface：Win2000 浅色档的 surface 是纯白
-            // `#FFFFFF`，而经典 Win 的凹陷边有一侧就是 ButtonHighlight 纯白 ——
-            // 贴在纯白面上那一侧会**完全隐形**，凹陷效果只剩一半。这里退回
-            // 「Windows Standard」的 `#D4D0C8` 灰面，亮边才读得出来。
-            // WinChromeTest 的「斜面必须比它所在的控件面更亮/更暗」正是钉这一条。
-            focusedContainerColor = fieldFaceColor(),
-            unfocusedContainerColor = fieldFaceColor(),
-            disabledContainerColor = fieldFaceColor(),
-        ),
+        colors =
+            OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                disabledBorderColor = Color.Transparent,
+                errorBorderColor = Color.Transparent,
+                // ⚠️ 刻意用 surfaceVariant 而非 surface：Win2000 浅色档的 surface 是纯白
+                // `#FFFFFF`，而经典 Win 的凹陷边有一侧就是 ButtonHighlight 纯白 ——
+                // 贴在纯白面上那一侧会**完全隐形**，凹陷效果只剩一半。这里退回
+                // 「Windows Standard」的 `#D4D0C8` 灰面，亮边才读得出来。
+                // WinChromeTest 的「斜面必须比它所在的控件面更亮/更暗」正是钉这一条。
+                focusedContainerColor = fieldFaceColor(),
+                unfocusedContainerColor = fieldFaceColor(),
+                disabledContainerColor = fieldFaceColor(),
+            ),
     )
 }
 
@@ -532,9 +545,12 @@ fun WinMenuItem(
     leadingIcon: @Composable (() -> Unit)? = null,
     trailingIcon: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
-    colors: androidx.compose.material3.MenuItemColors = androidx.compose.material3.MenuDefaults.itemColors(),
+    colors: androidx.compose.material3.MenuItemColors =
+        androidx.compose.material3.MenuDefaults
+            .itemColors(),
     contentPadding: androidx.compose.foundation.layout.PaddingValues =
-        androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        androidx.compose.foundation.layout
+            .PaddingValues(horizontal = 12.dp, vertical = 8.dp),
 ) {
     androidx.compose.material3.DropdownMenuItem(
         text = text,
@@ -551,8 +567,11 @@ fun WinMenuItem(
 /** 菜单容器的形状 —— 经典档直角（经典 Win 菜单是方角），现代档沿用 M3 圆角菜单。 */
 @Composable
 fun menuShape(): Shape =
-    if (isClassicChrome) RoundedCornerShape(LocalBevelStyle.current.bevelRadius)
-    else androidx.compose.material3.MenuDefaults.shape
+    if (isClassicChrome) {
+        RoundedCornerShape(LocalBevelStyle.current.bevelRadius)
+    } else {
+        androidx.compose.material3.MenuDefaults.shape
+    }
 
 /**
  * 进度指示器 —— 经典 Win 的进度条是**分段块状**（XP 的蓝色方块条）而非现代的细圆环。
@@ -562,7 +581,10 @@ fun menuShape(): Shape =
  * 已经比现代的细环更接近当年观感。
  */
 @Composable
-fun WinProgressIndicator(modifier: Modifier = Modifier, strokeWidth: androidx.compose.ui.unit.Dp = 4.dp) {
+fun WinProgressIndicator(
+    modifier: Modifier = Modifier,
+    strokeWidth: androidx.compose.ui.unit.Dp = 4.dp,
+) {
     androidx.compose.material3.CircularProgressIndicator(
         modifier = modifier,
         color = MaterialTheme.colorScheme.primary,

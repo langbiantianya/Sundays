@@ -51,7 +51,6 @@ import kotlin.test.assertTrue
  * 服务端连接数打满过。详见 `ServerSmokeTarget` 的类注释。
  */
 class MySQLRoutineTriggerQueryTest {
-
     companion object {
         /** 与 [MySqlSmoke.provision] 固定库名保持一致。 */
         private const val SCHEMA = "sundays_smoke"
@@ -110,9 +109,10 @@ class MySQLRoutineTriggerQueryTest {
 
     @Test
     fun `listTriggers reads a real trigger instead of failing on REMARKS`() {
-        val rows = MySqlSmoke.direct(SCHEMA).use { c ->
-            kotlinx.coroutines.runBlocking { dialect.listTriggers(c, SCHEMA) }
-        }
+        val rows =
+            MySqlSmoke.direct(SCHEMA).use { c ->
+                kotlinx.coroutines.runBlocking { dialect.listTriggers(c, SCHEMA) }
+            }
         val names = rows.map { it["name"] }
         assertTrue(
             TRIGGER in names,
@@ -122,9 +122,10 @@ class MySQLRoutineTriggerQueryTest {
 
     @Test
     fun `listRoutines returns the procedure and reads its COMMENT column`() {
-        val rows = MySqlSmoke.direct(SCHEMA).use { c ->
-            kotlinx.coroutines.runBlocking { dialect.listRoutines(c, SCHEMA) }
-        }
+        val rows =
+            MySqlSmoke.direct(SCHEMA).use { c ->
+                kotlinx.coroutines.runBlocking { dialect.listRoutines(c, SCHEMA) }
+            }
         val byName = rows.associateBy { it["name"] }
         assertTrue(
             PROCEDURE in byName.keys,
@@ -136,11 +137,13 @@ class MySQLRoutineTriggerQueryTest {
             "listRoutines 也应带上触发器（它合读 ROUTINES + TRIGGERS），实际：${byName.keys}",
         )
         assertEquals(
-            PROC_COMMENT, byName[PROCEDURE]!!["description"],
+            PROC_COMMENT,
+            byName[PROCEDURE]!!["description"],
             "过程注释必须从 ROUTINE_COMMENT 原样读回；为空串说明有人把注释列删了而不是改对",
         )
         assertEquals(
-            "", byName[TRIGGER]!!["description"],
+            "",
+            byName[TRIGGER]!!["description"],
             "MySQL 的 TRIGGERS 没有注释列，触发器 description 应为空串而不是拿 ACTION_STATEMENT 顶替",
         )
     }
@@ -152,7 +155,8 @@ class MySQLRoutineTriggerQueryTest {
                 val procInfo = dialect.getRoutineInfo(c, PROCEDURE, SCHEMA)
                 assertEquals("PROCEDURE", procInfo["routine_type"], "过程类型应识别为 PROCEDURE")
                 assertEquals(
-                    PROC_COMMENT, procInfo["description"],
+                    PROC_COMMENT,
+                    procInfo["description"],
                     "过程详情的注释同样要走 ROUTINE_COMMENT",
                 )
 

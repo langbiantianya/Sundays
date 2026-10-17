@@ -36,13 +36,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import org.slf4j.LoggerFactory
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Types
 import java.time.OffsetDateTime
 import java.time.OffsetTime
 import java.time.format.DateTimeFormatter
-import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
 
 object DataHandler {
@@ -60,6 +60,7 @@ object DataHandler {
      * TableHandler.create/update/delete 时通过 [invalidateColumnTypeCache] 失效
      */
     private val columnTypeCache = ConcurrentHashMap<String, Map<String, String>>()
+
     /**
      * 流式模式（req.hasPageSize() && req.pageSize == 0）通过 [onRow] 每行回调一次；
      * 否则返回分页 [DataListPagedResponse]。
@@ -70,101 +71,104 @@ object DataHandler {
         sessionId: String = "",
         requestId: String = "",
         onRow: (suspend (DataRowFrame) -> Unit)? = null,
-    ): DataListPagedResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
-        val page = if (req.page == 0) 1 else req.page
-        val pageSize = if (req.hasPageSize()) req.pageSize else 50
+    ): DataListPagedResponse =
+        withContext(Dispatchers.IO) {
+            if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
+            val page = if (req.page == 0) 1 else req.page
+            val pageSize = if (req.hasPageSize()) req.pageSize else 50
 
-        val whereRaw = req.where.ifBlank { null }
-        val orderByRaw = req.orderBy.ifBlank { null }
-        val schema = req.schema
+            val whereRaw = req.where.ifBlank { null }
+            val orderByRaw = req.orderBy.ifBlank { null }
+            val schema = req.schema
 
-        val connection = PoolManager.getConnection(config, schema, sessionId)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config, schema, sessionId)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        // 按方言规则校验 SQL 片段安全性
-        if (!whereRaw.isNullOrBlank()) dialect.validateSqlFragment(whereRaw, "where")
-        if (!orderByRaw.isNullOrBlank()) {
-            dialect.validateSqlFragment(orderByRaw, "orderBy")
-            dialect.validateOrderBy(orderByRaw)
-        }
-
-        val whereSql  = if (!whereRaw.isNullOrBlank())  " WHERE $whereRaw"   else ""
-        val orderBySql = if (!orderByRaw.isNullOrBlank()) " ORDER BY $orderByRaw" else ""
-
-        val conn = connection
-        return@withContext try {
-            // 查询总行数（带 WHERE）
-            val countSql = "SELECT COUNT(*) AS cnt FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql"
-            val total = conn.prepareStatement(countSql).use { countStmt ->
-                countStmt.executeQuery().use { rs ->
-                    if (rs.next()) rs.getLong("cnt") else 0L
-                }
+            // 按方言规则校验 SQL 片段安全性
+            if (!whereRaw.isNullOrBlank()) dialect.validateSqlFragment(whereRaw, "where")
+            if (!orderByRaw.isNullOrBlank()) {
+                dialect.validateSqlFragment(orderByRaw, "orderBy")
+                dialect.validateOrderBy(orderByRaw)
             }
 
-            if (pageSize == 0 && onRow != null) {
-                // 流式全量模式：使用 JDBC 游标逐行读取
-                val sql = "SELECT * FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql$orderBySql"
-                val originalAutoCommit = dialect.configureConnectionForStreaming(conn)
-                try {
-                    conn.prepareStatement(
-                        sql,
-                        ResultSet.TYPE_FORWARD_ONLY,
-                        ResultSet.CONCUR_READ_ONLY
-                    ).use { stmt ->
-                        // 登记到 StatementRegistry —— 大表全量读取时 SYSTEM.CANCEL 才能真正打断 rs.next()
-                        StatementRegistry.register(requestId, stmt)
-                        try {
-                            stmt.fetchSize = STREAM_FETCH_SIZE
-                            stmt.executeQuery().use { rs ->
-                                while (rs.next()) {
-                                    onRow(
-                                        dataRowFrame {
-                                            this.total = total
-                                            this.page = 0
-                                            this.pageSize = 1
-                                            row = buildRow(rs)
+            val whereSql = if (!whereRaw.isNullOrBlank()) " WHERE $whereRaw" else ""
+            val orderBySql = if (!orderByRaw.isNullOrBlank()) " ORDER BY $orderByRaw" else ""
+
+            val conn = connection
+            return@withContext try {
+                // 查询总行数（带 WHERE）
+                val countSql = "SELECT COUNT(*) AS cnt FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql"
+                val total =
+                    conn.prepareStatement(countSql).use { countStmt ->
+                        countStmt.executeQuery().use { rs ->
+                            if (rs.next()) rs.getLong("cnt") else 0L
+                        }
+                    }
+
+                if (pageSize == 0 && onRow != null) {
+                    // 流式全量模式：使用 JDBC 游标逐行读取
+                    val sql = "SELECT * FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql$orderBySql"
+                    val originalAutoCommit = dialect.configureConnectionForStreaming(conn)
+                    try {
+                        conn
+                            .prepareStatement(
+                                sql,
+                                ResultSet.TYPE_FORWARD_ONLY,
+                                ResultSet.CONCUR_READ_ONLY,
+                            ).use { stmt ->
+                                // 登记到 StatementRegistry —— 大表全量读取时 SYSTEM.CANCEL 才能真正打断 rs.next()
+                                StatementRegistry.register(requestId, stmt)
+                                try {
+                                    stmt.fetchSize = STREAM_FETCH_SIZE
+                                    stmt.executeQuery().use { rs ->
+                                        while (rs.next()) {
+                                            onRow(
+                                                dataRowFrame {
+                                                    this.total = total
+                                                    this.page = 0
+                                                    this.pageSize = 1
+                                                    row = buildRow(rs)
+                                                },
+                                            )
                                         }
-                                    )
+                                    }
+                                } finally {
+                                    StatementRegistry.unregister(requestId)
                                 }
                             }
-                        } finally {
-                            StatementRegistry.unregister(requestId)
-                        }
+                    } finally {
+                        dialect.restoreConnectionAfterStreaming(conn, originalAutoCommit)
                     }
-                } finally {
-                    dialect.restoreConnectionAfterStreaming(conn, originalAutoCommit)
-                }
-                // 流式模式不回传 paged body — 返回空 paged 仅占位（dispatcher 不会使用）
-                dataListPagedResponse {
-                    this.total = total
-                    this.page = 0
-                    this.pageSize = 0
-                }
-            } else {
-                // 普通分页模式
-                val offset = (page - 1) * pageSize
-                val sql = "SELECT * FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql$orderBySql LIMIT ? OFFSET ?"
-                conn.prepareStatement(sql).use { stmt ->
-                    stmt.setInt(1, pageSize)
-                    stmt.setInt(2, offset)
-                    stmt.executeQuery().use { rs ->
-                        dataListPagedResponse {
-                            this.total = total
-                            this.page = page
-                            this.pageSize = pageSize
-                            while (rs.next()) {
-                                this.rows += buildRow(rs)
+                    // 流式模式不回传 paged body — 返回空 paged 仅占位（dispatcher 不会使用）
+                    dataListPagedResponse {
+                        this.total = total
+                        this.page = 0
+                        this.pageSize = 0
+                    }
+                } else {
+                    // 普通分页模式
+                    val offset = (page - 1) * pageSize
+                    val sql = "SELECT * FROM ${dialect.quoteIdentifier(req.tableName)}$whereSql$orderBySql LIMIT ? OFFSET ?"
+                    conn.prepareStatement(sql).use { stmt ->
+                        stmt.setInt(1, pageSize)
+                        stmt.setInt(2, offset)
+                        stmt.executeQuery().use { rs ->
+                            dataListPagedResponse {
+                                this.total = total
+                                this.page = page
+                                this.pageSize = pageSize
+                                while (rs.next()) {
+                                    this.rows += buildRow(rs)
+                                }
                             }
                         }
                     }
                 }
+            } finally {
+                // 会话连接由 TransactionManager 持有，COMMIT/ROLLBACK 之前不能归还池
+                if (sessionId.isBlank()) conn.close()
             }
-        } finally {
-            // 会话连接由 TransactionManager 持有，COMMIT/ROLLBACK 之前不能归还池
-            if (sessionId.isBlank()) conn.close()
         }
-    }
 
     /**
      * Build a typed Row proto from a JDBC ResultSet. Each cell is packed as Value;
@@ -178,11 +182,12 @@ object DataHandler {
             for (i in 1..columnCount) {
                 val columnName = metaData.getColumnName(i)
                 val columnType = metaData.getColumnTypeName(i)
-                val value: Value = if (columnType in LOB_TYPES) {
-                    PayloadAdapter.toValue(JsonPrimitive("[LOB Data]"))
-                } else {
-                    PayloadAdapter.toValue(JsonPrimitive(rs.getString(i)))
-                }
+                val value: Value =
+                    if (columnType in LOB_TYPES) {
+                        PayloadAdapter.toValue(JsonPrimitive("[LOB Data]"))
+                    } else {
+                        PayloadAdapter.toValue(JsonPrimitive(rs.getString(i)))
+                    }
                 values.put(columnName, value)
             }
         }
@@ -192,82 +197,85 @@ object DataHandler {
         config: ConnectionConfig,
         req: DataCreateRequest,
         sessionId: String = "",
-    ): DataCreateResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
-        val schema = req.schema
-        val dialect = DialectLoader.getDialect(config.driver)
+    ): DataCreateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
+            val schema = req.schema
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        withBoundConnection(config, schema, sessionId) { conn ->
-            val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
+            withBoundConnection(config, schema, sessionId) { conn ->
+                val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
-            val columns = req.valuesMap.keys.joinToString(", ") { dialect.quoteIdentifier(it) }
-            val placeholders = req.valuesMap.keys.joinToString(", ") { "?" }
-            val sql = "INSERT INTO ${dialect.quoteIdentifier(req.tableName)} ($columns) VALUES ($placeholders)"
+                val columns = req.valuesMap.keys.joinToString(", ") { dialect.quoteIdentifier(it) }
+                val placeholders = req.valuesMap.keys.joinToString(", ") { "?" }
+                val sql = "INSERT INTO ${dialect.quoteIdentifier(req.tableName)} ($columns) VALUES ($placeholders)"
 
-            conn.prepareStatement(sql).use { stmt ->
-                req.valuesMap.entries.forEachIndexed { index, (name, value) ->
-                    bindTypedValue(stmt, index + 1, columnTypes[name.lowercase()], JsonPrimitive(value))
+                conn.prepareStatement(sql).use { stmt ->
+                    req.valuesMap.entries.forEachIndexed { index, (name, value) ->
+                        bindTypedValue(stmt, index + 1, columnTypes[name.lowercase()], JsonPrimitive(value))
+                    }
+                    val affectedRows = stmt.executeUpdate()
+                    dataCreateResponse { this.affectedRows = affectedRows }
                 }
-                val affectedRows = stmt.executeUpdate()
-                dataCreateResponse { this.affectedRows = affectedRows }
             }
         }
-    }
 
     suspend fun update(
         config: ConnectionConfig,
         req: DataUpdateRequest,
         sessionId: String = "",
-    ): DataUpdateResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
-        val schema = req.schema
-        val dialect = DialectLoader.getDialect(config.driver)
+    ): DataUpdateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
+            val schema = req.schema
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        withBoundConnection(config, schema, sessionId) { conn ->
-            val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
+            withBoundConnection(config, schema, sessionId) { conn ->
+                val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
-            val setClause = req.changesMap.keys.joinToString(", ") { "${dialect.quoteIdentifier(it)} = ?" }
-            val whereClause = req.whereMap.keys.joinToString(" AND ") { "${dialect.quoteIdentifier(it)} = ?" }
-            val sql = "UPDATE ${dialect.quoteIdentifier(req.tableName)} SET $setClause WHERE $whereClause"
+                val setClause = req.changesMap.keys.joinToString(", ") { "${dialect.quoteIdentifier(it)} = ?" }
+                val whereClause = req.whereMap.keys.joinToString(" AND ") { "${dialect.quoteIdentifier(it)} = ?" }
+                val sql = "UPDATE ${dialect.quoteIdentifier(req.tableName)} SET $setClause WHERE $whereClause"
 
-            conn.prepareStatement(sql).use { stmt ->
-                var paramIndex = 1
-                req.changesMap.forEach { (name, value) ->
-                    bindTypedValue(stmt, paramIndex++, columnTypes[name.lowercase()], JsonPrimitive(value))
+                conn.prepareStatement(sql).use { stmt ->
+                    var paramIndex = 1
+                    req.changesMap.forEach { (name, value) ->
+                        bindTypedValue(stmt, paramIndex++, columnTypes[name.lowercase()], JsonPrimitive(value))
+                    }
+                    req.whereMap.forEach { (name, value) ->
+                        bindTypedValue(stmt, paramIndex++, columnTypes[name.lowercase()], JsonPrimitive(value))
+                    }
+                    val affectedRows = stmt.executeUpdate()
+                    dataUpdateResponse { this.affectedRows = affectedRows }
                 }
-                req.whereMap.forEach { (name, value) ->
-                    bindTypedValue(stmt, paramIndex++, columnTypes[name.lowercase()], JsonPrimitive(value))
-                }
-                val affectedRows = stmt.executeUpdate()
-                dataUpdateResponse { this.affectedRows = affectedRows }
             }
         }
-    }
 
     suspend fun delete(
         config: ConnectionConfig,
         req: DataDeleteRequest,
         sessionId: String = "",
-    ): DataDeleteResponse = withContext(Dispatchers.IO) {
-        if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
-        val schema = req.schema
-        val dialect = DialectLoader.getDialect(config.driver)
+    ): DataDeleteResponse =
+        withContext(Dispatchers.IO) {
+            if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
+            val schema = req.schema
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        withBoundConnection(config, schema, sessionId) { conn ->
-            val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
+            withBoundConnection(config, schema, sessionId) { conn ->
+                val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
 
-            val whereClause = req.whereMap.keys.joinToString(" AND ") { "${dialect.quoteIdentifier(it)} = ?" }
-            val sql = "DELETE FROM ${dialect.quoteIdentifier(req.tableName)} WHERE $whereClause"
+                val whereClause = req.whereMap.keys.joinToString(" AND ") { "${dialect.quoteIdentifier(it)} = ?" }
+                val sql = "DELETE FROM ${dialect.quoteIdentifier(req.tableName)} WHERE $whereClause"
 
-            conn.prepareStatement(sql).use { stmt ->
-                req.whereMap.entries.forEachIndexed { index, (name, value) ->
-                    bindTypedValue(stmt, index + 1, columnTypes[name.lowercase()], JsonPrimitive(value))
+                conn.prepareStatement(sql).use { stmt ->
+                    req.whereMap.entries.forEachIndexed { index, (name, value) ->
+                        bindTypedValue(stmt, index + 1, columnTypes[name.lowercase()], JsonPrimitive(value))
+                    }
+                    val affectedRows = stmt.executeUpdate()
+                    dataDeleteResponse { this.affectedRows = affectedRows }
                 }
-                val affectedRows = stmt.executeUpdate()
-                dataDeleteResponse { this.affectedRows = affectedRows }
             }
         }
-    }
 
     /**
      * 借连接执行，并在**无事务会话时**归还连接池。
@@ -299,38 +307,52 @@ object DataHandler {
         driver: String,
         database: String?,
         schema: String,
-        tableName: String
+        tableName: String,
     ): Map<String, String> {
         val cacheKey = columnTypeCacheKey(driver, database, schema, tableName)
         columnTypeCache[cacheKey]?.let { return it }
 
-        val types = try {
-            val dialect = com.langbiantianya.loader.DialectLoader.getDialect(driver)
-            val cols = kotlinx.coroutines.runBlocking {
-                dialect.listColumns(conn, database ?: "", schema, tableName)
+        val types =
+            try {
+                val dialect =
+                    com.langbiantianya.loader.DialectLoader
+                        .getDialect(driver)
+                val cols =
+                    kotlinx.coroutines.runBlocking {
+                        dialect.listColumns(conn, database ?: "", schema, tableName)
+                    }
+                cols
+                    .mapNotNull { col ->
+                        val name = col["name"] as? String ?: return@mapNotNull null
+                        val type = col["type"] as? String ?: return@mapNotNull null
+                        name.lowercase() to type
+                    }.toMap()
+            } catch (e: Exception) {
+                // 不能确定列类型时,绑定回退到 setString() — 但需记录,避免静默丢错
+                // (可能错类型写入 — 列类型探测失败时记录以便诊断)
+                logger.warn("loadColumnTypes failed for driver=$driver table=$tableName: ${e.message}", e)
+                emptyMap()
             }
-            cols.mapNotNull { col ->
-                val name = col["name"] as? String ?: return@mapNotNull null
-                val type = col["type"] as? String ?: return@mapNotNull null
-                name.lowercase() to type
-            }.toMap()
-        } catch (e: Exception) {
-            // 不能确定列类型时,绑定回退到 setString() — 但需记录,避免静默丢错
-            // (可能错类型写入 — 列类型探测失败时记录以便诊断)
-            logger.warn("loadColumnTypes failed for driver=$driver table=$tableName: ${e.message}", e)
-            emptyMap()
-        }
         columnTypeCache[cacheKey] = types
         return types
     }
 
-    private fun columnTypeCacheKey(driver: String, database: String?, schema: String, table: String): String =
-        "$driver|${database ?: ""}|$schema|$table"
+    private fun columnTypeCacheKey(
+        driver: String,
+        database: String?,
+        schema: String,
+        table: String,
+    ): String = "$driver|${database ?: ""}|$schema|$table"
 
     /**
      * 失效表的列类型缓存 — 由 TableHandler 在 CREATE/ADD_COLUMN/DROP_COLUMN/MODIFY_COLUMN/RENAME/DROP/TRUNCATE 后调用。
      */
-    fun invalidateColumnTypeCache(driver: String, database: String?, schema: String, table: String) {
+    fun invalidateColumnTypeCache(
+        driver: String,
+        database: String?,
+        schema: String,
+        table: String,
+    ) {
         columnTypeCache.remove(columnTypeCacheKey(driver, database, schema, table))
     }
 
@@ -338,28 +360,34 @@ object DataHandler {
         stmt: PreparedStatement,
         paramIndex: Int,
         raw: String,
-        sqlType: Int
+        sqlType: Int,
     ) {
         try {
             when (sqlType) {
-                Types.TIMESTAMP_WITH_TIMEZONE ->
+                Types.TIMESTAMP_WITH_TIMEZONE -> {
                     stmt.setObject(
                         paramIndex,
                         OffsetDateTime.parse(raw, DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                        sqlType
+                        sqlType,
                     )
-                Types.TIME_WITH_TIMEZONE ->
+                }
+
+                Types.TIME_WITH_TIMEZONE -> {
                     stmt.setObject(
                         paramIndex,
                         OffsetTime.parse(raw),
-                        sqlType
+                        sqlType,
                     )
-                else -> stmt.setObject(paramIndex, raw, sqlType)
+                }
+
+                else -> {
+                    stmt.setObject(paramIndex, raw, sqlType)
+                }
             }
         } catch (e: Exception) {
             throw IllegalArgumentException(
                 "Cannot bind '$raw' as SQL type $sqlType for parameter $paramIndex: ${e.message}",
-                e
+                e,
             )
         }
     }
@@ -368,7 +396,7 @@ object DataHandler {
         stmt: PreparedStatement,
         paramIndex: Int,
         sqlType: String?,
-        value: JsonElement
+        value: JsonElement,
     ) {
         if (value is JsonNull) {
             stmt.setObject(paramIndex, null)
@@ -379,21 +407,25 @@ object DataHandler {
 
         when (type) {
             "TINYINT", "SMALLINT", "INT2", "INT", "MEDIUMINT", "INT4", "INTEGER",
-            "YEAR", "BIGINT", "INT8", "SERIAL", "BIGSERIAL", "SMALLSERIAL" -> {
+            "YEAR", "BIGINT", "INT8", "SERIAL", "BIGSERIAL", "SMALLSERIAL",
+            -> {
                 try {
                     stmt.setLong(paramIndex, raw.toLong())
                 } catch (_: NumberFormatException) {
                     stmt.setString(paramIndex, raw)
                 }
             }
+
             "FLOAT", "REAL", "FLOAT4", "DOUBLE", "DOUBLE PRECISION", "FLOAT8",
-            "NUMERIC", "DECIMAL", "MONEY" -> {
+            "NUMERIC", "DECIMAL", "MONEY",
+            -> {
                 try {
                     stmt.setDouble(paramIndex, raw.toDouble())
                 } catch (_: NumberFormatException) {
                     stmt.setString(paramIndex, raw)
                 }
             }
+
             "BOOL", "BOOLEAN", "BIT" -> {
                 val v = raw.trim().lowercase()
                 when (v) {
@@ -402,21 +434,49 @@ object DataHandler {
                     else -> stmt.setString(paramIndex, raw)
                 }
             }
-            "DATE" -> bindTemporal(stmt, paramIndex, raw, Types.DATE)
-            "TIME" -> bindTemporal(stmt, paramIndex, raw, Types.TIME)
-            "DATETIME", "TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE" -> bindTemporal(
-                stmt, paramIndex, raw, Types.TIMESTAMP
-            )
-            "TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE" -> bindTemporal(
-                stmt, paramIndex, raw, Types.TIMESTAMP_WITH_TIMEZONE
-            )
-            "TIMETZ", "TIME WITH TIME ZONE" -> bindTemporal(
-                stmt, paramIndex, raw, Types.TIME_WITH_TIMEZONE
-            )
+
+            "DATE" -> {
+                bindTemporal(stmt, paramIndex, raw, Types.DATE)
+            }
+
+            "TIME" -> {
+                bindTemporal(stmt, paramIndex, raw, Types.TIME)
+            }
+
+            "DATETIME", "TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE" -> {
+                bindTemporal(
+                    stmt,
+                    paramIndex,
+                    raw,
+                    Types.TIMESTAMP,
+                )
+            }
+
+            "TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE" -> {
+                bindTemporal(
+                    stmt,
+                    paramIndex,
+                    raw,
+                    Types.TIMESTAMP_WITH_TIMEZONE,
+                )
+            }
+
+            "TIMETZ", "TIME WITH TIME ZONE" -> {
+                bindTemporal(
+                    stmt,
+                    paramIndex,
+                    raw,
+                    Types.TIME_WITH_TIMEZONE,
+                )
+            }
+
             "BLOB", "BINARY", "VARBINARY", "LONGBLOB", "MEDIUMBLOB", "TINYBLOB", "BYTEA" -> {
                 stmt.setBytes(paramIndex, raw.toByteArray(Charsets.UTF_8))
             }
-            else -> stmt.setString(paramIndex, raw)
+
+            else -> {
+                stmt.setString(paramIndex, raw)
+            }
         }
     }
 }

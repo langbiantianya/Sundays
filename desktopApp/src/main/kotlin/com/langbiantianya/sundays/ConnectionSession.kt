@@ -160,21 +160,27 @@ class ConnectionSession(
 
     /** 向导「上一步」—— 按当前流程回退（QUICK_CONNECT 少一步 BASIC_INFO / CONNECTION_TYPE） */
     fun back() {
-        val prev = when (wizard.flow) {
-            WizardFlow.QUICK_CONNECT -> when (wizard.step) {
-                WizardStep.QUICK_CONNECT -> WizardStep.IDLE
-                WizardStep.CREDENTIALS -> WizardStep.QUICK_CONNECT
-                WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
-                else -> WizardStep.IDLE
+        val prev =
+            when (wizard.flow) {
+                WizardFlow.QUICK_CONNECT -> {
+                    when (wizard.step) {
+                        WizardStep.QUICK_CONNECT -> WizardStep.IDLE
+                        WizardStep.CREDENTIALS -> WizardStep.QUICK_CONNECT
+                        WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
+                        else -> WizardStep.IDLE
+                    }
+                }
+
+                WizardFlow.NORMAL -> {
+                    when (wizard.step) {
+                        WizardStep.BASIC_INFO -> WizardStep.IDLE
+                        WizardStep.CONNECTION_TYPE -> WizardStep.BASIC_INFO
+                        WizardStep.CREDENTIALS -> WizardStep.CONNECTION_TYPE
+                        WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
+                        else -> WizardStep.IDLE
+                    }
+                }
             }
-            WizardFlow.NORMAL -> when (wizard.step) {
-                WizardStep.BASIC_INFO -> WizardStep.IDLE
-                WizardStep.CONNECTION_TYPE -> WizardStep.BASIC_INFO
-                WizardStep.CREDENTIALS -> WizardStep.CONNECTION_TYPE
-                WizardStep.TEST_SAVE -> WizardStep.CREDENTIALS
-                else -> WizardStep.IDLE
-            }
-        }
         wizard = wizard.copy(step = prev)
     }
 
@@ -235,11 +241,12 @@ class ConnectionSession(
         if (openSheets.none { it.id == id }) return
         val newList = openSheets.filterNot { it.id == id }
         openSheets = newList
-        activeSheetId = when {
-            activeSheetId != id -> activeSheetId
-            newList.isEmpty() -> null
-            else -> newList.last().id
-        }
+        activeSheetId =
+            when {
+                activeSheetId != id -> activeSheetId
+                newList.isEmpty() -> null
+                else -> newList.last().id
+            }
     }
 
     /** 切换激活 sheet —— 调用方在用户点击 sheet 标签时调用。id 必须在 [openSheets] 中；否则忽略 */
@@ -255,17 +262,18 @@ class ConnectionSession(
         val gen = bumpStatusGeneration(config.id)
         statuses = statuses + (config.id to ConnectionStatus(ConnectionState.CONNECTING))
         scope.launch {
-            val status = runCatching { engine.testConnection(engineConfig(config)) }.fold(
-                onSuccess = { response ->
-                    if (response.ok) {
-                        ConnectionStatus(ConnectionState.CONNECTED, response.driver)
-                    } else {
-                        ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
-                    }
-                },
-                onFailure = { ConnectionStatus(ConnectionState.FAILED, it.message ?: "Unknown error") },
-            )
-            if (statusGeneration[config.id] != gen) return@launch   // 期间又断开/重连 —— 丢弃过期结果
+            val status =
+                runCatching { engine.testConnection(engineConfig(config)) }.fold(
+                    onSuccess = { response ->
+                        if (response.ok) {
+                            ConnectionStatus(ConnectionState.CONNECTED, response.driver)
+                        } else {
+                            ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
+                        }
+                    },
+                    onFailure = { ConnectionStatus(ConnectionState.FAILED, it.message ?: "Unknown error") },
+                )
+            if (statusGeneration[config.id] != gen) return@launch // 期间又断开/重连 —— 丢弃过期结果
             statuses = statuses + (config.id to status)
         }
     }
@@ -319,11 +327,14 @@ class ConnectionSession(
         // 这里**不**用 bump —— 探测是同步 suspend，回填紧接着发生，
         // 但仍要先把用户在途的操作代次作废，否则它晚到的结果会把探测结论覆盖掉。
         bumpStatusGeneration(config.id)
-        statuses = statuses + (config.id to when {
-            !response.ok -> ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
-            wasConnected -> ConnectionStatus(ConnectionState.CONNECTED, response.driver)
-            else -> ConnectionStatus()
-        })
+        statuses = statuses + (
+            config.id to
+                when {
+                    !response.ok -> ConnectionStatus(ConnectionState.FAILED, response.error.ifBlank { Msg.text(StrKey.CONNECT_FAILED) })
+                    wasConnected -> ConnectionStatus(ConnectionState.CONNECTED, response.driver)
+                    else -> ConnectionStatus()
+                }
+        )
         return TestResult(success = response.ok, message = response.error)
     }
 
@@ -344,10 +355,11 @@ class ConnectionSession(
  * `database` 一并写入：它参与连接池 key，且 `TableHandler` 会按它做 catalog 过滤 ——
  * 与 `DatabaseBrowserState.engineConn` 保持同构，避免同一连接出现多个不相干的池。
  */
-private fun engineConfig(config: ConnectionConfig) = connectionConfig {
-    driver = config.dialect.engineDriverName
-    jdbcUrl = config.jdbcUrl
-    user = config.username
-    password = config.password
-    database = config.database
-}
+private fun engineConfig(config: ConnectionConfig) =
+    connectionConfig {
+        driver = config.dialect.engineDriverName
+        jdbcUrl = config.jdbcUrl
+        user = config.username
+        password = config.password
+        database = config.database
+    }

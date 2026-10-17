@@ -14,6 +14,7 @@ import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ConnectionConfig
+import com.langbiantianya.grpc.ImportRunRequest
 import com.langbiantianya.grpc.Request
 import com.langbiantianya.grpc.RequestOptions
 import com.langbiantianya.grpc.SqlExecuteRequest
@@ -21,7 +22,6 @@ import com.langbiantianya.grpc.sqlRequest
 import com.langbiantianya.importer.ImportSourceFactory
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
-import com.langbiantianya.grpc.ImportRunRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
@@ -40,12 +40,15 @@ import kotlin.test.assertTrue
  * 三个都是「静默失效」型 bug，修复前不会有任何异常，只有结果错，因此必须断言结果本身。
  */
 class EngineFixesRegressionTest {
-
     private fun h2Config(): ConnectionConfig {
         DialectLoader.registerForTesting("H2", H2Dialect())
         val db = "fix_${UUID.randomUUID().toString().replace("-", "").take(10)}"
-        return ConnectionConfig.newBuilder()
-            .setDriver("H2").setUser("sa").setPassword("").setDatabase(db)
+        return ConnectionConfig
+            .newBuilder()
+            .setDriver("H2")
+            .setUser("sa")
+            .setPassword("")
+            .setDatabase(db)
             .setJdbcUrl("jdbc:h2:mem:$db;DB_CLOSE_DELAY=-1")
             .build()
     }
@@ -63,9 +66,15 @@ class EngineFixesRegressionTest {
         // 与 CsvWriter 输出一致：UTF-8 BOM + 表头
         f.writeBytes(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + "id,name\n1,Alice\n".toByteArray())
 
-        val src = ImportSourceFactory.open(
-            ImportRunRequest.newBuilder().setFilePath(f.absolutePath).setFormat("CSV").setHasHeader(true).build()
-        )
+        val src =
+            ImportSourceFactory.open(
+                ImportRunRequest
+                    .newBuilder()
+                    .setFilePath(f.absolutePath)
+                    .setFormat("CSV")
+                    .setHasHeader(true)
+                    .build(),
+            )
         src.use {
             assertEquals(listOf("id", "name"), it.columns, "BOM 不得污染首列列名")
             val rows = mutableListOf<Map<String, String>>()
@@ -83,9 +92,15 @@ class EngineFixesRegressionTest {
         f.deleteOnExit()
         f.writeBytes("id,name\n1,Alice\n".toByteArray())
 
-        val src = ImportSourceFactory.open(
-            ImportRunRequest.newBuilder().setFilePath(f.absolutePath).setFormat("CSV").setHasHeader(true).build()
-        )
+        val src =
+            ImportSourceFactory.open(
+                ImportRunRequest
+                    .newBuilder()
+                    .setFilePath(f.absolutePath)
+                    .setFormat("CSV")
+                    .setHasHeader(true)
+                    .build(),
+            )
         src.use {
             assertEquals(listOf("id", "name"), it.columns)
             val rows = mutableListOf<Map<String, String>>()
@@ -102,38 +117,53 @@ class EngineFixesRegressionTest {
      * 「取消多语句脚本」这个能力实际不可用。
      */
     @Test
-    fun `cancel works with the caller supplied request id on multi statement script`() = runBlocking {
-        val cfg = h2Config()
-        PoolManager.getConnection(cfg).use { c ->
-            c.createStatement().use { it.execute("CREATE TABLE t(id INT)") }
-        }
-        val requestId = "regress-cancel-${UUID.randomUUID()}"
-        // 第一条是会跑很久的查询，保证取消时它仍在运行
-        val sql = "SELECT COUNT(*) FROM SYSTEM_RANGE(1, 40000) a, SYSTEM_RANGE(1, 40000) b; SELECT 1"
+    fun `cancel works with the caller supplied request id on multi statement script`() =
+        runBlocking {
+            val cfg = h2Config()
+            PoolManager.getConnection(cfg).use { c ->
+                c.createStatement().use { it.execute("CREATE TABLE t(id INT)") }
+            }
+            val requestId = "regress-cancel-${UUID.randomUUID()}"
+            // 第一条是会跑很久的查询，保证取消时它仍在运行
+            val sql = "SELECT COUNT(*) FROM SYSTEM_RANGE(1, 40000) a, SYSTEM_RANGE(1, 40000) b; SELECT 1"
 
-        val job = launch(Dispatchers.Default) {
-            RequestDispatcher.dispatch(
-                Request.newBuilder().setId(requestId)
-                    .setCategory(Category.SQL).setAction(Action.EXECUTE)
-                    .setConnection(cfg)
-                    .setSqlRequest(sqlRequest {
-                        execute = SqlExecuteRequest.newBuilder().setSql(sql).setMultiStatement(true).build()
-                    })
-                    .build()
-            ).toList()
-        }
-        // 等到脚本里的第一条语句被登记
-        var waited = 0
-        while (StatementRegistry.activeCount() == 0 && waited < 500) { delay(10); waited++ }
-        assertTrue(StatementRegistry.activeCount() > 0, "脚本语句应已登记")
+            val job =
+                launch(Dispatchers.Default) {
+                    RequestDispatcher
+                        .dispatch(
+                            Request
+                                .newBuilder()
+                                .setId(requestId)
+                                .setCategory(Category.SQL)
+                                .setAction(Action.EXECUTE)
+                                .setConnection(cfg)
+                                .setSqlRequest(
+                                    sqlRequest {
+                                        execute =
+                                            SqlExecuteRequest
+                                                .newBuilder()
+                                                .setSql(sql)
+                                                .setMultiStatement(true)
+                                                .build()
+                                    },
+                                ).build(),
+                        ).toList()
+                }
+            // 等到脚本里的第一条语句被登记
+            var waited = 0
+            while (StatementRegistry.activeCount() == 0 && waited < 500) {
+                delay(10)
+                waited++
+            }
+            assertTrue(StatementRegistry.activeCount() > 0, "脚本语句应已登记")
 
-        assertTrue(
-            StatementRegistry.cancel(requestId),
-            "用调用方的原始 request id 必须能取消多语句脚本",
-        )
-        job.cancel()
-        PoolManager.closeAll()
-    }
+            assertTrue(
+                StatementRegistry.cancel(requestId),
+                "用调用方的原始 request id 必须能取消多语句脚本",
+            )
+            job.cancel()
+            PoolManager.closeAll()
+        }
 
     /**
      * 修复 #4：timeoutMs 对流式路由生效。
@@ -142,62 +172,78 @@ class EngineFixesRegressionTest {
      * 完全无视 timeoutMs。
      */
     @Test
-    fun `timeoutMs applies to streaming routes`() = runBlocking {
-        val cfg = h2Config()
-        PoolManager.getConnection(cfg).use { c ->
-            c.createStatement().use {
-                it.execute("CREATE TABLE big AS SELECT X AS id FROM SYSTEM_RANGE(1, 50000)")
+    fun `timeoutMs applies to streaming routes`() =
+        runBlocking {
+            val cfg = h2Config()
+            PoolManager.getConnection(cfg).use { c ->
+                c.createStatement().use {
+                    it.execute("CREATE TABLE big AS SELECT X AS id FROM SYSTEM_RANGE(1, 50000)")
+                }
             }
-        }
-        val started = System.currentTimeMillis()
-        val frames = RequestDispatcher.dispatch(
-            Request.newBuilder().setId("regress-timeout")
-                .setCategory(Category.SQL).setAction(Action.EXECUTE)
-                .setConnection(cfg)
-                .setOptions(RequestOptions.newBuilder().setTimeoutMs(50).build())
-                .setSqlRequest(sqlRequest {
-                    execute = SqlExecuteRequest.newBuilder()
-                        .setSql("SELECT COUNT(*) FROM big a JOIN big b ON a.id = b.id")
-                        .build()
-                })
-                .build()
-        ).toList()
-        val elapsed = System.currentTimeMillis() - started
+            val started = System.currentTimeMillis()
+            val frames =
+                RequestDispatcher
+                    .dispatch(
+                        Request
+                            .newBuilder()
+                            .setId("regress-timeout")
+                            .setCategory(Category.SQL)
+                            .setAction(Action.EXECUTE)
+                            .setConnection(cfg)
+                            .setOptions(RequestOptions.newBuilder().setTimeoutMs(50).build())
+                            .setSqlRequest(
+                                sqlRequest {
+                                    execute =
+                                        SqlExecuteRequest
+                                            .newBuilder()
+                                            .setSql("SELECT COUNT(*) FROM big a JOIN big b ON a.id = b.id")
+                                            .build()
+                                },
+                            ).build(),
+                    ).toList()
+            val elapsed = System.currentTimeMillis() - started
 
-        val last = frames.last()
-        assertTrue(
-            !last.success,
-            "超时后终止帧必须是 success=false，实际 success=${last.success} elapsedMs=$elapsed",
-        )
-        assertTrue(
-            last.error.contains("exceeded", ignoreCase = true),
-            "错误信息应说明超时，实际: ${last.error}",
-        )
-        assertTrue(last.end, "超时帧必须是终止帧")
-        assertTrue(elapsed < 30_000, "应在超时后很快返回，实际耗时 ${elapsed}ms")
-        PoolManager.closeAll()
-    }
+            val last = frames.last()
+            assertTrue(
+                !last.success,
+                "超时后终止帧必须是 success=false，实际 success=${last.success} elapsedMs=$elapsed",
+            )
+            assertTrue(
+                last.error.contains("exceeded", ignoreCase = true),
+                "错误信息应说明超时，实际: ${last.error}",
+            )
+            assertTrue(last.end, "超时帧必须是终止帧")
+            assertTrue(elapsed < 30_000, "应在超时后很快返回，实际耗时 ${elapsed}ms")
+            PoolManager.closeAll()
+        }
 
     /** 修复 #4 的对照：无 timeoutMs 时长查询必须正常完成（不能被误伤）。 */
     @Test
-    fun `streaming route without timeoutMs still completes`() = runBlocking {
-        val cfg = h2Config()
-        PoolManager.getConnection(cfg).use { c ->
-            c.createStatement().use { it.execute("CREATE TABLE small(id INT)") }
-            c.createStatement().use { it.execute("INSERT INTO small VALUES (1),(2)") }
+    fun `streaming route without timeoutMs still completes`() =
+        runBlocking {
+            val cfg = h2Config()
+            PoolManager.getConnection(cfg).use { c ->
+                c.createStatement().use { it.execute("CREATE TABLE small(id INT)") }
+                c.createStatement().use { it.execute("INSERT INTO small VALUES (1),(2)") }
+            }
+            val frames =
+                RequestDispatcher
+                    .dispatch(
+                        Request
+                            .newBuilder()
+                            .setId("regress-no-timeout")
+                            .setCategory(Category.SQL)
+                            .setAction(Action.EXECUTE)
+                            .setConnection(cfg)
+                            .setSqlRequest(
+                                sqlRequest {
+                                    execute = SqlExecuteRequest.newBuilder().setSql("SELECT * FROM small ORDER BY id").build()
+                                },
+                            ).build(),
+                    ).toList()
+            val last = frames.last()
+            assertTrue(last.success, "未设超时的正常查询必须成功: ${last.error}")
+            assertFalse(last.end.not() && last.error.isNotEmpty())
+            PoolManager.closeAll()
         }
-        val frames = RequestDispatcher.dispatch(
-            Request.newBuilder().setId("regress-no-timeout")
-                .setCategory(Category.SQL).setAction(Action.EXECUTE)
-                .setConnection(cfg)
-                .setSqlRequest(sqlRequest {
-                    execute = SqlExecuteRequest.newBuilder().setSql("SELECT * FROM small ORDER BY id").build()
-                })
-                .build()
-        ).toList()
-        val last = frames.last()
-        assertTrue(last.success, "未设超时的正常查询必须成功: ${last.error}")
-        assertFalse(last.end.not() && last.error.isNotEmpty())
-        PoolManager.closeAll()
-    }
 }

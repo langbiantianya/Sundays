@@ -48,14 +48,16 @@ import kotlin.test.assertTrue
  * 远程库不可达时显式 skip（沿用 `DialectSmokeTest` 的做法），报告里留一条 skipped。
  */
 class ExportEndToEndIntegrationTest {
-
     private var engine: IdbEngine? = null
     private val workspaces = mutableListOf<Pair<SmokeTarget, String>>()
 
     @After
     fun tearDown() {
         runCatching { PoolManager.closeAll() }
-        runCatching { com.langbiantianya.export.ExportProcessManager.stop() }
+        runCatching {
+            com.langbiantianya.export.ExportProcessManager
+                .stop()
+        }
         engine?.close()
         workspaces.forEach { (t, w) -> runCatching { t.teardown(w) } }
         workspaces.clear()
@@ -78,10 +80,10 @@ class ExportEndToEndIntegrationTest {
             c.createStatement().use { st ->
                 st.executeUpdate("DROP TABLE IF EXISTS e2e_items")
                 st.executeUpdate(
-                    "CREATE TABLE e2e_items (id INT PRIMARY KEY, label VARCHAR(64), amount DECIMAL(10,2))"
+                    "CREATE TABLE e2e_items (id INT PRIMARY KEY, label VARCHAR(64), amount DECIMAL(10,2))",
                 )
                 st.executeUpdate(
-                    "INSERT INTO e2e_items VALUES (1, '第一行', 12.50), (2, 'second, with comma', -3.00), (3, NULL, 0.00)"
+                    "INSERT INTO e2e_items VALUES (1, '第一行', 12.50), (2, 'second, with comma', -3.00), (3, NULL, 0.00)",
                 )
             }
         }
@@ -89,14 +91,15 @@ class ExportEndToEndIntegrationTest {
         val eng = IdbEngine().also { engine = it }
         val state = DatabaseBrowserState(eng, CoroutineScope(Dispatchers.IO))
         // 用真实的桌面配置：driver 字段决定引擎按哪个方言建池
-        val desktopCfg = ConnectionConfig(
-            id = "e2e",
-            name = "e2e",
-            dialect = DialectType.MYSQL,
-            username = cfg.username,
-            password = cfg.password,
-            jdbcUrl = cfg.jdbcUrl,
-        )
+        val desktopCfg =
+            ConnectionConfig(
+                id = "e2e",
+                name = "e2e",
+                dialect = DialectType.MYSQL,
+                username = cfg.username,
+                password = cfg.password,
+                jdbcUrl = cfg.jdbcUrl,
+            )
         // ⚠️ 不 bind 这一行的话 `engineConn` 会发出一个 **driver 为空** 的连接配置，
         // 引擎直接回「No dialect plugin loaded for driver: 」。
         // （这正是加完日志后第一眼看到的东西 —— 之前它被静默吞掉了。）
@@ -105,17 +108,18 @@ class ExportEndToEndIntegrationTest {
         val outDir = Files.createTempDirectory("sundays-export-out").toFile()
         val progress = mutableListOf<Long>()
 
-        val result = runBlocking {
-            withTimeoutOrNull(120_000) {
-                state.exportQuery(
-                    sql = "SELECT id, label, amount FROM e2e_items ORDER BY id",
-                    format = DatabaseBrowserState.ExportFormat.CSV,
-                    outputDir = outDir.absolutePath,
-                    fileName = "e2e.csv",
-                    onProgress = { progress += it.rowsWritten },
-                )
+        val result =
+            runBlocking {
+                withTimeoutOrNull(120_000) {
+                    state.exportQuery(
+                        sql = "SELECT id, label, amount FROM e2e_items ORDER BY id",
+                        format = DatabaseBrowserState.ExportFormat.CSV,
+                        outputDir = outDir.absolutePath,
+                        fileName = "e2e.csv",
+                        onProgress = { progress += it.rowsWritten },
+                    )
+                }
             }
-        }
 
         assertTrue(result != null, "导出 120 秒内没有返回 —— 又一次静默挂起")
         assertTrue(result.isSuccess, "导出失败：${result.exceptionOrNull()?.message}")

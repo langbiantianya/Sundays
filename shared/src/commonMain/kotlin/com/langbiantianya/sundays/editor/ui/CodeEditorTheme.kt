@@ -37,21 +37,21 @@ data class CodeEditorTheme(
     val backgroundColor: Color,
     val gutterColor: Color,
 ) {
-
     companion object {
-
         /** 默认浅色主题 — Intellij Light 风格。 */
-        val Light: CodeEditorTheme = CodeEditorTheme(
-            colors = SyntaxHighlighter.DefaultLightColors,
-            textStyle = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Normal,
-                color = Color(0xFF000000),
-            ),
-            backgroundColor = Color(0xFFFAFAFA),
-            gutterColor = Color(0xFFE8E8E8),
-        )
+        val Light: CodeEditorTheme =
+            CodeEditorTheme(
+                colors = SyntaxHighlighter.DefaultLightColors,
+                textStyle =
+                    TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = Color(0xFF000000),
+                    ),
+                backgroundColor = Color(0xFFFAFAFA),
+                gutterColor = Color(0xFFE8E8E8),
+            )
 
         /**
          * 默认深色主题 — Intellij Darcula 语法配色，底色改用与 `SundaysPalette` 深色表面
@@ -62,17 +62,19 @@ data class CodeEditorTheme(
          * 标签条融为整体。Darcula 的 10 个 token 配色全部保留（其中 STRING / COMMENT 对该底色
          * 的对比度为 3.9:1，低于 4.5 但仍清晰可读，与 Darcula 原始观感一致）。
          */
-        val Dark: CodeEditorTheme = CodeEditorTheme(
-            colors = SyntaxHighlighter.DefaultDarkColors,
-            textStyle = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Normal,
-                color = Color(0xFFA9B7C6),
-            ),
-            backgroundColor = Color(0xFF1E232D),
-            gutterColor = Color(0xFF262C38),
-        )
+        val Dark: CodeEditorTheme =
+            CodeEditorTheme(
+                colors = SyntaxHighlighter.DefaultDarkColors,
+                textStyle =
+                    TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = Color(0xFFA9B7C6),
+                    ),
+                backgroundColor = Color(0xFF1E232D),
+                gutterColor = Color(0xFF262C38),
+            )
 
         /**
          * 默认主题 — 根据当前系统设置自动选择。
@@ -120,14 +122,17 @@ data class CodeEditorTheme(
             val scheme = androidx.compose.material3.MaterialTheme.colorScheme
             return CodeEditorTheme(
                 colors = tokens.syntax.asTokenColors(),
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = scheme.onBackground,
-                ),
+                textStyle =
+                    TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = scheme.onBackground,
+                    ),
                 // 经典档底色取输入框面：纯白面上凹陷边的亮侧会完全隐形
-                backgroundColor = com.langbiantianya.sundays.ui.fieldFaceColor(),
+                backgroundColor =
+                    com.langbiantianya.sundays.ui
+                        .fieldFaceColor(),
                 gutterColor = scheme.outlineVariant,
             )
         }

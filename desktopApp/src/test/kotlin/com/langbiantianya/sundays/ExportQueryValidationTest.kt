@@ -28,35 +28,49 @@ import kotlin.test.assertTrue
  * 而不是 JDBC 异常或一个转不出来的圈。真正跑通的那半留给集成测试 / 手工验证。
  */
 class ExportQueryValidationTest {
-
     private fun newState(): DatabaseBrowserState {
-        val state = DatabaseBrowserState(
-            engine = object : com.langbiantianya.client.EngineClient {
-                // 这个假引擎**永远不该被调用** —— 被测的全是「发出去之前就拒绝」的分支。
-                // 真走到这里说明参数校验漏了，让测试直接炸出来而不是静默通过。
-                override fun handle(request: com.langbiantianya.grpc.Request) =
-                    throw AssertionError("不该打到引擎：request=$request")
-                override suspend fun testConnection(config: com.langbiantianya.grpc.ConnectionConfig) =
-                    throw AssertionError("不该打到引擎")
-                override suspend fun disconnect(config: com.langbiantianya.grpc.ConnectionConfig) =
-                    throw AssertionError("不该打到引擎")
-                override fun close() = Unit
-            },
-            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
-        )
+        val state =
+            DatabaseBrowserState(
+                engine =
+                    object : com.langbiantianya.client.EngineClient {
+                        // 这个假引擎**永远不该被调用** —— 被测的全是「发出去之前就拒绝」的分支。
+                        // 真走到这里说明参数校验漏了，让测试直接炸出来而不是静默通过。
+                        override fun handle(request: com.langbiantianya.grpc.Request) = throw AssertionError("不该打到引擎：request=$request")
+
+                        override suspend fun testConnection(config: com.langbiantianya.grpc.ConnectionConfig) = throw AssertionError("不该打到引擎")
+
+                        override suspend fun disconnect(config: com.langbiantianya.grpc.ConnectionConfig) = throw AssertionError("不该打到引擎")
+
+                        override fun close() = Unit
+                    },
+                scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
+            )
         state.bindConnection(
             com.langbiantianya.sundays.connection.ConnectionConfig(
-                id = "t", name = "T", dialect = com.langbiantianya.sundays.connection.DialectType.H2,
-                username = "sa", password = "", jdbcUrl = "jdbc:h2:mem:nowhere",
+                id = "t",
+                name = "T",
+                dialect = com.langbiantianya.sundays.connection.DialectType.H2,
+                username = "sa",
+                password = "",
+                jdbcUrl = "jdbc:h2:mem:nowhere",
             ),
         )
         return state
     }
 
-    private fun failureMessage(sql: String, format: DatabaseBrowserState.ExportFormat, dir: String, name: String, table: String = "") =
-        kotlinx.coroutines.runBlocking {
-            newState().exportQuery(sql, format, dir, name, table).exceptionOrNull()?.message.orEmpty()
-        }
+    private fun failureMessage(
+        sql: String,
+        format: DatabaseBrowserState.ExportFormat,
+        dir: String,
+        name: String,
+        table: String = "",
+    ) = kotlinx.coroutines.runBlocking {
+        newState()
+            .exportQuery(sql, format, dir, name, table)
+            .exceptionOrNull()
+            ?.message
+            .orEmpty()
+    }
 
     @Test
     fun `blank sql is rejected before reaching the engine`() {
@@ -92,9 +106,13 @@ class ExportQueryValidationTest {
      */
     @Test
     fun `sql insert export requires a target table name`() {
-        val msg = failureMessage(
-            "SELECT 1", DatabaseBrowserState.ExportFormat.SQL_INSERT, "/tmp", "a.sql",
-        )
+        val msg =
+            failureMessage(
+                "SELECT 1",
+                DatabaseBrowserState.ExportFormat.SQL_INSERT,
+                "/tmp",
+                "a.sql",
+            )
         assertTrue(msg.contains("目标表"), "SQL_INSERT 缺目标表名应被拒绝：$msg")
     }
 

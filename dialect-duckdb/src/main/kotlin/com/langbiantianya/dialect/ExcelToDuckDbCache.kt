@@ -43,15 +43,18 @@ import java.util.concurrent.ConcurrentHashMap
 object ExcelToDuckDbCache {
     private val logger = LoggerFactory.getLogger(ExcelToDuckDbCache::class.java)
     private val cache = ConcurrentHashMap<String, File>()
-    private val tempDirs = java.util.concurrent.ConcurrentHashMap.newKeySet<File>()
+    private val tempDirs =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet<File>()
 
     /**
      * 取得 [excelPath] 对应的 DuckDB 数据库文件路径；若未缓存则用 POI 读取并转换为临时 DuckDB。
      */
     fun getOrCreate(excelPath: String): String {
-        val file = cache.getOrPut(excelPath) {
-            convert(excelPath)
-        }
+        val file =
+            cache.getOrPut(excelPath) {
+                convert(excelPath)
+            }
         return file.absolutePath
     }
 
@@ -95,21 +98,23 @@ object ExcelToDuckDbCache {
         logger.info("开始将 Excel 转换为临时 DuckDB: ${src.absolutePath} → ${dbFile.absolutePath}")
 
         // 1. 用 POI 读取所有 sheet
-        val sheetData: List<Pair<String, List<List<String>>>> = WorkbookFactory.create(src).use { wb ->
-            (0 until wb.numberOfSheets).map { i ->
-                val sheet = wb.getSheetAt(i)
-                val sheetName = sheet.sheetName ?: "Sheet$i"
-                val rows = mutableListOf<List<String>>()
-                for (rowIdx in 0..sheet.lastRowNum) {
-                    val row = sheet.getRow(rowIdx) ?: continue
-                    val rowData = (0 until row.lastCellNum).map { cellIdx ->
-                        row.getCell(cellIdx)?.toString()?.takeIf { it.isNotEmpty() } ?: ""
+        val sheetData: List<Pair<String, List<List<String>>>> =
+            WorkbookFactory.create(src).use { wb ->
+                (0 until wb.numberOfSheets).map { i ->
+                    val sheet = wb.getSheetAt(i)
+                    val sheetName = sheet.sheetName ?: "Sheet$i"
+                    val rows = mutableListOf<List<String>>()
+                    for (rowIdx in 0..sheet.lastRowNum) {
+                        val row = sheet.getRow(rowIdx) ?: continue
+                        val rowData =
+                            (0 until row.lastCellNum).map { cellIdx ->
+                                row.getCell(cellIdx)?.toString()?.takeIf { it.isNotEmpty() } ?: ""
+                            }
+                        rows.add(rowData)
                     }
-                    rows.add(rowData)
+                    sheetName to rows
                 }
-                sheetName to rows
             }
-        }
 
         // 2. 把每个 sheet 写入临时 DuckDB（列一律 VARCHAR —— POI 读出来的是字符串，
         //    猜类型反而会错：身份证号 / 邮编 / 订单号前导零在「猜成数字」时会丢）
@@ -139,7 +144,7 @@ object ExcelToDuckDbCache {
                 }
                 logger.info(
                     "  ✓ Sheet '$sheetName' → 表 '$tableName'" +
-                        "（${dataRows.size} 行 × $colCount 列，${if (hasHeader) "首行为表头" else "无表头"}，列名=${columns}）",
+                        "（${dataRows.size} 行 × $colCount 列，${if (hasHeader) "首行为表头" else "无表头"}，列名=$columns）",
                 )
             }
         }
@@ -171,8 +176,7 @@ object ExcelToDuckDbCache {
         return rows.drop(1).any { row -> row.any { it.isNumericLike() } }
     }
 
-    private fun String.isNumericLike(): Boolean =
-        isNotBlank() && trim().toDoubleOrNull() != null
+    private fun String.isNumericLike(): Boolean = isNotBlank() && trim().toDoubleOrNull() != null
 
     /**
      * 列名：优先取表头文字，缺 / 空 / 重复时退回 `col1, col2, …`。
@@ -181,7 +185,10 @@ object ExcelToDuckDbCache {
      * 而应用侧拼 SQL 时从不加引号 —— 列名变成 `userName` 而查询写的是 `username`，
      * 于是「列名保住了大小写」反而让所有查询找不到列。
      */
-    private fun columnNames(header: List<String>?, colCount: Int): List<String> {
+    private fun columnNames(
+        header: List<String>?,
+        colCount: Int,
+    ): List<String> {
         val used = mutableSetOf<String>()
         return (0 until colCount).map { i ->
             val raw = header?.getOrNull(i)?.trim()
@@ -197,7 +204,12 @@ object ExcelToDuckDbCache {
         }
     }
 
-    private fun insertRow(conn: Connection, tableName: String, row: List<String>, colCount: Int) {
+    private fun insertRow(
+        conn: Connection,
+        tableName: String,
+        row: List<String>,
+        colCount: Int,
+    ) {
         val placeholders = (1..colCount).joinToString(", ") { "?" }
         conn.prepareStatement("INSERT INTO $tableName VALUES ($placeholders)").use { ps ->
             for (i in 0 until colCount) {
@@ -222,16 +234,18 @@ object ExcelToDuckDbCache {
      * （`WHERE col LIKE …` 里的 `col` 是折成小写的），一改就会对不上。
      */
     private fun sanitizeIdentifier(name: String): String {
-        val cleaned = buildString {
-            for (ch in name) {
-                if (ch.isLetterOrDigit() || ch == '_') append(ch) else append('_')
+        val cleaned =
+            buildString {
+                for (ch in name) {
+                    if (ch.isLetterOrDigit() || ch == '_') append(ch) else append('_')
+                }
             }
-        }
-        val prefixed = when {
-            cleaned.isEmpty() -> "_"
-            cleaned[0].isLetter() || cleaned[0] == '_' -> cleaned
-            else -> "_$cleaned"
-        }
+        val prefixed =
+            when {
+                cleaned.isEmpty() -> "_"
+                cleaned[0].isLetter() || cleaned[0] == '_' -> cleaned
+                else -> "_$cleaned"
+            }
         return prefixed.take(63)
     }
 }

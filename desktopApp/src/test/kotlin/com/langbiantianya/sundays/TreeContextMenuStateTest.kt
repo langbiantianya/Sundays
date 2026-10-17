@@ -10,7 +10,6 @@ package com.langbiantianya.sundays
 
 import androidx.compose.ui.geometry.Offset
 import com.langbiantianya.client.EngineClient
-import com.langbiantianya.grpc.ConnectionConfig as GrpcConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.DialectType
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.langbiantianya.grpc.ConnectionConfig as GrpcConnectionConfig
 
 /**
  * 一个只占位的引擎 —— 本组用例**不应**发出任何引擎请求。
@@ -30,16 +30,14 @@ import kotlin.test.assertTrue
  * 而不是安静地返回空响应、再让断言去猜哪里不对。
  */
 private object StubEngineClient : EngineClient {
-    override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> =
-        flow { throw IllegalStateException("本用例不走流式路径") }
+    override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> = flow { throw IllegalStateException("本用例不走流式路径") }
 
     override suspend fun invoke(
         connection: GrpcConnectionConfig,
         configure: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit,
     ): com.langbiantianya.grpc.Response = error("本用例不应发出引擎请求")
 
-    override suspend fun testConnection(config: GrpcConnectionConfig) =
-        error("本用例不测连接")
+    override suspend fun testConnection(config: GrpcConnectionConfig) = error("本用例不测连接")
 
     override suspend fun disconnect(config: GrpcConnectionConfig): Boolean = false
 
@@ -61,10 +59,12 @@ private object StubEngineClient : EngineClient {
  * （见 `TEST_CASES.md`：右键 → 复制引用名 → 粘到记事本）。
  */
 class TreeContextMenuStateTest {
-
     /** 记录写入内容的替身；[ok] = 模拟「写入成功 / 失败」。 */
-    private class RecordingClipboard(private val ok: Boolean = true) : (String) -> Boolean {
+    private class RecordingClipboard(
+        private val ok: Boolean = true,
+    ) : (String) -> Boolean {
         val written = mutableListOf<String>()
+
         override fun invoke(text: String): Boolean {
             written += text
             return ok
@@ -79,7 +79,10 @@ class TreeContextMenuStateTest {
         /** 连接配置里的库名 —— PG 三段式引用要靠它和节点库名比对（见 [DatabaseBrowserState.treeReferenceText]）。 */
         database: String = "",
     ) = DatabaseBrowserState(
-        StubEngineClient, CoroutineScope(Dispatchers.Default), notifications, clipboard,
+        StubEngineClient,
+        CoroutineScope(Dispatchers.Default),
+        notifications,
+        clipboard,
     ).also {
         if (bind && dialect != DialectType.UNKNOWN) {
             it.bindConnection(
@@ -106,9 +109,10 @@ class TreeContextMenuStateTest {
         //   连到 examquestions：FROM examquestions.public.t1   ✅
         //   连到 postgres     ：FROM examquestions.public.t1   ❌ 0A000
         val s = state(DialectType.POSTGRESQL, database = "examquestions")
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user"),
+            )
         assertEquals("\"examquestions\".\"public\".\"biz_user\"", text)
     }
 
@@ -117,11 +121,15 @@ class TreeContextMenuStateTest {
         // 字段接在表引用后面。PG 认 catalog.schema.table.column 四段式
         // （实测 SELECT "examquestions"."public"."t1"."l2" FROM "examquestions"."public"."t1" 通过）
         val s = state(DialectType.POSTGRESQL, database = "examquestions")
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(
-                database = "examquestions", schema = "public", table = "t1", column = "l2",
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(
+                    database = "examquestions",
+                    schema = "public",
+                    table = "t1",
+                    column = "l2",
+                ),
             )
-        )
         assertEquals("\"examquestions\".\"public\".\"t1\".\"l2\"", text)
     }
 
@@ -132,9 +140,10 @@ class TreeContextMenuStateTest {
         // 那种情况下写 catalog 会产出粘进 SQL 编辑器必炸的引用；
         // schema.table 那个形态在 PG 里任何版本、任何库都恒可用。
         val s = state(DialectType.POSTGRESQL, database = "examquestions")
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "postgres", schema = "public", table = "some_table")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "postgres", schema = "public", table = "some_table"),
+            )
         assertEquals("\"public\".\"some_table\"", text)
     }
 
@@ -144,9 +153,10 @@ class TreeContextMenuStateTest {
         // 而我们复制出去的是带引号的形式（保留大小写）。所以连接配置里写成
         // `ExamQuestions` 不该让这一级白白丢掉 —— 那正是用户报的现象。
         val s = state(DialectType.POSTGRESQL, database = "ExamQuestions")
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user"),
+            )
         assertEquals("\"examquestions\".\"public\".\"biz_user\"", text)
     }
 
@@ -155,9 +165,10 @@ class TreeContextMenuStateTest {
         // currentConnection 为 null 时比较结果为 false → 退化成两段式。
         // 菜单此刻已经弹出来了，给一个**能用**的引用远好过崩掉。
         val s = state(DialectType.POSTGRESQL, bind = false)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user"),
+            )
         assertEquals("\"public\".\"biz_user\"", text)
     }
 
@@ -170,13 +181,13 @@ class TreeContextMenuStateTest {
         assertEquals(
             "`other_db`.`biz_user`",
             s.treeReferenceText(
-                DatabaseBrowserState.TreeTarget(database = "other_db", schema = "", table = "biz_user")
+                DatabaseBrowserState.TreeTarget(database = "other_db", schema = "", table = "biz_user"),
             ),
         )
         assertEquals(
             "`examquestions`.`biz_user`",
             s.treeReferenceText(
-                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user")
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user"),
             ),
         )
     }
@@ -185,29 +196,35 @@ class TreeContextMenuStateTest {
     fun `h2 不因为库名匹配就多写一级`() {
         // H2 走 schema 分支：catalog 与 schema 是两层，写库名会报 schema 不存在
         val s = state(DialectType.H2, database = "EXAM")
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "EXAM", schema = "PUBLIC", table = "USERS")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "EXAM", schema = "PUBLIC", table = "USERS"),
+            )
         assertEquals("\"PUBLIC\".\"USERS\"", text)
     }
 
     @Test
     fun `表节点给表名引用`() {
         val s = state(DialectType.POSTGRESQL)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "public", table = "biz_user"),
+            )
         assertEquals("\"public\".\"biz_user\"", text)
     }
 
     @Test
     fun `字段节点给表点字段的引用而不是裸字段名`() {
         val s = state(DialectType.POSTGRESQL)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(
-                database = "examquestions", schema = "public", table = "biz_user", column = "user_name",
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(
+                    database = "examquestions",
+                    schema = "public",
+                    table = "biz_user",
+                    column = "user_name",
+                ),
             )
-        )
         // 裸的 `"user_name"` 在库里可能压根不存在（它在 biz_user 里）——
         // 复制出来的引用粘到 SQL 里必然报错，用户还得自己拼表名。
         assertEquals("\"public\".\"biz_user\".\"user_name\"", text)
@@ -223,9 +240,10 @@ class TreeContextMenuStateTest {
     @Test
     fun `mysql 表节点在没有 schema 时用库名限定`() {
         val s = state(DialectType.MYSQL)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user"),
+            )
         assertEquals("`examquestions`.`biz_user`", text)
     }
 
@@ -234,9 +252,10 @@ class TreeContextMenuStateTest {
         // 用户刚展开一个库、schema 往返还没回来就右键 —— 这时若拿 catalog 当限定名，
         // 复制出来的是 `"examquestions"."biz_user"`，在 PG 里解析成一个不存在的 schema。
         val s = state(DialectType.POSTGRESQL)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", schema = "", table = "biz_user"),
+            )
         assertEquals("\"biz_user\"", text)
     }
 
@@ -244,18 +263,20 @@ class TreeContextMenuStateTest {
     fun `h2 表节点不把库名当限定名`() {
         // H2 的 catalog（库名）与 schema（PUBLIC）是两层，写 catalog 会报 schema 不存在
         val s = state(DialectType.H2)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "EXAM", schema = "", table = "USERS")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "EXAM", schema = "", table = "USERS"),
+            )
         assertEquals("\"USERS\"", text)
     }
 
     @Test
     fun `没有绑定连接时仍能给出引用而不是崩掉`() {
         val s = state(DialectType.UNKNOWN, bind = false)
-        val text = s.treeReferenceText(
-            DatabaseBrowserState.TreeTarget(database = "examquestions", table = "biz_user")
-        )
+        val text =
+            s.treeReferenceText(
+                DatabaseBrowserState.TreeTarget(database = "examquestions", table = "biz_user"),
+            )
         // 未连接 = 方言未知 → 双引号。菜单此刻已经弹出来了，
         // 给一个能看的名字远好过让整条路径不可用。
         assertEquals("\"biz_user\"", text)
@@ -269,13 +290,13 @@ class TreeContextMenuStateTest {
         assertEquals(
             "biz_user",
             s.treePlainName(
-                DatabaseBrowserState.TreeTarget(database = "d", schema = "s", table = "biz_user")
+                DatabaseBrowserState.TreeTarget(database = "d", schema = "s", table = "biz_user"),
             ),
         )
         assertEquals(
             "user_name",
             s.treePlainName(
-                DatabaseBrowserState.TreeTarget(database = "d", table = "t", column = "user_name")
+                DatabaseBrowserState.TreeTarget(database = "d", table = "t", column = "user_name"),
             ),
         )
         assertEquals("d", s.treePlainName(DatabaseBrowserState.TreeTarget(database = "d")))
@@ -290,8 +311,11 @@ class TreeContextMenuStateTest {
             "user_name",
             s.treePlainName(
                 DatabaseBrowserState.TreeTarget(
-                    database = "d", schema = "s", table = "biz_user", column = "user_name",
-                )
+                    database = "d",
+                    schema = "s",
+                    table = "biz_user",
+                    column = "user_name",
+                ),
             ),
         )
     }

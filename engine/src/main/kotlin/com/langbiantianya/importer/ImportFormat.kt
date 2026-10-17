@@ -18,15 +18,15 @@ import com.langbiantianya.i18n.StrKey
  * [parse] 的报错信息、UI 的下拉选项、这里的 entries 都从这里派生。
  */
 enum class ImportFormat {
-
     /** 逗号分隔文本，支持引号包裹与 `""` 转义 */
     CSV,
 
     /** JSON Lines：每行一个独立的 JSON 对象 */
-    JSON_LINES;
+    JSON_LINES,
+
+    ;
 
     companion object {
-
         /** 面向用户的支持值列表（用于报错与文档） */
         val supported: List<String> = entries.map { it.name }
 
@@ -41,7 +41,7 @@ enum class ImportFormat {
             val key = raw.trim().uppercase()
             return entries.firstOrNull { it.name == key }
                 ?: throw IllegalArgumentException(
-                    Msg.format(StrKey.UNSUPPORTED_IMPORT_FORMAT, raw, supported.joinToString(", "))
+                    Msg.format(StrKey.UNSUPPORTED_IMPORT_FORMAT, raw, supported.joinToString(", ")),
                 )
         }
     }

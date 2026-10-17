@@ -31,7 +31,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class ThemeContentColorTest {
-
     private fun luminance(color: Color): Double {
         fun channel(c: Float): Double {
             val v = c.toDouble()
@@ -40,7 +39,10 @@ class ThemeContentColorTest {
         return 0.2126 * channel(color.red) + 0.7152 * channel(color.green) + 0.0722 * channel(color.blue)
     }
 
-    private fun contrastRatio(a: Color, b: Color): Double {
+    private fun contrastRatio(
+        a: Color,
+        b: Color,
+    ): Double {
         val la = luminance(a)
         val lb = luminance(b)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)

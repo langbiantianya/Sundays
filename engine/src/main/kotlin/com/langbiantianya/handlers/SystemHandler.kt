@@ -8,43 +8,42 @@
 
 package com.langbiantianya.handlers
 
+import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.DialectInfo
 import com.langbiantianya.grpc.PayloadAdapter
-import com.langbiantianya.grpc.SystemDisconnectResponse
-import com.langbiantianya.grpc.SystemInfoResponse
-import com.langbiantianya.grpc.SystemListDriversResponse
-import com.langbiantianya.grpc.SystemServerInfoResponse
-import com.langbiantianya.grpc.SystemTestConnectionResponse
-import com.langbiantianya.grpc.dialectInfo
-import com.langbiantianya.grpc.memoryInfo
-import com.langbiantianya.grpc.systemDisconnectResponse
-import com.langbiantianya.grpc.systemInfoResponse
-import com.langbiantianya.grpc.systemListDriversResponse
-import com.langbiantianya.grpc.systemServerInfoResponse
-import com.langbiantianya.grpc.systemTestConnectionResponse
-import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.grpc.SystemBeginResponse
 import com.langbiantianya.grpc.SystemCancelResponse
 import com.langbiantianya.grpc.SystemCommitResponse
+import com.langbiantianya.grpc.SystemDisconnectResponse
+import com.langbiantianya.grpc.SystemInfoResponse
+import com.langbiantianya.grpc.SystemListDriversResponse
 import com.langbiantianya.grpc.SystemRollbackResponse
+import com.langbiantianya.grpc.SystemServerInfoResponse
 import com.langbiantianya.grpc.SystemSessionInfoResponse
+import com.langbiantianya.grpc.SystemTestConnectionResponse
+import com.langbiantianya.grpc.dialectInfo
+import com.langbiantianya.grpc.memoryInfo
 import com.langbiantianya.grpc.systemBeginResponse
 import com.langbiantianya.grpc.systemCancelResponse
 import com.langbiantianya.grpc.systemCommitResponse
+import com.langbiantianya.grpc.systemDisconnectResponse
+import com.langbiantianya.grpc.systemInfoResponse
+import com.langbiantianya.grpc.systemListDriversResponse
 import com.langbiantianya.grpc.systemRollbackResponse
+import com.langbiantianya.grpc.systemServerInfoResponse
 import com.langbiantianya.grpc.systemSessionInfoResponse
+import com.langbiantianya.grpc.systemTestConnectionResponse
 import com.langbiantianya.grpc.transactionSession
-import com.langbiantianya.pool.TransactionManager
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
+import com.langbiantianya.pool.TransactionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
 import java.lang.management.ManagementFactory
 
 object SystemHandler {
-
     fun info(): SystemInfoResponse {
         val runtime = Runtime.getRuntime()
         val osBean = ManagementFactory.getOperatingSystemMXBean()
@@ -63,12 +62,13 @@ object SystemHandler {
             osArch = osBean.arch
             osVersion = osBean.version
             availableProcessors = osBean.availableProcessors
-            memory = memoryInfo {
-                max = maxMemory
-                total = totalMemory
-                used = usedMemory
-                free = freeMemory
-            }
+            memory =
+                memoryInfo {
+                    max = maxMemory
+                    total = totalMemory
+                    used = usedMemory
+                    free = freeMemory
+                }
             uptime = runtimeBean.uptime
             pid = runtimeBean.pid
         }
@@ -77,29 +77,30 @@ object SystemHandler {
     /**
      * TEST_CONNECTION — 测试数据库连接是否有效
      */
-    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse = withContext(Dispatchers.IO) {
-        try {
-            // 仅凭 JDBC URL 也能测试 —— 方言由 URL scheme 反查（PoolManager.resolveDialect）。
-            // 解析失败会抛出可读错误，被下面的 catch 转成 ok=false。
-            val driverName = PoolManager.resolveDialect(config).driverName
-            val connection = PoolManager.getConnection(config)
-            connection.use { conn ->
-                val ok = conn.isValid(5)
+    suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse =
+        withContext(Dispatchers.IO) {
+            try {
+                // 仅凭 JDBC URL 也能测试 —— 方言由 URL scheme 反查（PoolManager.resolveDialect）。
+                // 解析失败会抛出可读错误，被下面的 catch 转成 ok=false。
+                val driverName = PoolManager.resolveDialect(config).driverName
+                val connection = PoolManager.getConnection(config)
+                connection.use { conn ->
+                    val ok = conn.isValid(5)
+                    systemTestConnectionResponse {
+                        this.ok = ok
+                        driver = driverName
+                        host = config.host
+                        port = config.port
+                        database = config.database
+                    }
+                }
+            } catch (e: Exception) {
                 systemTestConnectionResponse {
-                    this.ok = ok
-                    driver = driverName
-                    host = config.host
-                    port = config.port
-                    database = config.database
+                    ok = false
+                    error = e.message ?: "Unknown error"
                 }
             }
-        } catch (e: Exception) {
-            systemTestConnectionResponse {
-                ok = false
-                error = e.message ?: "Unknown error"
-            }
         }
-    }
 
     /**
      * DISCONNECT (v2.15) — 释放 [config] 对应的全部 HikariCP 连接池（含各 schema 维度）。
@@ -127,17 +128,18 @@ object SystemHandler {
      * @param requestId 目标请求 id（调用方自己分配的 `Request.id`）
      * @return cancelled=true 表示已找到目标并发出取消；false = 该请求不在运行 / 已结束
      */
-    fun cancel(requestId: String): SystemCancelResponse = systemCancelResponse {
-        if (requestId.isBlank()) {
-            error = "SYSTEM.CANCEL requires 'target_request_id' (the id of the request to cancel)"
-            return@systemCancelResponse
+    fun cancel(requestId: String): SystemCancelResponse =
+        systemCancelResponse {
+            if (requestId.isBlank()) {
+                error = "SYSTEM.CANCEL requires 'target_request_id' (the id of the request to cancel)"
+                return@systemCancelResponse
+            }
+            this.requestId = requestId
+            cancelled = StatementRegistry.cancel(requestId)
+            if (!cancelled) {
+                error = "No running statement for request id '$requestId' — it may have already finished"
+            }
         }
-        this.requestId = requestId
-        cancelled = StatementRegistry.cancel(requestId)
-        if (!cancelled) {
-            error = "No running statement for request id '$requestId' — it may have already finished"
-        }
-    }
 
     /**
      * BEGIN (v2.16) — 开启事务会话。
@@ -145,7 +147,10 @@ object SystemHandler {
      * 为会话固定一条连接并置 `autocommit=false`；调用方把返回的 `session_id` 随后续
      * `DATA.*` / `SQL.EXECUTE` 请求下发，直到 COMMIT / ROLLBACK。
      */
-    fun begin(config: ConnectionConfig, schema: String = ""): SystemBeginResponse {
+    fun begin(
+        config: ConnectionConfig,
+        schema: String = "",
+    ): SystemBeginResponse {
         val session = TransactionManager.begin(config, schema)
         return systemBeginResponse {
             sessionId = session.id
@@ -156,18 +161,20 @@ object SystemHandler {
     }
 
     /** COMMIT (v2.16) — 提交并结束事务会话。重复提交返回 committed=false 而非报错。 */
-    fun commit(sessionId: String): SystemCommitResponse = systemCommitResponse {
-        this.sessionId = sessionId
-        committed = TransactionManager.commit(sessionId)
-        if (!committed) error = "Unknown or already-closed transaction session: '$sessionId'"
-    }
+    fun commit(sessionId: String): SystemCommitResponse =
+        systemCommitResponse {
+            this.sessionId = sessionId
+            committed = TransactionManager.commit(sessionId)
+            if (!committed) error = "Unknown or already-closed transaction session: '$sessionId'"
+        }
 
     /** ROLLBACK (v2.16) — 回滚并结束事务会话。语义与 [commit] 对称。 */
-    fun rollback(sessionId: String): SystemRollbackResponse = systemRollbackResponse {
-        this.sessionId = sessionId
-        rolledBack = TransactionManager.rollback(sessionId)
-        if (!rolledBack) error = "Unknown or already-closed transaction session: '$sessionId'"
-    }
+    fun rollback(sessionId: String): SystemRollbackResponse =
+        systemRollbackResponse {
+            this.sessionId = sessionId
+            rolledBack = TransactionManager.rollback(sessionId)
+            if (!rolledBack) error = "Unknown or already-closed transaction session: '$sessionId'"
+        }
 
     /**
      * SESSION_INFO (v2.16) — 事务会话状态。
@@ -175,8 +182,12 @@ object SystemHandler {
      * [sessionId] 非空时返回该会话（不存在则 `active_sessions=0`）；留空则列出全部活跃会话。
      */
     fun sessionInfo(sessionId: String = ""): SystemSessionInfoResponse {
-        val target = if (sessionId.isBlank()) TransactionManager.active()
-        else listOfNotNull(TransactionManager.get(sessionId))
+        val target =
+            if (sessionId.isBlank()) {
+                TransactionManager.active()
+            } else {
+                listOfNotNull(TransactionManager.get(sessionId))
+            }
         return systemSessionInfoResponse {
             activeSessions = target.size
             sessions.addAll(
@@ -189,7 +200,7 @@ object SystemHandler {
                         schema = s.appliedSchema
                         autoCommit = s.connection.autoCommit
                     }
-                }
+                },
             )
         }
     }
@@ -200,36 +211,40 @@ object SystemHandler {
      * 方言返回的 Map 字段直接映射到 SystemServerInfoResponse 的已知字段（version/catalog/current_database/mode），
      * 未知字段打包进 extras: google.protobuf.Value。
      */
-    suspend fun serverInfo(config: ConnectionConfig): SystemServerInfoResponse = withContext(Dispatchers.IO) {
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
-        connection.use { conn ->
-            val info = dialect.getServerInfo(conn)
-            val extras = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
-            val response = systemServerInfoResponse {
-                info.forEach { (k, v) ->
-                    when (k) {
-                        "version" -> version = v
-                        "catalog" -> catalog = v
-                        "current_database" -> currentDatabase = v
-                        "mode" -> mode = v
-                        else -> extras[k] = JsonPrimitive(v)
+    suspend fun serverInfo(config: ConnectionConfig): SystemServerInfoResponse =
+        withContext(Dispatchers.IO) {
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
+            connection.use { conn ->
+                val info = dialect.getServerInfo(conn)
+                val extras = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
+                val response =
+                    systemServerInfoResponse {
+                        info.forEach { (k, v) ->
+                            when (k) {
+                                "version" -> version = v
+                                "catalog" -> catalog = v
+                                "current_database" -> currentDatabase = v
+                                "mode" -> mode = v
+                                else -> extras[k] = JsonPrimitive(v)
+                            }
+                        }
                     }
+                if (extras.isNotEmpty()) {
+                    response
+                        .toBuilder()
+                        .setExtras(
+                            PayloadAdapter.toValue(
+                                kotlinx.serialization.json.buildJsonObject {
+                                    extras.forEach { (k, v) -> put(k, v) }
+                                },
+                            ),
+                        ).build()
+                } else {
+                    response
                 }
             }
-            if (extras.isNotEmpty()) {
-                response.toBuilder().setExtras(
-                    PayloadAdapter.toValue(
-                        kotlinx.serialization.json.buildJsonObject {
-                            extras.forEach { (k, v) -> put(k, v) }
-                        }
-                    )
-                ).build()
-            } else {
-                response
-            }
         }
-    }
 
     /**
      * LIST_DRIVERS (v2.8) — 列出引擎已加载的所有方言插件及连接元数据。
@@ -240,23 +255,24 @@ object SystemHandler {
      * 不需要 connection（与 INFO 一样纯元数据查询），但 Request 仍可携带 connection 字段（被忽略）。
      */
     fun listDrivers(): SystemListDriversResponse {
-        val items = DialectLoader.getAllDialects().map { dialect ->
-            dialectInfo {
-                driverName = dialect.driverName
-                displayName = dialect.displayName
-                jdbcDriverClassName = dialect.jdbcDriverClassName
-                jdbcUrlExample = dialect.jdbcUrlExample
-                connectionType = dialect.connectionType.name
-                requiresHost = dialect.requiresHost
-                requiresPort = dialect.requiresPort
-                defaultPort = dialect.defaultPort ?: 0
-                supportsUser = dialect.supportsUser
-                supportsPassword = dialect.supportsPassword
-                supportsSchema = dialect.supportsSchema
-                supportsCrossDatabase = dialect.supportsCrossDatabase
-                capabilities.addAll(dialect.capabilities.map { it.name })
+        val items =
+            DialectLoader.getAllDialects().map { dialect ->
+                dialectInfo {
+                    driverName = dialect.driverName
+                    displayName = dialect.displayName
+                    jdbcDriverClassName = dialect.jdbcDriverClassName
+                    jdbcUrlExample = dialect.jdbcUrlExample
+                    connectionType = dialect.connectionType.name
+                    requiresHost = dialect.requiresHost
+                    requiresPort = dialect.requiresPort
+                    defaultPort = dialect.defaultPort ?: 0
+                    supportsUser = dialect.supportsUser
+                    supportsPassword = dialect.supportsPassword
+                    supportsSchema = dialect.supportsSchema
+                    supportsCrossDatabase = dialect.supportsCrossDatabase
+                    capabilities.addAll(dialect.capabilities.map { it.name })
+                }
             }
-        }
         return systemListDriversResponse {
             this.items.addAll(items)
         }

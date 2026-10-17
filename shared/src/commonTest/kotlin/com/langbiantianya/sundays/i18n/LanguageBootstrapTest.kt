@@ -30,7 +30,6 @@ import kotlin.test.assertFalse
  * `commonTest` 而不是 `desktopApp` 的 Compose 测试里。
  */
 class LanguageBootstrapTest {
-
     private lateinit var tempHome: String
     private lateinit var originalHome: String
 
@@ -137,11 +136,16 @@ class LanguageBootstrapTest {
     fun `非法语言值降级但不影响其余字段`() {
         SettingsStorage.save(AppSettings(language = AppLanguage.JA, compactMode = true))
         // 手改成非法值，模拟用户编辑 / 降级安装
-        val file = Files.createDirectories(
-            java.nio.file.Paths.get(tempHome, ".config", "sundays")
-        ).resolve("settings.json")
-        val patched = Files.readString(file)
-            .replace("\"language\": \"ja\"", "\"language\": \"kl\"")
+        val file =
+            Files
+                .createDirectories(
+                    java.nio.file.Paths
+                        .get(tempHome, ".config", "sundays"),
+                ).resolve("settings.json")
+        val patched =
+            Files
+                .readString(file)
+                .replace("\"language\": \"ja\"", "\"language\": \"kl\"")
         Files.writeString(file, patched)
 
         val loaded = SettingsStorage.load()
@@ -166,9 +170,10 @@ class LanguageBootstrapTest {
      */
     @Test
     fun `改配色不会抹掉已选语言`() {
-        val state = AppearanceState(
-            onChange = { s -> SettingsStorage.save(s.toAppSettings()) },
-        )
+        val state =
+            AppearanceState(
+                onChange = { s -> SettingsStorage.save(s.toAppSettings()) },
+            )
         state.selectLanguage(AppLanguage.DE)
         assertEquals(AppLanguage.DE, SettingsStorage.load().language)
 

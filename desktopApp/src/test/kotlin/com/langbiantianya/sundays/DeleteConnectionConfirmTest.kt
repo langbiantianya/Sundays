@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -29,10 +29,10 @@ import com.langbiantianya.sundays.connection.ConnectionType
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.WizardFlow
 import com.langbiantianya.sundays.connection.WizardStep
+import org.junit.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.minutes
-import org.junit.Test
 
 /**
  * **删除连接必须先过一道确认框** —— 真窗口走查发现，键盘 Tab 到「删除」按一下回车，
@@ -54,19 +54,19 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class DeleteConnectionConfirmTest {
-
-    private val config = ConnectionConfig(
-        id = "del-me",
-        name = "要删的连接",
-        dialect = DialectType.MYSQL,
-        host = "192.168.1.5",
-        port = 3306,
-        database = "sundays_probe",
-        username = "root",
-        password = "666666",
-        connectionType = ConnectionType.CLIENT_SERVER,
-        jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe?useSSL=false",
-    )
+    private val config =
+        ConnectionConfig(
+            id = "del-me",
+            name = "要删的连接",
+            dialect = DialectType.MYSQL,
+            host = "192.168.1.5",
+            port = 3306,
+            database = "sundays_probe",
+            username = "root",
+            password = "666666",
+            connectionType = ConnectionType.CLIENT_SERVER,
+            jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe?useSSL=false",
+        )
 
     /** 内存态的连接列表 —— 不碰真实 `connection.json`。 */
     private fun newList() = mutableStateOf(ConnectionList(listOf(config)))
@@ -109,7 +109,8 @@ class DeleteConnectionConfirmTest {
             onNodeWithText(zh(StrKey.DELETE)).performClick()
             waitForIdle()
             assertEquals(
-                emptyList(), deleted,
+                emptyList(),
+                deleted,
                 "点「删除」还没确认时**绝不能**真的删 —— 这正是走查里按一下回车连接就没了的原因",
             )
             onNodeWithText(zh(StrKey.CONFIRM_DELETE_CONNECTION, "要删的连接")).assertIsDisplayed()
@@ -146,9 +147,10 @@ class DeleteConnectionConfirmTest {
                             onQuickConnectDirect = {},
                             onDeleteConnection = { id ->
                                 deleted += id
-                                list.value = list.value.copy(
-                                    connections = list.value.connections.filterNot { it.id == id },
-                                )
+                                list.value =
+                                    list.value.copy(
+                                        connections = list.value.connections.filterNot { it.id == id },
+                                    )
                             },
                             onCancelEdit = {},
                             onWizardNext = {},
@@ -167,7 +169,8 @@ class DeleteConnectionConfirmTest {
             // 再点第二个（框内那个）。这样点的是框内按钮，不靠「哪个先渲染」去猜。
             val deleteLabels = onAllNodesWithText(zh(StrKey.DELETE)).fetchSemanticsNodes()
             assertEquals(
-                2, deleteLabels.size,
+                2,
+                deleteLabels.size,
                 "确认框打开时应同时存在面板的「删除」与框内的「删除」两个入口",
             )
 
@@ -220,7 +223,8 @@ class DeleteConnectionConfirmTest {
             waitForIdle()
 
             assertEquals(
-                emptyList(), deleted,
+                emptyList(),
+                deleted,
                 "⋮ 菜单的「删除」同样必须先确认 —— 它是同一个收口，不该有例外",
             )
             onNodeWithText(zh(StrKey.CONFIRM_DELETE_CONNECTION, "要删的连接")).assertIsDisplayed()

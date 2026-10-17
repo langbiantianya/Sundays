@@ -12,8 +12,8 @@ import com.langbiantianya.i18n.tables.textsDe
 import com.langbiantianya.i18n.tables.textsEn
 import com.langbiantianya.i18n.tables.textsJa
 import com.langbiantianya.i18n.tables.textsRu
-import com.langbiantianya.i18n.tables.textsZhHant
 import com.langbiantianya.i18n.tables.textsZhHans
+import com.langbiantianya.i18n.tables.textsZhHant
 
 /**
  * 普通文案表的语言分派 —— 一处 `when`，六份数据文件。
@@ -31,13 +31,13 @@ import com.langbiantianya.i18n.tables.textsZhHans
  * 「不完整」（`else` 缺席），漏不掉。
  */
 internal object Texts {
-
-    fun forLanguage(language: AppLanguage): Map<StrKey, String> = when (language) {
-        AppLanguage.ZH_HANS -> textsZhHans
-        AppLanguage.ZH_HANT -> textsZhHant
-        AppLanguage.EN -> textsEn
-        AppLanguage.RU -> textsRu
-        AppLanguage.JA -> textsJa
-        AppLanguage.DE -> textsDe
-    }
+    fun forLanguage(language: AppLanguage): Map<StrKey, String> =
+        when (language) {
+            AppLanguage.ZH_HANS -> textsZhHans
+            AppLanguage.ZH_HANT -> textsZhHant
+            AppLanguage.EN -> textsEn
+            AppLanguage.RU -> textsRu
+            AppLanguage.JA -> textsJa
+            AppLanguage.DE -> textsDe
+        }
 }

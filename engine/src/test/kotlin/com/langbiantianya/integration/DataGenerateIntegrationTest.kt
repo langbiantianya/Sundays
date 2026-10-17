@@ -29,61 +29,76 @@ import kotlin.test.assertTrue
  * 覆盖 dispatcher 流式 GENERATE 路径：Lua 脚本执行 → INSERT → 流式进度帧。
  */
 class DataGenerateIntegrationTest : H2Fixture() {
-
     private fun request(
-        configure: Request.Builder.() -> Unit
-    ): Request = Request.newBuilder()
-        .setId(TestIds.next("r-gen"))
-        .setCategory(Category.DATA)
-        .setAction(Action.GENERATE)
-        .setConnection(config)
-        .apply(configure)
-        .build()
+        configure: Request.Builder.() -> Unit,
+    ): Request =
+        Request
+            .newBuilder()
+            .setId(TestIds.next("r-gen"))
+            .setCategory(Category.DATA)
+            .setAction(Action.GENERATE)
+            .setConnection(config)
+            .apply(configure)
+            .build()
 
     @Test
-    fun `DATA GENERATE inserts rows via Lua script`() = runBlocking {
-        val tableName = TestIds.nextSql("gen")
-        // setup target table
-        executeUpdate("CREATE TABLE $tableName (id INT PRIMARY KEY, name VARCHAR(64))")
+    fun `DATA GENERATE inserts rows via Lua script`() =
+        runBlocking {
+            val tableName = TestIds.nextSql("gen")
+            // setup target table
+            executeUpdate("CREATE TABLE $tableName (id INT PRIMARY KEY, name VARCHAR(64))")
 
-        val resp = RequestDispatcher.dispatch(
-            request {
-                setDataRequest(DataRequest.newBuilder()
-                    .setGenerate(dataGenerateRequest {
-                        tables += generateTable {
-                            script = "for i = 1, 5 do insert('$tableName', {id = i, name = 'user_'..i}) end"
-                        }
-                    })
-                    .build())
-            }
-        ).toList()
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        request {
+                            setDataRequest(
+                                DataRequest
+                                    .newBuilder()
+                                    .setGenerate(
+                                        dataGenerateRequest {
+                                            tables +=
+                                                generateTable {
+                                                    script = "for i = 1, 5 do insert('$tableName', {id = i, name = 'user_'..i}) end"
+                                                }
+                                        },
+                                    ).build(),
+                            )
+                        },
+                    ).toList()
 
-        // 最后一条是 terminal 帧（end=true），前面是 5 条 progress 帧
-        assertTrue(resp.size >= 6, "expected >=6 frames (5 progress + terminal), got ${resp.size}")
-        assertTrue(resp.last().end, "last frame must be terminal (end=true)")
-        assertTrue(resp.last().success)
-        assertTrue(resp.last().hasGenerateTerminal())
-        assertEquals(1, resp.last().generateTerminal.tablesProcessed, "终止帧应回填已处理脚本数")
-        assertTrue(resp.last().generateTerminal.success)
+            // 最后一条是 terminal 帧（end=true），前面是 5 条 progress 帧
+            assertTrue(resp.size >= 6, "expected >=6 frames (5 progress + terminal), got ${resp.size}")
+            assertTrue(resp.last().end, "last frame must be terminal (end=true)")
+            assertTrue(resp.last().success)
+            assertTrue(resp.last().hasGenerateTerminal())
+            assertEquals(1, resp.last().generateTerminal.tablesProcessed, "终止帧应回填已处理脚本数")
+            assertTrue(resp.last().generateTerminal.success)
 
-        // 验证行确实写入
-        val rowCount = executeQuerySingle("SELECT COUNT(*) FROM $tableName")?.toInt() ?: 0
-        assertEquals(5, rowCount, "expected 5 rows inserted by Lua script")
-    }
+            // 验证行确实写入
+            val rowCount = executeQuerySingle("SELECT COUNT(*) FROM $tableName")?.toInt() ?: 0
+            assertEquals(5, rowCount, "expected 5 rows inserted by Lua script")
+        }
 
     @Test
-    fun `DATA GENERATE rejects empty tables list`() = runBlocking {
-        val resp = RequestDispatcher.dispatch(
-            request {
-                setDataRequest(DataRequest.newBuilder()
-                    .setGenerate(dataGenerateRequest { /* no tables */ })
-                    .build())
-            }
-        ).toList()
+    fun `DATA GENERATE rejects empty tables list`() =
+        runBlocking {
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        request {
+                            setDataRequest(
+                                DataRequest
+                                    .newBuilder()
+                                    .setGenerate(dataGenerateRequest { /* no tables */ })
+                                    .build(),
+                            )
+                        },
+                    ).toList()
 
-        // 空 tables 在 generate 处抛 IllegalArgumentException，dispatcher 包装为 error 帧
-        assertEquals(1, resp.size)
-        assertEquals(false, resp.single().success)
-        assertTrue(resp.single().error.isNotEmpty())
-    }
+            // 空 tables 在 generate 处抛 IllegalArgumentException，dispatcher 包装为 error 帧
+            assertEquals(1, resp.size)
+            assertEquals(false, resp.single().success)
+            assertTrue(resp.single().error.isNotEmpty())
+        }
 }

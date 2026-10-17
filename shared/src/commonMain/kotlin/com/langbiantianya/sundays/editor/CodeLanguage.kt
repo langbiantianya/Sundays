@@ -30,7 +30,6 @@ package com.langbiantianya.sundays.editor
  * @see CompletionItem
  */
 interface CodeLanguage {
-
     /** 语言唯一 ID（如 `"sql"` / `"lua"` / `"python"`），UI 通过此 ID 选择语言 */
     val id: String
 
@@ -93,7 +92,6 @@ interface CodeLanguage {
  * ```
  */
 object CodeLanguageRegistry {
-
     private val lock = Any()
     private val languages = mutableMapOf<String, CodeLanguage>()
 

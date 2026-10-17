@@ -33,16 +33,18 @@ import kotlin.test.assertTrue
  * 「拼出来的 URL 对不对」与「拼出来的东西用不用得了」是两件事，后者才要断。
  */
 class ExcelToDuckDbCacheTest {
-
     @Test
-    fun `converted database keeps the source file name`(@TempDir tempDir: Path) {
+    fun `converted database keeps the source file name`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = writeExcel(tempDir, "销售明细.xlsx", header = true, rows = 20)
         val dbPath = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
 
         // 中文文件名必须**原样保留**：按 ASCII 规整会把「销售明细」变成「____」，
         // 那比叫 `converted` 更让人摸不着头脑 —— 库名是直接显示在应用库树上的。
         assertEquals(
-            "销售明细.duckdb", File(dbPath).name,
+            "销售明细.duckdb",
+            File(dbPath).name,
             "临时库名应沿用源文件名（去掉扩展名），实际 ${File(dbPath).name}",
         )
         val dbNames = queryStrings(dbPath, "SELECT database_name FROM duckdb_databases()")
@@ -58,7 +60,9 @@ class ExcelToDuckDbCacheTest {
      * 规整后仍应保留可辨认的部分，而不是整串退化成下划线。
      */
     @Test
-    fun `special characters in the file name are kept recognisable`(@TempDir tempDir: Path) {
+    fun `special characters in the file name are kept recognisable`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = writeExcel(tempDir, "Q1 报表(最终).xlsx", header = true, rows = 3)
         val dbPath = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
         println("规整后库名 = ${File(dbPath).name}")
@@ -66,7 +70,9 @@ class ExcelToDuckDbCacheTest {
     }
 
     @Test
-    fun `header row becomes column names and is not data`(@TempDir tempDir: Path) {
+    fun `header row becomes column names and is not data`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = writeExcel(tempDir, "with_header.xlsx", header = true, rows = 20)
         val dbPath = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
 
@@ -79,7 +85,9 @@ class ExcelToDuckDbCacheTest {
     }
 
     @Test
-    fun `a file without a header keeps every row`(@TempDir tempDir: Path) {
+    fun `a file without a header keeps every row`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = writeExcel(tempDir, "no_header.xlsx", header = false, rows = 5)
         val dbPath = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
 
@@ -91,7 +99,9 @@ class ExcelToDuckDbCacheTest {
     }
 
     @Test
-    fun `a numeric first row is data rather than a header`(@TempDir tempDir: Path) {
+    fun `a numeric first row is data rather than a header`(
+        @TempDir tempDir: Path,
+    ) {
         // 「2024 年销售额」这种表头认不出来（判据只看数字）；
         // 但纯数字开头的行**一定**是数据，不能被当表头吃掉 —— 这是判据的保守侧。
         val excel = writeNumericFirstRow(tempDir)
@@ -100,14 +110,16 @@ class ExcelToDuckDbCacheTest {
     }
 
     @Test
-    fun `duplicate and blank header cells fall back without colliding`(@TempDir tempDir: Path) {
+    fun `duplicate and blank header cells fall back without colliding`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = File(tempDir.toFile(), "weird_header.xlsx")
         XSSFWorkbook().use { wb ->
             val sheet = wb.createSheet("Sheet1")
             val header = sheet.createRow(0)
             header.createCell(0).setCellValue("id")
-            header.createCell(1).setCellValue("id")     // 重名
-            header.createCell(2).setCellValue(" ")       // 空白
+            header.createCell(1).setCellValue("id") // 重名
+            header.createCell(2).setCellValue(" ") // 空白
             for (i in 1..3) {
                 val row = sheet.createRow(i)
                 row.createCell(0).setCellValue(i.toDouble())
@@ -124,7 +136,9 @@ class ExcelToDuckDbCacheTest {
     }
 
     @Test
-    fun `conversion is cached per path`(@TempDir tempDir: Path) {
+    fun `conversion is cached per path`(
+        @TempDir tempDir: Path,
+    ) {
         val excel = writeExcel(tempDir, "cached.xlsx", header = true, rows = 3)
         val a = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
         val b = ExcelToDuckDbCache.getOrCreate(excel.absolutePath)
@@ -174,7 +188,10 @@ class ExcelToDuckDbCacheTest {
 
     // ------------------------------------------------------------------ 查询
 
-    private fun queryStrings(dbPath: String, sql: String): List<String> =
+    private fun queryStrings(
+        dbPath: String,
+        sql: String,
+    ): List<String> =
         DriverManager.getConnection("jdbc:duckdb:$dbPath", "", "").use { c ->
             c.createStatement().use { s ->
                 s.executeQuery(sql).use { r ->
@@ -183,10 +200,16 @@ class ExcelToDuckDbCacheTest {
             }
         }
 
-    private fun queryInt(dbPath: String, sql: String): Int =
+    private fun queryInt(
+        dbPath: String,
+        sql: String,
+    ): Int =
         DriverManager.getConnection("jdbc:duckdb:$dbPath", "", "").use { c ->
             c.createStatement().use { s ->
-                s.executeQuery(sql).use { r -> r.next(); r.getInt(1) }
+                s.executeQuery(sql).use { r ->
+                    r.next()
+                    r.getInt(1)
+                }
             }
         }
 }

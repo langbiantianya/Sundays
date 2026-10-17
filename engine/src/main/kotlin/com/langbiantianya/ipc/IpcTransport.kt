@@ -23,7 +23,6 @@ import io.grpc.ServerBuilder
  * SocketAddress / 目标 URI（TCP / UDS / Named Pipe）。
  */
 interface IpcTransport {
-
     /** URI scheme: "tcp" / "unix" / "pipe" */
     fun scheme(): String
 

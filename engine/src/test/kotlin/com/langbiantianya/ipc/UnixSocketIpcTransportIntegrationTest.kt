@@ -35,15 +35,16 @@ import kotlin.test.assertTrue
  */
 @EnabledOnOs(OS.LINUX, OS.MAC, OS.FREEBSD)
 class UnixSocketIpcTransportIntegrationTest {
+    private val sockFile =
+        File(
+            System.getProperty("java.io.tmpdir"),
+            TestIds.uniqueName("idb-engine-test") + ".sock",
+        )
 
-    private val sockFile = File(
-        System.getProperty("java.io.tmpdir"),
-        TestIds.uniqueName("idb-engine-test") + ".sock"
-    )
-
-    private val transport = UnixSocketIpcTransport(
-        IpcConfig(kind = IpcKind.UNIX, udsPath = sockFile.absolutePath)
-    )
+    private val transport =
+        UnixSocketIpcTransport(
+            IpcConfig(kind = IpcKind.UNIX, udsPath = sockFile.absolutePath),
+        )
 
     @AfterEach
     fun tearDown() {
@@ -54,21 +55,25 @@ class UnixSocketIpcTransportIntegrationTest {
     fun `gRPC round-trip over filesystem UDS`() {
         assertTimeout(Duration.ofSeconds(15)) {
             transport.prepare()
-            val server = transport.serverBuilder()
-                .addService(MinimalEchoImpl())
-                .build()
+            val server =
+                transport
+                    .serverBuilder()
+                    .addService(MinimalEchoImpl())
+                    .build()
             server.start()
             try {
                 val channel = transport.channelBuilder().build()
                 try {
                     val stub = IdbEngineGrpc.newBlockingStub(channel)
-                    val iter = stub.handle(
-                        Request.newBuilder()
-                            .setId("uds-1")
-                            .setCategory(Category.SYSTEM)
-                            .setAction(Action.INFO)
-                            .build()
-                    )
+                    val iter =
+                        stub.handle(
+                            Request
+                                .newBuilder()
+                                .setId("uds-1")
+                                .setCategory(Category.SYSTEM)
+                                .setAction(Action.INFO)
+                                .build(),
+                        )
                     assertTrue(iter.hasNext(), "no response received via UDS")
                     val resp: Response = iter.next()
                     assertNotNull(resp)
@@ -99,13 +104,14 @@ class UnixSocketIpcTransportIntegrationTest {
     private class MinimalEchoImpl : IdbEngineGrpc.IdbEngineImplBase() {
         override fun handle(
             request: Request,
-            responseObserver: StreamObserver<Response>
+            responseObserver: StreamObserver<Response>,
         ) {
             responseObserver.onNext(
-                Response.newBuilder()
+                Response
+                    .newBuilder()
                     .setId(request.id)
                     .setSuccess(true)
-                    .build()
+                    .build(),
             )
             responseObserver.onCompleted()
         }

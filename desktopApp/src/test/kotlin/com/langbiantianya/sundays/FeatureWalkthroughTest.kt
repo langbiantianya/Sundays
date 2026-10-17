@@ -10,14 +10,14 @@ package com.langbiantianya.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -33,6 +33,17 @@ import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.table.TableRow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.skia.Image
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -41,17 +52,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.SupervisorJob
-import org.jetbrains.skia.Image
-import org.junit.After
-import org.junit.Before
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
-import org.junit.Test
 
 /**
  * **已实现功能的真机走查** —— 在 **H2 与 SQLite 两个方言**上，把最近落地的五项功能
@@ -111,8 +111,9 @@ import org.junit.Test
  */
 @RunWith(Parameterized::class)
 @OptIn(ExperimentalTestApi::class)
-class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
-
+class FeatureWalkthroughTest(
+    private val target: WalkthroughTarget,
+) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "[{0}]")
@@ -120,11 +121,11 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     }
 
     /** 等待引擎往返的上限。实测往返都在 700ms 内，60s 是几十倍余量。 */
-    private val ENGINE_AWAIT_MS = 60_000L
+    private val engineAwaitMs = 60_000L
 
     private var browserScope: CoroutineScope? = null
-    private fun newScope(): CoroutineScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { browserScope = it }
+
+    private fun newScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { browserScope = it }
 
     private lateinit var tempHome: File
     private lateinit var originalHome: String
@@ -200,7 +201,11 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     fun tearDown() {
         // 顺序与 H2GuiWalkthroughTest 一致：先关引擎（它会连 DialectLoader 的 ClassLoader 一起关），
         // 再取消协程作用域。SQLite 还要额外删临时文件。
-        try { engine.close() } catch (e: Exception) { println("engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("engine.close 抛了：$e")
+        }
         browserScope?.cancel()
         System.setProperty("user.home", originalHome)
         tempHome.deleteRecursively()
@@ -231,126 +236,136 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * - **等待条件必须判「每一类都落定」，不能判「loading 清空」** —— 见 [settledObjectKinds]。
      */
     @Test
-    fun `OB1 object browser lists views and reports unsupported kinds`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
+    fun `OB1 object browser lists views and reports unsupported kinds`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
 
-        val db = browser.databases.first()
-        // ⚠️ 必须**展开**库：对象分组是库节点的子行，库没展开时树上根本没有它们。
-        // 展开同时会并发拉库级对象与表列表（见 `toggleDatabase`）。
-        browser.toggleDatabase(db)
-        awaitState("展开库", browser) { db in browser.expandedDatabases }
+            val db = browser.databases.first()
+            // ⚠️ 必须**展开**库：对象分组是库节点的子行，库没展开时树上根本没有它们。
+            // 展开同时会并发拉库级对象与表列表（见 `toggleDatabase`）。
+            browser.toggleDatabase(db)
+            awaitState("展开库", browser) { db in browser.expandedDatabases }
 
-        // ⚠️ 等待条件不能只看 `loadingObjects` 清空 ——
-        // `loadDatabaseObjects` 先把三类占位全撤掉、再由 `loadDatabaseObjectsFor` 逐类置上，
-        // 中间存在一个「谁都不在 loading 里」的窗口，照那个条件等会在数据落地前就返回。
-        // 真正的「落定」是**每一类**要么进了结果、要么进了错误。
-        awaitState("库级对象全部落定", browser) {
-            settledObjectKinds(browser, db).size == DatabaseBrowserState.DatabaseObjectKind.entries.size
-        }
-        awaitUi("界面已画出对象分组")
-
-        val schemas = browser.schemasByDatabase[db].orEmpty()
-        val objects = browser.objectsByDatabase[db].orEmpty()
-        val errors = browser.objectLoadError
-        println("RESULT OB1 [${target.name}] schema=$schemas objects=$objects errors=$errors")
-        assertTrue(schemas.isNotEmpty(), "schema 名必须先解析出来（实际 $schemas），否则对象查询全落空")
-
-        for (kind in DatabaseBrowserState.DatabaseObjectKind.entries) {
-            val errKey = "$db::${kind.name}"
-            val errorText = errors[errKey]
-            if (kind.name in target.supportsDatabaseObjects) {
-                assertNull(errorText, "[${target.name}] 支持${Msg.text(kind.labelKey)}，不应报错：$errorText")
-                assertTrue(
-                    kind in objects,
-                    "[${target.name}] ${Msg.text(kind.labelKey)} 应出现在对象分组里（key 集合=${objects.keys}）",
-                )
-            } else {
-                // 不支持的一侧：**要么**明确报错、**要么**给出空列表；两者都行，
-                // 但绝不能是「永远 loading」也不能是「把支持的种类一起弄没了」。
-                assertTrue(
-                    errorText != null || objects[kind].isNullOrEmpty(),
-                    "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，应报错或为空，实际 objects=${objects[kind]} errors=$errors",
-                )
-                println("  · ${Msg.text(kind.labelKey)} 不受支持 → error=${errorText ?: "(空列表)"}")
+            // ⚠️ 等待条件不能只看 `loadingObjects` 清空 ——
+            // `loadDatabaseObjects` 先把三类占位全撤掉、再由 `loadDatabaseObjectsFor` 逐类置上，
+            // 中间存在一个「谁都不在 loading 里」的窗口，照那个条件等会在数据落地前就返回。
+            // 真正的「落定」是**每一类**要么进了结果、要么进了错误。
+            awaitState("库级对象全部落定", browser) {
+                settledObjectKinds(browser, db).size == DatabaseBrowserState.DatabaseObjectKind.entries.size
             }
-        }
+            awaitUi("界面已画出对象分组")
 
-        // 视图两个方言都支持，且名字是我们自己建的 —— 这是最硬的一条锚点
-        val views = objects[DatabaseBrowserState.DatabaseObjectKind.VIEW].orEmpty()
-        assertTrue(
-            views.any { it.equals("v_active_users", ignoreCase = true) },
-            "[${target.name}] 视图列表应含 v_active_users，实际 $views",
-        )
+            val schemas = browser.schemasByDatabase[db].orEmpty()
+            val objects = browser.objectsByDatabase[db].orEmpty()
+            val errors = browser.objectLoadError
+            println("RESULT OB1 [${target.name}] schema=$schemas objects=$objects errors=$errors")
+            assertTrue(schemas.isNotEmpty(), "schema 名必须先解析出来（实际 $schemas），否则对象查询全落空")
 
-        // 界面上也要真的画出来。
-        //
-        // ⚠️ 树是 **LazyColumn**，而对象分组排在所有表**之后**（见渲染处的注释：
-        //「用户 90% 的时间在找表，把表放前面」）。树不高时那些行在折叠线以下 ——
-        // 离屏的 lazy item **没有语义节点**，于是 `onNodeWithText(zh(StrKey.VIEWS))` 直接找不到。
-        // 第一版就是这么误判成「界面没渲染」的。必须先滚到它。
-        //
-        // ⚠️ 也不能用 `onNode(hasScrollAction())`：整屏有多个可滚动节点，而 `onNode` 要求
-        // **恰好**命中一个；而且**按序号取会漂** —— 库里有多少东西、行高多少，都会改变
-        // 「树排在第几个」（SQLite 的库名是一整条文件路径，行数与 H2 不同）。
-        //
-        // 只按 `left < 400` 会挑中顶部导航条（横向）或详情面板里的小滚动区，所以先筛出
-        // 「**纵向**且靠左」的一组候选。
-        //
-        // ⚠️ **不能只认一个**：更严格的判据（额外要求 LazyColumn 专有的 `ScrollToIndex`）
-        // 在并发下**偶发**失配 —— 该动作是否出现在语义里取决于那一帧 lazy 布局有没有
-        // 铺开 item，实测 SQLite + 高负载时整棵树都匹配不上。
-        // 判据随环境抖动的解法不是加更多条件，而是**把候选逐个试一遍**。
-        val candidates = onAllNodes(hasScrollAction()).fetchSemanticsNodes()
-            .mapIndexedNotNull { i, node ->
-                if (node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null &&
-                    node.boundsInRoot.left < 400f
-                ) i else null
+            for (kind in DatabaseBrowserState.DatabaseObjectKind.entries) {
+                val errKey = "$db::${kind.name}"
+                val errorText = errors[errKey]
+                if (kind.name in target.supportsDatabaseObjects) {
+                    assertNull(errorText, "[${target.name}] 支持${Msg.text(kind.labelKey)}，不应报错：$errorText")
+                    assertTrue(
+                        kind in objects,
+                        "[${target.name}] ${Msg.text(kind.labelKey)} 应出现在对象分组里（key 集合=${objects.keys}）",
+                    )
+                } else {
+                    // 不支持的一侧：**要么**明确报错、**要么**给出空列表；两者都行，
+                    // 但绝不能是「永远 loading」也不能是「把支持的种类一起弄没了」。
+                    assertTrue(
+                        errorText != null || objects[kind].isNullOrEmpty(),
+                        "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，应报错或为空，实际 objects=${objects[kind]} errors=$errors",
+                    )
+                    println("  · ${Msg.text(kind.labelKey)} 不受支持 → error=${errorText ?: "(空列表)"}")
+                }
             }
-        assertTrue(candidates.isNotEmpty(), "左侧应至少有一个纵向可滚动节点")
 
-        val scrolled = candidates.any { idx ->
-            runCatching {
-                onAllNodes(hasScrollAction())[idx]
-                    // ⚠️ `substring = true` 不能省：分组行的文本是 `"视图："`（带全角冒号），
-                    // 而 `hasText` 默认要求**完全相等**，写成 "视图" 就永远匹配不上。
-                    .performScrollToNode(hasText(zh(StrKey.VIEWS), substring = true))
-            }.isSuccess
-        }
-        assertTrue(scrolled, "应在左侧某个纵向滚动节点里找到「视图」分组（试了 ${candidates.size} 个）")
-        onAllNodesWithText(zh(StrKey.VIEWS), substring = true).fetchSemanticsNodes().let {
-            assertTrue(it.isNotEmpty(), "树上应出现「视图」分组")
-        }
+            // 视图两个方言都支持，且名字是我们自己建的 —— 这是最硬的一条锚点
+            val views = objects[DatabaseBrowserState.DatabaseObjectKind.VIEW].orEmpty()
+            assertTrue(
+                views.any { it.equals("v_active_users", ignoreCase = true) },
+                "[${target.name}] 视图列表应含 v_active_users，实际 $views",
+            )
 
-        // 不支持的种类必须在**界面上单独**说清楚，且不得连累能列出来的那几类。
-        //
-        // 这条是双方言矩阵才照得出来的：SQLite 上 TRIGGER / FUNCTION 必然失败，
-        // 若错误被画成「整个对象区」的一行红字，视图就会跟着消失 —— 而视图恰恰
-        // 是这几类里唯一真有内容的。修掉之前 SQLite 这条一直红。
-        val text = onRoot().fetchSemanticsNode().let { node ->
-            val acc = StringBuilder()
-            fun walk(s: SemanticsNode) {
-                s.config.getOrNull(SemanticsProperties.Text)?.forEach { acc.append(it.text).append('|') }
-                s.children.forEach { walk(it) }
+            // 界面上也要真的画出来。
+            //
+            // ⚠️ 树是 **LazyColumn**，而对象分组排在所有表**之后**（见渲染处的注释：
+            // 「用户 90% 的时间在找表，把表放前面」）。树不高时那些行在折叠线以下 ——
+            // 离屏的 lazy item **没有语义节点**，于是 `onNodeWithText(zh(StrKey.VIEWS))` 直接找不到。
+            // 第一版就是这么误判成「界面没渲染」的。必须先滚到它。
+            //
+            // ⚠️ 也不能用 `onNode(hasScrollAction())`：整屏有多个可滚动节点，而 `onNode` 要求
+            // **恰好**命中一个；而且**按序号取会漂** —— 库里有多少东西、行高多少，都会改变
+            // 「树排在第几个」（SQLite 的库名是一整条文件路径，行数与 H2 不同）。
+            //
+            // 只按 `left < 400` 会挑中顶部导航条（横向）或详情面板里的小滚动区，所以先筛出
+            // 「**纵向**且靠左」的一组候选。
+            //
+            // ⚠️ **不能只认一个**：更严格的判据（额外要求 LazyColumn 专有的 `ScrollToIndex`）
+            // 在并发下**偶发**失配 —— 该动作是否出现在语义里取决于那一帧 lazy 布局有没有
+            // 铺开 item，实测 SQLite + 高负载时整棵树都匹配不上。
+            // 判据随环境抖动的解法不是加更多条件，而是**把候选逐个试一遍**。
+            val candidates =
+                onAllNodes(hasScrollAction())
+                    .fetchSemanticsNodes()
+                    .mapIndexedNotNull { i, node ->
+                        if (node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null &&
+                            node.boundsInRoot.left < 400f
+                        ) {
+                            i
+                        } else {
+                            null
+                        }
+                    }
+            assertTrue(candidates.isNotEmpty(), "左侧应至少有一个纵向可滚动节点")
+
+            val scrolled =
+                candidates.any { idx ->
+                    runCatching {
+                        onAllNodes(hasScrollAction())[idx]
+                            // ⚠️ `substring = true` 不能省：分组行的文本是 `"视图："`（带全角冒号），
+                            // 而 `hasText` 默认要求**完全相等**，写成 "视图" 就永远匹配不上。
+                            .performScrollToNode(hasText(zh(StrKey.VIEWS), substring = true))
+                    }.isSuccess
+                }
+            assertTrue(scrolled, "应在左侧某个纵向滚动节点里找到「视图」分组（试了 ${candidates.size} 个）")
+            onAllNodesWithText(zh(StrKey.VIEWS), substring = true).fetchSemanticsNodes().let {
+                assertTrue(it.isNotEmpty(), "树上应出现「视图」分组")
             }
-            walk(node)
-            acc.toString()
-        }
-        for (kind in DatabaseBrowserState.DatabaseObjectKind.entries) {
-            if (kind.name !in target.supportsDatabaseObjects) {
-                assertTrue(
-                    text.contains(Msg.text(kind.labelKey)) && (errors["$db::${kind.name}"]?.let { text.contains(it.take(12)) } ?: true),
-                    "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，界面上应有它自己的说明；文本=$text",
-                )
+
+            // 不支持的种类必须在**界面上单独**说清楚，且不得连累能列出来的那几类。
+            //
+            // 这条是双方言矩阵才照得出来的：SQLite 上 TRIGGER / FUNCTION 必然失败，
+            // 若错误被画成「整个对象区」的一行红字，视图就会跟着消失 —— 而视图恰恰
+            // 是这几类里唯一真有内容的。修掉之前 SQLite 这条一直红。
+            val text =
+                onRoot().fetchSemanticsNode().let { node ->
+                    val acc = StringBuilder()
+
+                    fun walk(s: SemanticsNode) {
+                        s.config.getOrNull(SemanticsProperties.Text)?.forEach { acc.append(it.text).append('|') }
+                        s.children.forEach { walk(it) }
+                    }
+                    walk(node)
+                    acc.toString()
+                }
+            for (kind in DatabaseBrowserState.DatabaseObjectKind.entries) {
+                if (kind.name !in target.supportsDatabaseObjects) {
+                    assertTrue(
+                        text.contains(Msg.text(kind.labelKey)) && (errors["$db::${kind.name}"]?.let { text.contains(it.take(12)) } ?: true),
+                        "[${target.name}] ${Msg.text(kind.labelKey)} 不受支持，界面上应有它自己的说明；文本=$text",
+                    )
+                }
             }
+            assertTrue(
+                text.contains("v_active_users") || text.contains("V_ACTIVE_USERS"),
+                "[${target.name}] 视图名应出现在树上（不被失败的那几类连累）；文本=$text",
+            )
+            shot("ob1-object-browser-${target.name.lowercase()}.png")
         }
-        assertTrue(
-            text.contains("v_active_users") || text.contains("V_ACTIVE_USERS"),
-            "[${target.name}] 视图名应出现在树上（不被失败的那几类连累）；文本=$text",
-        )
-        shot("ob1-object-browser-${target.name.lowercase()}.png")
-    }
 
     /**
      * ## TC-OB2 — 表级对象：索引 / 外键
@@ -372,54 +387,56 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      *   `INFORMATION_SCHEMA`，名字是真的。
      */
     @Test
-    fun `OB2 table objects list indexes and foreign keys`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
-        val db = browser.databases.first()
-        browser.toggleDatabase(db)
-        awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
-        awaitUi("界面已画出表节点")
+    fun `OB2 table objects list indexes and foreign keys`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
+            val db = browser.databases.first()
+            browser.toggleDatabase(db)
+            awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
+            awaitUi("界面已画出表节点")
 
-        val table = browser.findTable(db, "ORDERS")
-        browser.toggleTableObjects(db, table)
-        val slot = "$db::$table"
-        // ⚠️ 集合里存的是 **`(slot, kind)`**（slot = "库::表"），不是 `(库, kind)`。
-        // 写成 `(db to it)` 时条件恒真 —— await 立刻通过，于是拿一个空 `objs` 去断言，
-        // 第一版就是这么把「应用没写数据」误报成「界面没显示」的。
-        awaitState("表级对象加载完成（$slot）", browser) {
-            DatabaseBrowserState.TableObjectKind.entries.all { (slot to it) !in browser.loadingTableObjects }
-        }
-        awaitUi("界面已画出表级对象")
+            val table = browser.findTable(db, "ORDERS")
+            browser.toggleTableObjects(db, table)
+            val slot = "$db::$table"
+            // ⚠️ 集合里存的是 **`(slot, kind)`**（slot = "库::表"），不是 `(库, kind)`。
+            // 写成 `(db to it)` 时条件恒真 —— await 立刻通过，于是拿一个空 `objs` 去断言，
+            // 第一版就是这么把「应用没写数据」误报成「界面没显示」的。
+            awaitState("表级对象加载完成（$slot）", browser) {
+                DatabaseBrowserState.TableObjectKind.entries.all { (slot to it) !in browser.loadingTableObjects }
+            }
+            awaitUi("界面已画出表级对象")
 
-        val objs = browser.tableObjects[slot].orEmpty()
-        // 直连引擎再发一次同一请求：把「应用没调」与「引擎调了但失败」分开 ——
-        // 表级对象只在成功时才写进 `_tableObjects`，失败时界面上是空列表，
-        // 与「真的没有索引」长得一模一样。
-        val probe = probeIndexList(db, table)
-        val diag = "slot=$slot schema=${browser.schemasByDatabase[db]} objs=$objs " +
-            "engineProbe=$probe"
-        println("RESULT OB2 [${target.name}] $diag")
+            val objs = browser.tableObjects[slot].orEmpty()
+            // 直连引擎再发一次同一请求：把「应用没调」与「引擎调了但失败」分开 ——
+            // 表级对象只在成功时才写进 `_tableObjects`，失败时界面上是空列表，
+            // 与「真的没有索引」长得一模一样。
+            val probe = probeIndexList(db, table)
+            val diag =
+                "slot=$slot schema=${browser.schemasByDatabase[db]} objs=$objs " +
+                    "engineProbe=$probe"
+            println("RESULT OB2 [${target.name}] $diag")
 
-        val idx = objs[DatabaseBrowserState.TableObjectKind.INDEX].orEmpty()
-        assertTrue(
-            idx.any { it.contains("idx_orders_status", ignoreCase = true) },
-            "[${target.name}] 索引列表应含 idx_orders_status，实际 $idx；$diag",
-        )
-        val fks = objs[DatabaseBrowserState.TableObjectKind.FOREIGN_KEY].orEmpty()
-        if (target.exposesForeignKeyName) {
+            val idx = objs[DatabaseBrowserState.TableObjectKind.INDEX].orEmpty()
             assertTrue(
-                fks.any { it.contains("fk_orders_user", ignoreCase = true) },
-                "[${target.name}] 外键列表应含 fk_orders_user，实际 $fks；$diag",
+                idx.any { it.contains("idx_orders_status", ignoreCase = true) },
+                "[${target.name}] 索引列表应含 idx_orders_status，实际 $idx；$diag",
             )
-        } else {
-            // SQLite 拿不到真名（PRAGMA foreign_key_list 不暴露约束名），只断言「列出来了」
-            assertTrue(fks.isNotEmpty(), "[${target.name}] 外键列表不该为空，实际 $fks；$diag")
-            println("  · SQLite 的外键名是方言拼出来的（PRAGMA 不给真名）：$fks")
-        }
+            val fks = objs[DatabaseBrowserState.TableObjectKind.FOREIGN_KEY].orEmpty()
+            if (target.exposesForeignKeyName) {
+                assertTrue(
+                    fks.any { it.contains("fk_orders_user", ignoreCase = true) },
+                    "[${target.name}] 外键列表应含 fk_orders_user，实际 $fks；$diag",
+                )
+            } else {
+                // SQLite 拿不到真名（PRAGMA foreign_key_list 不暴露约束名），只断言「列出来了」
+                assertTrue(fks.isNotEmpty(), "[${target.name}] 外键列表不该为空，实际 $fks；$diag")
+                println("  · SQLite 的外键名是方言拼出来的（PRAGMA 不给真名）：$fks")
+            }
 
-        shot("ob2-table-objects-${target.name.lowercase()}.png")
-    }
+            shot("ob2-table-objects-${target.name.lowercase()}.png")
+        }
 
     // ==================================================================
     // TC-DQ：过滤 / 排序 / 表内搜索
@@ -444,65 +461,71 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * - **三个子场景之间必须先互相清干净**，否则过滤条件会被 AND 叠加。
      */
     @Test
-    fun `DQ1 filter sort and search are pushed down to the engine`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
-        val db = browser.databases.first()
-        browser.toggleDatabase(db)
-        awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
+    fun `DQ1 filter sort and search are pushed down to the engine`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
+            val db = browser.databases.first()
+            browser.toggleDatabase(db)
+            awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
 
-        val table = browser.findTable(db, "USERS")
-        browser.openTab(browser.currentSchema(), table)
-        val tab = browser.tabs.single()
-        awaitState("USERS 预览加载完成", browser) { tab.rows.isNotEmpty() && !tab.loading }
-        assertEquals(250L, tab.total, "未过滤时 USERS 应为 250 行")
+            val table = browser.findTable(db, "USERS")
+            browser.openTab(browser.currentSchema(), table)
+            val tab = browser.tabs.single()
+            awaitState("USERS 预览加载完成", browser) { tab.rows.isNotEmpty() && !tab.loading }
+            assertEquals(250L, tab.total, "未过滤时 USERS 应为 250 行")
 
-        // ---- 过滤：id > 200 → 201..250 共 50 行
-        browser.setTabFilter(tab, "id > 200")
-        awaitState("过滤 id > 200 生效", browser) { !tab.loading && tab.total == 50L }
-        assertEquals(1, tab.page, "改过滤条件必须回到第 1 页（否则可能停在一个已不存在的页上）")
-        assertNull(tab.error, "过滤不应报错")
-        assertTrue(
-            onAllNodesWithText("user_201", substring = true).fetchSemanticsNodes().isNotEmpty(),
-            "过滤后应看到第 201 行起的数据（若失败，先确认是不是本地筛而不是下推）",
-        )
-        println("RESULT DQ1-filter [${target.name}] total=${tab.total} first=${tab.rows.first().cells}")
+            // ---- 过滤：id > 200 → 201..250 共 50 行
+            browser.setTabFilter(tab, "id > 200")
+            awaitState("过滤 id > 200 生效", browser) { !tab.loading && tab.total == 50L }
+            assertEquals(1, tab.page, "改过滤条件必须回到第 1 页（否则可能停在一个已不存在的页上）")
+            assertNull(tab.error, "过滤不应报错")
+            assertTrue(
+                onAllNodesWithText("user_201", substring = true).fetchSemanticsNodes().isNotEmpty(),
+                "过滤后应看到第 201 行起的数据（若失败，先确认是不是本地筛而不是下推）",
+            )
+            println("RESULT DQ1-filter [${target.name}] total=${tab.total} first=${tab.rows.first().cells}")
 
-        // ---- 排序：清掉过滤后按 id DESC，首行应是 250
-        browser.setTabFilter(tab, "")
-        awaitState("清除过滤", browser) { !tab.loading && tab.total == 250L }
-        browser.setTabOrderBy(tab, "id DESC")
-        awaitState("排序 id DESC 生效", browser) { !tab.loading && tab.rows.isNotEmpty() }
-        val firstId = tab.rows.first().cellOf("id")?.toString()
-        println("RESULT DQ2-sort [${target.name}] firstRow=${tab.rows.first().cells}")
-        assertEquals(
-            "250", firstId,
-            "[${target.name}] 按 id DESC 排序后首行应为 250，实际 ${tab.rows.first().cells}",
-        )
+            // ---- 排序：清掉过滤后按 id DESC，首行应是 250
+            browser.setTabFilter(tab, "")
+            awaitState("清除过滤", browser) { !tab.loading && tab.total == 250L }
+            browser.setTabOrderBy(tab, "id DESC")
+            awaitState("排序 id DESC 生效", browser) { !tab.loading && tab.rows.isNotEmpty() }
+            val firstId =
+                tab.rows
+                    .first()
+                    .cellOf("id")
+                    ?.toString()
+            println("RESULT DQ2-sort [${target.name}] firstRow=${tab.rows.first().cells}")
+            assertEquals(
+                "250",
+                firstId,
+                "[${target.name}] 按 id DESC 排序后首行应为 250，实际 ${tab.rows.first().cells}",
+            )
 
-        // ---- 表内搜索：'user_25' → `user_25` 与 `user_250` 共 **2** 行
-        //      （只有 1..250，`user_251..259` 根本不存在 —— 我第一版写 11 是数错了）
-        browser.setTabOrderBy(tab, "")
-        awaitState("清除排序", browser) { !tab.loading }
-        browser.setTabSearch(tab, "user_25")
-        awaitState("表内搜索 user_25 生效", browser) { !tab.loading && tab.total == 2L }
-        assertNull(tab.error, "搜索不应报错")
-        println("RESULT DQ3-search [${target.name}] total=${tab.total} rows=${tab.rows.map { it.cells }}")
+            // ---- 表内搜索：'user_25' → `user_25` 与 `user_250` 共 **2** 行
+            //      （只有 1..250，`user_251..259` 根本不存在 —— 我第一版写 11 是数错了）
+            browser.setTabOrderBy(tab, "")
+            awaitState("清除排序", browser) { !tab.loading }
+            browser.setTabSearch(tab, "user_25")
+            awaitState("表内搜索 user_25 生效", browser) { !tab.loading && tab.total == 2L }
+            assertNull(tab.error, "搜索不应报错")
+            println("RESULT DQ3-search [${target.name}] total=${tab.total} rows=${tab.rows.map { it.cells }}")
 
-        // 三个条件都在时必须 AND 叠加（不是互相覆盖）。
-        // 上面已经清过过滤，所以这里**重新**放一个过滤再断言 ——
-        // 期望值里带 `id > 200` 却在过滤已空时断言，是第一版写错的地方。
-        browser.setTabFilter(tab, "id > 100")
-        awaitState("过滤与搜索同时存在", browser) { !tab.loading }
-        assertEquals(
-            "id > 100 AND (${tab.columns.joinToString(" OR ") { c -> "CAST(${c.key} AS VARCHAR) LIKE '%user_25%'" }})",
-            tab.effectiveWhere(),
-            "手工过滤与表内搜索应是 AND 关系，且搜索要铺到每一列上",
-        )
+            // 三个条件都在时必须 AND 叠加（不是互相覆盖）。
+            // 上面已经清过过滤，所以这里**重新**放一个过滤再断言 ——
+            // 期望值里带 `id > 200` 却在过滤已空时断言，是第一版写错的地方。
+            browser.setTabFilter(tab, "id > 100")
+            awaitState("过滤与搜索同时存在", browser) { !tab.loading }
+            assertEquals(
+                "id > 100 AND (${tab.columns.joinToString(" OR ") { c -> "CAST(${c.key} AS VARCHAR) LIKE '%user_25%'" }})",
+                tab.effectiveWhere(),
+                "手工过滤与表内搜索应是 AND 关系，且搜索要铺到每一列上",
+            )
 
-        shot("dq-filter-sort-search-${target.name.lowercase()}.png")
-    }
+            shot("dq-filter-sort-search-${target.name.lowercase()}.png")
+        }
 
     // ==================================================================
     // TC-MS / TC-TX / TC-RO：多语句 / 事务 / 只读
@@ -523,32 +546,33 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * 跨语句的副作用上。
      */
     @Test
-    fun `MS1 multi statement runs every statement in the script`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
-        browser.selectPane(BrowserPane.SQL)
+    fun `MS1 multi statement runs every statement in the script`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
+            browser.selectPane(BrowserPane.SQL)
 
-        val sheet = browser.currentSqlSheet()!!
-        sheet.multiStatement = true
-        sheet.editor.setText(
-            "CREATE TABLE multi_stmt_probe (id INT PRIMARY KEY); " +
-                "INSERT INTO multi_stmt_probe VALUES (1); " +
-                "INSERT INTO multi_stmt_probe VALUES (2)",
-        )
-        waitForIdle()
+            val sheet = browser.currentSqlSheet()!!
+            sheet.multiStatement = true
+            sheet.editor.setText(
+                "CREATE TABLE multi_stmt_probe (id INT PRIMARY KEY); " +
+                    "INSERT INTO multi_stmt_probe VALUES (1); " +
+                    "INSERT INTO multi_stmt_probe VALUES (2)",
+            )
+            waitForIdle()
 
-        browser.executeSql()
-        awaitState("多语句执行结束", browser) { !sheet.running }
+            browser.executeSql()
+            awaitState("多语句执行结束", browser) { !sheet.running }
 
-        println("RESULT MS1 [${target.name}] error=${sheet.error} affected=${sheet.affectedRows} rows=${sheet.rows.size}")
-        assertNull(sheet.error, "[${target.name}] 多语句执行不应报错，实际 ${sheet.error}")
+            println("RESULT MS1 [${target.name}] error=${sheet.error} affected=${sheet.affectedRows} rows=${sheet.rows.size}")
+            assertNull(sheet.error, "[${target.name}] 多语句执行不应报错，实际 ${sheet.error}")
 
-        val probe = queryInt("SELECT COUNT(*) FROM multi_stmt_probe")
-        assertEquals(2, probe, "[${target.name}] 多语句应把两条 INSERT 都执行掉，实际 count=$probe")
+            val probe = queryInt("SELECT COUNT(*) FROM multi_stmt_probe")
+            assertEquals(2, probe, "[${target.name}] 多语句应把两条 INSERT 都执行掉，实际 count=$probe")
 
-        shot("ms-multi-statement-${target.name.lowercase()}.png")
-    }
+            shot("ms-multi-statement-${target.name.lowercase()}.png")
+        }
 
     /**
      * ## TC-TX1 / TX2 / TX3 — 事务（BEGIN / ROLLBACK / COMMIT）
@@ -569,51 +593,52 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      *   但必须显式写出来，否则换个平台它就变成一个查不到的错误。见 [countElsewhere]。
      */
     @Test
-    fun `TX1 rollback discards writes and commit keeps them`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
-        browser.selectPane(BrowserPane.SQL)
-        val sheet = browser.currentSqlSheet()!!
+    fun `TX1 rollback discards writes and commit keeps them`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
+            browser.selectPane(BrowserPane.SQL)
+            val sheet = browser.currentSqlSheet()!!
 
-        // ---- BEGIN：必须拿到 session id，拿不到等于事务没开
-        val beginErr = runBlocking { browser.beginTransaction(sheet) }
-        assertNull(beginErr, "[${target.name}] 开启事务不应失败，实际 $beginErr")
-        assertNotNull(sheet.transactionSessionId, "引擎必须回 session id，否则后续请求找不到被钉住的连接")
-        println("RESULT TX1 [${target.name}] sessionId=${sheet.transactionSessionId}")
+            // ---- BEGIN：必须拿到 session id，拿不到等于事务没开
+            val beginErr = runBlocking { browser.beginTransaction(sheet) }
+            assertNull(beginErr, "[${target.name}] 开启事务不应失败，实际 $beginErr")
+            assertNotNull(sheet.transactionSessionId, "引擎必须回 session id，否则后续请求找不到被钉住的连接")
+            println("RESULT TX1 [${target.name}] sessionId=${sheet.transactionSessionId}")
 
-        // ---- 在事务里插一行
-        sheet.editor.setText("INSERT INTO users VALUES (9001, 'tx_user', 'tx@example.com')")
-        browser.executeSql()
-        awaitState("事务内 INSERT 执行完", browser) { !sheet.running }
-        assertNull(sheet.error, "[${target.name}] 事务内 INSERT 不应报错，实际 ${sheet.error}")
+            // ---- 在事务里插一行
+            sheet.editor.setText("INSERT INTO users VALUES (9001, 'tx_user', 'tx@example.com')")
+            browser.executeSql()
+            awaitState("事务内 INSERT 执行完", browser) { !sheet.running }
+            assertNull(sheet.error, "[${target.name}] 事务内 INSERT 不应报错，实际 ${sheet.error}")
 
-        // 独立连接此刻**必须看不到**
-        assertTrue(
-            !visibleElsewhere("id = 9001"),
-            "[${target.name}] 未提交的数据不该被另一条连接看到 —— 看到了说明事务没有真正隔离",
-        )
+            // 独立连接此刻**必须看不到**
+            assertTrue(
+                !visibleElsewhere("id = 9001"),
+                "[${target.name}] 未提交的数据不该被另一条连接看到 —— 看到了说明事务没有真正隔离",
+            )
 
-        // ---- ROLLBACK
-        val rollbackErr = runBlocking { browser.rollbackTransaction(sheet) }
-        assertNull(rollbackErr, "[${target.name}] 回滚不应失败，实际 $rollbackErr")
-        assertTrue(!visibleElsewhere("id = 9001"), "[${target.name}] 回滚后数据必须消失")
+            // ---- ROLLBACK
+            val rollbackErr = runBlocking { browser.rollbackTransaction(sheet) }
+            assertNull(rollbackErr, "[${target.name}] 回滚不应失败，实际 $rollbackErr")
+            assertTrue(!visibleElsewhere("id = 9001"), "[${target.name}] 回滚后数据必须消失")
 
-        // ---- 再来一次，这次提交
-        runBlocking { browser.beginTransaction(sheet) }
-        sheet.editor.setText("INSERT INTO users VALUES (9002, 'tx_user2', 'tx2@example.com')")
-        browser.executeSql()
-        awaitState("第二次事务内 INSERT 执行完", browser) { !sheet.running }
-        val commitErr = runBlocking { browser.commitTransaction(sheet) }
-        assertNull(commitErr, "[${target.name}] 提交不应失败，实际 $commitErr")
+            // ---- 再来一次，这次提交
+            runBlocking { browser.beginTransaction(sheet) }
+            sheet.editor.setText("INSERT INTO users VALUES (9002, 'tx_user2', 'tx2@example.com')")
+            browser.executeSql()
+            awaitState("第二次事务内 INSERT 执行完", browser) { !sheet.running }
+            val commitErr = runBlocking { browser.commitTransaction(sheet) }
+            assertNull(commitErr, "[${target.name}] 提交不应失败，实际 $commitErr")
 
-        val afterCommit = countElsewhere("id = 9002")
-        assertNotNull(afterCommit, "[${target.name}] 提交后独立连接必须能查到（SQLite 此刻不该再被锁）")
-        assertEquals(1, afterCommit, "[${target.name}] 提交后数据必须对其他连接可见")
-        println("RESULT TX3 [${target.name}] 提交后外部可见行数=$afterCommit")
+            val afterCommit = countElsewhere("id = 9002")
+            assertNotNull(afterCommit, "[${target.name}] 提交后独立连接必须能查到（SQLite 此刻不该再被锁）")
+            assertEquals(1, afterCommit, "[${target.name}] 提交后数据必须对其他连接可见")
+            println("RESULT TX3 [${target.name}] 提交后外部可见行数=$afterCommit")
 
-        shot("tx-transaction-${target.name.lowercase()}.png")
-    }
+            shot("tx-transaction-${target.name.lowercase()}.png")
+        }
 
     /**
      * ## TC-RO1 / RO2 — 只读模式
@@ -630,59 +655,61 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * （区分「没发」与「发了被引擎拒」）。
      */
     @Test
-    fun `RO1 read only blocks writes before they reach the engine`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val browser = DatabaseBrowserState(engine, newScope())
-        render(browser)
-        awaitSchema(browser)
-        val db = browser.databases.first()
-        browser.toggleDatabase(db)
-        awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
-        val table = browser.findTable(db, "USERS")
+    fun `RO1 read only blocks writes before they reach the engine`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val browser = DatabaseBrowserState(engine, newScope())
+            render(browser)
+            awaitSchema(browser)
+            val db = browser.databases.first()
+            browser.toggleDatabase(db)
+            awaitState("展开库后表列表加载完成", browser) { db !in browser.loadingTables }
+            val table = browser.findTable(db, "USERS")
 
-        // 关着时：不拦任何东西
-        assertFalse(browser.readOnly, "只读默认应是关的")
-        assertNull(browser.rejectIfReadOnly("DROP TABLE $table"), "只读关闭时不应拦")
+            // 关着时：不拦任何东西
+            assertFalse(browser.readOnly, "只读默认应是关的")
+            assertNull(browser.rejectIfReadOnly("DROP TABLE $table"), "只读关闭时不应拦")
 
-        // 打开后：写操作被拦，读操作放行
-        browser.readOnly = true
-        assertNotNull(browser.rejectIfReadOnly("DROP TABLE $table"), "只读开启后 DROP 必须被拦")
-        assertNotNull(
-            browser.rejectIfReadOnly("UPDATE $table SET username = 'x'"),
-            "UPDATE 必须被拦",
-        )
-        assertNull(
-            browser.rejectIfReadOnly("SELECT 1"),
-            "只读不该拦 SELECT，实际 ${browser.rejectIfReadOnly("SELECT 1")}",
-        )
+            // 打开后：写操作被拦，读操作放行
+            browser.readOnly = true
+            assertNotNull(browser.rejectIfReadOnly("DROP TABLE $table"), "只读开启后 DROP 必须被拦")
+            assertNotNull(
+                browser.rejectIfReadOnly("UPDATE $table SET username = 'x'"),
+                "UPDATE 必须被拦",
+            )
+            assertNull(
+                browser.rejectIfReadOnly("SELECT 1"),
+                "只读不该拦 SELECT，实际 ${browser.rejectIfReadOnly("SELECT 1")}",
+            )
 
-        // 拦完回头查库：表必须还在（证明没发出去）
-        assertTrue(tableExists(table), "只读拦下写操作后，$table 表必须还在")
-        assertEquals(250, countElsewhere("1 = 1") ?: -1, "表里应仍有 250 行")
+            // 拦完回头查库：表必须还在（证明没发出去）
+            assertTrue(tableExists(table), "只读拦下写操作后，$table 表必须还在")
+            assertEquals(250, countElsewhere("1 = 1") ?: -1, "表里应仍有 250 行")
 
-        // 界面上那个开关也真实存在（它才是用户能点的入口）——
-        // 先切到 SQL 工作台，否则那个工具栏压根没渲染。
-        browser.selectPane(BrowserPane.SQL)
-        awaitUi("切到 SQL 工作台，只读开关已渲染")
-        // ⚠️ 必须 waitForIdle：切 pane 后子树才刚进入组合，此刻取快照去读
-        // `onNodeWithTag` 会撞上「快照创建后才写入的状态」。
-        waitForIdle()
-        onNodeWithTag(SQL_READONLY_CHIP_TAG).assertExists()
+            // 界面上那个开关也真实存在（它才是用户能点的入口）——
+            // 先切到 SQL 工作台，否则那个工具栏压根没渲染。
+            browser.selectPane(BrowserPane.SQL)
+            awaitUi("切到 SQL 工作台，只读开关已渲染")
+            // ⚠️ 必须 waitForIdle：切 pane 后子树才刚进入组合，此刻取快照去读
+            // `onNodeWithTag` 会撞上「快照创建后才写入的状态」。
+            waitForIdle()
+            onNodeWithTag(SQL_READONLY_CHIP_TAG).assertExists()
 
-        // 再关掉
-        browser.readOnly = false
-        assertNull(browser.rejectIfReadOnly("DROP TABLE $table"), "关掉只读后不应再拦")
+            // 再关掉
+            browser.readOnly = false
+            assertNull(browser.rejectIfReadOnly("DROP TABLE $table"), "关掉只读后不应再拦")
 
-        shot("ro-readonly-${target.name.lowercase()}.png")
-    }
+            shot("ro-readonly-${target.name.lowercase()}.png")
+        }
 
     // ==================================================================
     // 辅助
     // ==================================================================
 
     private fun ComposeUiTest.render(browser: DatabaseBrowserState) {
-        val sheets = listOf(
-            SheetDescriptor(conn, browser, ConnectionStatus(ConnectionState.CONNECTED, target.name)),
-        )
+        val sheets =
+            listOf(
+                SheetDescriptor(conn, browser, ConnectionStatus(ConnectionState.CONNECTED, target.name)),
+            )
         setContent {
             ProvideTestStrings {
                 MaterialTheme {
@@ -708,11 +735,15 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * 语义树要等重组，重组由测试调度器驱动；状态机是普通 Kotlin 对象，读它不经过调度器，
      * 因此永远不会卡在重组上。「引擎没返回」与「返回了但没画出来」必须能分开判定。
      */
-    private fun ComposeUiTest.awaitState(what: String, browser: DatabaseBrowserState, condition: () -> Boolean) {
+    private fun ComposeUiTest.awaitState(
+        what: String,
+        browser: DatabaseBrowserState,
+        condition: () -> Boolean,
+    ) {
         val start = System.currentTimeMillis()
         println("▶ $what …")
         while (!condition()) {
-            if (System.currentTimeMillis() - start > ENGINE_AWAIT_MS) {
+            if (System.currentTimeMillis() - start > engineAwaitMs) {
                 throw AssertionError(
                     "等待超时：$what（${System.currentTimeMillis() - start}ms）[${target.name}]\n" +
                         "  databases=${browser.databases} loadingDatabases=${browser.loadingDatabases}\n" +
@@ -759,7 +790,10 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
     }
 
     /** 方言之间的标识符大小写不同（H2 全大写、SQLite 原样），查表名必须忽略大小写。 */
-    private fun DatabaseBrowserState.findTable(db: String, name: String): String {
+    private fun DatabaseBrowserState.findTable(
+        db: String,
+        name: String,
+    ): String {
         val hit = tablesByDatabase[db]?.firstOrNull { it.equals(name, ignoreCase = true) }
         return hit ?: throw AssertionError("表 $name 不在 ${tablesByDatabase[db]}（库 $db）")
     }
@@ -775,20 +809,26 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
         db: String,
     ): Set<DatabaseBrowserState.DatabaseObjectKind> {
         val results = browser.objectsByDatabase[db] ?: return emptySet()
-        return DatabaseBrowserState.DatabaseObjectKind.entries.filter { kind ->
-            (db to kind) !in browser.loadingObjects &&
-                (kind in results || "$db::${kind.name}" in browser.objectLoadError)
-        }.toSet()
+        return DatabaseBrowserState.DatabaseObjectKind.entries
+            .filter { kind ->
+                (db to kind) !in browser.loadingObjects &&
+                    (kind in results || "$db::${kind.name}" in browser.objectLoadError)
+            }.toSet()
     }
 
     /** 同上，列名（H2 的结果集元数据是大写）。 */
-    private fun TableRow.cellOf(name: String): Any? =
-        cells.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+    private fun TableRow.cellOf(name: String): Any? = cells.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
 
     /** 走一条**独立于引擎**的直连取整数值。 */
-    private fun queryInt(sql: String): Int = target.openDirect().use { c ->
-        c.createStatement().use { s -> s.executeQuery(sql).use { rs -> rs.next(); rs.getInt(1) } }
-    }
+    private fun queryInt(sql: String): Int =
+        target.openDirect().use { c ->
+            c.createStatement().use { s ->
+                s.executeQuery(sql).use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
 
     /**
      * 独立连接数出来的行数；**查不到时返回 null**（被锁 / 连不上）。
@@ -796,15 +836,17 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * 「null = 不可见」是刻意的：SQLite 文件库在他人持写事务时会 `SQLITE_BUSY`，
      * 那同样证明未提交的数据对他人不可见。
      */
-    private fun countElsewhere(where: String): Int? = runCatching {
-        target.openDirect().use { c ->
-            c.createStatement().use { s ->
-                s.executeQuery("SELECT COUNT(*) FROM users WHERE $where").use { rs ->
-                    rs.next(); rs.getInt(1)
+    private fun countElsewhere(where: String): Int? =
+        runCatching {
+            target.openDirect().use { c ->
+                c.createStatement().use { s ->
+                    s.executeQuery("SELECT COUNT(*) FROM users WHERE $where").use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
                 }
             }
-        }
-    }.getOrNull()
+        }.getOrNull()
 
     private fun visibleElsewhere(where: String): Boolean = (countElsewhere(where) ?: 0) > 0
 
@@ -815,14 +857,18 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * 改成「直接查它，查得动就说明表还在」：这本来就是我们真正要回答的问题，
      * 而且两个方言通用。
      */
-    private fun tableExists(name: String): Boolean = runCatching {
-        target.openDirect().use { c ->
-            c.createStatement().use { s ->
-                s.executeQuery("SELECT COUNT(*) FROM $name").use { rs -> rs.next(); rs.getInt(1) }
+    private fun tableExists(name: String): Boolean =
+        runCatching {
+            target.openDirect().use { c ->
+                c.createStatement().use { s ->
+                    s.executeQuery("SELECT COUNT(*) FROM $name").use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
             }
-        }
-        true
-    }.getOrDefault(false)
+            true
+        }.getOrDefault(false)
 
     /**
      * 直连引擎发一次 `INDEX.LIST`，只为诊断用。
@@ -831,49 +877,64 @@ class FeatureWalkthroughTest(private val target: WalkthroughTarget) {
      * 空列表 —— 与「这张表真的没有索引」**长得一模一样**。没有这次探针，
      * 「应用没发请求」「发了但失败」「确实没有」三者是同一个现象。
      */
-    private fun probeIndexList(database: String, table: String): String = runCatching {
-        runBlocking {
-            val schema = engine.invoke(
-                com.langbiantianya.grpc.connectionConfig {
-                    driver = conn.dialect.engineDriverName
-                    jdbcUrl = target.jdbcUrl
-                    user = conn.username
-                    password = conn.password
-                    this.database = database
-                },
-            ) {
-                category = com.langbiantianya.grpc.Category.SCHEMA
-                action = com.langbiantianya.grpc.Action.LIST
-                schemaRequest = com.langbiantianya.grpc.schemaRequest {
-                    list = com.langbiantianya.grpc.schemaListRequest {
-                        level = "schema"
-                        this.database = database
-                    }
-                }
-            }
-            ?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty().firstOrNull() ?: ""
+    private fun probeIndexList(
+        database: String,
+        table: String,
+    ): String =
+        runCatching {
+            runBlocking {
+                val schema =
+                    engine
+                        .invoke(
+                            com.langbiantianya.grpc.connectionConfig {
+                                driver = conn.dialect.engineDriverName
+                                jdbcUrl = target.jdbcUrl
+                                user = conn.username
+                                password = conn.password
+                                this.database = database
+                            },
+                        ) {
+                            category = com.langbiantianya.grpc.Category.SCHEMA
+                            action = com.langbiantianya.grpc.Action.LIST
+                            schemaRequest =
+                                com.langbiantianya.grpc.schemaRequest {
+                                    list =
+                                        com.langbiantianya.grpc.schemaListRequest {
+                                            level = "schema"
+                                            this.database = database
+                                        }
+                                }
+                        }?.takeIf { it.success }
+                        ?.schema
+                        ?.list
+                        ?.itemsList
+                        .orEmpty()
+                        .firstOrNull() ?: ""
 
-            val resp = engine.invoke(
-            com.langbiantianya.grpc.connectionConfig {
-                driver = conn.dialect.engineDriverName
-                jdbcUrl = target.jdbcUrl
-                user = conn.username
-                password = conn.password
-                this.database = database
-            },
-        ) {
-            category = com.langbiantianya.grpc.Category.INDEX
-            action = com.langbiantianya.grpc.Action.LIST
-            indexRequest = com.langbiantianya.grpc.indexRequest {
-                list = com.langbiantianya.grpc.indexListRequest {
-                    tableName = table
-                    this.schema = schema
-                }
+                val resp =
+                    engine.invoke(
+                        com.langbiantianya.grpc.connectionConfig {
+                            driver = conn.dialect.engineDriverName
+                            jdbcUrl = target.jdbcUrl
+                            user = conn.username
+                            password = conn.password
+                            this.database = database
+                        },
+                    ) {
+                        category = com.langbiantianya.grpc.Category.INDEX
+                        action = com.langbiantianya.grpc.Action.LIST
+                        indexRequest =
+                            com.langbiantianya.grpc.indexRequest {
+                                list =
+                                    com.langbiantianya.grpc.indexListRequest {
+                                        tableName = table
+                                        this.schema = schema
+                                    }
+                            }
+                    }
+                "schema='$schema' success=${resp.success} error='${resp.error}' items=${resp.index.list.itemsList.map { it.name }}"
             }
-        }
-        "schema='$schema' success=${resp.success} error='${resp.error}' items=${resp.index.list.itemsList.map { it.name }}"
-        }
-    }.getOrElse { "探针本身抛了：${it::class.simpleName}: ${it.message}" }
+        }.getOrElse { "探针本身抛了：${it::class.simpleName}: ${it.message}" }
 }
 
 /**

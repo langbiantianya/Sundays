@@ -38,7 +38,6 @@ import kotlin.test.assertEquals
  */
 @OptIn(ExperimentalTestApi::class)
 class MainScreenNavTest {
-
     private lateinit var tempHome: File
     private lateinit var originalHome: String
     private lateinit var engine: IdbEngine
@@ -53,7 +52,10 @@ class MainScreenNavTest {
 
     @After
     fun tearDown() {
-        try { PoolManager.closeAll() } catch (_: Exception) {}
+        try {
+            PoolManager.closeAll()
+        } catch (_: Exception) {
+        }
         System.setProperty("user.home", originalHome)
     }
 }

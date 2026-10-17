@@ -25,7 +25,6 @@ import kotlin.test.assertTrue
  * 界面上只是「字稍微大一点 / 小一点」，没人会报告，而密度算错会让所有控件大小失真。
  */
 class CompactModeTest {
-
     /** 2x 缩放屏 + 系统字体 100%。 */
     private val base = Density(density = 2f, fontScale = 1f)
 

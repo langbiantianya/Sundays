@@ -45,7 +45,6 @@ import java.util.UUID
  * gRPC 实现关闭 channel 后请求将失败。
  */
 interface EngineClient : AutoCloseable {
-
     /**
      * 单一主入口 —— 与 gRPC stub `IdbEngineCoroutineStub.handle(req)` 语义完全一致：
      *
@@ -70,12 +69,16 @@ interface EngineClient : AutoCloseable {
      * 单次（非流式）调用的便捷包装 —— 构造 Request 并 collect 终止帧。
      * 流式调用请使用 [handle] + `collect`。
      */
-    suspend fun invoke(connection: ConnectionConfig, configure: RequestKt.Dsl.() -> Unit): Response {
-        val req = request {
-            id = UUID.randomUUID().toString()
-            this.connection = connection
-            configure()
-        }
+    suspend fun invoke(
+        connection: ConnectionConfig,
+        configure: RequestKt.Dsl.() -> Unit,
+    ): Response {
+        val req =
+            request {
+                id = UUID.randomUUID().toString()
+                this.connection = connection
+                configure()
+            }
         // 非流式响应：collect 直到 end=true（单条响应此值立即为 true）
         var result: Response? = null
         handle(req).collect { resp ->
@@ -98,13 +101,14 @@ interface EngineClient : AutoCloseable {
         jdbcUrl: String,
         user: String = "",
         password: String = "",
-    ): SystemTestConnectionResponse = testConnection(
-        connectionConfig {
-            this.jdbcUrl = jdbcUrl
-            this.user = user
-            this.password = password
-        }
-    )
+    ): SystemTestConnectionResponse =
+        testConnection(
+            connectionConfig {
+                this.jdbcUrl = jdbcUrl
+                this.user = user
+                this.password = password
+            },
+        )
 
     /**
      * 断开连接 —— 释放 [config] 对应的全部连接池（含该配置下各 schema 维度的池），

@@ -60,7 +60,6 @@ import kotlin.test.assertTrue
  * 不可达时按 [DialectSmokeTest] 的约定 `assumeTrue` 显式 skip。
  */
 class PostgreSQLCrossDatabaseTest {
-
     companion object {
         /**
          * 连接配置里的库（bootstrap）。
@@ -108,7 +107,11 @@ class PostgreSQLCrossDatabaseTest {
 
     @After
     fun tearDown() {
-        try { engine.close() } catch (e: Exception) { println("[PG-XDB] engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("[PG-XDB] engine.close 抛了：$e")
+        }
         dropOwnTables()
         System.setProperty("user.home", originalHome)
         tempDir.deleteRecursively()
@@ -211,7 +214,8 @@ class PostgreSQLCrossDatabaseTest {
 
         assertEquals(1, rows.total, "行数不对：$rows")
         assertEquals(
-            listOf("目标库的行"), rows.notes,
+            listOf("目标库的行"),
+            rows.notes,
             "⚠️ 静默读到了 $BOOTSTRAP_DB 的同名表 —— 这比报错更危险，用户根本看不出来",
         )
     }
@@ -225,44 +229,56 @@ class PostgreSQLCrossDatabaseTest {
         assertEquals(listOf("bootstrap库的行"), rows.notes, "默认库读到了别的库：$rows")
     }
 
-    private data class Rows(val total: Int, val notes: List<String>) {
+    private data class Rows(
+        val total: Int,
+        val notes: List<String>,
+    ) {
         override fun toString() = "total=$total notes=$notes"
     }
 
     private fun listTables(database: String): List<String> {
-        val resp: Response = runBlocking {
-            engine.invoke(engineConfig(database)) {
-                category = Category.TABLE
-                action = Action.LIST
-                tableRequest = tableRequest { list = tableListRequest {} }
-            }
-        }
-        assertTrue(resp.success, "TABLE.LIST(database=$database) 失败：${resp.error}")
-        return resp.table.list.itemsList.map { it.name }
-    }
-
-    private fun dataList(database: String, table: String): Rows {
-        val resp: Response = runBlocking {
-            engine.invoke(engineConfig(database)) {
-                category = Category.DATA
-                action = Action.LIST
-                dataRequest = dataRequest {
-                    list = dataListRequest {
-                        tableName = table
-                        page = 1
-                        pageSize = 50
-                        schema = ""
-                        where = ""
-                        orderBy = ""
-                    }
+        val resp: Response =
+            runBlocking {
+                engine.invoke(engineConfig(database)) {
+                    category = Category.TABLE
+                    action = Action.LIST
+                    tableRequest = tableRequest { list = tableListRequest {} }
                 }
             }
-        }
+        assertTrue(resp.success, "TABLE.LIST(database=$database) 失败：${resp.error}")
+        return resp.table.list.itemsList
+            .map { it.name }
+    }
+
+    private fun dataList(
+        database: String,
+        table: String,
+    ): Rows {
+        val resp: Response =
+            runBlocking {
+                engine.invoke(engineConfig(database)) {
+                    category = Category.DATA
+                    action = Action.LIST
+                    dataRequest =
+                        dataRequest {
+                            list =
+                                dataListRequest {
+                                    tableName = table
+                                    page = 1
+                                    pageSize = 50
+                                    schema = ""
+                                    where = ""
+                                    orderBy = ""
+                                }
+                        }
+                }
+            }
         assertTrue(resp.success, "DATA.LIST($database.$table) 失败：${resp.error}")
         val paged = resp.data.list
-        val notes = paged.rowsList.map { row ->
-            row.valuesMap["note"]?.let { unwrap(it) } ?: ""
-        }
+        val notes =
+            paged.rowsList.map { row ->
+                row.valuesMap["note"]?.let { unwrap(it) } ?: ""
+            }
         return Rows(paged.total.toInt(), notes)
     }
 
@@ -273,21 +289,36 @@ class PostgreSQLCrossDatabaseTest {
      * 这种调试串，拿去和真实内容比永远不相等 —— 而值本身其实是对的。
      * （与 `CrossDatabaseQueryTest` / `DialectSmokeTest.unwrap` 同一个坑。）
      */
-    private fun unwrap(v: com.google.protobuf.Value): String = when (v.kindCase) {
-        com.google.protobuf.Value.KindCase.STRING_VALUE -> v.stringValue
-        com.google.protobuf.Value.KindCase.NUMBER_VALUE ->
-            if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
-            else v.numberValue.toString()
-        com.google.protobuf.Value.KindCase.BOOL_VALUE -> v.boolValue.toString()
-        else -> ""
-    }
+    private fun unwrap(v: com.google.protobuf.Value): String =
+        when (v.kindCase) {
+            com.google.protobuf.Value.KindCase.STRING_VALUE -> {
+                v.stringValue
+            }
 
-    private fun engineConfig(database: String) = connectionConfig {
-        driver = baseConn.dialect.engineDriverName
-        // ⚠️ 固定用 [BOOTSTRAP_DB] 的 URL —— 本类验的正是「URL 指 A、选 B」。
-        jdbcUrl = baseConn.jdbcUrl
-        user = baseConn.username
-        password = baseConn.password
-        this.database = database
-    }
+            com.google.protobuf.Value.KindCase.NUMBER_VALUE -> {
+                if (v.numberValue == kotlin.math.floor(v.numberValue)) {
+                    v.numberValue.toLong().toString()
+                } else {
+                    v.numberValue.toString()
+                }
+            }
+
+            com.google.protobuf.Value.KindCase.BOOL_VALUE -> {
+                v.boolValue.toString()
+            }
+
+            else -> {
+                ""
+            }
+        }
+
+    private fun engineConfig(database: String) =
+        connectionConfig {
+            driver = baseConn.dialect.engineDriverName
+            // ⚠️ 固定用 [BOOTSTRAP_DB] 的 URL —— 本类验的正是「URL 指 A、选 B」。
+            jdbcUrl = baseConn.jdbcUrl
+            user = baseConn.username
+            password = baseConn.password
+            this.database = database
+        }
 }

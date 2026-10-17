@@ -117,7 +117,10 @@ data class TableRow(
  * 数字档（`labelKey == null`）显示的就是数字本身；只有 [ALL] 的「全部」是需要翻译的词，
  * 因此挂在 [StrKey] 上而不是硬编码在枚举里。渲染方一律用 [labelText]。
  */
-enum class PageSize(val value: Int, val labelKey: StrKey?) {
+enum class PageSize(
+    val value: Int,
+    val labelKey: StrKey?,
+) {
     S10(10, null),
     S20(20, null),
     S50(50, null),
@@ -133,6 +136,7 @@ enum class PageSize(val value: Int, val labelKey: StrKey?) {
 
     companion object {
         val DEFAULT: PageSize = S20
+
         /** 所有可选分页值（按枚举顺序 = 升序 + 全部在末尾）。 */
         val ALL_VALUES: List<PageSize> = entries.toList()
     }
@@ -164,7 +168,10 @@ typealias ContextMenuState = com.langbiantianya.sundays.ui.ContextMenuState<Tabl
 /** 创建并 [remember] 一个 `ContextMenuState<TableRow>`。 */
 @Composable
 fun rememberContextMenuState(): ContextMenuState =
-    androidx.compose.runtime.remember { com.langbiantianya.sundays.ui.ContextMenuState<TableRow>() }
+    androidx.compose.runtime.remember {
+        com.langbiantianya.sundays.ui
+            .ContextMenuState<TableRow>()
+    }
 
 // ============================================================================
 // 表格主题 (DataTableTheme)
@@ -231,26 +238,28 @@ data class DataTableTheme(
             // 独立调过的（表头比正文更亮形成凹槽感、选行 `#E3F2FD` 是淡蓝而非主色染）。
             // 曾一度在这里统一改成从 `ColorScheme` 取色，结果现代三套主题的表格整体变色。
             // ⚠️「原样返回常量」约束的是**颜色**，不是「谁决定选哪一套」。选档位读 [isDarkMode]
-            //（应用生效档位）而不是 `isSystemInDarkTheme()`（系统设置）—— 后者与用户选的
+            // （应用生效档位）而不是 `isSystemInDarkTheme()`（系统设置）—— 后者与用户选的
             // 「始终浅色 / 始终深色」无关，一页浅色界面里嵌一块深色表格，会被当成区域损坏。
             if (!tokens.isClassic) return if (isDarkMode) Dark else Light
 
             return DataTableTheme(
                 headerBackground = scheme.surfaceVariant,
-                headerText = TextStyle(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = scheme.onSurfaceVariant,
-                ),
+                headerText =
+                    TextStyle(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = scheme.onSurfaceVariant,
+                    ),
                 rowBackground = scheme.surface,
                 rowBackgroundAlt = if (tokens.zebraRows) scheme.surface else null,
                 rowBackgroundSelected = if (tokens.selection == SelectionMode.INVERTED) scheme.primary else scheme.primaryContainer,
                 cellText = TextStyle(fontSize = 13.sp, color = scheme.onSurface),
-                cellTextSelected = if (tokens.selection == SelectionMode.INVERTED) {
-                    TextStyle(fontSize = 13.sp, color = scheme.onPrimary)
-                } else {
-                    TextStyle(fontSize = 13.sp, color = scheme.onPrimaryContainer)
-                },
+                cellTextSelected =
+                    if (tokens.selection == SelectionMode.INVERTED) {
+                        TextStyle(fontSize = 13.sp, color = scheme.onPrimary)
+                    } else {
+                        TextStyle(fontSize = 13.sp, color = scheme.onPrimaryContainer)
+                    },
                 borderColor = scheme.outlineVariant,
                 paginationBackground = scheme.surfaceVariant,
             )
@@ -266,21 +275,23 @@ data class DataTableTheme(
             "不跟随应用配色，Retro 主题下会与界面割裂；应用内请改用 themed()",
             ReplaceWith("DataTableTheme.themed()"),
         )
-        val Light: DataTableTheme = DataTableTheme(
-            headerBackground = Color(0xFFF5F5F5),
-            headerText = TextStyle(
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF333333),
-            ),
-            rowBackground = Color(0xFFFFFFFF),
-            rowBackgroundAlt = Color(0xFFFAFAFA),
-            rowBackgroundSelected = Color(0xFFE3F2FD),
-            cellText = TextStyle(fontSize = 13.sp, color = Color(0xFF000000)),
-            cellTextSelected = null,
-            borderColor = Color(0xFFE0E0E0),
-            paginationBackground = Color(0xFFF5F5F5),
-        )
+        val Light: DataTableTheme =
+            DataTableTheme(
+                headerBackground = Color(0xFFF5F5F5),
+                headerText =
+                    TextStyle(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF333333),
+                    ),
+                rowBackground = Color(0xFFFFFFFF),
+                rowBackgroundAlt = Color(0xFFFAFAFA),
+                rowBackgroundSelected = Color(0xFFE3F2FD),
+                cellText = TextStyle(fontSize = 13.sp, color = Color(0xFF000000)),
+                cellTextSelected = null,
+                borderColor = Color(0xFFE0E0E0),
+                paginationBackground = Color(0xFFF5F5F5),
+            )
 
         /**
          * 默认深色主题 — Intellij Darcula 风格，底色改用与 `SundaysPalette` 深色表面一致的
@@ -290,21 +301,23 @@ data class DataTableTheme(
          * 比正文**更亮**（凹槽感）才读得出是分区头；选行底 `#2C425E` 对应新的亮靛蓝主色，
          * 选中文字转白以保住对比度。
          */
-        val Dark: DataTableTheme = DataTableTheme(
-            headerBackground = Color(0xFF2C3240),
-            headerText = TextStyle(
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFFBFC7D4),
-            ),
-            rowBackground = Color(0xFF232833),
-            rowBackgroundAlt = Color(0xFF262B36),
-            rowBackgroundSelected = Color(0xFF2C425E),
-            cellText = TextStyle(fontSize = 13.sp, color = Color(0xFFCBD1DC)),
-            cellTextSelected = TextStyle(fontSize = 13.sp, color = Color(0xFFFFFFFF)),
-            borderColor = Color(0xFF333A48),
-            paginationBackground = Color(0xFF2C3240),
-        )
+        val Dark: DataTableTheme =
+            DataTableTheme(
+                headerBackground = Color(0xFF2C3240),
+                headerText =
+                    TextStyle(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFBFC7D4),
+                    ),
+                rowBackground = Color(0xFF232833),
+                rowBackgroundAlt = Color(0xFF262B36),
+                rowBackgroundSelected = Color(0xFF2C425E),
+                cellText = TextStyle(fontSize = 13.sp, color = Color(0xFFCBD1DC)),
+                cellTextSelected = TextStyle(fontSize = 13.sp, color = Color(0xFFFFFFFF)),
+                borderColor = Color(0xFF333A48),
+                paginationBackground = Color(0xFF2C3240),
+            )
 
         /**
          * 默认主题 — 跟随应用配色与明暗档（见 [themed]）。

@@ -67,69 +67,75 @@ object ImportHandler {
      * 输出帧序列：若干 `ImportProgressFrame`（`stream=true, end=false`）+
      * 一条终止帧（`end=true`，携带 `ImportResultResponse`）。
      */
-    fun executeInMainProcess(request: Request): Flow<Response> = flow {
-        val id = request.id
-        val config = request.connection
-        val runReq = request.importRequest.runImport
-        val cancelled = AtomicBoolean(false)
-        // 当前批次的语句 —— 取消时既要置停标志（批次之间生效），也要打断正在跑的 executeBatch()
-        val currentStatement = AtomicReference<PreparedStatement?>(null)
+    fun executeInMainProcess(request: Request): Flow<Response> =
+        flow {
+            val id = request.id
+            val config = request.connection
+            val runReq = request.importRequest.runImport
+            val cancelled = AtomicBoolean(false)
+            // 当前批次的语句 —— 取消时既要置停标志（批次之间生效），也要打断正在跑的 executeBatch()
+            val currentStatement = AtomicReference<PreparedStatement?>(null)
 
-        StatementRegistry.registerCanceler(id) {
-            cancelled.set(true)
-            currentStatement.get()?.let { runCatching { it.cancel() } }
-        }
-
-        try {
-            coroutineScope {
-                val ch = Channel<Response>(Channel.BUFFERED)
-                val job = launch(Dispatchers.IO) {
-                    try {
-                        val result = runImport(id, config, runReq, request.sessionId, cancelled, currentStatement) { progress ->
-                            ch.send(
-                                Response.newBuilder()
-                                    .setId(id)
-                                    .setSuccess(true)
-                                    .setStream(true)
-                                    .setEnd(false)
-                                    .setImportProgress(progress)
-                                    .build()
-                            )
-                        }
-                        ch.send(
-                            Response.newBuilder()
-                                .setId(id)
-                                .setSuccess(result.success)
-                                .setStream(true)
-                                .setEnd(true)
-                                .setError(if (result.success) "" else result.error)
-                                .setImport(importResponse { this.result = result })
-                                .build()
-                        )
-                    } catch (e: Exception) {
-                        logger.error("Import failed for request {}", id, e)
-                        val message = if (cancelled.get()) "cancelled" else (e.message ?: e.javaClass.simpleName)
-                        ch.send(
-                            Response.newBuilder()
-                                .setId(id)
-                                .setSuccess(false)
-                                .setStream(true)
-                                .setEnd(true)
-                                .setError(message)
-                                .setImport(importResponse { result = failedResult(message) })
-                                .build()
-                        )
-                    } finally {
-                        ch.close()
-                    }
-                }
-                for (msg in ch) emit(msg)
-                job.join()
+            StatementRegistry.registerCanceler(id) {
+                cancelled.set(true)
+                currentStatement.get()?.let { runCatching { it.cancel() } }
             }
-        } finally {
-            StatementRegistry.unregister(id)
+
+            try {
+                coroutineScope {
+                    val ch = Channel<Response>(Channel.BUFFERED)
+                    val job =
+                        launch(Dispatchers.IO) {
+                            try {
+                                val result =
+                                    runImport(id, config, runReq, request.sessionId, cancelled, currentStatement) { progress ->
+                                        ch.send(
+                                            Response
+                                                .newBuilder()
+                                                .setId(id)
+                                                .setSuccess(true)
+                                                .setStream(true)
+                                                .setEnd(false)
+                                                .setImportProgress(progress)
+                                                .build(),
+                                        )
+                                    }
+                                ch.send(
+                                    Response
+                                        .newBuilder()
+                                        .setId(id)
+                                        .setSuccess(result.success)
+                                        .setStream(true)
+                                        .setEnd(true)
+                                        .setError(if (result.success) "" else result.error)
+                                        .setImport(importResponse { this.result = result })
+                                        .build(),
+                                )
+                            } catch (e: Exception) {
+                                logger.error("Import failed for request {}", id, e)
+                                val message = if (cancelled.get()) "cancelled" else (e.message ?: e.javaClass.simpleName)
+                                ch.send(
+                                    Response
+                                        .newBuilder()
+                                        .setId(id)
+                                        .setSuccess(false)
+                                        .setStream(true)
+                                        .setEnd(true)
+                                        .setError(message)
+                                        .setImport(importResponse { result = failedResult(message) })
+                                        .build(),
+                                )
+                            } finally {
+                                ch.close()
+                            }
+                        }
+                    for (msg in ch) emit(msg)
+                    job.join()
+                }
+            } finally {
+                StatementRegistry.unregister(id)
+            }
         }
-    }
 
     /**
      * 执行导入全流程：打开源 →（可选）清表 → 批量插入 → 汇总统计。
@@ -157,12 +163,14 @@ object ImportHandler {
             // 目标表列名（按 ordinal 排序）：无表头的 CSV 靠它确定列集合 ——
             // 文件本身给不出列名，只能从表元数据取。
             // 有表头时也会用到：用于校验文件表头与表的列是否对得上（见下）。
-            val targetColumns = dialect.listColumns(
-                conn,
-                config.database.ifBlank { "" },
-                req.schema,
-                req.tableName,
-            ).mapNotNull { it["name"]?.toString() }
+            val targetColumns =
+                dialect
+                    .listColumns(
+                        conn,
+                        config.database.ifBlank { "" },
+                        req.schema,
+                        req.tableName,
+                    ).mapNotNull { it["name"]?.toString() }
 
             ImportSourceFactory.open(req, targetColumns).use { source ->
                 if (source.columns.isEmpty()) {
@@ -241,7 +249,11 @@ object ImportHandler {
                 onProgress(progress(rowsRead, rowsInserted, rowsFailed))
                 logger.info(
                     "Import {} finished: read={} inserted={} failed={} table={}",
-                    requestId, rowsRead, rowsInserted, rowsFailed, req.tableName,
+                    requestId,
+                    rowsRead,
+                    rowsInserted,
+                    rowsFailed,
+                    req.tableName,
                 )
                 return importResultResponse {
                     success = true
@@ -284,7 +296,11 @@ object ImportHandler {
         }
     }
 
-    private fun bindRow(stmt: PreparedStatement, columns: List<String>, row: Map<String, String>) {
+    private fun bindRow(
+        stmt: PreparedStatement,
+        columns: List<String>,
+        row: Map<String, String>,
+    ) {
         columns.forEachIndexed { index, column ->
             // 一律以字符串写入，由驱动按目标列类型做隐式转换 —— 与 DataHandler 的
             // 「UI 传来的都是字符串」约定一致。
@@ -294,19 +310,31 @@ object ImportHandler {
         }
     }
 
-    private fun qualified(dialect: DatabaseDialect, table: String, schema: String): String =
-        if (schema.isBlank()) dialect.quoteIdentifier(table)
-        else "${dialect.quoteIdentifier(schema)}.${dialect.quoteIdentifier(table)}"
+    private fun qualified(
+        dialect: DatabaseDialect,
+        table: String,
+        schema: String,
+    ): String =
+        if (schema.isBlank()) {
+            dialect.quoteIdentifier(table)
+        } else {
+            "${dialect.quoteIdentifier(schema)}.${dialect.quoteIdentifier(table)}"
+        }
 
-    private fun progress(read: Long, inserted: Long, failed: Long) = importProgressFrame {
+    private fun progress(
+        read: Long,
+        inserted: Long,
+        failed: Long,
+    ) = importProgressFrame {
         rowsRead = read
         rowsInserted = inserted
         rowsFailed = failed
         message = "read=$read inserted=$inserted failed=$failed"
     }
 
-    private fun failedResult(message: String) = importResultResponse {
-        success = false
-        error = message
-    }
+    private fun failedResult(message: String) =
+        importResultResponse {
+            success = false
+            error = message
+        }
 }

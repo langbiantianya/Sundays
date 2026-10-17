@@ -29,15 +29,16 @@ import kotlin.test.assertTrue
  * dialects；测试目标纯粹是传输可达性。
  */
 class TcpIpcTransportIntegrationTest {
-
     @Test
     fun `gRPC round-trip over TCP loopback via ephemeral port`() {
         assertTimeout(Duration.ofSeconds(10)) {
             val transport = TcpIpcTransport(IpcConfig(kind = IpcKind.TCP, tcpPort = 0))
             transport.prepare()
-            val server = transport.serverBuilder()
-                .addService(MinimalEchoImpl())
-                .build()
+            val server =
+                transport
+                    .serverBuilder()
+                    .addService(MinimalEchoImpl())
+                    .build()
             server.start()
             try {
                 val actualPort = server.getPort()
@@ -45,18 +46,20 @@ class TcpIpcTransportIntegrationTest {
                 val channel = clientTransport.channelBuilder().build()
                 try {
                     val stub = IdbEngineGrpc.newBlockingStub(channel)
-                    val iter = stub.handle(
-                        Request.newBuilder()
-                            .setId("tcp-1")
-                            .setCategory(Category.SYSTEM)
-                            .setAction(Action.INFO)
-                            .build()
-                    )
+                    val iter =
+                        stub.handle(
+                            Request
+                                .newBuilder()
+                                .setId("tcp-1")
+                                .setCategory(Category.SYSTEM)
+                                .setAction(Action.INFO)
+                                .build(),
+                        )
                     assertTrue(iter.hasNext(), "no response received")
                     val resp: Response = iter.next()
                     assertNotNull(resp)
                     assertTrue(resp.success)
-                    assertTrue(iter.hasNext() || true)  // consume all
+                    assertTrue(iter.hasNext() || true) // consume all
                     while (iter.hasNext()) iter.next()
                 } finally {
                     channel.shutdownNow()
@@ -74,13 +77,14 @@ class TcpIpcTransportIntegrationTest {
     private class MinimalEchoImpl : IdbEngineGrpc.IdbEngineImplBase() {
         override fun handle(
             request: Request,
-            responseObserver: StreamObserver<Response>
+            responseObserver: StreamObserver<Response>,
         ) {
             responseObserver.onNext(
-                Response.newBuilder()
+                Response
+                    .newBuilder()
                     .setId(request.id)
                     .setSuccess(true)
-                    .build()
+                    .build(),
             )
             responseObserver.onCompleted()
         }

@@ -19,7 +19,6 @@ package com.langbiantianya.sundays.editor.formatter
  * 注意：formatter 是**可选的** — 同一 language 不一定有 formatter，反之亦然。
  */
 object CodeFormatterRegistry {
-
     private val lock = Any()
     private val formatters = mutableMapOf<String, CodeFormatter>()
 

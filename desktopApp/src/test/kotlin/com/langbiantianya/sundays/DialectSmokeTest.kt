@@ -11,14 +11,14 @@ package com.langbiantianya.sundays
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
+import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.connectionConfig
-import com.langbiantianya.grpc.dataRequest
 import com.langbiantianya.grpc.dataListRequest
+import com.langbiantianya.grpc.dataRequest
 import com.langbiantianya.grpc.foreignKeyListRequest
 import com.langbiantianya.grpc.foreignKeyRequest
 import com.langbiantianya.grpc.indexListRequest
 import com.langbiantianya.grpc.indexRequest
-import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.schemaListRequest
 import com.langbiantianya.grpc.schemaRequest
 import com.langbiantianya.grpc.sqlExecuteRequest
@@ -84,8 +84,9 @@ import kotlin.time.Duration.Companion.minutes
  * 界面路径由 `FeatureWalkthroughTest` / `H2GuiWalkthroughTest` 负责，两边职责不重叠。
  */
 @RunWith(Parameterized::class)
-class DialectSmokeTest(private val target: SmokeTarget) {
-
+class DialectSmokeTest(
+    private val target: SmokeTarget,
+) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "[{0}]")
@@ -121,7 +122,11 @@ class DialectSmokeTest(private val target: SmokeTarget) {
     @After
     fun tearDown() {
         // 先释放引擎（它会连带关掉 DialectLoader 的 ClassLoader），再**无条件**归还工作区
-        try { engine.close() } catch (e: Exception) { println("[${target.label}] engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("[${target.label}] engine.close 抛了：$e")
+        }
         runCatching { target.teardown(workspace) }
             .onFailure { println("⚠ [${target.label}] 归还工作区失败，请手工清理 $workspace：$it") }
         System.setProperty("user.home", originalHome)
@@ -138,10 +143,11 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 放最前面：它失败时后面全部无意义，而且**引擎原文**（常含 `Caused by`）最有诊断价值。
      */
     @Test
-    fun `S0 the dialect is reachable`() = withTimeout("测试连接") {
-        val resp = invoke(Category.SYSTEM, Action.TEST_CONNECTION)
-        assertTrue(resp.success, "[${target.label}] 测试连接失败：${resp.error}")
-    }
+    fun `S0 the dialect is reachable`() =
+        withTimeout("测试连接") {
+            val resp = invoke(Category.SYSTEM, Action.TEST_CONNECTION)
+            assertTrue(resp.success, "[${target.label}] 测试连接失败：${resp.error}")
+        }
 
     /**
      * **S1 建表 + 插数 + 读回**。
@@ -154,28 +160,29 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 这里要验的是**引擎能不能写入并读回**，不是各方的造数语法。
      */
     @Test
-    fun `S1 create insert and read back`() = withTimeout("建表 + 写读闭环") {
-        assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
-        assertOk(execSql("CREATE TABLE smoke_tx (id INT PRIMARY KEY, note VARCHAR(64))"))
+    fun `S1 create insert and read back`() =
+        withTimeout("建表 + 写读闭环") {
+            assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
+            assertOk(execSql("CREATE TABLE smoke_tx (id INT PRIMARY KEY, note VARCHAR(64))"))
 
-        target.direct(workspace).use { c ->
-            c.prepareStatement("INSERT INTO smoke_items VALUES (?, ?)").use { ps ->
-                for (i in 1..20) {
-                    ps.setInt(1, i)
-                    ps.setString(2, "item_$i")
-                    ps.addBatch()
+            target.direct(workspace).use { c ->
+                c.prepareStatement("INSERT INTO smoke_items VALUES (?, ?)").use { ps ->
+                    for (i in 1..20) {
+                        ps.setInt(1, i)
+                        ps.setString(2, "item_$i")
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
                 }
-                ps.executeBatch()
             }
+
+            // 独立直连确认真的落库了（引擎说成功、库里却是空的情况必须能被发现）
+            assertEquals(20, count("smoke_items"), "[${target.label}] 应写入 20 行")
+
+            // 再经引擎读回来
+            val rows = dataList("smoke_items", page = 1, pageSize = 100)
+            assertEquals(20, rows.first, "[${target.label}] DATA.LIST 读回的行数不对（第二段=${rows.second}）")
         }
-
-        // 独立直连确认真的落库了（引擎说成功、库里却是空的情况必须能被发现）
-        assertEquals(20, count("smoke_items"), "[${target.label}] 应写入 20 行")
-
-        // 再经引擎读回来
-        val rows = dataList("smoke_items", page = 1, pageSize = 100)
-        assertEquals(20, rows.first, "[${target.label}] DATA.LIST 读回的行数不对（第二段=${rows.second}）")
-    }
 
     /**
      * **S2 过滤 / 排序 / 搜索下推**。
@@ -185,43 +192,49 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 而这个写法能不能编过**每个方言各有答案**。
      */
     @Test
-    fun `S2 filter sort and search reach the engine`() = withTimeout("过滤/排序/搜索下推") {
-        assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
-        target.direct(workspace).use { c ->
-            c.prepareStatement("INSERT INTO smoke_items VALUES (?, ?)").use { ps ->
-                for (i in 1..20) {
-                    ps.setInt(1, i); ps.setString(2, "item_$i"); ps.addBatch()
+    fun `S2 filter sort and search reach the engine`() =
+        withTimeout("过滤/排序/搜索下推") {
+            assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
+            target.direct(workspace).use { c ->
+                c.prepareStatement("INSERT INTO smoke_items VALUES (?, ?)").use { ps ->
+                    for (i in 1..20) {
+                        ps.setInt(1, i)
+                        ps.setString(2, "item_$i")
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
                 }
-                ps.executeBatch()
             }
+
+            // 过滤 id > 15 → 16..20 共 5 行
+            val filtered = dataList("smoke_items", page = 1, pageSize = 100, where = "id > 15")
+            assertEquals(5, filtered.first, "[${target.label}] 过滤 id > 15 应得 5 行（第二段=${filtered.second}）")
+
+            // 排序 id DESC → 首行 20
+            val sorted = dataList("smoke_items", page = 1, pageSize = 100, orderBy = "id DESC")
+            assertEquals(
+                "20",
+                sorted.third.firstOrNull(),
+                "[${target.label}] 按 id DESC 排序首行应为 20，实际 ${sorted.third}",
+            )
+
+            // 表内搜索 'item_1' → item_1 与 item_10..item_19 共 11 行
+            // 写法与生产代码 `TablePreviewTab.effectiveWhere()` **完全一致**，包括 CAST 目标类型
+            // 由 [SqlLiterals.castTypeFor] 按方言给出 —— MySQL 用 VARCHAR 是语法错误，
+            // 这里写死 VARCHAR 就会把「生产代码那个 bug」原样复制一份到测试里。
+            val castType = SqlLiterals.castTypeFor(target.dialectType)
+            val like =
+                sampleColumns()
+                    .map { "CAST($it AS $castType) LIKE '%item_1%'" }
+                    .joinToString(" OR ", prefix = "(", postfix = ")")
+            val searched = dataList("smoke_items", page = 1, pageSize = 100, where = like)
+            assertEquals(
+                11,
+                searched.first,
+                "[${target.label}] 表内搜索 item_1 应得 11 行，实际 ${searched.first}" +
+                    "（第二段=${searched.second}；SQL=$like；castType=$castType）",
+            )
         }
-
-        // 过滤 id > 15 → 16..20 共 5 行
-        val filtered = dataList("smoke_items", page = 1, pageSize = 100, where = "id > 15")
-        assertEquals(5, filtered.first, "[${target.label}] 过滤 id > 15 应得 5 行（第二段=${filtered.second}）")
-
-        // 排序 id DESC → 首行 20
-        val sorted = dataList("smoke_items", page = 1, pageSize = 100, orderBy = "id DESC")
-        assertEquals(
-            "20", sorted.third.firstOrNull(),
-            "[${target.label}] 按 id DESC 排序首行应为 20，实际 ${sorted.third}",
-        )
-
-        // 表内搜索 'item_1' → item_1 与 item_10..item_19 共 11 行
-        // 写法与生产代码 `TablePreviewTab.effectiveWhere()` **完全一致**，包括 CAST 目标类型
-        // 由 [SqlLiterals.castTypeFor] 按方言给出 —— MySQL 用 VARCHAR 是语法错误，
-        // 这里写死 VARCHAR 就会把「生产代码那个 bug」原样复制一份到测试里。
-        val castType = SqlLiterals.castTypeFor(target.dialectType)
-        val like = sampleColumns()
-            .map { "CAST($it AS $castType) LIKE '%item_1%'" }
-            .joinToString(" OR ", prefix = "(", postfix = ")")
-        val searched = dataList("smoke_items", page = 1, pageSize = 100, where = like)
-        assertEquals(
-            11, searched.first,
-            "[${target.label}] 表内搜索 item_1 应得 11 行，实际 ${searched.first}" +
-                "（第二段=${searched.second}；SQL=$like；castType=$castType）",
-        )
-    }
 
     /**
      * **S3 对象浏览** —— 库级的视图、表级的索引与外键。
@@ -230,96 +243,119 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 断言全部落在**真建出来的对象名**上 —— 列表非空不算数，库里有 100 个系统索引也算。
      */
     @Test
-    fun `S3 object browsing lists views indexes and foreign keys`() = withTimeout("对象浏览") {
-        seedObjects()
+    fun `S3 object browsing lists views indexes and foreign keys`() =
+        withTimeout("对象浏览") {
+            seedObjects()
 
-        val db = conn.database
-        val schema = resolveSchema() ?: db
+            val db = conn.database
+            val schema = resolveSchema() ?: db
 
-        // 库级：视图
-        val views = invoke(Category.VIEW, Action.LIST) {
-            viewRequest = viewRequest { list = viewListRequest { this.schema = schema } }
-        }
-        assertTrue(views.success, "[${target.label}] VIEW.LIST 失败：${views.error}")
-        val viewNames = views.view.list.itemsList.map { it.name }
-        println("[${target.label}] 视图 = $viewNames")
-        assertTrue(
-            viewNames.any { it.contains("smoke_v_items", ignoreCase = true) },
-            "[${target.label}] 视图列表应含 smoke_v_items，实际 $viewNames",
-        )
-
-        // 库级：触发器 —— 有就列出来，没有就**必须**有话说，且不许把视图一起弄没
-        val triggers = invoke(Category.TRIGGER, Action.LIST) {
-            triggerRequest = com.langbiantianya.grpc.triggerRequest {
-                list = com.langbiantianya.grpc.triggerListRequest { this.schema = schema }
-            }
-        }
-        println("[${target.label}] 触发器 success=${triggers.success} items=${triggers.trigger.list.itemsList.map { it.name }} error=${triggers.error}")
-        assertTrue(
-            triggers.success || triggers.error.isNotBlank(),
-            "[${target.label}] 触发器不支持时必须**明确报错**（空错误 + 空列表 = 静默消失）",
-        )
-
-        // 表级：索引 / 外键。表名要问库（见 realTableName）—— H2 存成大写
-        val indexes = invoke(Category.INDEX, Action.LIST) {
-            indexRequest = indexRequest {
-                list = indexListRequest {
-                    tableName = realTableName("smoke_items")
-                    this.schema = schema
+            // 库级：视图
+            val views =
+                invoke(Category.VIEW, Action.LIST) {
+                    viewRequest = viewRequest { list = viewListRequest { this.schema = schema } }
                 }
-            }
-        }
-        assertTrue(indexes.success, "[${target.label}] INDEX.LIST 失败：${indexes.error}")
-        val indexNames = indexes.index.list.itemsList.map { it.name }
-        println("[${target.label}] 索引 = $indexNames")
-        assertTrue(
-            indexNames.any { it.contains("smoke_idx_items", ignoreCase = true) },
-            "[${target.label}] 索引列表应含 smoke_idx_items，实际 $indexNames",
-        )
-
-        val fks = invoke(Category.FOREIGN_KEY, Action.LIST) {
-            foreignKeyRequest = foreignKeyRequest {
-                list = foreignKeyListRequest {
-                    tableName = realTableName("smoke_child")
-                    this.schema = schema
-                }
-            }
-        }
-        assertTrue(fks.success, "[${target.label}] FOREIGN_KEY.LIST 失败：${fks.error}")
-        val fkNames = fks.foreignKey.list.itemsList.map { it.name }
-        println("[${target.label}] 外键 = $fkNames")
-        if (target.keepsUserGivenForeignKeyName()) {
+            assertTrue(views.success, "[${target.label}] VIEW.LIST 失败：${views.error}")
+            val viewNames =
+                views.view.list.itemsList
+                    .map { it.name }
+            println("[${target.label}] 视图 = $viewNames")
             assertTrue(
-                fkNames.any { it.contains("smoke_fk_child", ignoreCase = true) },
-                "[${target.label}] 外键列表应含 smoke_fk_child，实际 $fkNames",
+                viewNames.any { it.contains("smoke_v_items", ignoreCase = true) },
+                "[${target.label}] 视图列表应含 smoke_v_items，实际 $viewNames",
             )
-        } else {
-            // SQLite 拿不到约束名（PRAGMA 不给），DuckDB 会把子句里的名字改写成
-            // `<表>_<列>_fkey`。两种成因不同但对断言的影响一样：只能断言「列出来了」——
-            // 断言用户给的名字会在这些方言上永远红，而红的原因与被测代码无关。
-            assertTrue(fkNames.isNotEmpty(), "[${target.label}] 外键列表不该为空，实际 $fkNames")
-            println("  · ${target.label} 不保留用户给的外键名（实际 $fkNames）")
+
+            // 库级：触发器 —— 有就列出来，没有就**必须**有话说，且不许把视图一起弄没
+            val triggers =
+                invoke(Category.TRIGGER, Action.LIST) {
+                    triggerRequest =
+                        com.langbiantianya.grpc.triggerRequest {
+                            list = com.langbiantianya.grpc.triggerListRequest { this.schema = schema }
+                        }
+                }
+            println("[${target.label}] 触发器 success=${triggers.success} items=${triggers.trigger.list.itemsList.map { it.name }} error=${triggers.error}")
+            assertTrue(
+                triggers.success || triggers.error.isNotBlank(),
+                "[${target.label}] 触发器不支持时必须**明确报错**（空错误 + 空列表 = 静默消失）",
+            )
+
+            // 表级：索引 / 外键。表名要问库（见 realTableName）—— H2 存成大写
+            val indexes =
+                invoke(Category.INDEX, Action.LIST) {
+                    indexRequest =
+                        indexRequest {
+                            list =
+                                indexListRequest {
+                                    tableName = realTableName("smoke_items")
+                                    this.schema = schema
+                                }
+                        }
+                }
+            assertTrue(indexes.success, "[${target.label}] INDEX.LIST 失败：${indexes.error}")
+            val indexNames =
+                indexes.index.list.itemsList
+                    .map { it.name }
+            println("[${target.label}] 索引 = $indexNames")
+            assertTrue(
+                indexNames.any { it.contains("smoke_idx_items", ignoreCase = true) },
+                "[${target.label}] 索引列表应含 smoke_idx_items，实际 $indexNames",
+            )
+
+            val fks =
+                invoke(Category.FOREIGN_KEY, Action.LIST) {
+                    foreignKeyRequest =
+                        foreignKeyRequest {
+                            list =
+                                foreignKeyListRequest {
+                                    tableName = realTableName("smoke_child")
+                                    this.schema = schema
+                                }
+                        }
+                }
+            assertTrue(fks.success, "[${target.label}] FOREIGN_KEY.LIST 失败：${fks.error}")
+            val fkNames =
+                fks.foreignKey.list.itemsList
+                    .map { it.name }
+            println("[${target.label}] 外键 = $fkNames")
+            if (target.keepsUserGivenForeignKeyName()) {
+                assertTrue(
+                    fkNames.any { it.contains("smoke_fk_child", ignoreCase = true) },
+                    "[${target.label}] 外键列表应含 smoke_fk_child，实际 $fkNames",
+                )
+            } else {
+                // SQLite 拿不到约束名（PRAGMA 不给），DuckDB 会把子句里的名字改写成
+                // `<表>_<列>_fkey`。两种成因不同但对断言的影响一样：只能断言「列出来了」——
+                // 断言用户给的名字会在这些方言上永远红，而红的原因与被测代码无关。
+                assertTrue(fkNames.isNotEmpty(), "[${target.label}] 外键列表不该为空，实际 $fkNames")
+                println("  · ${target.label} 不保留用户给的外键名（实际 $fkNames）")
+            }
         }
-    }
 
     /** **S4 取 DDL** —— 各方言 DDL 文本风格差很多，只断言「拿得到且提到表名」。 */
     @Test
-    fun `S4 table ddl can be fetched`() = withTimeout("取 DDL") {
-        assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
-        val resp = invoke(Category.TABLE, Action.GET_DDL) {
-            tableRequest = tableRequest {
-                getDdl = tableGetDdlRequest { tableName = realTableName("smoke_items"); schema = "" }
-            }
+    fun `S4 table ddl can be fetched`() =
+        withTimeout("取 DDL") {
+            assertOk(execSql("CREATE TABLE smoke_items (id INT PRIMARY KEY, label VARCHAR(64))"))
+            val resp =
+                invoke(Category.TABLE, Action.GET_DDL) {
+                    tableRequest =
+                        tableRequest {
+                            getDdl =
+                                tableGetDdlRequest {
+                                    tableName = realTableName("smoke_items")
+                                    schema = ""
+                                }
+                        }
+                }
+            assertTrue(resp.success, "[${target.label}] 取 DDL 失败：${resp.error}")
+            val ddl = resp.table.getDdl.ddl
+            println("[${target.label}] DDL = ${ddl.take(160)}")
+            assertTrue(ddl.isNotBlank(), "[${target.label}] DDL 不应为空")
+            assertTrue(
+                ddl.contains("smoke_items", ignoreCase = true),
+                "[${target.label}] DDL 应提到表名，实际：$ddl",
+            )
         }
-        assertTrue(resp.success, "[${target.label}] 取 DDL 失败：${resp.error}")
-        val ddl = resp.table.getDdl.ddl
-        println("[${target.label}] DDL = ${ddl.take(160)}")
-        assertTrue(ddl.isNotBlank(), "[${target.label}] DDL 不应为空")
-        assertTrue(
-            ddl.contains("smoke_items", ignoreCase = true),
-            "[${target.label}] DDL 应提到表名，实际：$ddl",
-        )
-    }
 
     /**
      * **S5 多语句** —— `CREATE` + 两条 `INSERT` 一次发出。
@@ -327,17 +363,18 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 判据是**跨语句副作用**（表建出来且有 2 行）；单条语句区分不出「跑了全部」与「只跑了第一条」。
      */
     @Test
-    fun `S5 multi statement runs every statement`() = withTimeout("多语句") {
-        assertOk(
-            execSql(
-                "CREATE TABLE smoke_multi (id INT PRIMARY KEY); " +
-                    "INSERT INTO smoke_multi VALUES (1); " +
-                    "INSERT INTO smoke_multi VALUES (2)",
-                multi = true,
-            ),
-        )
-        assertEquals(2, count("smoke_multi"), "[${target.label}] 多语句应把两条 INSERT 都执行掉")
-    }
+    fun `S5 multi statement runs every statement`() =
+        withTimeout("多语句") {
+            assertOk(
+                execSql(
+                    "CREATE TABLE smoke_multi (id INT PRIMARY KEY); " +
+                        "INSERT INTO smoke_multi VALUES (1); " +
+                        "INSERT INTO smoke_multi VALUES (2)",
+                    multi = true,
+                ),
+            )
+            assertEquals(2, count("smoke_multi"), "[${target.label}] 多语句应把两条 INSERT 都执行掉")
+        }
 
     /**
      * **S6 事务可见性** —— BEGIN / ROLLBACK / COMMIT。
@@ -349,39 +386,43 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 「回滚后数据没了」这条判据变成「DDL 顺手把事务提交了」，测的就不是事务了。
      */
     @Test
-    fun `S6 transaction rollback discards writes and commit keeps them`() = withTimeout("事务") {
-        assertOk(execSql("CREATE TABLE smoke_tx (id INT PRIMARY KEY, note VARCHAR(64))"))
+    fun `S6 transaction rollback discards writes and commit keeps them`() =
+        withTimeout("事务") {
+            assertOk(execSql("CREATE TABLE smoke_tx (id INT PRIMARY KEY, note VARCHAR(64))"))
 
-        // ---- BEGIN
-        val begin = invoke(Category.SYSTEM, Action.BEGIN) {
-            systemRequest = systemRequest { sessionId = "smoke-${System.nanoTime()}" }
+            // ---- BEGIN
+            val begin =
+                invoke(Category.SYSTEM, Action.BEGIN) {
+                    systemRequest = systemRequest { sessionId = "smoke-${System.nanoTime()}" }
+                }
+            assertTrue(begin.success, "[${target.label}] 开启事务失败：${begin.error}")
+            val sessionId = begin.system.begin.sessionId
+            assertTrue(sessionId.isNotBlank(), "[${target.label}] 引擎必须回 session id，否则后续请求找不到被钉住的连接")
+            println("[${target.label}] transaction sessionId=$sessionId")
+
+            // ---- 回滚：写进去 → 外部看不到 → 回滚 → 仍看不到
+            assertOk(execSql("INSERT INTO smoke_tx VALUES (9001, 'rollback_me')", sessionId = sessionId))
+            assertEquals(
+                0,
+                count("smoke_tx", "id = 9001"),
+                "[${target.label}] 未提交的数据不该被另一条连接看到（看到了说明没有真正隔离）",
+            )
+            assertTrue(commitOrRollback(Action.ROLLBACK, sessionId).success, "[${target.label}] 回滚失败")
+            assertEquals(0, count("smoke_tx", "id = 9001"), "[${target.label}] 回滚后数据必须消失")
+
+            // ---- 提交：同样的操作，提交后外部必须看得到
+            val begin2 =
+                invoke(Category.SYSTEM, Action.BEGIN) {
+                    // `this.` 不能省：外层有个同名局部 val `sessionId`，
+                    // 不写接收者的话赋值语句会解析到那个 val 上（编译器报「val cannot be reassigned」）
+                    systemRequest = systemRequest { this.sessionId = "smoke-${System.nanoTime()}" }
+                }
+            assertTrue(begin2.success, "[${target.label}] 二次开启事务失败：${begin2.error}")
+            val session2 = begin2.system.begin.sessionId
+            assertOk(execSql("INSERT INTO smoke_tx VALUES (9002, 'keep_me')", sessionId = session2))
+            assertTrue(commitOrRollback(Action.COMMIT, session2).success, "[${target.label}] 提交失败")
+            assertEquals(1, count("smoke_tx", "id = 9002"), "[${target.label}] 提交后外部必须看得到")
         }
-        assertTrue(begin.success, "[${target.label}] 开启事务失败：${begin.error}")
-        val sessionId = begin.system.begin.sessionId
-        assertTrue(sessionId.isNotBlank(), "[${target.label}] 引擎必须回 session id，否则后续请求找不到被钉住的连接")
-        println("[${target.label}] transaction sessionId=$sessionId")
-
-        // ---- 回滚：写进去 → 外部看不到 → 回滚 → 仍看不到
-        assertOk(execSql("INSERT INTO smoke_tx VALUES (9001, 'rollback_me')", sessionId = sessionId))
-        assertEquals(
-            0, count("smoke_tx", "id = 9001"),
-            "[${target.label}] 未提交的数据不该被另一条连接看到（看到了说明没有真正隔离）",
-        )
-        assertTrue(commitOrRollback(Action.ROLLBACK, sessionId).success, "[${target.label}] 回滚失败")
-        assertEquals(0, count("smoke_tx", "id = 9001"), "[${target.label}] 回滚后数据必须消失")
-
-        // ---- 提交：同样的操作，提交后外部必须看得到
-        val begin2 = invoke(Category.SYSTEM, Action.BEGIN) {
-            // `this.` 不能省：外层有个同名局部 val `sessionId`，
-            // 不写接收者的话赋值语句会解析到那个 val 上（编译器报「val cannot be reassigned」）
-            systemRequest = systemRequest { this.sessionId = "smoke-${System.nanoTime()}" }
-        }
-        assertTrue(begin2.success, "[${target.label}] 二次开启事务失败：${begin2.error}")
-        val session2 = begin2.system.begin.sessionId
-        assertOk(execSql("INSERT INTO smoke_tx VALUES (9002, 'keep_me')", sessionId = session2))
-        assertTrue(commitOrRollback(Action.COMMIT, session2).success, "[${target.label}] 提交失败")
-        assertEquals(1, count("smoke_tx", "id = 9002"), "[${target.label}] 提交后外部必须看得到")
-    }
 
     // ==================================================================
     // 辅助
@@ -392,23 +433,27 @@ class DialectSmokeTest(private val target: SmokeTarget) {
         action: Action,
         sessionId: String? = null,
         configure: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit = {},
-    ) : Response = runBlocking {
-        val resp = runCatching {
-            engine.invoke(connectionConfig {
-                driver = conn.dialect.engineDriverName
-                jdbcUrl = conn.jdbcUrl
-                user = conn.username
-                password = conn.password
-                if (conn.database.isNotBlank()) database = conn.database
-            }) {
-                this.category = category
-                this.action = action
-                if (sessionId != null) this.sessionId = sessionId
-                configure()
-            }
-        }.getOrNull()
-        resp ?: throw AssertionError("[${target.label}] $category.$action 引擎无响应（抛了异常）")
-    }
+    ): Response =
+        runBlocking {
+            val resp =
+                runCatching {
+                    engine.invoke(
+                        connectionConfig {
+                            driver = conn.dialect.engineDriverName
+                            jdbcUrl = conn.jdbcUrl
+                            user = conn.username
+                            password = conn.password
+                            if (conn.database.isNotBlank()) database = conn.database
+                        },
+                    ) {
+                        this.category = category
+                        this.action = action
+                        if (sessionId != null) this.sessionId = sessionId
+                        configure()
+                    }
+                }.getOrNull()
+            resp ?: throw AssertionError("[${target.label}] $category.$action 引擎无响应（抛了异常）")
+        }
 
     private fun assertOk(resp: Response) {
         assertTrue(resp.success, "[${target.label}] 请求失败：${resp.error}")
@@ -422,20 +467,28 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 找回那条被 `SET autocommit=false` 钉住的连接的凭据。放错位置编译就不过，
      * 放对位置事务才真的生效。
      */
-    private fun execSql(sql: String, multi: Boolean = false, sessionId: String? = null): Response =
+    private fun execSql(
+        sql: String,
+        multi: Boolean = false,
+        sessionId: String? = null,
+    ): Response =
         invoke(Category.SQL, Action.EXECUTE, sessionId) {
-            sqlRequest = sqlRequest {
-                execute = sqlExecuteRequest {
-                    this.sql = sql
-                    // schema 必须留空：引擎拿它去做 SET SCHEMA，塞 catalog 名会报「schema not found」
-                    this.schema = ""
-                    multiStatement = multi
+            sqlRequest =
+                sqlRequest {
+                    execute =
+                        sqlExecuteRequest {
+                            this.sql = sql
+                            // schema 必须留空：引擎拿它去做 SET SCHEMA，塞 catalog 名会报「schema not found」
+                            this.schema = ""
+                            multiStatement = multi
+                        }
                 }
-            }
         }
 
-    private fun commitOrRollback(action: Action, sessionId: String): Response =
-        invoke(Category.SYSTEM, action) { systemRequest = systemRequest { this.sessionId = sessionId } }
+    private fun commitOrRollback(
+        action: Action,
+        sessionId: String,
+    ): Response = invoke(Category.SYSTEM, action) { systemRequest = systemRequest { this.sessionId = sessionId } }
 
     /**
      * `DATA.LIST` 一把梭：返回 `(行数, 引擎原文, 首行首列)`。
@@ -449,34 +502,47 @@ class DialectSmokeTest(private val target: SmokeTarget) {
         where: String = "",
         orderBy: String = "",
     ): Triple<Int, String, List<String>> {
-        val resp = invoke(Category.DATA, Action.LIST) {
-            dataRequest = dataRequest {
-                list = dataListRequest {
-                    tableName = table
-                    this.page = page
-                    this.pageSize = pageSize
-                    this.schema = ""
-                    this.where = where
-                    this.orderBy = orderBy
-                }
+        val resp =
+            invoke(Category.DATA, Action.LIST) {
+                dataRequest =
+                    dataRequest {
+                        list =
+                            dataListRequest {
+                                tableName = table
+                                this.page = page
+                                this.pageSize = pageSize
+                                this.schema = ""
+                                this.where = where
+                                this.orderBy = orderBy
+                            }
+                    }
             }
-        }
         assertTrue(resp.success, "[${target.label}] DATA.LIST($table, where=$where) 失败：${resp.error}")
         val rows = resp.data.list.rowsList
         // proto3 的标量没有 hasXxx()，total 直接读即可
-        val total = resp.data.list.total.toInt()
+        val total =
+            resp.data.list.total
+                .toInt()
         // ⚠️ 必须**拆 Value**：`Value.toString()` 给的是 `string_value: "20"` 这种调试串，
         // 直接拿去和 `20` 比永远不相等 —— 而值本身其实是对的（实测四方言排序首行都是 20）。
-        val first = rows.firstOrNull()?.valuesMap.orEmpty().entries.take(2).map { unwrap(it.value) }
+        val first =
+            rows
+                .firstOrNull()
+                ?.valuesMap
+                .orEmpty()
+                .entries
+                .take(2)
+                .map { unwrap(it.value) }
         return Triple(total, resp.error, first)
     }
 
     /** 表的列名（构造表内搜索的 `CAST` 谓词用）—— 直接问库，不猜。 */
-    private fun sampleColumns(): List<String> = target.direct(workspace).use { c ->
-        c.metaData.getColumns(null, null, realTableName("smoke_items"), null).use { rs ->
-            generateSequence { if (rs.next()) rs.getString("COLUMN_NAME") else null }.toList()
+    private fun sampleColumns(): List<String> =
+        target.direct(workspace).use { c ->
+            c.metaData.getColumns(null, null, realTableName("smoke_items"), null).use { rs ->
+                generateSequence { if (rs.next()) rs.getString("COLUMN_NAME") else null }.toList()
+            }
         }
-    }
 
     /**
      * 表在**库里真实叫什么**。
@@ -486,12 +552,13 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * —— 实测报「未找到表 'smoke_items' 或其无可见列」，看起来像功能缺失，其实是大小写。
      * SQLite / MySQL / PG 保留原样小写。**这不是产品缺陷，是标识符折叠规则，各方言不同。**
      */
-    private fun realTableName(logical: String): String = target.direct(workspace).use { c ->
-        c.metaData.getTables(null, null, "%", arrayOf("TABLE")).use { rs ->
-            generateSequence { if (rs.next()) rs.getString("TABLE_NAME") else null }
-                .firstOrNull { it.equals(logical, ignoreCase = true) }
-        }
-    } ?: logical
+    private fun realTableName(logical: String): String =
+        target.direct(workspace).use { c ->
+            c.metaData.getTables(null, null, "%", arrayOf("TABLE")).use { rs ->
+                generateSequence { if (rs.next()) rs.getString("TABLE_NAME") else null }
+                    .firstOrNull { it.equals(logical, ignoreCase = true) }
+            }
+        } ?: logical
 
     /** 造对象浏览要用的那一套：表 + 索引 + 子表/外键 + 视图。 */
     private fun seedObjects() {
@@ -523,22 +590,37 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * 「那个 schema 不叫 public」时退回第一个 —— 库里连 public 都没有是另一种情况，
      * 那时**随便哪个 schema** 都比空强。
      */
-    private fun resolveSchema(): String? = runCatching {
-        val resp = invoke(Category.SCHEMA, Action.LIST) {
-            schemaRequest = schemaRequest {
-                list = schemaListRequest { level = "schema"; database = conn.database }
-            }
-        }
-        val schemas = resp.schema.list.itemsList
-        schemas.firstOrNull { it.equals("public", ignoreCase = true) } ?: schemas.firstOrNull()
-    }.getOrNull()
+    private fun resolveSchema(): String? =
+        runCatching {
+            val resp =
+                invoke(Category.SCHEMA, Action.LIST) {
+                    schemaRequest =
+                        schemaRequest {
+                            list =
+                                schemaListRequest {
+                                    level = "schema"
+                                    database = conn.database
+                                }
+                        }
+                }
+            val schemas = resp.schema.list.itemsList
+            schemas.firstOrNull { it.equals("public", ignoreCase = true) } ?: schemas.firstOrNull()
+        }.getOrNull()
 
     /** 直连计数 —— 「真的落库了吗」与事务可见性都靠它。 */
-    private fun count(table: String, where: String = "1 = 1"): Int = target.direct(workspace).use { c ->
-        c.createStatement().use { s -> scalar(s.executeQuery("SELECT COUNT(*) FROM $table WHERE $where")) }
-    }
+    private fun count(
+        table: String,
+        where: String = "1 = 1",
+    ): Int =
+        target.direct(workspace).use { c ->
+            c.createStatement().use { s -> scalar(s.executeQuery("SELECT COUNT(*) FROM $table WHERE $where")) }
+        }
 
-    private fun scalar(rs: ResultSet): Int = rs.use { rs.next(); rs.getInt(1) }
+    private fun scalar(rs: ResultSet): Int =
+        rs.use {
+            rs.next()
+            rs.getInt(1)
+        }
 
     /**
      * 把 `google.protobuf.Value` 拆成**载荷**。
@@ -546,17 +628,34 @@ class DialectSmokeTest(private val target: SmokeTarget) {
      * `Value` 的 `toString()` 是 protobuf 的调试串（`string_value: "20"`），
      * 拿它做断言会得到「值明明是对的，断言却红」这种最难查的失败。
      */
-    private fun unwrap(v: com.google.protobuf.Value): String = when (v.kindCase) {
-        com.google.protobuf.Value.KindCase.STRING_VALUE -> v.stringValue
-        com.google.protobuf.Value.KindCase.NUMBER_VALUE ->
-            if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
-            else v.numberValue.toString()
-        com.google.protobuf.Value.KindCase.BOOL_VALUE -> v.boolValue.toString()
-        else -> ""
-    }
+    private fun unwrap(v: com.google.protobuf.Value): String =
+        when (v.kindCase) {
+            com.google.protobuf.Value.KindCase.STRING_VALUE -> {
+                v.stringValue
+            }
+
+            com.google.protobuf.Value.KindCase.NUMBER_VALUE -> {
+                if (v.numberValue == kotlin.math.floor(v.numberValue)) {
+                    v.numberValue.toLong().toString()
+                } else {
+                    v.numberValue.toString()
+                }
+            }
+
+            com.google.protobuf.Value.KindCase.BOOL_VALUE -> {
+                v.boolValue.toString()
+            }
+
+            else -> {
+                ""
+            }
+        }
 
     /** 给可能很慢的远程往返套一个明确的上限，超时报出正在做什么。 */
-    private fun <T> withTimeout(what: String, block: () -> T): T {
+    private fun <T> withTimeout(
+        what: String,
+        block: () -> T,
+    ): T {
         val start = System.currentTimeMillis()
         val result = block()
         println("[${target.label}] $what 完成，用时 ${System.currentTimeMillis() - start}ms")

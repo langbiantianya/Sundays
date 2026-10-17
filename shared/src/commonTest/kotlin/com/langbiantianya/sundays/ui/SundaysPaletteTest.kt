@@ -42,7 +42,6 @@ import kotlin.test.assertTrue
  * 本来就该贴近底色（对分割线要求 4.5:1 会让所有层级线都变成刺眼的粗线）。
  */
 class SundaysPaletteTest {
-
     private fun luminance(color: Color): Double {
         fun channel(c: Float): Double {
             val v = c.toDouble()
@@ -51,13 +50,21 @@ class SundaysPaletteTest {
         return 0.2126 * channel(color.red) + 0.7152 * channel(color.green) + 0.0722 * channel(color.blue)
     }
 
-    private fun contrastRatio(a: Color, b: Color): Double {
+    private fun contrastRatio(
+        a: Color,
+        b: Color,
+    ): Double {
         val la = luminance(a)
         val lb = luminance(b)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
 
-    private fun assertContrast(scheme: ColorScheme, label: String, fg: Color, bg: Color) {
+    private fun assertContrast(
+        scheme: ColorScheme,
+        label: String,
+        fg: Color,
+        bg: Color,
+    ) {
         val ratio = contrastRatio(fg, bg)
         assertTrue(
             ratio >= 4.5,
@@ -65,7 +72,10 @@ class SundaysPaletteTest {
         )
     }
 
-    private fun assertSchemeReadable(scheme: ColorScheme, label: String) {
+    private fun assertSchemeReadable(
+        scheme: ColorScheme,
+        label: String,
+    ) {
         // 正文与次要文字 —— 这两组覆盖了界面上几乎所有「没显式设色的 Text」
         assertContrast(scheme, "$label/onSurface", scheme.onSurface, scheme.surface)
         assertContrast(scheme, "$label/onSurface@background", scheme.onSurface, scheme.background)

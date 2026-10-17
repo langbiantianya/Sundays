@@ -44,11 +44,12 @@ object ConnectionStorage {
     /** 凭据文件权限：`rw-------`。 */
     private const val OWNER_ONLY_FILE = "rw-------"
 
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
+    private val json =
+        Json {
+            prettyPrint = true
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
     /** 获取配置目录路径 */
     private fun configDir(): Path {
@@ -57,20 +58,20 @@ object ConnectionStorage {
     }
 
     /** 获取配置文件路径 */
-    private fun configFile(): Path {
-        return configDir().resolve("connection.json")
-    }
+    private fun configFile(): Path = configDir().resolve("connection.json")
 
     /** 读取文件中的 `version` 字段；缺失 / 非数字时按当前格式（v2）处理 */
-    private fun detectVersion(content: String): Int {
-        return try {
-            val version = (json.parseToJsonElement(content) as? JsonObject)
-                ?.get("version")?.jsonPrimitive?.intOrNull
+    private fun detectVersion(content: String): Int =
+        try {
+            val version =
+                (json.parseToJsonElement(content) as? JsonObject)
+                    ?.get("version")
+                    ?.jsonPrimitive
+                    ?.intOrNull
             version ?: PERSISTED_VERSION
         } catch (_: Exception) {
             PERSISTED_VERSION
         }
-    }
 
     /**
      * 从 [PersistedConnectionConfig] 还原 [ConnectionConfig] —— 从 jdbcUrl 解析
@@ -125,21 +126,22 @@ object ConnectionStorage {
             id = id,
             name = name,
             dialect = dialect,
-            jdbcUrl = jdbcUrl.ifBlank {
-                buildJdbcUrl(
-                    ConnectionConfig(
-                        id = id,
-                        name = name,
-                        dialect = dialect,
-                        host = host,
-                        port = port,
-                        database = database.ifBlank { filePath },
-                        username = username,
-                        password = password,
-                        connectionType = connectionType,
+            jdbcUrl =
+                jdbcUrl.ifBlank {
+                    buildJdbcUrl(
+                        ConnectionConfig(
+                            id = id,
+                            name = name,
+                            dialect = dialect,
+                            host = host,
+                            port = port,
+                            database = database.ifBlank { filePath },
+                            username = username,
+                            password = password,
+                            connectionType = connectionType,
+                        ),
                     )
-                )
-            },
+                },
             username = username,
             password = password,
             createdAt = createdAt,
@@ -186,10 +188,11 @@ object ConnectionStorage {
      * @return 是否保存成功
      */
     fun save(connectionList: ConnectionList): Boolean {
-        val persisted = PersistedConnectionList(
-            connections = connectionList.connections.map { it.toPersisted() },
-            version = PERSISTED_VERSION,
-        )
+        val persisted =
+            PersistedConnectionList(
+                connections = connectionList.connections.map { it.toPersisted() },
+                version = PERSISTED_VERSION,
+            )
         return savePersisted(persisted)
     }
 
@@ -227,8 +230,8 @@ object ConnectionStorage {
      * **一个根因、十一处报错** —— 这也是为什么看到「一批不相干的用例同时红」时，
      * 该先去找那个共同的底层原因，而不是逐条去改断言。
      */
-    private fun savePersisted(persisted: PersistedConnectionList): Boolean {
-        return try {
+    private fun savePersisted(persisted: PersistedConnectionList): Boolean =
+        try {
             val dir = configDir()
             if (!Files.exists(dir)) {
                 // ⚠️ 见文件头说明：带 POSIX 属性的建目录在 Windows 上会抛
@@ -263,7 +266,6 @@ object ConnectionStorage {
             e.printStackTrace()
             false
         }
-    }
 
     /**
      * 添加或更新一个连接配置.
@@ -302,9 +304,7 @@ object ConnectionStorage {
      * @param id 连接 ID
      * @return 连接配置 (不存在返回 null)
      */
-    fun get(id: String): ConnectionConfig? {
-        return load().connections.find { it.id == id }
-    }
+    fun get(id: String): ConnectionConfig? = load().connections.find { it.id == id }
 }
 
 /**

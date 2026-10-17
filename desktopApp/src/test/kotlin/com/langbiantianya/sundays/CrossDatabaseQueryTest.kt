@@ -75,7 +75,6 @@ import kotlin.test.assertTrue
  * skipped，而不是一片绿或一片红。
  */
 class CrossDatabaseQueryTest {
-
     companion object {
         /** 会话默认 catalog —— 复用冒烟测试那个固定库，不再多留一个。 */
         private const val DEFAULT_DB = "sundays_smoke"
@@ -113,17 +112,22 @@ class CrossDatabaseQueryTest {
         System.setProperty("user.home", tempDir.absolutePath)
 
         MySqlSmoke.registerDialect()
-        engine = com.langbiantianya.engine.IdbEngine(
-            driversDir = File("/nonexistent"),
-            dialectsDir = File("/nonexistent"),
-        )
+        engine =
+            com.langbiantianya.engine.IdbEngine(
+                driversDir = File("/nonexistent"),
+                dialectsDir = File("/nonexistent"),
+            )
 
         provisionTables()
     }
 
     @After
     fun tearDown() {
-        try { engine.close() } catch (e: Exception) { println("[XDB] engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("[XDB] engine.close 抛了：$e")
+        }
         System.setProperty("user.home", originalHome)
         tempDir.deleteRecursively()
     }
@@ -166,63 +170,78 @@ class CrossDatabaseQueryTest {
     }
 
     @Test
-    fun `非默认库独有的表能查到`() = withTimeout("查另一个库独有的表") {
-        val rows = dataList(OTHER_DB, UNIQUE_TABLE)
+    fun `非默认库独有的表能查到`() =
+        withTimeout("查另一个库独有的表") {
+            val rows = dataList(OTHER_DB, UNIQUE_TABLE)
 
-        assertEquals(1, rows.total, "行数不对：$rows")
-        assertEquals(
-            listOf("另一个库的行"), rows.notes,
-            "读到的不是 $OTHER_DB 的内容 —— 会话还停在 jdbcUrl 指定的 $DEFAULT_DB",
-        )
-    }
-
-    @Test
-    fun `同名表读到的是选中库的内容`() = withTimeout("同名表别读错库") {
-        val rows = dataList(OTHER_DB, SHARED_TABLE)
-
-        assertEquals(1, rows.total, "行数不对：$rows")
-        assertEquals(
-            listOf("另一个库的行"), rows.notes,
-            "⚠️ 静默读到了 $DEFAULT_DB 的同名表 —— 这比报错更危险，用户根本看不出来",
-        )
-    }
+            assertEquals(1, rows.total, "行数不对：$rows")
+            assertEquals(
+                listOf("另一个库的行"),
+                rows.notes,
+                "读到的不是 $OTHER_DB 的内容 —— 会话还停在 jdbcUrl 指定的 $DEFAULT_DB",
+            )
+        }
 
     @Test
-    fun `连接配置指定的库仍然正常`() = withTimeout("默认库没被改坏") {
-        // 回归护栏：切 catalog 不能反过来把原本能用的默认库弄坏
-        val rows = dataList(DEFAULT_DB, SHARED_TABLE)
+    fun `同名表读到的是选中库的内容`() =
+        withTimeout("同名表别读错库") {
+            val rows = dataList(OTHER_DB, SHARED_TABLE)
 
-        assertEquals(1, rows.total, "默认库的行数不对：$rows")
-        assertEquals(listOf("默认库的行"), rows.notes, "默认库读到了别的库：$rows")
-    }
+            assertEquals(1, rows.total, "行数不对：$rows")
+            assertEquals(
+                listOf("另一个库的行"),
+                rows.notes,
+                "⚠️ 静默读到了 $DEFAULT_DB 的同名表 —— 这比报错更危险，用户根本看不出来",
+            )
+        }
 
-    private data class Rows(val total: Int, val notes: List<String>) {
+    @Test
+    fun `连接配置指定的库仍然正常`() =
+        withTimeout("默认库没被改坏") {
+            // 回归护栏：切 catalog 不能反过来把原本能用的默认库弄坏
+            val rows = dataList(DEFAULT_DB, SHARED_TABLE)
+
+            assertEquals(1, rows.total, "默认库的行数不对：$rows")
+            assertEquals(listOf("默认库的行"), rows.notes, "默认库读到了别的库：$rows")
+        }
+
+    private data class Rows(
+        val total: Int,
+        val notes: List<String>,
+    ) {
         override fun toString() = "total=$total notes=$notes"
     }
 
-    private fun dataList(database: String, table: String): Rows {
-        val resp: Response = runBlocking {
-            engine.invoke(engineConfig(database)) {
-                category = Category.DATA
-                action = Action.LIST
-                dataRequest = dataRequest {
-                    list = dataListRequest {
-                        tableName = table
-                        page = 1
-                        pageSize = 50
-                        schema = ""
-                        where = ""
-                        orderBy = ""
-                    }
+    private fun dataList(
+        database: String,
+        table: String,
+    ): Rows {
+        val resp: Response =
+            runBlocking {
+                engine.invoke(engineConfig(database)) {
+                    category = Category.DATA
+                    action = Action.LIST
+                    dataRequest =
+                        dataRequest {
+                            list =
+                                dataListRequest {
+                                    tableName = table
+                                    page = 1
+                                    pageSize = 50
+                                    schema = ""
+                                    where = ""
+                                    orderBy = ""
+                                }
+                        }
                 }
             }
-        }
         assertTrue(resp.success, "DATA.LIST($database.$table) 失败：${resp.error}")
         val paged = resp.data.list
-        val notes = paged.rowsList.map { row ->
-            // 行是 map<列名, Value>，按列名取比按下标稳（H2 会把列名折成大写）
-            row.valuesMap["note"]?.let { unwrap(it) } ?: ""
-        }
+        val notes =
+            paged.rowsList.map { row ->
+                // 行是 map<列名, Value>，按列名取比按下标稳（H2 会把列名折成大写）
+                row.valuesMap["note"]?.let { unwrap(it) } ?: ""
+            }
         return Rows(paged.total.toInt(), notes)
     }
 
@@ -233,25 +252,43 @@ class CrossDatabaseQueryTest {
      * 这种调试串，拿去和真实内容比永远不相等 —— 而值本身其实是对的。
      * （与 `DialectSmokeTest.unwrap` 同一个坑。）
      */
-    private fun unwrap(v: com.google.protobuf.Value): String = when (v.kindCase) {
-        com.google.protobuf.Value.KindCase.STRING_VALUE -> v.stringValue
-        com.google.protobuf.Value.KindCase.NUMBER_VALUE ->
-            if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
-            else v.numberValue.toString()
-        com.google.protobuf.Value.KindCase.BOOL_VALUE -> v.boolValue.toString()
-        else -> ""
-    }
+    private fun unwrap(v: com.google.protobuf.Value): String =
+        when (v.kindCase) {
+            com.google.protobuf.Value.KindCase.STRING_VALUE -> {
+                v.stringValue
+            }
 
-    private fun engineConfig(database: String) = connectionConfig {
-        driver = baseConn.dialect.engineDriverName
-        jdbcUrl = baseConn.jdbcUrl
-        user = baseConn.username
-        password = baseConn.password
-        if (database.isNotBlank()) this.database = database
-    }
+            com.google.protobuf.Value.KindCase.NUMBER_VALUE -> {
+                if (v.numberValue == kotlin.math.floor(v.numberValue)) {
+                    v.numberValue.toLong().toString()
+                } else {
+                    v.numberValue.toString()
+                }
+            }
+
+            com.google.protobuf.Value.KindCase.BOOL_VALUE -> {
+                v.boolValue.toString()
+            }
+
+            else -> {
+                ""
+            }
+        }
+
+    private fun engineConfig(database: String) =
+        connectionConfig {
+            driver = baseConn.dialect.engineDriverName
+            jdbcUrl = baseConn.jdbcUrl
+            user = baseConn.username
+            password = baseConn.password
+            if (database.isNotBlank()) this.database = database
+        }
 
     /** 给可能很慢的远程往返套一个明确的上限，超时报出正在做什么。 */
-    private fun <T> withTimeout(what: String, block: () -> T): T {
+    private fun <T> withTimeout(
+        what: String,
+        block: () -> T,
+    ): T {
         val start = System.currentTimeMillis()
         val result = block()
         println("[XDB] $what 完成，用时 ${System.currentTimeMillis() - start}ms")

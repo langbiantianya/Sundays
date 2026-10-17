@@ -19,7 +19,6 @@ import kotlin.test.assertTrue
  * [IpcConfig] CLI 参数解析测试。
  */
 class IpcConfigTest {
-
     @Test
     fun `default OS detection chooses pipe on Windows when --ipc omitted`() {
         val cfg = IpcConfig.fromArgs(emptyArray())
@@ -77,17 +76,19 @@ class IpcConfigTest {
 
     @Test
     fun `--port out-of-range is rejected`() {
-        val ex = assertThrows<IllegalStateException> {
-            IpcConfig.fromArgs(arrayOf("--ipc", "tcp", "--port", "70000"))
-        }
+        val ex =
+            assertThrows<IllegalStateException> {
+                IpcConfig.fromArgs(arrayOf("--ipc", "tcp", "--port", "70000"))
+            }
         assertTrue(ex.message!!.contains("0..65535"))
     }
 
     @Test
     fun `--port non-integer is rejected`() {
-        val ex = assertThrows<IllegalStateException> {
-            IpcConfig.fromArgs(arrayOf("--ipc", "tcp", "--port", "notanumber"))
-        }
+        val ex =
+            assertThrows<IllegalStateException> {
+                IpcConfig.fromArgs(arrayOf("--ipc", "tcp", "--port", "notanumber"))
+            }
         assertTrue(ex.message!!.contains("integer"))
     }
 
@@ -105,26 +106,29 @@ class IpcConfigTest {
 
     @Test
     fun `--ipc with no value is rejected`() {
-        val ex = assertThrows<IllegalStateException> {
-            IpcConfig.fromArgs(arrayOf("--ipc"))
-        }
+        val ex =
+            assertThrows<IllegalStateException> {
+                IpcConfig.fromArgs(arrayOf("--ipc"))
+            }
         assertTrue(ex.message!!.contains("requires a value"))
     }
 
     @Test
     fun `--ipc invalid value is rejected with clear message`() {
-        val ex = assertThrows<IllegalStateException> {
-            IpcConfig.fromArgs(arrayOf("--ipc", "websocket"))
-        }
+        val ex =
+            assertThrows<IllegalStateException> {
+                IpcConfig.fromArgs(arrayOf("--ipc", "websocket"))
+            }
         assertTrue(ex.message!!.contains("Invalid --ipc"))
         assertTrue(ex.message!!.contains("tcp | unix | pipe"))
     }
 
     @Test
     fun `unknown flag is rejected with hint to --help`() {
-        val ex = assertThrows<IllegalStateException> {
-            IpcConfig.fromArgs(arrayOf("--foo-bar"))
-        }
+        val ex =
+            assertThrows<IllegalStateException> {
+                IpcConfig.fromArgs(arrayOf("--foo-bar"))
+            }
         assertTrue(ex.message!!.contains("Unknown argument"))
         assertTrue(ex.message!!.contains("--help"))
     }
@@ -146,9 +150,10 @@ class IpcConfigTest {
 
     @Test
     fun `multiple flags all parse correctly`() {
-        val cfg = IpcConfig.fromArgs(
-            arrayOf("--ipc", "tcp", "--port", "12345")
-        )
+        val cfg =
+            IpcConfig.fromArgs(
+                arrayOf("--ipc", "tcp", "--port", "12345"),
+            )
         assertEquals(IpcKind.TCP, cfg.kind)
         assertEquals(12345, cfg.tcpPort)
         assertEquals("/tmp/idb-engine.sock", cfg.udsPath) // default preserved

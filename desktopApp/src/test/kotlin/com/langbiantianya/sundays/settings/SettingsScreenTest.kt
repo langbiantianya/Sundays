@@ -10,11 +10,11 @@ package com.langbiantianya.sundays.settings
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -30,10 +30,10 @@ import com.langbiantianya.sundays.ui.SystemInfoRefresh
 import com.langbiantianya.sundays.ui.ThemeMode
 import com.langbiantianya.sundays.ui.ThemePalette
 import com.langbiantianya.sundays.zh
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.test.Test
 
 /**
  * 设置页行为契约（在 `:desktopApp` 跑 —— `:shared/commonTest` 没有 Compose 测试依赖）。
@@ -48,7 +48,6 @@ import kotlin.test.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class SettingsScreenTest {
-
     @Composable
     private fun render(
         state: AppearanceState,
@@ -114,7 +113,8 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `both categories are listed and default to personalization`() {        runComposeUiTest {
+    fun `both categories are listed and default to personalization`() {
+        runComposeUiTest {
             setContent { ProvideTestStrings { render(AppearanceState()) } }
 
             // 「个性化」出现两次是预期结构：左侧分类行 + 右侧内容标题
@@ -229,21 +229,22 @@ class SettingsScreenTest {
     @Test
     fun `system info pane renders engine values`() {
         runComposeUiTest {
-            val info = SystemInfo(
-                jvmVersion = "25.0.4.1",
-                jvmVendor = "Red Hat",
-                jvmName = "OpenJDK 64-Bit Server VM",
-                osName = "Linux",
-                osArch = "amd64",
-                osVersion = "7.2",
-                availableProcessors = 16,
-                memoryMax = 4L * 1024 * 1024 * 1024,
-                memoryTotal = 2L * 1024 * 1024 * 1024,
-                memoryUsed = 512L * 1024 * 1024,
-                memoryFree = 1536L * 1024 * 1024,
-                uptimeMillis = 3_723_000L,   // 1 小时 2 分
-                pid = 4242,
-            )
+            val info =
+                SystemInfo(
+                    jvmVersion = "25.0.4.1",
+                    jvmVendor = "Red Hat",
+                    jvmName = "OpenJDK 64-Bit Server VM",
+                    osName = "Linux",
+                    osArch = "amd64",
+                    osVersion = "7.2",
+                    availableProcessors = 16,
+                    memoryMax = 4L * 1024 * 1024 * 1024,
+                    memoryTotal = 2L * 1024 * 1024 * 1024,
+                    memoryUsed = 512L * 1024 * 1024,
+                    memoryFree = 1536L * 1024 * 1024,
+                    uptimeMillis = 3_723_000L, // 1 小时 2 分
+                    pid = 4242,
+                )
             setContent {
                 ProvideTestStrings {
                     render(AppearanceState(), systemInfo = SystemInfoState.Loaded(info))

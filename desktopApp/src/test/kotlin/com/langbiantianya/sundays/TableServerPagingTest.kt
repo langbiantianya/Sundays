@@ -10,10 +10,10 @@ package com.langbiantianya.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -24,8 +24,8 @@ import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.table.TableColumn
 import com.langbiantianya.sundays.table.TableRow
 import com.langbiantianya.sundays.ui.SundaysTheme
-import kotlin.test.assertEquals
 import org.junit.Test
+import kotlin.test.assertEquals
 
 /**
  * `DataTable` 的**服务端分页模式** —— [DataTable] 本地切片与「调用方已切好页」不能混用。
@@ -39,17 +39,18 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class TableServerPagingTest {
-
-    private val columns = listOf(
-        TableColumn(key = "id", header = "ID"),
-        TableColumn(key = "tag", header = "TAG"),
-    )
+    private val columns =
+        listOf(
+            TableColumn(key = "id", header = "ID"),
+            TableColumn(key = "tag", header = "TAG"),
+        )
 
     /** 引擎为「第 3 页 / 每页 2 行」返回的那两行 —— 已经是**切好的当前页**。 */
-    private val thirdPageRows = listOf(
-        TableRow(id = 5, cells = mapOf("id" to 5, "tag" to "row5")),
-        TableRow(id = 6, cells = mapOf("id" to 6, "tag" to "row6")),
-    )
+    private val thirdPageRows =
+        listOf(
+            TableRow(id = 5, cells = mapOf("id" to 5, "tag" to "row5")),
+            TableRow(id = 6, cells = mapOf("id" to 6, "tag" to "row6")),
+        )
 
     private fun ComposeUiTest.renderServerPaged(
         pageSize: PageSize = PageSize.S10,
@@ -75,62 +76,66 @@ class TableServerPagingTest {
     }
 
     @Test
-    fun `server paged rows survive a page past the first`() = runComposeUiTest {
-        // 这条断言就是整件事的意义：修复前 serverSidePaging 不存在，接线方只能沿用本地切片，
-        // 第 3 页在这里会命中 `start >= rows.size` → 空表
-        renderServerPaged()
-        onNodeWithText("row5").assertIsDisplayed()
-        onNodeWithText("row6").assertIsDisplayed()
-    }
+    fun `server paged rows survive a page past the first`() =
+        runComposeUiTest {
+            // 这条断言就是整件事的意义：修复前 serverSidePaging 不存在，接线方只能沿用本地切片，
+            // 第 3 页在这里会命中 `start >= rows.size` → 空表
+            renderServerPaged()
+            onNodeWithText("row5").assertIsDisplayed()
+            onNodeWithText("row6").assertIsDisplayed()
+        }
 
     @Test
-    fun `page indicator reflects the whole result set not the current page`() = runComposeUiTest {
-        // 25 行 / 每页 10 行 = 3 页。totalCount 传错（用了 rows.size=2）会让分页栏退化成「1 / 1」
-        renderServerPaged()
-        onNodeWithText("3 / 3").assertIsDisplayed()
-        onNodeWithText(zh(PluralStrKey.TOTAL_RECORDS, 25, 25)).assertIsDisplayed()
-    }
+    fun `page indicator reflects the whole result set not the current page`() =
+        runComposeUiTest {
+            // 25 行 / 每页 10 行 = 3 页。totalCount 传错（用了 rows.size=2）会让分页栏退化成「1 / 1」
+            renderServerPaged()
+            onNodeWithText("3 / 3").assertIsDisplayed()
+            onNodeWithText(zh(PluralStrKey.TOTAL_RECORDS, 25, 25)).assertIsDisplayed()
+        }
 
     @Test
-    fun `navigation hands the new page back to the caller`() = runComposeUiTest {
-        // 服务端分页下 DataTable **不能**自己跳页：它手里没有引擎。必须把页码交回调用方，
-        // 由调用方带新的 page 重新取数 —— 这是与本地分页最本质的差别
-        var requested: Int? = null
-        setContent {
-            ProvideTestStrings {
-                SundaysTheme {
-                    DataTable(
-                        columns = columns,
-                        rows = thirdPageRows,
-                        modifier = Modifier.fillMaxSize(),
-                        pageSize = PageSize.S10,
-                        currentPage = 2,
-                        totalCount = 25,
-                        onPageChange = { requested = it },
-                        serverSidePaging = true,
-                    )
+    fun `navigation hands the new page back to the caller`() =
+        runComposeUiTest {
+            // 服务端分页下 DataTable **不能**自己跳页：它手里没有引擎。必须把页码交回调用方，
+            // 由调用方带新的 page 重新取数 —— 这是与本地分页最本质的差别
+            var requested: Int? = null
+            setContent {
+                ProvideTestStrings {
+                    SundaysTheme {
+                        DataTable(
+                            columns = columns,
+                            rows = thirdPageRows,
+                            modifier = Modifier.fillMaxSize(),
+                            pageSize = PageSize.S10,
+                            currentPage = 2,
+                            totalCount = 25,
+                            onPageChange = { requested = it },
+                            serverSidePaging = true,
+                        )
+                    }
                 }
             }
+            waitForIdle()
+
+            onNodeWithText(zh(StrKey.PREV_PAGE)).performClick()
+            waitForIdle()
+            assertEquals(1, requested, "上一页应把目标页码交回调用方")
+
+            onNodeWithText(zh(StrKey.FIRST_PAGE)).performClick()
+            waitForIdle()
+            assertEquals(1, requested, "首页应跳到第 1 页")
         }
-        waitForIdle()
-
-        onNodeWithText(zh(StrKey.PREV_PAGE)).performClick()
-        waitForIdle()
-        assertEquals(1, requested, "上一页应把目标页码交回调用方")
-
-        onNodeWithText(zh(StrKey.FIRST_PAGE)).performClick()
-        waitForIdle()
-        assertEquals(1, requested, "首页应跳到第 1 页")
-    }
 
     @Test
-    fun `the all option is withheld from the size picker`() = runComposeUiTest {
-        // 「全部」在数据源侧是**流式读取哨兵**（pageSize = 0），不是一个合法分页大小。
-        // 放出来会让用户选一个静默退化成「每次取 1 行」的档位，故服务端分页下不提供
-        renderServerPaged()
-        onNodeWithText(zh(StrKey.PER_PAGE)).assertIsDisplayed()
-        onNodeWithText("10").assertIsDisplayed()
-    }
+    fun `the all option is withheld from the size picker`() =
+        runComposeUiTest {
+            // 「全部」在数据源侧是**流式读取哨兵**（pageSize = 0），不是一个合法分页大小。
+            // 放出来会让用户选一个静默退化成「每次取 1 行」的档位，故服务端分页下不提供
+            renderServerPaged()
+            onNodeWithText(zh(StrKey.PER_PAGE)).assertIsDisplayed()
+            onNodeWithText("10").assertIsDisplayed()
+        }
 }
 
 /**
@@ -141,54 +146,55 @@ class TableServerPagingTest {
  */
 @OptIn(ExperimentalTestApi::class)
 class LocalPagingUnchangedTest {
-
     @Test
-    fun `client paged tables still slice locally`() = runComposeUiTest {
-        val rows = (1..10).map { TableRow(id = it, cells = mapOf("id" to it, "tag" to "row$it")) }
-        setContent {
-            ProvideTestStrings {
-                SundaysTheme {
-                    DataTable(
-                        columns = listOf(TableColumn(key = "id", header = "ID"), TableColumn(key = "tag", header = "TAG")),
-                        rows = rows,
-                        modifier = Modifier.fillMaxSize(),
-                        pageSize = PageSize.S10,
-                        currentPage = 2,   // 本地切片：第 2 页 = 第 11 行起 → 空
-                        totalCount = 10,
-                        // serverSidePaging 保持默认 false
-                    )
+    fun `client paged tables still slice locally`() =
+        runComposeUiTest {
+            val rows = (1..10).map { TableRow(id = it, cells = mapOf("id" to it, "tag" to "row$it")) }
+            setContent {
+                ProvideTestStrings {
+                    SundaysTheme {
+                        DataTable(
+                            columns = listOf(TableColumn(key = "id", header = "ID"), TableColumn(key = "tag", header = "TAG")),
+                            rows = rows,
+                            modifier = Modifier.fillMaxSize(),
+                            pageSize = PageSize.S10,
+                            currentPage = 2, // 本地切片：第 2 页 = 第 11 行起 → 空
+                            totalCount = 10,
+                            // serverSidePaging 保持默认 false
+                        )
+                    }
                 }
             }
-        }
-        waitForIdle()
+            waitForIdle()
 
-        // 第 2 页在 10 行/页下本就不该有任何行 —— 这正是本地切片的既有行为
-        onNodeWithText("row1").assertDoesNotExist()
-        onNodeWithText("2 / 1").assertIsDisplayed()
-    }
+            // 第 2 页在 10 行/页下本就不该有任何行 —— 这正是本地切片的既有行为
+            onNodeWithText("row1").assertDoesNotExist()
+            onNodeWithText("2 / 1").assertIsDisplayed()
+        }
 
     @Test
-    fun `client paged tables show the first page by default`() = runComposeUiTest {
-        val rows = (1..10).map { TableRow(id = it, cells = mapOf("id" to it, "tag" to "row$it")) }
-        setContent {
-            ProvideTestStrings {
-                SundaysTheme {
-                    DataTable(
-                        columns = listOf(TableColumn(key = "id", header = "ID"), TableColumn(key = "tag", header = "TAG")),
-                        rows = rows,
-                        modifier = Modifier.fillMaxSize(),
-                        pageSize = PageSize.S10,
-                        totalCount = 10,
-                    )
+    fun `client paged tables show the first page by default`() =
+        runComposeUiTest {
+            val rows = (1..10).map { TableRow(id = it, cells = mapOf("id" to it, "tag" to "row$it")) }
+            setContent {
+                ProvideTestStrings {
+                    SundaysTheme {
+                        DataTable(
+                            columns = listOf(TableColumn(key = "id", header = "ID"), TableColumn(key = "tag", header = "TAG")),
+                            rows = rows,
+                            modifier = Modifier.fillMaxSize(),
+                            pageSize = PageSize.S10,
+                            totalCount = 10,
+                        )
+                    }
                 }
             }
-        }
-        waitForIdle()
+            waitForIdle()
 
-        onNodeWithText("row1").assertIsDisplayed()
-        onNodeWithText("row10").assertIsDisplayed()
-        onNodeWithText("1 / 1").assertIsDisplayed()
-        // 只有一页时翻页按钮必须禁用
-        onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsNotEnabled()
-    }
+            onNodeWithText("row1").assertIsDisplayed()
+            onNodeWithText("row10").assertIsDisplayed()
+            onNodeWithText("1 / 1").assertIsDisplayed()
+            // 只有一页时翻页按钮必须禁用
+            onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsNotEnabled()
+        }
 }

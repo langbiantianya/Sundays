@@ -39,7 +39,6 @@ import kotlin.test.assertTrue
  * 断言里读路径用的也是同一个 `user.home`，所以只要**写**之前先改掉它，两边自然一致。
  */
 class ConnectionStoragePermissionsTest {
-
     private lateinit var tempHome: Path
     private lateinit var originalHome: String
 
@@ -58,16 +57,17 @@ class ConnectionStoragePermissionsTest {
 
     @Test
     fun `saved credential file is owner only`() {
-        val cfg = ConnectionConfig(
-            id = "perm-test-1",
-            name = "权限测试",
-            dialect = DialectType.MYSQL,
-            host = "db.example.com",
-            port = 3306,
-            username = "root",
-            password = "super-secret",
-            database = "shop",
-        )
+        val cfg =
+            ConnectionConfig(
+                id = "perm-test-1",
+                name = "权限测试",
+                dialect = DialectType.MYSQL,
+                host = "db.example.com",
+                port = 3306,
+                username = "root",
+                password = "super-secret",
+                database = "shop",
+            )
         assertTrue(ConnectionStorage.save(ConnectionList(connections = listOf(cfg))), "保存应成功")
 
         val file = Paths.get(System.getProperty("user.home"), ".config", "sundays", "connection.json")
@@ -97,29 +97,31 @@ class ConnectionStoragePermissionsTest {
     fun `credentials still round trip after permission tightening`() {
         // jdbcUrl 是持久化的真相源，构造时显式填好。
         // （不能用 withDialect —— 那是「切换方言」，resetFor 会清空 password / jdbcUrl。）
-        val cfg = ConnectionConfig(
-            id = "perm-test-2",
-            name = "往返测试",
-            dialect = DialectType.POSTGRESQL,
-            host = "pg.example.com",
-            port = 5432,
-            username = "app",
-            password = "p@ss/w:ord",
-            database = "analytics",
-            connectionType = ConnectionType.CLIENT_SERVER,
-            jdbcUrl = buildJdbcUrl(
-                ConnectionConfig(
-                    id = "tmp",
-                    name = "tmp",
-                    dialect = DialectType.POSTGRESQL,
-                    host = "pg.example.com",
-                    port = 5432,
-                    username = "app",
-                    password = "p@ss/w:ord",
-                    database = "analytics",
-                )
-            ),
-        )
+        val cfg =
+            ConnectionConfig(
+                id = "perm-test-2",
+                name = "往返测试",
+                dialect = DialectType.POSTGRESQL,
+                host = "pg.example.com",
+                port = 5432,
+                username = "app",
+                password = "p@ss/w:ord",
+                database = "analytics",
+                connectionType = ConnectionType.CLIENT_SERVER,
+                jdbcUrl =
+                    buildJdbcUrl(
+                        ConnectionConfig(
+                            id = "tmp",
+                            name = "tmp",
+                            dialect = DialectType.POSTGRESQL,
+                            host = "pg.example.com",
+                            port = 5432,
+                            username = "app",
+                            password = "p@ss/w:ord",
+                            database = "analytics",
+                        ),
+                    ),
+            )
         ConnectionStorage.save(ConnectionList(connections = listOf(cfg)))
         val loaded = ConnectionStorage.load().connections.firstOrNull { it.id == "perm-test-2" }
         assertTrue(loaded != null, "应能读回刚保存的连接")

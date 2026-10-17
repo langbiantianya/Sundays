@@ -20,7 +20,6 @@ import kotlin.test.assertFailsWith
  * 构造函数不能。
  */
 class CellEditTest {
-
     @Test
     fun `an edit carries the column key so the caller knows which column to change`() {
         val e = CellEdit(rowId = 7, columnKey = "email", oldValue = "a@x", newValue = "b@x")
@@ -31,9 +30,10 @@ class CellEditTest {
 
     @Test
     fun `a blank column key is rejected`() {
-        val e = assertFailsWith<IllegalArgumentException> {
-            CellEdit(rowId = 1, columnKey = "  ", oldValue = "a", newValue = "b")
-        }
+        val e =
+            assertFailsWith<IllegalArgumentException> {
+                CellEdit(rowId = 1, columnKey = "  ", oldValue = "a", newValue = "b")
+            }
         assertTrue(e.message!!.contains("columnKey"), "错误信息应点明是 columnKey 的问题：${e.message}")
     }
 
@@ -43,15 +43,25 @@ class CellEditTest {
      */
     @Test
     fun `an edit that changes nothing is rejected at construction time`() {
-        val e = assertFailsWith<IllegalArgumentException> {
-            CellEdit(rowId = 1, columnKey = "name", oldValue = "Alice", newValue = "Alice")
-        }
+        val e =
+            assertFailsWith<IllegalArgumentException> {
+                CellEdit(rowId = 1, columnKey = "name", oldValue = "Alice", newValue = "Alice")
+            }
         assertTrue(e.message!!.contains("相同"), "错误信息应点明是「没变」：${e.message}")
     }
 
-    private fun assertTrue(b: Boolean, msg: String) = kotlin.test.assertTrue(b, msg)
+    private fun assertTrue(
+        b: Boolean,
+        msg: String,
+    ) = kotlin.test.assertTrue(b, msg)
 
-    private fun assertCellEditFields(e: CellEdit, rowId: Any, columnKey: String, oldValue: String, newValue: String) {
+    private fun assertCellEditFields(
+        e: CellEdit,
+        rowId: Any,
+        columnKey: String,
+        oldValue: String,
+        newValue: String,
+    ) {
         kotlin.test.assertEquals(rowId, e.rowId)
         kotlin.test.assertEquals(columnKey, e.columnKey)
         kotlin.test.assertEquals(oldValue, e.oldValue)

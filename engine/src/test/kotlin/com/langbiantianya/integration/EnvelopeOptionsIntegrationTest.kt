@@ -34,98 +34,134 @@ import kotlin.test.assertTrue
  * - timeoutMs 超时（强制返回 error="timeout"）
  */
 class EnvelopeOptionsIntegrationTest : H2Fixture() {
-
     private fun baseRequest(
         category: Category,
         action: Action,
-        configure: Request.Builder.() -> Unit
-    ): Request = Request.newBuilder()
-        .setId(TestIds.next("r-env"))
-        .setCategory(category)
-        .setAction(action)
-        .setConnection(config)
-        .apply(configure)
-        .build()
+        configure: Request.Builder.() -> Unit,
+    ): Request =
+        Request
+            .newBuilder()
+            .setId(TestIds.next("r-env"))
+            .setCategory(category)
+            .setAction(action)
+            .setConnection(config)
+            .apply(configure)
+            .build()
 
     @Test
-    fun `dryRun short-circuits TABLE CREATE without executing`() = runBlocking {
-        val tableName = TestIds.nextSql("dryrun")
-        val resp = RequestDispatcher.dispatch(
-            baseRequest(Category.TABLE, Action.CREATE) {
-                setOptions(RequestOptions.newBuilder().setDryRun(true).build())
-                setTableRequest(TableRequest.newBuilder()
-                    .setCreate(com.langbiantianya.grpc.TableCreateRequest.newBuilder()
-                        .setTableName(tableName)
-                        .addColumns(ColumnDef.newBuilder().setName("id").setType("INT").setIsPrimaryKey(true).build())
-                        .build())
-                    .build())
-            }
-        ).toList()
+    fun `dryRun short-circuits TABLE CREATE without executing`() =
+        runBlocking {
+            val tableName = TestIds.nextSql("dryrun")
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        baseRequest(Category.TABLE, Action.CREATE) {
+                            setOptions(RequestOptions.newBuilder().setDryRun(true).build())
+                            setTableRequest(
+                                TableRequest
+                                    .newBuilder()
+                                    .setCreate(
+                                        com.langbiantianya.grpc.TableCreateRequest
+                                            .newBuilder()
+                                            .setTableName(tableName)
+                                            .addColumns(
+                                                ColumnDef
+                                                    .newBuilder()
+                                                    .setName("id")
+                                                    .setType("INT")
+                                                    .setIsPrimaryKey(true)
+                                                    .build(),
+                                            ).build(),
+                                    ).build(),
+                            )
+                        },
+                    ).toList()
 
-        val r = resp.single()
-        assertTrue(r.success, "dryRun write should still return success: ${r.error}")
-        assertTrue(r.error.contains("dryRun"), "error must indicate dryRun: ${r.error}")
-        // 表必须未被实际创建
-        assertFalse(tableExists(tableName), "dryRun must NOT create table $tableName")
-    }
-
-    @Test
-    fun `dryRun still executes read actions`() = runBlocking {
-        val resp = RequestDispatcher.dispatch(
-            baseRequest(Category.SCHEMA, Action.LIST) {
-                setOptions(RequestOptions.newBuilder().setDryRun(true).build())
-                setSchemaRequest(com.langbiantianya.grpc.SchemaRequest.newBuilder()
-                    .setList(com.langbiantianya.grpc.schemaListRequest { level = "database" })
-                    .build())
-            }
-        ).toList()
-        val r = resp.single()
-        assertTrue(r.success, "dryRun LIST must execute normally: ${r.error}")
-        assertTrue(r.hasSchema())
-    }
-
-    @Test
-    fun `dryRun on DATA CREATE inserts nothing`() = runBlocking {
-        val tableName = TestIds.nextSql("dryrun_data")
-        executeUpdate("CREATE TABLE $tableName (id INT PRIMARY KEY, name VARCHAR(64))")
-        val resp = RequestDispatcher.dispatch(
-            baseRequest(Category.DATA, Action.CREATE) {
-                setOptions(RequestOptions.newBuilder().setDryRun(true).build())
-                setDataRequest(DataRequest.newBuilder()
-                    .setCreate(com.langbiantianya.grpc.DataCreateRequest.newBuilder()
-                        .setTableName(tableName)
-                        .putValues("id", "1")
-                        .putValues("name", "test")
-                        .build())
-                    .build())
-            }
-        ).toList()
-        val r = resp.single()
-        assertTrue(r.success)
-        assertTrue(r.error.contains("dryRun"))
-        val count = executeQuerySingle("SELECT COUNT(*) FROM $tableName")?.toInt() ?: 0
-        assertEquals(0, count, "dryRun must NOT insert row")
-    }
-
-    @Test
-    fun `timeoutMs wraps handler call and surfaces timeout error`() = runBlocking {
-        val resp = RequestDispatcher.dispatch(
-            baseRequest(Category.SYSTEM, Action.INFO) {
-                // 1 ns timeout — guaranteed to expire for any real handler
-                setOptions(RequestOptions.newBuilder().setTimeoutMs(1).build())
-                setSystemRequest(com.langbiantianya.grpc.SystemRequest.newBuilder().build())
-            }
-        ).toList()
-        val r = resp.single()
-        // 1ms 可能仍然完成（极快），但更可能是 timeout。我们验证 response 总是返回（不挂起）即可。
-        assertTrue(resp.isNotEmpty(), "timeout should not lose response")
-        // if timeout fired, success=false and error contains timeout
-        if (!r.success) {
-            assertTrue(
-                r.error.contains("timeout", ignoreCase = true) ||
-                r.error.contains("exceeded", ignoreCase = true),
-                "error should mention timeout: ${r.error}"
-            )
+            val r = resp.single()
+            assertTrue(r.success, "dryRun write should still return success: ${r.error}")
+            assertTrue(r.error.contains("dryRun"), "error must indicate dryRun: ${r.error}")
+            // 表必须未被实际创建
+            assertFalse(tableExists(tableName), "dryRun must NOT create table $tableName")
         }
-    }
+
+    @Test
+    fun `dryRun still executes read actions`() =
+        runBlocking {
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        baseRequest(Category.SCHEMA, Action.LIST) {
+                            setOptions(RequestOptions.newBuilder().setDryRun(true).build())
+                            setSchemaRequest(
+                                com.langbiantianya.grpc.SchemaRequest
+                                    .newBuilder()
+                                    .setList(com.langbiantianya.grpc.schemaListRequest { level = "database" })
+                                    .build(),
+                            )
+                        },
+                    ).toList()
+            val r = resp.single()
+            assertTrue(r.success, "dryRun LIST must execute normally: ${r.error}")
+            assertTrue(r.hasSchema())
+        }
+
+    @Test
+    fun `dryRun on DATA CREATE inserts nothing`() =
+        runBlocking {
+            val tableName = TestIds.nextSql("dryrun_data")
+            executeUpdate("CREATE TABLE $tableName (id INT PRIMARY KEY, name VARCHAR(64))")
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        baseRequest(Category.DATA, Action.CREATE) {
+                            setOptions(RequestOptions.newBuilder().setDryRun(true).build())
+                            setDataRequest(
+                                DataRequest
+                                    .newBuilder()
+                                    .setCreate(
+                                        com.langbiantianya.grpc.DataCreateRequest
+                                            .newBuilder()
+                                            .setTableName(tableName)
+                                            .putValues("id", "1")
+                                            .putValues("name", "test")
+                                            .build(),
+                                    ).build(),
+                            )
+                        },
+                    ).toList()
+            val r = resp.single()
+            assertTrue(r.success)
+            assertTrue(r.error.contains("dryRun"))
+            val count = executeQuerySingle("SELECT COUNT(*) FROM $tableName")?.toInt() ?: 0
+            assertEquals(0, count, "dryRun must NOT insert row")
+        }
+
+    @Test
+    fun `timeoutMs wraps handler call and surfaces timeout error`() =
+        runBlocking {
+            val resp =
+                RequestDispatcher
+                    .dispatch(
+                        baseRequest(Category.SYSTEM, Action.INFO) {
+                            // 1 ns timeout — guaranteed to expire for any real handler
+                            setOptions(RequestOptions.newBuilder().setTimeoutMs(1).build())
+                            setSystemRequest(
+                                com.langbiantianya.grpc.SystemRequest
+                                    .newBuilder()
+                                    .build(),
+                            )
+                        },
+                    ).toList()
+            val r = resp.single()
+            // 1ms 可能仍然完成（极快），但更可能是 timeout。我们验证 response 总是返回（不挂起）即可。
+            assertTrue(resp.isNotEmpty(), "timeout should not lose response")
+            // if timeout fired, success=false and error contains timeout
+            if (!r.success) {
+                assertTrue(
+                    r.error.contains("timeout", ignoreCase = true) ||
+                        r.error.contains("exceeded", ignoreCase = true),
+                    "error should mention timeout: ${r.error}",
+                )
+            }
+        }
 }

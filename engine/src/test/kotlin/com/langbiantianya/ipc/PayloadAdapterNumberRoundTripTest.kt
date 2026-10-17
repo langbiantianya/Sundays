@@ -8,8 +8,8 @@
 
 package com.langbiantianya.ipc
 
-import com.langbiantianya.grpc.PayloadAdapter
 import com.google.protobuf.Value
+import com.langbiantianya.grpc.PayloadAdapter
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
@@ -39,13 +39,13 @@ import kotlin.test.assertNull
  * 坏的只是进度数字。所以边界必须有独立锚点。
  */
 class PayloadAdapterNumberRoundTripTest {
-
     @Test
     fun `整数经 gRPC 往返后仍能被 longOrNull 读回`() {
-        val original = buildJsonObject {
-            put("exportedRows", 3L)
-            put("columnCount", 5)
-        }
+        val original =
+            buildJsonObject {
+                put("exportedRows", 3L)
+                put("columnCount", 5)
+            }
 
         // JsonElement → Value（走真实边界，模拟请求下发）
         val value = PayloadAdapter.toValue(original)
@@ -58,13 +58,15 @@ class PayloadAdapterNumberRoundTripTest {
 
     @Test
     fun `大整数行数不被 double 精度与小数点吃掉`() {
-        val value = Value.newBuilder()
-            .setStructValue(
-                com.google.protobuf.Struct.newBuilder()
-                    .putFields("exportedRows", Value.newBuilder().setNumberValue(13_308.0).build())
-                    .build()
-            )
-            .build()
+        val value =
+            Value
+                .newBuilder()
+                .setStructValue(
+                    com.google.protobuf.Struct
+                        .newBuilder()
+                        .putFields("exportedRows", Value.newBuilder().setNumberValue(13_308.0).build())
+                        .build(),
+                ).build()
 
         val back = PayloadAdapter.toJsonElement(value) as kotlinx.serialization.json.JsonObject
 

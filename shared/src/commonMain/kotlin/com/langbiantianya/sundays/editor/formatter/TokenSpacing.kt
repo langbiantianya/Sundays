@@ -42,7 +42,6 @@ import com.langbiantianya.sundays.editor.TokenType
  * @param extraTightRight 语言私有的「额外贴右标点」
  */
 internal object TokenSpacing {
-
     /**
      * 本 token 是否**贴住左邻居**（输出时不留前导空格）。
      *
@@ -73,11 +72,15 @@ internal object TokenSpacing {
      * 恒贴右的：`.` `::` 与开括号 `(` `[` `{` —— 所以 `f(`、`t.`、`a::` 后面都不留空格。
      * 注意 `,` `;` **不**在此列：它们要「前不留后留」，即 `a, b`。
      */
-    fun bindsRight(text: String, type: TokenType): Boolean = when (type) {
-        TokenType.OPERATOR -> text == "::"
-        TokenType.PUNCTUATION -> text in ALWAYS_BINDS_RIGHT
-        else -> false
-    }
+    fun bindsRight(
+        text: String,
+        type: TokenType,
+    ): Boolean =
+        when (type) {
+            TokenType.OPERATOR -> text == "::"
+            TokenType.PUNCTUATION -> text in ALWAYS_BINDS_RIGHT
+            else -> false
+        }
 
     /** 任何语言都贴左的标点。 */
     private val ALWAYS_BINDS_LEFT: Set<String> = setOf(",", ";", ")", "]", "}", ".")

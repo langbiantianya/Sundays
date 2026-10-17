@@ -53,5 +53,4 @@ typealias EditorContextMenuState = ContextMenuState<EditorContextMenuPayload>
  * ```
  */
 @Composable
-fun rememberEditorContextMenuState(): EditorContextMenuState =
-    remember { ContextMenuState<EditorContextMenuPayload>() }
+fun rememberEditorContextMenuState(): EditorContextMenuState = remember { ContextMenuState<EditorContextMenuPayload>() }

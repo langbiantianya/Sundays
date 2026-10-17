@@ -37,7 +37,6 @@ import kotlin.test.assertTrue
  * 那里红说明「没接上」。混在一起就只能看到一个笼统的失败。
  */
 class PostgreSQLJdbcUrlTest {
-
     private val dialect = PostgreSQLDialect()
 
     // ───────────────────────── 正常切库 ─────────────────────────
@@ -134,9 +133,10 @@ class PostgreSQLJdbcUrlTest {
         strings = ["sundays/smoke", "shop?x=1", "a#b", "with space", "tab\there", "pct%20"],
     )
     fun `库名含 URL 结构字符时拒绝而不是拼接`(catalog: String) {
-        val ex = assertThrows<IllegalArgumentException> {
-            dialect.jdbcUrlForCatalog("jdbc:postgresql://h:5432/postgres", catalog)
-        }
+        val ex =
+            assertThrows<IllegalArgumentException> {
+                dialect.jdbcUrlForCatalog("jdbc:postgresql://h:5432/postgres", catalog)
+            }
         assertTrue(
             ex.message!!.contains(catalog),
             "错误信息里应带上出问题的库名，界面上才看得出是哪一步失败的，实际：${ex.message}",

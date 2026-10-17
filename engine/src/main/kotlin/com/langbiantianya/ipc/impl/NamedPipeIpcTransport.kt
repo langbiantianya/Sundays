@@ -31,11 +31,14 @@ import org.slf4j.LoggerFactory
  * 并给出明确错误。后续可通过 JNA + Windows `CreateNamedPipe` Win32 API + 自行实现 gRPC HTTP/2 管道
  * 启用（参见 TODO），或在 grpc-java 上游公开 `forTarget` 后自动启用。
  */
-class NamedPipeIpcTransport(private val cfg: IpcConfig) : IpcTransport {
+class NamedPipeIpcTransport(
+    private val cfg: IpcConfig,
+) : IpcTransport {
     private val logger = LoggerFactory.getLogger(NamedPipeIpcTransport::class.java)
     private val target: String = "pipe:${cfg.pipeName}"
 
     override fun scheme(): String = "pipe"
+
     override fun displayTarget(): String = target
 
     override fun prepare() {
@@ -45,17 +48,15 @@ class NamedPipeIpcTransport(private val cfg: IpcConfig) : IpcTransport {
         logger.info("Named pipe target: $target (client-only; server-side pending)")
     }
 
-    override fun serverBuilder(): ServerBuilder<*> {
+    override fun serverBuilder(): ServerBuilder<*> =
         throw UnsupportedOperationException(
             "grpc-Java does not expose a public API for binding a gRPC server to a Windows " +
-            "named pipe (pipe:<name>). Internal NettyTransportFactory supports it but is not " +
-            "in the public surface. Pass --ipc=tcp on Windows, or implement raw Netty " +
-            "piping via JNA + CreateNamedPipe."
+                "named pipe (pipe:<name>). Internal NettyTransportFactory supports it but is not " +
+                "in the public surface. Pass --ipc=tcp on Windows, or implement raw Netty " +
+                "piping via JNA + CreateNamedPipe.",
         )
-    }
 
-    override fun channelBuilder(): ManagedChannelBuilder<*> =
-        Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
+    override fun channelBuilder(): ManagedChannelBuilder<*> = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
 
     override fun cleanup() {
         // Windows OS 在最后一个句柄关闭时回收 pipe，无需额外清理

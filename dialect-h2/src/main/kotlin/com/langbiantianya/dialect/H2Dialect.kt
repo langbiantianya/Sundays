@@ -54,20 +54,25 @@ class H2Dialect : DatabaseDialect {
     override val supportsSchema = true
     override val supportsCrossDatabase = true
     override val jdbcUrlExample = "jdbc:h2:mem:mydb;DB_CLOSE_DELAY=-1"
-    override val capabilities = setOf(
-        DialectCapability.USERS,
-        DialectCapability.PRIVILEGES,
-        DialectCapability.ROUTINES,
-        DialectCapability.VIEWS,
-        DialectCapability.INDEXES,
-        DialectCapability.FOREIGN_KEYS,
-        DialectCapability.MULTI_SCHEMA,
-        DialectCapability.EXPORT,
-        DialectCapability.DDL_TRANSACTION,
-        DialectCapability.EMBEDDED_MODE,
-    )
+    override val capabilities =
+        setOf(
+            DialectCapability.USERS,
+            DialectCapability.PRIVILEGES,
+            DialectCapability.ROUTINES,
+            DialectCapability.VIEWS,
+            DialectCapability.INDEXES,
+            DialectCapability.FOREIGN_KEYS,
+            DialectCapability.MULTI_SCHEMA,
+            DialectCapability.EXPORT,
+            DialectCapability.DDL_TRANSACTION,
+            DialectCapability.EMBEDDED_MODE,
+        )
 
-    override fun buildJdbcUrl(host: String, port: Int, database: String): String {
+    override fun buildJdbcUrl(
+        host: String,
+        port: Int,
+        database: String,
+    ): String {
         // H2 内存数据库：host/port 忽略，database 名直接用于 `mem:<name>`
         val safeName = sanitizeIdentifier(database, "database name")
         // CASE_INSENSITIVE_IDENTIFIERS=TRUE — 让带引号的小写标识符也能匹配到默认存储的大写表/列名
@@ -80,7 +85,10 @@ class H2Dialect : DatabaseDialect {
         return conn.autoCommit
     }
 
-    override fun setSearchPath(conn: Connection, schema: String) {
+    override fun setSearchPath(
+        conn: Connection,
+        schema: String,
+    ) {
         if (schema.isBlank()) return
         conn.createStatement().use { stmt ->
             stmt.execute("SET SCHEMA ${quoteIdentifier(schema)}")
@@ -104,13 +112,17 @@ class H2Dialect : DatabaseDialect {
         private val SIZABLE_TYPES = setOf("VARCHAR", "CHAR", "VARBINARY", "BINARY")
 
         /** 默认值中不需要加引号的字面量 */
-        private val UNQUOTED_DEFAULT_REGEX = Regex(
-            """\d+(\.\d+)?|NULL|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NOW\(\)|IDENTITY""",
-            RegexOption.IGNORE_CASE
-        )
+        private val UNQUOTED_DEFAULT_REGEX =
+            Regex(
+                """\d+(\.\d+)?|NULL|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NOW\(\)|IDENTITY""",
+                RegexOption.IGNORE_CASE,
+            )
     }
 
-    private fun sanitizeIdentifier(name: String, label: String): String {
+    private fun sanitizeIdentifier(
+        name: String,
+        label: String,
+    ): String {
         if (name.isBlank()) throw IllegalArgumentException("$label cannot be empty")
         // 拒绝 null 字节（0x00）— 防 SQL 截断
         if (name.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
@@ -127,7 +139,10 @@ class H2Dialect : DatabaseDialect {
      * 字符串字面量转义（用于 DDL 中无法参数化的位置）。
      * 拒绝 null 字节、分号、换行；保留单引号转义为 \\\'
      */
-    internal fun escapeSqlString(value: String, label: String): String {
+    internal fun escapeSqlString(
+        value: String,
+        label: String,
+    ): String {
         if (value.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         if (value.contains(';')) throw IllegalArgumentException("$label contains semicolon")
         if (value.contains('\n')) throw IllegalArgumentException("$label contains newline")
@@ -144,40 +159,47 @@ class H2Dialect : DatabaseDialect {
 
     // region Schema / Table / User 管理
 
-    override suspend fun listDatabases(conn: Connection): List<String> = withContext(Dispatchers.IO) {
-        // H2 单实例：连接的 catalog 即为该实例的 database 名
-        // metaData.databaseProductName + url 解析：更简单是用 conn.catalog
-        val db = conn.catalog
-        if (db.isNullOrBlank()) {
-            // 单连接未 catalog 时回退空列表
-            return@withContext emptyList()
+    override suspend fun listDatabases(conn: Connection): List<String> =
+        withContext(Dispatchers.IO) {
+            // H2 单实例：连接的 catalog 即为该实例的 database 名
+            // metaData.databaseProductName + url 解析：更简单是用 conn.catalog
+            val db = conn.catalog
+            if (db.isNullOrBlank()) {
+                // 单连接未 catalog 时回退空列表
+                return@withContext emptyList()
+            }
+            return@withContext listOf(db)
         }
-        return@withContext listOf(db)
-    }
 
-    override suspend fun listSchemas(conn: Connection, database: String): List<String> = withContext(Dispatchers.IO) {
-        // H2 没有跨库概念，但接受 database 参数用于 assert 连接 catalog 一致
-        if (database.isNotBlank()) {
-            val currentCatalog = conn.catalog
-            if (!currentCatalog.isNullOrBlank() &&
-                !currentCatalog.equals(database, ignoreCase = true)) {
-                logger.warn(
-                    "listSchemas called with database='$database' but connection catalog is '$currentCatalog'"
-                )
+    override suspend fun listSchemas(
+        conn: Connection,
+        database: String,
+    ): List<String> =
+        withContext(Dispatchers.IO) {
+            // H2 没有跨库概念，但接受 database 参数用于 assert 连接 catalog 一致
+            if (database.isNotBlank()) {
+                val currentCatalog = conn.catalog
+                if (!currentCatalog.isNullOrBlank() &&
+                    !currentCatalog.equals(database, ignoreCase = true)
+                ) {
+                    logger.warn(
+                        "listSchemas called with database='$database' but connection catalog is '$currentCatalog'",
+                    )
+                }
             }
-        }
-        val schemas = mutableListOf<String>()
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery(
-                "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA " +
-                "WHERE SCHEMA_NAME NOT IN ('INFORMATION_SCHEMA', 'SYSTEM_LOBS') " +
-                "ORDER BY SCHEMA_NAME"
-            ).use { rs ->
-                while (rs.next()) schemas.add(rs.getString(1))
+            val schemas = mutableListOf<String>()
+            conn.createStatement().use { stmt ->
+                stmt
+                    .executeQuery(
+                        "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA " +
+                            "WHERE SCHEMA_NAME NOT IN ('INFORMATION_SCHEMA', 'SYSTEM_LOBS') " +
+                            "ORDER BY SCHEMA_NAME",
+                    ).use { rs ->
+                        while (rs.next()) schemas.add(rs.getString(1))
+                    }
             }
+            schemas
         }
-        schemas
-    }
 
     /**
      * H2 专用实现 — 通过 INFORMATION_SCHEMA.COLUMNS + INFORMATION_SCHEMA.KEY_COLUMN_USAGE 查询，
@@ -190,139 +212,171 @@ class H2Dialect : DatabaseDialect {
         conn: Connection,
         database: String,
         schema: String,
-        tableName: String
-    ): List<Map<String, Any?>> = withContext(Dispatchers.IO) {
-        // schema 过滤：若调用方传了 schema 才用，否则不限定 schema（H2 默认 schema 可能是 PUBLIC/SA 等）
-        val targetSchema = schema.ifBlank { "" }
-        val result = mutableListOf<Map<String, Any?>>()
+        tableName: String,
+    ): List<Map<String, Any?>> =
+        withContext(Dispatchers.IO) {
+            // schema 过滤：若调用方传了 schema 才用，否则不限定 schema（H2 默认 schema 可能是 PUBLIC/SA 等）
+            val targetSchema = schema.ifBlank { "" }
+            val result = mutableListOf<Map<String, Any?>>()
 
-        // 1. 主键列表 — JOIN CONSTRAINTS → KEY_COLUMN_USAGE
-        val primaryKeys = mutableSetOf<String>()
-        val pkSql = if (targetSchema.isNotBlank()) {
-            """SELECT KU.COLUMN_NAME
+            // 1. 主键列表 — JOIN CONSTRAINTS → KEY_COLUMN_USAGE
+            val primaryKeys = mutableSetOf<String>()
+            val pkSql =
+                if (targetSchema.isNotBlank()) {
+                    """SELECT KU.COLUMN_NAME
                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE KU
                JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
                  ON KU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME AND KU.CONSTRAINT_SCHEMA = TC.CONSTRAINT_SCHEMA
                WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY'
                  AND KU.TABLE_NAME = ?
                  AND TC.TABLE_SCHEMA = ?"""
-        } else {
-            """SELECT KU.COLUMN_NAME
+                } else {
+                    """SELECT KU.COLUMN_NAME
                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE KU
                JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
                  ON KU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME AND KU.CONSTRAINT_SCHEMA = TC.CONSTRAINT_SCHEMA
                WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY'
                  AND KU.TABLE_NAME = ?"""
-        }
-        conn.prepareStatement(pkSql).use { ps ->
-            ps.setString(1, tableName.uppercase())
-            if (targetSchema.isNotBlank()) ps.setString(2, targetSchema.uppercase())
-            ps.executeQuery().use { rs ->
-                while (rs.next()) primaryKeys.add(rs.getString(1))
+                }
+            conn.prepareStatement(pkSql).use { ps ->
+                ps.setString(1, tableName.uppercase())
+                if (targetSchema.isNotBlank()) ps.setString(2, targetSchema.uppercase())
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) primaryKeys.add(rs.getString(1))
+                }
             }
-        }
 
-        // 2. 列定义 — DATA_TYPE 是 VARCHAR（如 INTEGER / CHARACTER VARYING）
-        // H2 默认把未加引号的标识符存为大写 — 输出的 name 也保持大写（与系统一致）
-        // 排除系统 schema（INFORMATION_SCHEMA / SYSTEM_LOBS）避免误命中（如 USERS 系统表）
-        val colSql = if (targetSchema.isNotBlank()) {
-            """SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE, COLUMN_DEFAULT
+            // 2. 列定义 — DATA_TYPE 是 VARCHAR（如 INTEGER / CHARACTER VARYING）
+            // H2 默认把未加引号的标识符存为大写 — 输出的 name 也保持大写（与系统一致）
+            // 排除系统 schema（INFORMATION_SCHEMA / SYSTEM_LOBS）避免误命中（如 USERS 系统表）
+            val colSql =
+                if (targetSchema.isNotBlank()) {
+                    """SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE, COLUMN_DEFAULT
                FROM INFORMATION_SCHEMA.COLUMNS
                WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?
                  AND TABLE_SCHEMA NOT IN ('INFORMATION_SCHEMA', 'SYSTEM_LOBS')
                ORDER BY ORDINAL_POSITION"""
-        } else {
-            """SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE, COLUMN_DEFAULT
+                } else {
+                    """SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE, COLUMN_DEFAULT
                FROM INFORMATION_SCHEMA.COLUMNS
                WHERE TABLE_NAME = ?
                  AND TABLE_SCHEMA NOT IN ('INFORMATION_SCHEMA', 'SYSTEM_LOBS')
                ORDER BY ORDINAL_POSITION"""
-        }
-        conn.prepareStatement(colSql).use { ps ->
-            ps.setString(1, tableName.uppercase())
-            if (targetSchema.isNotBlank()) ps.setString(2, targetSchema.uppercase())
-            ps.executeQuery().use { rs ->
-                while (rs.next()) {
-                    val name = rs.getString(1) ?: continue
-                    val dataTypeStr = rs.getString(2) ?: ""
-                    val charLen = rs.getInt(3)
-                    // wasNull() 只反映“最近一次”读取，必须在每次读之后立刻取，
-                    // 否则 charLen 的空值标记会被后面的 numPrec 覆盖（VARCHAR 长度因此被吞成 0）
-                    val charLenWasNull = rs.wasNull()
-                    val numPrec = rs.getInt(4)
-                    val numPrecWasNull = rs.wasNull()
-                    val size = if (!charLenWasNull && charLen > 0) charLen else if (!numPrecWasNull) numPrec else 0
-                    val nullable = rs.getString(5)
-                    val isPk = name in primaryKeys || name.lowercase() in primaryKeys
-                    result.add(mapOf(
-                        "name" to name,
-                        "type" to dataTypeStr,
-                        "size" to size,
-                        "nullable" to ("YES".equals(nullable, ignoreCase = true)),
-                        "isPrimaryKey" to isPk,
-                        "defaultValue" to rs.getString(6)
-                    ))
+                }
+            conn.prepareStatement(colSql).use { ps ->
+                ps.setString(1, tableName.uppercase())
+                if (targetSchema.isNotBlank()) ps.setString(2, targetSchema.uppercase())
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        val name = rs.getString(1) ?: continue
+                        val dataTypeStr = rs.getString(2) ?: ""
+                        val charLen = rs.getInt(3)
+                        // wasNull() 只反映“最近一次”读取，必须在每次读之后立刻取，
+                        // 否则 charLen 的空值标记会被后面的 numPrec 覆盖（VARCHAR 长度因此被吞成 0）
+                        val charLenWasNull = rs.wasNull()
+                        val numPrec = rs.getInt(4)
+                        val numPrecWasNull = rs.wasNull()
+                        val size =
+                            if (!charLenWasNull && charLen > 0) {
+                                charLen
+                            } else if (!numPrecWasNull) {
+                                numPrec
+                            } else {
+                                0
+                            }
+                        val nullable = rs.getString(5)
+                        val isPk = name in primaryKeys || name.lowercase() in primaryKeys
+                        result.add(
+                            mapOf(
+                                "name" to name,
+                                "type" to dataTypeStr,
+                                "size" to size,
+                                "nullable" to ("YES".equals(nullable, ignoreCase = true)),
+                                "isPrimaryKey" to isPk,
+                                "defaultValue" to rs.getString(6),
+                            ),
+                        )
+                    }
                 }
             }
+            result
         }
-        result
-    }
 
-    override suspend fun createSchema(conn: Connection, name: String, options: Map<String, String>, ifNotExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(name, "schema name")
-        conn.createStatement().use { stmt ->
-            val ifClause = if (ifNotExists) "IF NOT EXISTS " else ""
-            stmt.execute("CREATE SCHEMA ${ifClause}${quoteIdentifier(safeName)}")
+    override suspend fun createSchema(
+        conn: Connection,
+        name: String,
+        options: Map<String, String>,
+        ifNotExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(name, "schema name")
+            conn.createStatement().use { stmt ->
+                val ifClause = if (ifNotExists) "IF NOT EXISTS " else ""
+                stmt.execute("CREATE SCHEMA ${ifClause}${quoteIdentifier(safeName)}")
+            }
+            true
         }
-        true
-    }
 
-    override suspend fun deleteSchema(conn: Connection, name: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(name, "schema name")
-        conn.createStatement().use { stmt ->
-            // H2 必须使用 CASCADE 防止有对象依赖时失败
-            val ifClause = if (ifExists) "IF EXISTS " else ""
-            stmt.execute("DROP SCHEMA ${ifClause}${quoteIdentifier(safeName)} CASCADE")
+    override suspend fun deleteSchema(
+        conn: Connection,
+        name: String,
+        ifExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(name, "schema name")
+            conn.createStatement().use { stmt ->
+                // H2 必须使用 CASCADE 防止有对象依赖时失败
+                val ifClause = if (ifExists) "IF EXISTS " else ""
+                stmt.execute("DROP SCHEMA ${ifClause}${quoteIdentifier(safeName)} CASCADE")
+            }
+            true
         }
-        true
-    }
 
-    override suspend fun listTables(conn: Connection, database: String, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val tables = mutableListOf<Map<String, String>>()
-        val query = if (schema.isNotBlank()) {
-            "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " +
-            "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_NAME"
-        } else {
-            "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " +
-            "WHERE TABLE_SCHEMA = CURRENT_SCHEMA AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') " +
-            "ORDER BY TABLE_NAME"
-        }
-        conn.prepareStatement(query).use { stmt ->
-            if (schema.isNotBlank()) stmt.setString(1, schema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    tables.add(mapOf(
-                        "name" to rs.getString("TABLE_NAME"),
-                        "type" to rs.getString("TABLE_TYPE")
-                    ))
+    override suspend fun listTables(
+        conn: Connection,
+        database: String,
+        schema: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val tables = mutableListOf<Map<String, String>>()
+            val query =
+                if (schema.isNotBlank()) {
+                    "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " +
+                        "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_NAME"
+                } else {
+                    "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " +
+                        "WHERE TABLE_SCHEMA = CURRENT_SCHEMA AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') " +
+                        "ORDER BY TABLE_NAME"
+                }
+            conn.prepareStatement(query).use { stmt ->
+                if (schema.isNotBlank()) stmt.setString(1, schema)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        tables.add(
+                            mapOf(
+                                "name" to rs.getString("TABLE_NAME"),
+                                "type" to rs.getString("TABLE_TYPE"),
+                            ),
+                        )
+                    }
                 }
             }
+            tables
         }
-        tables
-    }
 
-    override suspend fun listUsers(conn: Connection): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val users = mutableListOf<Map<String, String>>()
-        conn.createStatement().use { stmt ->
-            // H2 INFORMATION_SCHEMA.USERS 使用 USER_NAME 列（不是 NAME）
-            stmt.executeQuery("SELECT USER_NAME FROM INFORMATION_SCHEMA.USERS ORDER BY USER_NAME").use { rs ->
-                while (rs.next()) {
-                    users.add(mapOf("user" to rs.getString(1)))
+    override suspend fun listUsers(conn: Connection): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val users = mutableListOf<Map<String, String>>()
+            conn.createStatement().use { stmt ->
+                // H2 INFORMATION_SCHEMA.USERS 使用 USER_NAME 列（不是 NAME）
+                stmt.executeQuery("SELECT USER_NAME FROM INFORMATION_SCHEMA.USERS ORDER BY USER_NAME").use { rs ->
+                    while (rs.next()) {
+                        users.add(mapOf("user" to rs.getString(1)))
+                    }
                 }
             }
+            users
         }
-        users
-    }
 
     override suspend fun updatePrivileges(
         conn: Connection,
@@ -331,108 +385,143 @@ class H2Dialect : DatabaseDialect {
         privileges: List<String>,
         isGrant: Boolean,
         tableName: String?,
-        withGrantOption: Boolean
-    ): Boolean = withContext(Dispatchers.IO) {
-        val safeUser = sanitizeIdentifier(user, "user name")
-        val safeSchema = sanitizeIdentifier(schema, "schema name")
-        val safePrivs = privileges.map { priv ->
-            val p = priv.trim().uppercase()
-            if (!p.matches(Regex("^[A-Z_ ]+$"))) {
-                throw IllegalArgumentException("Invalid privilege name: $p — 仅允许字母/空格/下划线")
-            }
-            p
-        }
-        val privList = safePrivs.joinToString(", ")
-        // H2 不支持 WITH GRANT OPTION 语法（虽然有 GRANT OPTION 列在 INFORMATION_SCHEMA）
-        if (withGrantOption) {
-            logger.warn("H2 方言不支持 WITH GRANT OPTION 语法 — 参数被忽略")
-        }
-        val onTarget = if (tableName.isNullOrBlank()) {
-            "SCHEMA ${quoteIdentifier(safeSchema)}"
-        } else {
-            "TABLE ${quoteIdentifier(safeSchema)}.${quoteIdentifier(sanitizeIdentifier(tableName, "table name"))}"
-        }
-        val sql = if (isGrant) {
-            "GRANT $privList ON $onTarget TO ${quoteIdentifier(safeUser)}"
-        } else {
-            "REVOKE $privList ON $onTarget FROM ${quoteIdentifier(safeUser)}"
-        }
-        conn.createStatement().use { stmt -> stmt.execute(sql) }
-        true
-    }
-
-    override suspend fun createUser(conn: Connection, user: String, password: String, host: String): Boolean = withContext(Dispatchers.IO) {
-        // H2 没有 host 概念 — host 参数必须为 "%" 或空
-        if (host.isNotBlank() && host != "%") {
-            throw IllegalArgumentException(
-                "H2 不支持 host 参数（必须为空或 '%'，表示不限定 host）"
-            )
-        }
-        val safeUser = sanitizeIdentifier(user, "user name")
-        val escapedPwd = password.replace("'", "''")
-        conn.createStatement().use { stmt ->
-            stmt.execute("CREATE USER ${quoteIdentifier(safeUser)} PASSWORD '$escapedPwd'")
-        }
-        true
-    }
-
-    override suspend fun deleteUser(conn: Connection, user: String, host: String): Boolean = withContext(Dispatchers.IO) {
-        if (host.isNotBlank() && host != "%") {
-            throw IllegalArgumentException("H2 不支持 host 参数")
-        }
-        val safeUser = sanitizeIdentifier(user, "user name")
-        conn.createStatement().use { stmt ->
-            stmt.execute("DROP USER ${quoteIdentifier(safeUser)}")
-        }
-        true
-    }
-
-    override suspend fun updatePassword(conn: Connection, user: String, password: String, host: String): Boolean = withContext(Dispatchers.IO) {
-        if (host.isNotBlank() && host != "%") {
-            throw IllegalArgumentException("H2 不支持 host 参数")
-        }
-        val safeUser = sanitizeIdentifier(user, "user name")
-        val escapedPwd = password.replace("'", "''")
-        conn.createStatement().use { stmt ->
-            stmt.execute("ALTER USER ${quoteIdentifier(safeUser)} SET PASSWORD '$escapedPwd'")
-        }
-        true
-    }
-
-    override suspend fun listPrivileges(conn: Connection, user: String, host: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        if (host.isNotBlank() && host != "%") {
-            throw IllegalArgumentException("H2 不支持 host 参数")
-        }
-        val safeUser = sanitizeIdentifier(user, "user name")
-        val privileges = mutableListOf<Map<String, String>>()
-        conn.prepareStatement(
-            "SELECT TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE " +
-            "FROM INFORMATION_SCHEMA.TABLE_PRIVILEGES " +
-            "WHERE GRANTEE = ? ORDER BY TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE"
-        ).use { stmt ->
-            stmt.setString(1, safeUser)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    privileges.add(mapOf(
-                        "schema" to rs.getString("TABLE_SCHEMA"),
-                        "table" to rs.getString("TABLE_NAME"),
-                        "privilege" to rs.getString("PRIVILEGE_TYPE")
-                    ))
+        withGrantOption: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeUser = sanitizeIdentifier(user, "user name")
+            val safeSchema = sanitizeIdentifier(schema, "schema name")
+            val safePrivs =
+                privileges.map { priv ->
+                    val p = priv.trim().uppercase()
+                    if (!p.matches(Regex("^[A-Z_ ]+$"))) {
+                        throw IllegalArgumentException("Invalid privilege name: $p — 仅允许字母/空格/下划线")
+                    }
+                    p
                 }
+            val privList = safePrivs.joinToString(", ")
+            // H2 不支持 WITH GRANT OPTION 语法（虽然有 GRANT OPTION 列在 INFORMATION_SCHEMA）
+            if (withGrantOption) {
+                logger.warn("H2 方言不支持 WITH GRANT OPTION 语法 — 参数被忽略")
             }
+            val onTarget =
+                if (tableName.isNullOrBlank()) {
+                    "SCHEMA ${quoteIdentifier(safeSchema)}"
+                } else {
+                    "TABLE ${quoteIdentifier(safeSchema)}.${quoteIdentifier(sanitizeIdentifier(tableName, "table name"))}"
+                }
+            val sql =
+                if (isGrant) {
+                    "GRANT $privList ON $onTarget TO ${quoteIdentifier(safeUser)}"
+                } else {
+                    "REVOKE $privList ON $onTarget FROM ${quoteIdentifier(safeUser)}"
+                }
+            conn.createStatement().use { stmt -> stmt.execute(sql) }
+            true
         }
-        privileges
-    }
 
-    override suspend fun listAllGrants(conn: Connection, user: String, host: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        if (host.isNotBlank() && host != "%") {
-            throw IllegalArgumentException("H2 不支持 host 参数")
+    override suspend fun createUser(
+        conn: Connection,
+        user: String,
+        password: String,
+        host: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            // H2 没有 host 概念 — host 参数必须为 "%" 或空
+            if (host.isNotBlank() && host != "%") {
+                throw IllegalArgumentException(
+                    "H2 不支持 host 参数（必须为空或 '%'，表示不限定 host）",
+                )
+            }
+            val safeUser = sanitizeIdentifier(user, "user name")
+            val escapedPwd = password.replace("'", "''")
+            conn.createStatement().use { stmt ->
+                stmt.execute("CREATE USER ${quoteIdentifier(safeUser)} PASSWORD '$escapedPwd'")
+            }
+            true
         }
-        val safeUser = sanitizeIdentifier(user, "user name")
-        val grants = mutableListOf<Map<String, String>>()
-        // H2 UNION schema 级 + table 级权限
-        conn.prepareStatement(
-            """SELECT TABLE_SCHEMA AS schema, TABLE_NAME AS objname, 'TABLE' AS objtype,
+
+    override suspend fun deleteUser(
+        conn: Connection,
+        user: String,
+        host: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            if (host.isNotBlank() && host != "%") {
+                throw IllegalArgumentException("H2 不支持 host 参数")
+            }
+            val safeUser = sanitizeIdentifier(user, "user name")
+            conn.createStatement().use { stmt ->
+                stmt.execute("DROP USER ${quoteIdentifier(safeUser)}")
+            }
+            true
+        }
+
+    override suspend fun updatePassword(
+        conn: Connection,
+        user: String,
+        password: String,
+        host: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            if (host.isNotBlank() && host != "%") {
+                throw IllegalArgumentException("H2 不支持 host 参数")
+            }
+            val safeUser = sanitizeIdentifier(user, "user name")
+            val escapedPwd = password.replace("'", "''")
+            conn.createStatement().use { stmt ->
+                stmt.execute("ALTER USER ${quoteIdentifier(safeUser)} SET PASSWORD '$escapedPwd'")
+            }
+            true
+        }
+
+    override suspend fun listPrivileges(
+        conn: Connection,
+        user: String,
+        host: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            if (host.isNotBlank() && host != "%") {
+                throw IllegalArgumentException("H2 不支持 host 参数")
+            }
+            val safeUser = sanitizeIdentifier(user, "user name")
+            val privileges = mutableListOf<Map<String, String>>()
+            conn
+                .prepareStatement(
+                    "SELECT TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE " +
+                        "FROM INFORMATION_SCHEMA.TABLE_PRIVILEGES " +
+                        "WHERE GRANTEE = ? ORDER BY TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE",
+                ).use { stmt ->
+                    stmt.setString(1, safeUser)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            privileges.add(
+                                mapOf(
+                                    "schema" to rs.getString("TABLE_SCHEMA"),
+                                    "table" to rs.getString("TABLE_NAME"),
+                                    "privilege" to rs.getString("PRIVILEGE_TYPE"),
+                                ),
+                            )
+                        }
+                    }
+                }
+            privileges
+        }
+
+    override suspend fun listAllGrants(
+        conn: Connection,
+        user: String,
+        host: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            if (host.isNotBlank() && host != "%") {
+                throw IllegalArgumentException("H2 不支持 host 参数")
+            }
+            val safeUser = sanitizeIdentifier(user, "user name")
+            val grants = mutableListOf<Map<String, String>>()
+            // H2 UNION schema 级 + table 级权限
+            conn
+                .prepareStatement(
+                    """SELECT TABLE_SCHEMA AS schema, TABLE_NAME AS objname, 'TABLE' AS objtype,
                       GROUP_CONCAT(DISTINCT PRIVILEGE_TYPE ORDER BY PRIVILEGE_TYPE) AS privileges
                FROM INFORMATION_SCHEMA.TABLE_PRIVILEGES
                WHERE GRANTEE = ?
@@ -443,23 +532,25 @@ class H2Dialect : DatabaseDialect {
                 FROM INFORMATION_SCHEMA.SCHEMA_PRIVILEGES
                 WHERE GRANTEE = ?
                 GROUP BY TABLE_SCHEMA)
-               ORDER BY schema, objname"""
-        ).use { stmt ->
-            stmt.setString(1, safeUser)
-            stmt.setString(2, safeUser)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    grants.add(mapOf(
-                        "schema" to rs.getString("schema"),
-                        "table" to rs.getString("objname"),
-                        "object_type" to rs.getString("objtype"),
-                        "privileges" to (rs.getString("privileges") ?: "")
-                    ))
+               ORDER BY schema, objname""",
+                ).use { stmt ->
+                    stmt.setString(1, safeUser)
+                    stmt.setString(2, safeUser)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            grants.add(
+                                mapOf(
+                                    "schema" to rs.getString("schema"),
+                                    "table" to rs.getString("objname"),
+                                    "object_type" to rs.getString("objtype"),
+                                    "privileges" to (rs.getString("privileges") ?: ""),
+                                ),
+                            )
+                        }
+                    }
                 }
-            }
+            grants
         }
-        grants
-    }
 
     // endregion
 
@@ -472,43 +563,54 @@ class H2Dialect : DatabaseDialect {
         nullable: Boolean,
         isPrimaryKey: Boolean,
         defaultValue: String?,
-        autoIncrement: Boolean
-    ): String = buildString {
-        append(quoteIdentifier(name))
-        append(" ")
-        if (autoIncrement && isPrimaryKey) {
-            // H2 自增列：IDENTITY / BIGINT GENERATED BY DEFAULT AS IDENTITY
-            // IDENTITY 在 H2 中是 INT 等价物；BIGINT 用 GENERATED BY DEFAULT
-            val upperType = type.uppercase()
-            when (upperType) {
-                "INT", "INTEGER" -> append("INT AUTO_INCREMENT")
-                "BIGINT" -> append("BIGINT AUTO_INCREMENT")
-                else -> {
-                    append(buildTypeSpec(type, size))
-                    append(" GENERATED BY DEFAULT AS IDENTITY")
+        autoIncrement: Boolean,
+    ): String =
+        buildString {
+            append(quoteIdentifier(name))
+            append(" ")
+            if (autoIncrement && isPrimaryKey) {
+                // H2 自增列：IDENTITY / BIGINT GENERATED BY DEFAULT AS IDENTITY
+                // IDENTITY 在 H2 中是 INT 等价物；BIGINT 用 GENERATED BY DEFAULT
+                val upperType = type.uppercase()
+                when (upperType) {
+                    "INT", "INTEGER" -> {
+                        append("INT AUTO_INCREMENT")
+                    }
+
+                    "BIGINT" -> {
+                        append("BIGINT AUTO_INCREMENT")
+                    }
+
+                    else -> {
+                        append(buildTypeSpec(type, size))
+                        append(" GENERATED BY DEFAULT AS IDENTITY")
+                    }
                 }
-            }
-        } else {
-            append(buildTypeSpec(type, size))
-        }
-        if (!autoIncrement && !nullable) append(" NOT NULL")
-        if (defaultValue != null && !autoIncrement) {
-            append(" DEFAULT ")
-            append(if (UNQUOTED_DEFAULT_REGEX.matches(defaultValue)) {
-                defaultValue
             } else {
-                "'${defaultValue.replace("'", "''")}'"
-            })
+                append(buildTypeSpec(type, size))
+            }
+            if (!autoIncrement && !nullable) append(" NOT NULL")
+            if (defaultValue != null && !autoIncrement) {
+                append(" DEFAULT ")
+                append(
+                    if (UNQUOTED_DEFAULT_REGEX.matches(defaultValue)) {
+                        defaultValue
+                    } else {
+                        "'${defaultValue.replace("'", "''")}'"
+                    },
+                )
+            }
         }
-    }
 
-    override fun buildAddColumnSQL(tableName: String, columnDef: String): String {
-        return "ALTER TABLE ${quoteIdentifier(tableName)} ADD COLUMN $columnDef"
-    }
+    override fun buildAddColumnSQL(
+        tableName: String,
+        columnDef: String,
+    ): String = "ALTER TABLE ${quoteIdentifier(tableName)} ADD COLUMN $columnDef"
 
-    override fun buildDropColumnSQL(tableName: String, columnName: String): String {
-        return "ALTER TABLE ${quoteIdentifier(tableName)} DROP COLUMN ${quoteIdentifier(columnName)}"
-    }
+    override fun buildDropColumnSQL(
+        tableName: String,
+        columnName: String,
+    ): String = "ALTER TABLE ${quoteIdentifier(tableName)} DROP COLUMN ${quoteIdentifier(columnName)}"
 
     /**
      * H2 的 ALTER COLUMN 是单语句：每次只能改一个属性（TYPE / SET NOT NULL / DROP NOT NULL / SET DEFAULT / RENAME TO）。
@@ -521,7 +623,7 @@ class H2Dialect : DatabaseDialect {
         size: Int?,
         nullable: Boolean,
         defaultValue: String?,
-        newName: String?
+        newName: String?,
     ): String {
         val table = quoteIdentifier(tableName)
         val col = quoteIdentifier(name)
@@ -532,122 +634,147 @@ class H2Dialect : DatabaseDialect {
                 val typeSpec = buildTypeSpec(type, size)
                 "ALTER TABLE $table ALTER COLUMN $col $typeSpec"
             }
-            newName != null -> "ALTER TABLE $table ALTER COLUMN $col RENAME TO ${quoteIdentifier(newName)}"
+
+            newName != null -> {
+                "ALTER TABLE $table ALTER COLUMN $col RENAME TO ${quoteIdentifier(newName)}"
+            }
+
             defaultValue != null -> {
-                val literal = if (UNQUOTED_DEFAULT_REGEX.matches(defaultValue)) {
-                    defaultValue
-                } else {
-                    "'${defaultValue.replace("'", "''")}'"
-                }
+                val literal =
+                    if (UNQUOTED_DEFAULT_REGEX.matches(defaultValue)) {
+                        defaultValue
+                    } else {
+                        "'${defaultValue.replace("'", "''")}'"
+                    }
                 "ALTER TABLE $table ALTER COLUMN $col SET DEFAULT $literal"
             }
-            !nullable -> "ALTER TABLE $table ALTER COLUMN $col SET NOT NULL"
-            nullable -> "ALTER TABLE $table ALTER COLUMN $col DROP NOT NULL"
-            else -> throw IllegalArgumentException("MODIFY_COLUMN 调用缺少任何修改属性")
+
+            !nullable -> {
+                "ALTER TABLE $table ALTER COLUMN $col SET NOT NULL"
+            }
+
+            nullable -> {
+                "ALTER TABLE $table ALTER COLUMN $col DROP NOT NULL"
+            }
+
+            else -> {
+                throw IllegalArgumentException("MODIFY_COLUMN 调用缺少任何修改属性")
+            }
         }
     }
 
-    override suspend fun getCreateTableDDL(conn: Connection, tableName: String): String = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val targetSchema = "PUBLIC" // H2 测试场景下用户表都在 PUBLIC；INFORMATION_SCHEMA.USERS 等系统表也在该 schema，需过滤
+    override suspend fun getCreateTableDDL(
+        conn: Connection,
+        tableName: String,
+    ): String =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            val targetSchema = "PUBLIC" // H2 测试场景下用户表都在 PUBLIC；INFORMATION_SCHEMA.USERS 等系统表也在该 schema，需过滤
 
-        // 1. 查询列定义 — 显式按 TABLE_SCHEMA = 'PUBLIC' 过滤，避免命中 INFORMATION_SCHEMA.USERS 等同名系统表
-        val columns = mutableListOf<String>()
-        conn.prepareStatement(
-            "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_DEFAULT, " +
-            "NUMERIC_PRECISION, NUMERIC_SCALE " +
-            "FROM INFORMATION_SCHEMA.COLUMNS " +
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? ORDER BY ORDINAL_POSITION"
-        ).use { stmt ->
-            stmt.setString(1, safeTable)
-            stmt.setString(2, targetSchema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    val colName = rs.getString("COLUMN_NAME")
-                    val dataType = rs.getString("DATA_TYPE") ?: ""
-                    val charLen = rs.getInt("CHARACTER_MAXIMUM_LENGTH")
-                    val charLenWasNull = rs.wasNull()
-                    val numPrec = rs.getInt("NUMERIC_PRECISION")
-                    val numPrecWasNull = rs.wasNull()
-                    val numScale = rs.getInt("NUMERIC_SCALE")
-                    val numScaleWasNull = rs.wasNull()
-                    val nullable = rs.getString("IS_NULLABLE") == "YES"
-                    val defaultVal = rs.getString("COLUMN_DEFAULT")
+            // 1. 查询列定义 — 显式按 TABLE_SCHEMA = 'PUBLIC' 过滤，避免命中 INFORMATION_SCHEMA.USERS 等同名系统表
+            val columns = mutableListOf<String>()
+            conn
+                .prepareStatement(
+                    "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_DEFAULT, " +
+                        "NUMERIC_PRECISION, NUMERIC_SCALE " +
+                        "FROM INFORMATION_SCHEMA.COLUMNS " +
+                        "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? ORDER BY ORDINAL_POSITION",
+                ).use { stmt ->
+                    stmt.setString(1, safeTable)
+                    stmt.setString(2, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            val colName = rs.getString("COLUMN_NAME")
+                            val dataType = rs.getString("DATA_TYPE") ?: ""
+                            val charLen = rs.getInt("CHARACTER_MAXIMUM_LENGTH")
+                            val charLenWasNull = rs.wasNull()
+                            val numPrec = rs.getInt("NUMERIC_PRECISION")
+                            val numPrecWasNull = rs.wasNull()
+                            val numScale = rs.getInt("NUMERIC_SCALE")
+                            val numScaleWasNull = rs.wasNull()
+                            val nullable = rs.getString("IS_NULLABLE") == "YES"
+                            val defaultVal = rs.getString("COLUMN_DEFAULT")
 
-                    val typeSpec = when (dataType.uppercase()) {
-                        "CHARACTER VARYING" -> if (!charLenWasNull && charLen > 0) "VARCHAR($charLen)" else "VARCHAR"
-                        "CHARACTER" -> if (!charLenWasNull && charLen > 0) "CHAR($charLen)" else "CHAR"
-                        "DECIMAL", "NUMERIC" -> if (!numPrecWasNull && numPrec > 0) "DECIMAL($numPrec, ${if (numScaleWasNull) 0 else numScale})" else "DECIMAL"
-                        "INTEGER" -> "INT"
-                        else -> dataType
+                            val typeSpec =
+                                when (dataType.uppercase()) {
+                                    "CHARACTER VARYING" -> if (!charLenWasNull && charLen > 0) "VARCHAR($charLen)" else "VARCHAR"
+                                    "CHARACTER" -> if (!charLenWasNull && charLen > 0) "CHAR($charLen)" else "CHAR"
+                                    "DECIMAL", "NUMERIC" -> if (!numPrecWasNull && numPrec > 0) "DECIMAL($numPrec, ${if (numScaleWasNull) 0 else numScale})" else "DECIMAL"
+                                    "INTEGER" -> "INT"
+                                    else -> dataType
+                                }
+
+                            buildString {
+                                append("${quoteIdentifier(colName)} $typeSpec")
+                                if (!nullable) append(" NOT NULL")
+                                if (defaultVal != null) append(" DEFAULT $defaultVal")
+                            }.let { columns.add(it) }
+                        }
                     }
-
-                    buildString {
-                        append("${quoteIdentifier(colName)} $typeSpec")
-                        if (!nullable) append(" NOT NULL")
-                        if (defaultVal != null) append(" DEFAULT $defaultVal")
-                    }.let { columns.add(it) }
                 }
+
+            if (columns.isEmpty()) {
+                throw IllegalArgumentException("未找到表 '$safeTable' 或其无可见列")
             }
-        }
 
-        if (columns.isEmpty()) {
-            throw IllegalArgumentException("未找到表 '$safeTable' 或其无可见列")
-        }
-
-        // 2. 查询主键（H2 无 INDEX_COLUMNS.PRIMARY_KEY 列，改用 TABLE_CONSTRAINTS）
-        val primaryKeys = mutableListOf<String>()
-        conn.prepareStatement(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE " +
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? AND CONSTRAINT_NAME = " +
-            "(SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS " +
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? AND CONSTRAINT_TYPE = 'PRIMARY KEY')"
-        ).use { stmt ->
-            stmt.setString(1, safeTable)
-            stmt.setString(2, targetSchema)
-            stmt.setString(3, safeTable)
-            stmt.setString(4, targetSchema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"))
-            }
-        }
-
-        // 3. UNIQUE 约束（H2：使用 INDEXES 表 + JOIN INDEX_COLUMNS）
-        // H2 的 INDEX_TYPE_NAME 实际存的是 'UNIQUE INDEX'，等值比较 'UNIQUE' 永远不命中，
-        // 会让重建 DDL 静默丢掉 UNIQUE 子句 — 与 listIndexes 一样用包含匹配。
-        val uniqueConstraints = mutableListOf<String>()
-        conn.prepareStatement(
-            "SELECT ix.INDEX_NAME, GROUP_CONCAT(ic.COLUMN_NAME ORDER BY ic.ORDINAL_POSITION) AS COLS " +
-            "FROM INFORMATION_SCHEMA.INDEXES ix " +
-            "JOIN INFORMATION_SCHEMA.INDEX_COLUMNS ic USING (TABLE_SCHEMA, TABLE_NAME, INDEX_NAME) " +
-            "WHERE ix.TABLE_NAME = ? AND ix.TABLE_SCHEMA = ? AND UPPER(ix.INDEX_TYPE_NAME) LIKE '%UNIQUE%' " +
-            "GROUP BY ix.INDEX_NAME"
-        ).use { stmt ->
-            stmt.setString(1, safeTable)
-            stmt.setString(2, targetSchema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    uniqueConstraints.add("UNIQUE (${rs.getString("COLS")})")
+            // 2. 查询主键（H2 无 INDEX_COLUMNS.PRIMARY_KEY 列，改用 TABLE_CONSTRAINTS）
+            val primaryKeys = mutableListOf<String>()
+            conn
+                .prepareStatement(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE " +
+                        "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? AND CONSTRAINT_NAME = " +
+                        "(SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS " +
+                        "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? AND CONSTRAINT_TYPE = 'PRIMARY KEY')",
+                ).use { stmt ->
+                    stmt.setString(1, safeTable)
+                    stmt.setString(2, targetSchema)
+                    stmt.setString(3, safeTable)
+                    stmt.setString(4, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"))
+                    }
                 }
-            }
-        }
 
-        buildString {
-            append("CREATE TABLE ${quoteIdentifier(safeTable)} (\n")
-            val allDefs = mutableListOf<String>()
-            allDefs.addAll(columns)
-            if (primaryKeys.isNotEmpty()) {
-                allDefs.add("PRIMARY KEY (${primaryKeys.joinToString(", ") { quoteIdentifier(it) }})")
+            // 3. UNIQUE 约束（H2：使用 INDEXES 表 + JOIN INDEX_COLUMNS）
+            // H2 的 INDEX_TYPE_NAME 实际存的是 'UNIQUE INDEX'，等值比较 'UNIQUE' 永远不命中，
+            // 会让重建 DDL 静默丢掉 UNIQUE 子句 — 与 listIndexes 一样用包含匹配。
+            val uniqueConstraints = mutableListOf<String>()
+            conn
+                .prepareStatement(
+                    "SELECT ix.INDEX_NAME, GROUP_CONCAT(ic.COLUMN_NAME ORDER BY ic.ORDINAL_POSITION) AS COLS " +
+                        "FROM INFORMATION_SCHEMA.INDEXES ix " +
+                        "JOIN INFORMATION_SCHEMA.INDEX_COLUMNS ic USING (TABLE_SCHEMA, TABLE_NAME, INDEX_NAME) " +
+                        "WHERE ix.TABLE_NAME = ? AND ix.TABLE_SCHEMA = ? AND UPPER(ix.INDEX_TYPE_NAME) LIKE '%UNIQUE%' " +
+                        "GROUP BY ix.INDEX_NAME",
+                ).use { stmt ->
+                    stmt.setString(1, safeTable)
+                    stmt.setString(2, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            uniqueConstraints.add("UNIQUE (${rs.getString("COLS")})")
+                        }
+                    }
+                }
+
+            buildString {
+                append("CREATE TABLE ${quoteIdentifier(safeTable)} (\n")
+                val allDefs = mutableListOf<String>()
+                allDefs.addAll(columns)
+                if (primaryKeys.isNotEmpty()) {
+                    allDefs.add("PRIMARY KEY (${primaryKeys.joinToString(", ") { quoteIdentifier(it) }})")
+                }
+                allDefs.addAll(uniqueConstraints)
+                append("  ${allDefs.joinToString(",\n  ")}\n")
+                append(")")
             }
-            allDefs.addAll(uniqueConstraints)
-            append("  ${allDefs.joinToString(",\n  ")}\n")
-            append(")")
         }
-    }
 
     override fun buildTableOptionsSQL(options: Map<String, String>): String = "" // H2 无表级引擎选项
 
-    override fun buildPostCreateStatements(tableName: String, options: Map<String, String>): List<String> {
+    override fun buildPostCreateStatements(
+        tableName: String,
+        options: Map<String, String>,
+    ): List<String> {
         val statements = mutableListOf<String>()
         val comment = options["comment"]
         if (comment != null) {
@@ -661,7 +788,10 @@ class H2Dialect : DatabaseDialect {
 
     // region SQL 安全校验
 
-    override fun validateSqlFragment(sql: String, label: String) {
+    override fun validateSqlFragment(
+        sql: String,
+        label: String,
+    ) {
         DialectUtil.validateSqlFragment(sql, label, DANGEROUS_KEYWORD_REGEXES)
     }
 
@@ -673,116 +803,138 @@ class H2Dialect : DatabaseDialect {
 
     // region 函数/存储过程管理
 
-    override suspend fun listRoutines(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        val routines = mutableListOf<Map<String, String>>()
-        val seenNames = mutableSetOf<String>()
+    override suspend fun listRoutines(
+        conn: Connection,
+        schema: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            val routines = mutableListOf<Map<String, String>>()
+            val seenNames = mutableSetOf<String>()
 
-        // 1. TRIGGERS
-        conn.prepareStatement(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
-            "FROM INFORMATION_SCHEMA.TRIGGERS " +
-            "WHERE TRIGGER_SCHEMA = ? " +
-            "ORDER BY TRIGGER_NAME"
-        ).use { stmt ->
-            stmt.setString(1, targetSchema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    val tn = rs.getString("TRIGGER_NAME") ?: continue
-                    seenNames.add(tn.uppercase())
-                    routines.add(mapOf(
-                        "name" to tn,
-                        "routine_type" to "TRIGGER",
-                        "return_type" to "TRIGGER",
-                        "language" to "java",
-                        "security_definer" to "SECURITY INVOKER",
-                        "volatility" to "VOLATILE",
-                        "arg_count" to "0",
-                        "arg_names" to "",
-                        "schema" to targetSchema,
-                        "description" to (rs.getString("REMARKS") ?: ""),
-                        "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: "")
-                    ))
-                }
-            }
-        }
-
-        // 2. ROUTINES（真实 CREATE FUNCTION/PROCEDURE — H2 2.x 起可用）
-        try {
-            conn.prepareStatement(
-                "SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS " +
-                "FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_SCHEMA = ?"
-            ).use { stmt ->
-                stmt.setString(1, targetSchema)
-                stmt.executeQuery().use { rs ->
-                    while (rs.next()) {
-                        val name = rs.getString("ROUTINE_NAME") ?: continue
-                        seenNames.add(name.uppercase())
-                        routines.add(mapOf(
-                            "name" to name,
-                            "routine_type" to (rs.getString("ROUTINE_TYPE") ?: "FUNCTION"),
-                            "return_type" to (rs.getString("DATA_TYPE") ?: ""),
-                            "language" to "java",
-                            "security_definer" to "SECURITY INVOKER",
-                            "volatility" to "VOLATILE",
-                            "arg_count" to "0",
-                            "arg_names" to "",
-                            "schema" to targetSchema,
-                            "description" to (rs.getString("REMARKS") ?: ""),
-                            "trigger_table" to ""
-                        ))
+            // 1. TRIGGERS
+            conn
+                .prepareStatement(
+                    "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
+                        "FROM INFORMATION_SCHEMA.TRIGGERS " +
+                        "WHERE TRIGGER_SCHEMA = ? " +
+                        "ORDER BY TRIGGER_NAME",
+                ).use { stmt ->
+                    stmt.setString(1, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            val tn = rs.getString("TRIGGER_NAME") ?: continue
+                            seenNames.add(tn.uppercase())
+                            routines.add(
+                                mapOf(
+                                    "name" to tn,
+                                    "routine_type" to "TRIGGER",
+                                    "return_type" to "TRIGGER",
+                                    "language" to "java",
+                                    "security_definer" to "SECURITY INVOKER",
+                                    "volatility" to "VOLATILE",
+                                    "arg_count" to "0",
+                                    "arg_names" to "",
+                                    "schema" to targetSchema,
+                                    "description" to (rs.getString("REMARKS") ?: ""),
+                                    "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: ""),
+                                ),
+                            )
+                        }
                     }
                 }
-            }
-        } catch (_: Exception) {
-            // ROUTINES 表不存在 — 跳过
-        }
 
-        // 3. FUNCTION_ALIASES（CREATE ALIAS 注册的 Java 方法别名）
-        try {
-            conn.prepareStatement(
-                "SELECT ALIAS_NAME, ALIAS_SCHEMA, REMARKS " +
-                "FROM INFORMATION_SCHEMA.FUNCTION_ALIASES WHERE ALIAS_SCHEMA = ?"
-            ).use { stmt ->
-                stmt.setString(1, targetSchema)
-                stmt.executeQuery().use { rs ->
-                    while (rs.next()) {
-                        val name = rs.getString("ALIAS_NAME") ?: continue
-                        if (!seenNames.add(name.uppercase())) continue
-                        routines.add(mapOf(
-                            "name" to name,
-                            "routine_type" to "FUNCTION",
-                            "return_type" to "java_method",
-                            "language" to "java",
-                            "security_definer" to "SECURITY INVOKER",
-                            "volatility" to "VOLATILE",
-                            "arg_count" to "0",
-                            "arg_names" to "",
-                            "schema" to targetSchema,
-                            "description" to (rs.getString("REMARKS") ?: ""),
-                            "trigger_table" to ""
-                        ))
+            // 2. ROUTINES（真实 CREATE FUNCTION/PROCEDURE — H2 2.x 起可用）
+            try {
+                conn
+                    .prepareStatement(
+                        "SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS " +
+                            "FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_SCHEMA = ?",
+                    ).use { stmt ->
+                        stmt.setString(1, targetSchema)
+                        stmt.executeQuery().use { rs ->
+                            while (rs.next()) {
+                                val name = rs.getString("ROUTINE_NAME") ?: continue
+                                seenNames.add(name.uppercase())
+                                routines.add(
+                                    mapOf(
+                                        "name" to name,
+                                        "routine_type" to (rs.getString("ROUTINE_TYPE") ?: "FUNCTION"),
+                                        "return_type" to (rs.getString("DATA_TYPE") ?: ""),
+                                        "language" to "java",
+                                        "security_definer" to "SECURITY INVOKER",
+                                        "volatility" to "VOLATILE",
+                                        "arg_count" to "0",
+                                        "arg_names" to "",
+                                        "schema" to targetSchema,
+                                        "description" to (rs.getString("REMARKS") ?: ""),
+                                        "trigger_table" to "",
+                                    ),
+                                )
+                            }
+                        }
                     }
-                }
+            } catch (_: Exception) {
+                // ROUTINES 表不存在 — 跳过
             }
-        } catch (_: Exception) {
-            // FUNCTION_ALIASES 表不存在 — 跳过
+
+            // 3. FUNCTION_ALIASES（CREATE ALIAS 注册的 Java 方法别名）
+            try {
+                conn
+                    .prepareStatement(
+                        "SELECT ALIAS_NAME, ALIAS_SCHEMA, REMARKS " +
+                            "FROM INFORMATION_SCHEMA.FUNCTION_ALIASES WHERE ALIAS_SCHEMA = ?",
+                    ).use { stmt ->
+                        stmt.setString(1, targetSchema)
+                        stmt.executeQuery().use { rs ->
+                            while (rs.next()) {
+                                val name = rs.getString("ALIAS_NAME") ?: continue
+                                if (!seenNames.add(name.uppercase())) continue
+                                routines.add(
+                                    mapOf(
+                                        "name" to name,
+                                        "routine_type" to "FUNCTION",
+                                        "return_type" to "java_method",
+                                        "language" to "java",
+                                        "security_definer" to "SECURITY INVOKER",
+                                        "volatility" to "VOLATILE",
+                                        "arg_count" to "0",
+                                        "arg_names" to "",
+                                        "schema" to targetSchema,
+                                        "description" to (rs.getString("REMARKS") ?: ""),
+                                        "trigger_table" to "",
+                                    ),
+                                )
+                            }
+                        }
+                    }
+            } catch (_: Exception) {
+                // FUNCTION_ALIASES 表不存在 — 跳过
+            }
+
+            routines
         }
 
-        routines
-    }
+    override suspend fun getRoutineDDL(
+        conn: Connection,
+        routineName: String,
+        schema: String,
+    ): String =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            // H2 函数/触发器的 DDL 可通过 SYSTEM_RANGE 重建困难 — 返回简单的占位 DDL
+            // 真实场景需客户端事先保存 DDL
+            throw UnsupportedOperationException("H2 不支持从元数据重建函数/触发器 DDL，请保留 CREATE 时的原始 SQL")
+        }
 
-    override suspend fun getRoutineDDL(conn: Connection, routineName: String, schema: String): String = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        // H2 函数/触发器的 DDL 可通过 SYSTEM_RANGE 重建困难 — 返回简单的占位 DDL
-        // 真实场景需客户端事先保存 DDL
-        throw UnsupportedOperationException("H2 不支持从元数据重建函数/触发器 DDL，请保留 CREATE 时的原始 SQL")
-    }
-
-    override suspend fun createRoutine(conn: Connection, ddl: String): Boolean = withContext(Dispatchers.IO) {
-        conn.createStatement().use { stmt -> stmt.execute(ddl) }
-        true
-    }
+    override suspend fun createRoutine(
+        conn: Connection,
+        ddl: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            conn.createStatement().use { stmt -> stmt.execute(ddl) }
+            true
+        }
 
     override suspend fun dropRoutine(
         conn: Connection,
@@ -790,354 +942,422 @@ class H2Dialect : DatabaseDialect {
         routineType: String,
         schema: String,
         ifExists: Boolean,
-        cascade: Boolean
-    ): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(routineName, "routine name")
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        val sql = buildString {
-            when (routineType.uppercase()) {
-                "TRIGGER" -> {
-                    append("DROP TRIGGER ")
-                    if (ifExists) append("IF EXISTS ")
-                    append(quoteIdentifier(safeName))
+        cascade: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(routineName, "routine name")
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            val sql =
+                buildString {
+                    when (routineType.uppercase()) {
+                        "TRIGGER" -> {
+                            append("DROP TRIGGER ")
+                            if (ifExists) append("IF EXISTS ")
+                            append(quoteIdentifier(safeName))
+                        }
+
+                        "FUNCTION", "PROCEDURE" -> {
+                            append("DROP ALIAS ")
+                            if (ifExists) append("IF EXISTS ")
+                            append(quoteIdentifier(safeName))
+                        }
+
+                        else -> {
+                            throw IllegalArgumentException("Unsupported routine type: $routineType")
+                        }
+                    }
                 }
-                "FUNCTION", "PROCEDURE" -> {
-                    append("DROP ALIAS ")
-                    if (ifExists) append("IF EXISTS ")
-                    append(quoteIdentifier(safeName))
-                }
-                else -> throw IllegalArgumentException("Unsupported routine type: $routineType")
-            }
+            conn.createStatement().use { stmt -> stmt.execute(sql) }
+            true
         }
-        conn.createStatement().use { stmt -> stmt.execute(sql) }
-        true
-    }
 
     override suspend fun callRoutine(
         conn: Connection,
         routineName: String,
         routineType: String,
         schema: String,
-        args: List<String?>
-    ): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(routineName, "routine name")
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        val result = mutableMapOf<String, Any?>()
-        val placeholders = args.joinToString(", ") { "?" }
-        val qualifiedName = quoteIdentifier(safeName)
-        val isProcedure = routineType.equals("PROCEDURE", ignoreCase = true)
+        args: List<String?>,
+    ): Map<String, Any?> =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(routineName, "routine name")
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            val result = mutableMapOf<String, Any?>()
+            val placeholders = args.joinToString(", ") { "?" }
+            val qualifiedName = quoteIdentifier(safeName)
+            val isProcedure = routineType.equals("PROCEDURE", ignoreCase = true)
 
-        // PROCEDURE → CALL；FUNCTION → SELECT scalar，使用参数化绑定
-        val sql = if (isProcedure) {
-            "CALL $qualifiedName($placeholders)"
-        } else {
-            "SELECT $qualifiedName($placeholders) AS result"
-        }
-        conn.prepareStatement(sql).use { stmt ->
-            for ((i, v) in args.withIndex()) {
-                if (v == null) stmt.setNull(i + 1, java.sql.Types.NULL)
-                else stmt.setString(i + 1, v)
-            }
-            if (isProcedure) {
-                // H2 PreparedStatement 不支持 executeUpdate()，只能 execute()
-                stmt.execute()
-                result["update_count"] = stmt.updateCount
-            } else {
-                stmt.executeQuery().use { rs ->
-                    val metaData = rs.metaData
-                    val columnCount = metaData.columnCount
-                    if (rs.next()) {
-                        if (columnCount == 1) {
-                            result["result"] = rs.getObject(1)
-                        } else {
-                            val row = mutableMapOf<String, Any?>()
-                            for (col in 1..columnCount) row[metaData.getColumnLabel(col)] = rs.getObject(col)
-                            result["result"] = row
+            // PROCEDURE → CALL；FUNCTION → SELECT scalar，使用参数化绑定
+            val sql =
+                if (isProcedure) {
+                    "CALL $qualifiedName($placeholders)"
+                } else {
+                    "SELECT $qualifiedName($placeholders) AS result"
+                }
+            conn.prepareStatement(sql).use { stmt ->
+                for ((i, v) in args.withIndex()) {
+                    if (v == null) {
+                        stmt.setNull(i + 1, java.sql.Types.NULL)
+                    } else {
+                        stmt.setString(i + 1, v)
+                    }
+                }
+                if (isProcedure) {
+                    // H2 PreparedStatement 不支持 executeUpdate()，只能 execute()
+                    stmt.execute()
+                    result["update_count"] = stmt.updateCount
+                } else {
+                    stmt.executeQuery().use { rs ->
+                        val metaData = rs.metaData
+                        val columnCount = metaData.columnCount
+                        if (rs.next()) {
+                            if (columnCount == 1) {
+                                result["result"] = rs.getObject(1)
+                            } else {
+                                val row = mutableMapOf<String, Any?>()
+                                for (col in 1..columnCount) row[metaData.getColumnLabel(col)] = rs.getObject(col)
+                                result["result"] = row
+                            }
+                            result["row_count"] = 1
                         }
-                        result["row_count"] = 1
                     }
                 }
             }
-        }
-        result["routine_type"] = routineType.uppercase()
-        result["schema"] = targetSchema
-        result
-    }
-
-    override suspend fun getRoutineInfo(conn: Connection, routineName: String, schema: String): Map<String, String> = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        // H2：优先查 TRIGGERS
-        conn.prepareStatement(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
-            "FROM INFORMATION_SCHEMA.TRIGGERS " +
-            "WHERE TRIGGER_NAME = ? AND TRIGGER_SCHEMA = ?"
-        ).use { stmt ->
-            stmt.setString(1, routineName)
-            stmt.setString(2, targetSchema)
-            stmt.executeQuery().use { rs ->
-                if (rs.next()) {
-                    return@withContext mapOf(
-                        "name" to routineName,
-                        "routine_type" to "TRIGGER",
-                        "schema" to targetSchema,
-                        "language" to "java",
-                        "return_type" to "TRIGGER",
-                        "volatility" to "VOLATILE",
-                        "security_definer" to "SECURITY INVOKER",
-                        "arg_count" to "0",
-                        "arg_names" to "",
-                        "description" to (rs.getString("REMARKS") ?: ""),
-                        "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: "")
-                    )
-                }
-            }
-        }
-        // 尝试查 ROUTINES
-        try {
-            conn.prepareStatement(
-                "SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS " +
-                "FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = ? AND ROUTINE_SCHEMA = ?"
-            ).use { stmt ->
-                stmt.setString(1, routineName)
-                stmt.setString(2, targetSchema)
-                stmt.executeQuery().use { rs ->
-                    if (rs.next()) {
-                        return@withContext mapOf(
-                            "name" to routineName,
-                            "routine_type" to (rs.getString("ROUTINE_TYPE") ?: "FUNCTION"),
-                            "schema" to targetSchema,
-                            "language" to "java",
-                            "return_type" to (rs.getString("DATA_TYPE") ?: ""),
-                            "volatility" to "VOLATILE",
-                            "security_definer" to "SECURITY INVOKER",
-                            "arg_count" to "0",
-                            "arg_names" to "",
-                            "description" to (rs.getString("REMARKS") ?: ""),
-                            "trigger_table" to ""
-                        )
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        // 尝试查 FUNCTION_ALIASES（CREATE ALIAS 注册的 Java 方法别名）
-        try {
-            conn.prepareStatement(
-                "SELECT ALIAS_NAME, ALIAS_SCHEMA, REMARKS " +
-                "FROM INFORMATION_SCHEMA.FUNCTION_ALIASES WHERE ALIAS_NAME = ? AND ALIAS_SCHEMA = ?"
-            ).use { stmt ->
-                stmt.setString(1, routineName)
-                stmt.setString(2, targetSchema)
-                stmt.executeQuery().use { rs ->
-                    if (rs.next()) {
-                        return@withContext mapOf(
-                            "name" to routineName,
-                            "routine_type" to "FUNCTION",
-                            "schema" to targetSchema,
-                            "language" to "java",
-                            "return_type" to "java_method",
-                            "volatility" to "VOLATILE",
-                            "security_definer" to "SECURITY INVOKER",
-                            "arg_count" to "0",
-                            "arg_names" to "",
-                            "description" to (rs.getString("REMARKS") ?: ""),
-                            "trigger_table" to ""
-                        )
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        throw IllegalArgumentException("未找到函数/触发器 '$routineName'，schema: '$targetSchema'")
-    }
-
-    override suspend fun debugRoutine(conn: Connection, routineName: String, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        val safeName = sanitizeIdentifier(routineName, "routine name")
-        val results = mutableListOf<Map<String, String>>()
-
-        // EXPLAIN — 使用参数化语句并校验 routineName 安全性
-        // H2 的 EXPLAIN 不支持占位符名称，必须拼接但已 sanitize
-        try {
-            conn.createStatement().use { stmt ->
-                stmt.executeQuery("EXPLAIN SELECT ${quoteIdentifier(safeName)}()").use { rs ->
-                    if (rs.next()) {
-                        results.add(mapOf(
-                            "type" to "EXPLAIN",
-                            "output" to (rs.getString(1) ?: "")
-                        ))
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            results.add(mapOf("type" to "EXPLAIN", "output" to "(EXPLAIN not available)"))
+            result["routine_type"] = routineType.uppercase()
+            result["schema"] = targetSchema
+            result
         }
 
-        // INFO
-        val info = getRoutineInfo(conn, safeName, targetSchema)
-        results.add(mapOf(
-            "type" to "INFO",
-            "output" to buildString {
-                appendLine("Name: ${info["name"]}")
-                appendLine("Schema: ${info["schema"]}")
-                appendLine("Type: ${info["routine_type"]}")
-                appendLine("Language: ${info["language"]}")
-                appendLine("Return: ${info["return_type"]}")
-                if (info["trigger_table"]?.isNotBlank() == true) {
-                    appendLine("Trigger Table: ${info["trigger_table"]}")
+    override suspend fun getRoutineInfo(
+        conn: Connection,
+        routineName: String,
+        schema: String,
+    ): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            // H2：优先查 TRIGGERS
+            conn
+                .prepareStatement(
+                    "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
+                        "FROM INFORMATION_SCHEMA.TRIGGERS " +
+                        "WHERE TRIGGER_NAME = ? AND TRIGGER_SCHEMA = ?",
+                ).use { stmt ->
+                    stmt.setString(1, routineName)
+                    stmt.setString(2, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            return@withContext mapOf(
+                                "name" to routineName,
+                                "routine_type" to "TRIGGER",
+                                "schema" to targetSchema,
+                                "language" to "java",
+                                "return_type" to "TRIGGER",
+                                "volatility" to "VOLATILE",
+                                "security_definer" to "SECURITY INVOKER",
+                                "arg_count" to "0",
+                                "arg_names" to "",
+                                "description" to (rs.getString("REMARKS") ?: ""),
+                                "trigger_table" to (rs.getString("EVENT_OBJECT_TABLE") ?: ""),
+                            )
+                        }
+                    }
                 }
+            // 尝试查 ROUTINES
+            try {
+                conn
+                    .prepareStatement(
+                        "SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, REMARKS " +
+                            "FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = ? AND ROUTINE_SCHEMA = ?",
+                    ).use { stmt ->
+                        stmt.setString(1, routineName)
+                        stmt.setString(2, targetSchema)
+                        stmt.executeQuery().use { rs ->
+                            if (rs.next()) {
+                                return@withContext mapOf(
+                                    "name" to routineName,
+                                    "routine_type" to (rs.getString("ROUTINE_TYPE") ?: "FUNCTION"),
+                                    "schema" to targetSchema,
+                                    "language" to "java",
+                                    "return_type" to (rs.getString("DATA_TYPE") ?: ""),
+                                    "volatility" to "VOLATILE",
+                                    "security_definer" to "SECURITY INVOKER",
+                                    "arg_count" to "0",
+                                    "arg_names" to "",
+                                    "description" to (rs.getString("REMARKS") ?: ""),
+                                    "trigger_table" to "",
+                                )
+                            }
+                        }
+                    }
+            } catch (_: Exception) {
             }
-        ))
+            // 尝试查 FUNCTION_ALIASES（CREATE ALIAS 注册的 Java 方法别名）
+            try {
+                conn
+                    .prepareStatement(
+                        "SELECT ALIAS_NAME, ALIAS_SCHEMA, REMARKS " +
+                            "FROM INFORMATION_SCHEMA.FUNCTION_ALIASES WHERE ALIAS_NAME = ? AND ALIAS_SCHEMA = ?",
+                    ).use { stmt ->
+                        stmt.setString(1, routineName)
+                        stmt.setString(2, targetSchema)
+                        stmt.executeQuery().use { rs ->
+                            if (rs.next()) {
+                                return@withContext mapOf(
+                                    "name" to routineName,
+                                    "routine_type" to "FUNCTION",
+                                    "schema" to targetSchema,
+                                    "language" to "java",
+                                    "return_type" to "java_method",
+                                    "volatility" to "VOLATILE",
+                                    "security_definer" to "SECURITY INVOKER",
+                                    "arg_count" to "0",
+                                    "arg_names" to "",
+                                    "description" to (rs.getString("REMARKS") ?: ""),
+                                    "trigger_table" to "",
+                                )
+                            }
+                        }
+                    }
+            } catch (_: Exception) {
+            }
+            throw IllegalArgumentException("未找到函数/触发器 '$routineName'，schema: '$targetSchema'")
+        }
 
-        results
-    }
+    override suspend fun debugRoutine(
+        conn: Connection,
+        routineName: String,
+        schema: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            val safeName = sanitizeIdentifier(routineName, "routine name")
+            val results = mutableListOf<Map<String, String>>()
+
+            // EXPLAIN — 使用参数化语句并校验 routineName 安全性
+            // H2 的 EXPLAIN 不支持占位符名称，必须拼接但已 sanitize
+            try {
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("EXPLAIN SELECT ${quoteIdentifier(safeName)}()").use { rs ->
+                        if (rs.next()) {
+                            results.add(
+                                mapOf(
+                                    "type" to "EXPLAIN",
+                                    "output" to (rs.getString(1) ?: ""),
+                                ),
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                results.add(mapOf("type" to "EXPLAIN", "output" to "(EXPLAIN not available)"))
+            }
+
+            // INFO
+            val info = getRoutineInfo(conn, safeName, targetSchema)
+            results.add(
+                mapOf(
+                    "type" to "INFO",
+                    "output" to
+                        buildString {
+                            appendLine("Name: ${info["name"]}")
+                            appendLine("Schema: ${info["schema"]}")
+                            appendLine("Type: ${info["routine_type"]}")
+                            appendLine("Language: ${info["language"]}")
+                            appendLine("Return: ${info["return_type"]}")
+                            if (info["trigger_table"]?.isNotBlank() == true) {
+                                appendLine("Trigger Table: ${info["trigger_table"]}")
+                            }
+                        },
+                ),
+            )
+
+            results
+        }
 
     /**
      * 验证 DDL 语法 — 不实际执行，仅通过正则解析校验语法骨架。
      * 对 H2 仅做粗粒度的形式校验（不允许分号注入；类型/名称合法）。
      */
-    override suspend fun validateRoutineDDL(conn: Connection, ddl: String): Boolean = withContext(Dispatchers.IO) {
-        val trimmed = ddl.trim().trimEnd(';')
-        if (trimmed.contains(';')) throw IllegalArgumentException("DDL 不允许包含多条语句（分号）")
+    override suspend fun validateRoutineDDL(
+        conn: Connection,
+        ddl: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val trimmed = ddl.trim().trimEnd(';')
+            if (trimmed.contains(';')) throw IllegalArgumentException("DDL 不允许包含多条语句（分号）")
 
-        // 1. 解析 DDL 类型 + 名称
-        // 先把 `"name"` / `` `name` `` 引号去掉再匹配，统一为 `CREATE TYPE schema.name` 形式
-        val normalized = trimmed.replace(Regex("""[`"]"""), "")
-        val match = Regex("""(?i)CREATE\s+(?:OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER|ALIAS)\s+(\w+)(?:\.(\w+))?""").find(normalized)
-            ?: throw IllegalArgumentException("无法从 DDL 中解析对象类型/名称")
+            // 1. 解析 DDL 类型 + 名称
+            // 先把 `"name"` / `` `name` `` 引号去掉再匹配，统一为 `CREATE TYPE schema.name` 形式
+            val normalized = trimmed.replace(Regex("""[`"]"""), "")
+            val match =
+                Regex("""(?i)CREATE\s+(?:OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER|ALIAS)\s+(\w+)(?:\.(\w+))?""").find(normalized)
+                    ?: throw IllegalArgumentException("无法从 DDL 中解析对象类型/名称")
 
-        val objType = match.groupValues[1].uppercase()
-        // match group[2] = schema (or single-segment name); group[3] = name (only when schema.name form)
-        val (objSchema, objName) = if (match.groupValues[3].isNotBlank()) {
-            match.groupValues[2] to match.groupValues[3]
-        } else {
-            (conn.catalog ?: "") to match.groupValues[2]
-        }
-        if (objSchema.isBlank()) throw IllegalArgumentException("无法定位对象所属 schema")
-
-        // 2. 名称安全检查（不允许注入字符）
-        val allowedName = Regex("""^[A-Za-z_][A-Za-z0-9_]*$""")
-        if (!allowedName.matches(objName)) throw IllegalArgumentException("对象名称 '$objName' 包含非法字符")
-        if (objSchema.isNotEmpty() && !allowedName.matches(objSchema)) throw IllegalArgumentException("schema 名称 '$objSchema' 包含非法字符")
-
-        // 3. 校验 DDL 类型匹配
-        when (objType) {
-            "ALIAS" -> {
-                // CREATE ALIAS 必须含 FOR "<JavaMethod>"
-                if (!Regex("""(?i)\bFOR\s+"?[\w$.]+"?\s*$""").containsMatchIn(trimmed)) {
-                    throw IllegalArgumentException("CREATE ALIAS 必须以 FOR \"<JavaMethod>\" 结尾")
+            val objType = match.groupValues[1].uppercase()
+            // match group[2] = schema (or single-segment name); group[3] = name (only when schema.name form)
+            val (objSchema, objName) =
+                if (match.groupValues[3].isNotBlank()) {
+                    match.groupValues[2] to match.groupValues[3]
+                } else {
+                    (conn.catalog ?: "") to match.groupValues[2]
                 }
-            }
-            "TRIGGER" -> {
-                // CREATE TRIGGER 必须含 BEFORE/AFTER + INSERT/UPDATE/DELETE + ON <table>
-                val required = listOf("ON", "BEFORE|AFTER|INSTEAD OF", "INSERT|UPDATE|DELETE")
-                for (pattern in required) {
-                    if (!Regex("(?i)\\b(?:${pattern})\\b").containsMatchIn(trimmed)) {
-                        throw IllegalArgumentException("CREATE TRIGGER 必须包含关键字: $pattern")
+            if (objSchema.isBlank()) throw IllegalArgumentException("无法定位对象所属 schema")
+
+            // 2. 名称安全检查（不允许注入字符）
+            val allowedName = Regex("""^[A-Za-z_][A-Za-z0-9_]*$""")
+            if (!allowedName.matches(objName)) throw IllegalArgumentException("对象名称 '$objName' 包含非法字符")
+            if (objSchema.isNotEmpty() && !allowedName.matches(objSchema)) throw IllegalArgumentException("schema 名称 '$objSchema' 包含非法字符")
+
+            // 3. 校验 DDL 类型匹配
+            when (objType) {
+                "ALIAS" -> {
+                    // CREATE ALIAS 必须含 FOR "<JavaMethod>"
+                    if (!Regex("""(?i)\bFOR\s+"?[\w$.]+"?\s*$""").containsMatchIn(trimmed)) {
+                        throw IllegalArgumentException("CREATE ALIAS 必须以 FOR \"<JavaMethod>\" 结尾")
+                    }
+                }
+
+                "TRIGGER" -> {
+                    // CREATE TRIGGER 必须含 BEFORE/AFTER + INSERT/UPDATE/DELETE + ON <table>
+                    val required = listOf("ON", "BEFORE|AFTER|INSTEAD OF", "INSERT|UPDATE|DELETE")
+                    for (pattern in required) {
+                        if (!Regex("(?i)\\b(?:$pattern)\\b").containsMatchIn(trimmed)) {
+                            throw IllegalArgumentException("CREATE TRIGGER 必须包含关键字: $pattern")
+                        }
+                    }
+                }
+
+                "FUNCTION", "PROCEDURE" -> {
+                    // 必须含 RETURNS（FUNCTION）或不强制
+                    if (objType == "FUNCTION" && !Regex("(?i)\\bRETURNS\\b").containsMatchIn(trimmed)) {
+                        throw IllegalArgumentException("CREATE FUNCTION 必须包含 RETURNS 子句")
                     }
                 }
             }
-            "FUNCTION", "PROCEDURE" -> {
-                // 必须含 RETURNS（FUNCTION）或不强制
-                if (objType == "FUNCTION" && !Regex("(?i)\\bRETURNS\\b").containsMatchIn(trimmed)) {
-                    throw IllegalArgumentException("CREATE FUNCTION 必须包含 RETURNS 子句")
-                }
-            }
-        }
 
-        true
-    }
+            true
+        }
 
     // endregion
 
     // region Views
 
-    override suspend fun listViews(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val views = mutableListOf<Map<String, String>>()
-        val query = if (schema.isNotBlank()) {
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS " +
-            "WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
-        } else {
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS " +
-            "WHERE TABLE_SCHEMA = CURRENT_SCHEMA ORDER BY TABLE_NAME"
-        }
-        conn.prepareStatement(query).use { stmt ->
-            if (schema.isNotBlank()) stmt.setString(1, schema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) views.add(mapOf("name" to rs.getString(1)))
-            }
-        }
-        views
-    }
-
-    override suspend fun createView(conn: Connection, viewName: String, definition: String): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(viewName, "view name")
-        // definition 必须是纯 SELECT 语句；防御性注入：仅允许非分号
-        if (definition.contains(';')) throw IllegalArgumentException("视图定义不允许包含分号")
-        conn.createStatement().use { stmt ->
-            stmt.execute("CREATE VIEW ${quoteIdentifier(safeName)} AS $definition")
-        }
-        true
-    }
-
-    override suspend fun dropView(conn: Connection, viewName: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeName = sanitizeIdentifier(viewName, "view name")
-        val sql = buildString {
-            append("DROP VIEW ")
-            if (ifExists) append("IF EXISTS ")
-            append(quoteIdentifier(safeName))
-        }
-        conn.createStatement().use { stmt -> stmt.execute(sql) }
-        true
-    }
-
-    override suspend fun getViewDDL(conn: Connection, viewName: String, schema: String): String = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        conn.prepareStatement(
-            "SELECT VIEW_DEFINITION FROM INFORMATION_SCHEMA.VIEWS " +
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?"
-        ).use { stmt ->
-            stmt.setString(1, viewName)
-            stmt.setString(2, targetSchema)
-            stmt.executeQuery().use { rs ->
-                if (rs.next()) {
-                    val def = rs.getString(1) ?: ""
-                    return@withContext "CREATE VIEW ${quoteIdentifier(viewName)} AS $def"
+    override suspend fun listViews(
+        conn: Connection,
+        schema: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val views = mutableListOf<Map<String, String>>()
+            val query =
+                if (schema.isNotBlank()) {
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS " +
+                        "WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
+                } else {
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS " +
+                        "WHERE TABLE_SCHEMA = CURRENT_SCHEMA ORDER BY TABLE_NAME"
+                }
+            conn.prepareStatement(query).use { stmt ->
+                if (schema.isNotBlank()) stmt.setString(1, schema)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) views.add(mapOf("name" to rs.getString(1)))
                 }
             }
+            views
         }
-        throw IllegalArgumentException("未找到视图 '$viewName'")
-    }
+
+    override suspend fun createView(
+        conn: Connection,
+        viewName: String,
+        definition: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(viewName, "view name")
+            // definition 必须是纯 SELECT 语句；防御性注入：仅允许非分号
+            if (definition.contains(';')) throw IllegalArgumentException("视图定义不允许包含分号")
+            conn.createStatement().use { stmt ->
+                stmt.execute("CREATE VIEW ${quoteIdentifier(safeName)} AS $definition")
+            }
+            true
+        }
+
+    override suspend fun dropView(
+        conn: Connection,
+        viewName: String,
+        ifExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeName = sanitizeIdentifier(viewName, "view name")
+            val sql =
+                buildString {
+                    append("DROP VIEW ")
+                    if (ifExists) append("IF EXISTS ")
+                    append(quoteIdentifier(safeName))
+                }
+            conn.createStatement().use { stmt -> stmt.execute(sql) }
+            true
+        }
+
+    override suspend fun getViewDDL(
+        conn: Connection,
+        viewName: String,
+        schema: String,
+    ): String =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            conn
+                .prepareStatement(
+                    "SELECT VIEW_DEFINITION FROM INFORMATION_SCHEMA.VIEWS " +
+                        "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?",
+                ).use { stmt ->
+                    stmt.setString(1, viewName)
+                    stmt.setString(2, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            val def = rs.getString(1) ?: ""
+                            return@withContext "CREATE VIEW ${quoteIdentifier(viewName)} AS $def"
+                        }
+                    }
+                }
+            throw IllegalArgumentException("未找到视图 '$viewName'")
+        }
 
     // endregion
 
     // region Indexes
 
-    override suspend fun listIndexes(conn: Connection, tableName: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val indexes = mutableListOf<Map<String, String>>()
-        // H2 INDEX_TYPE_NAME: "UNIQUE INDEX" / "PRIMARY KEY" / "INDEX"
-        conn.prepareStatement(
-            "SELECT ix.INDEX_NAME, ix.INDEX_TYPE_NAME, GROUP_CONCAT(ic.COLUMN_NAME ORDER BY ic.ORDINAL_POSITION) AS COLS " +
-            "FROM INFORMATION_SCHEMA.INDEXES ix " +
-            "JOIN INFORMATION_SCHEMA.INDEX_COLUMNS ic USING (TABLE_SCHEMA, TABLE_NAME, INDEX_NAME) " +
-            "WHERE ix.TABLE_NAME = ? " +
-            "GROUP BY ix.INDEX_NAME, ix.INDEX_TYPE_NAME " +
-            "ORDER BY ix.INDEX_NAME"
-        ).use { stmt ->
-            stmt.setString(1, safeTable)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    val typeName = rs.getString("INDEX_TYPE_NAME") ?: ""
-                    val isUnique = typeName.contains("UNIQUE", ignoreCase = true) || typeName.equals("PRIMARY KEY", ignoreCase = true)
-                    indexes.add(mapOf(
-                        "name" to rs.getString("INDEX_NAME"),
-                        "unique" to isUnique.toString(),
-                        "columns" to rs.getString("COLS")
-                    ))
+    override suspend fun listIndexes(
+        conn: Connection,
+        tableName: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            val indexes = mutableListOf<Map<String, String>>()
+            // H2 INDEX_TYPE_NAME: "UNIQUE INDEX" / "PRIMARY KEY" / "INDEX"
+            conn
+                .prepareStatement(
+                    "SELECT ix.INDEX_NAME, ix.INDEX_TYPE_NAME, GROUP_CONCAT(ic.COLUMN_NAME ORDER BY ic.ORDINAL_POSITION) AS COLS " +
+                        "FROM INFORMATION_SCHEMA.INDEXES ix " +
+                        "JOIN INFORMATION_SCHEMA.INDEX_COLUMNS ic USING (TABLE_SCHEMA, TABLE_NAME, INDEX_NAME) " +
+                        "WHERE ix.TABLE_NAME = ? " +
+                        "GROUP BY ix.INDEX_NAME, ix.INDEX_TYPE_NAME " +
+                        "ORDER BY ix.INDEX_NAME",
+                ).use { stmt ->
+                    stmt.setString(1, safeTable)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            val typeName = rs.getString("INDEX_TYPE_NAME") ?: ""
+                            val isUnique = typeName.contains("UNIQUE", ignoreCase = true) || typeName.equals("PRIMARY KEY", ignoreCase = true)
+                            indexes.add(
+                                mapOf(
+                                    "name" to rs.getString("INDEX_NAME"),
+                                    "unique" to isUnique.toString(),
+                                    "columns" to rs.getString("COLS"),
+                                ),
+                            )
+                        }
+                    }
                 }
-            }
+            indexes
         }
-        indexes
-    }
 
     override suspend fun createIndex(
         conn: Connection,
@@ -1145,91 +1365,110 @@ class H2Dialect : DatabaseDialect {
         indexName: String,
         columns: List<String>,
         unique: Boolean,
-        ifNotExists: Boolean
-    ): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeIndex = sanitizeIdentifier(indexName, "index name")
-        val safeCols = columns.joinToString(", ") { quoteIdentifier(it) }
-        val sql = buildString {
-            if (unique) append("CREATE UNIQUE INDEX ")
-            else append("CREATE INDEX ")
-            if (ifNotExists) append("IF NOT EXISTS ")
-            append(quoteIdentifier(safeIndex))
-            append(" ON ${quoteIdentifier(safeTable)} ($safeCols)")
+        ifNotExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            val safeIndex = sanitizeIdentifier(indexName, "index name")
+            val safeCols = columns.joinToString(", ") { quoteIdentifier(it) }
+            val sql =
+                buildString {
+                    if (unique) {
+                        append("CREATE UNIQUE INDEX ")
+                    } else {
+                        append("CREATE INDEX ")
+                    }
+                    if (ifNotExists) append("IF NOT EXISTS ")
+                    append(quoteIdentifier(safeIndex))
+                    append(" ON ${quoteIdentifier(safeTable)} ($safeCols)")
+                }
+            conn.createStatement().use { stmt -> stmt.execute(sql) }
+            true
         }
-        conn.createStatement().use { stmt -> stmt.execute(sql) }
-        true
-    }
 
-    override suspend fun dropIndex(conn: Connection, indexName: String, tableName: String?, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeIndex = sanitizeIdentifier(indexName, "index name")
-        conn.createStatement().use { stmt ->
-            val ifClause = if (ifExists) "IF EXISTS " else ""
-            stmt.execute("DROP INDEX ${ifClause}${quoteIdentifier(safeIndex)}")
+    override suspend fun dropIndex(
+        conn: Connection,
+        indexName: String,
+        tableName: String?,
+        ifExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeIndex = sanitizeIdentifier(indexName, "index name")
+            conn.createStatement().use { stmt ->
+                val ifClause = if (ifExists) "IF EXISTS " else ""
+                stmt.execute("DROP INDEX ${ifClause}${quoteIdentifier(safeIndex)}")
+            }
+            true
         }
-        true
-    }
 
     // endregion
 
     // region Foreign Keys
 
-    override suspend fun listForeignKeys(conn: Connection, tableName: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        // H2 没有 KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME — 通过 DatabaseMetaData 跨方言获取外键
-        val fks = mutableListOf<Map<String, String>>()
-        // 按 FK 名 + KEY_SEQ 分组聚合列
-        conn.metaData.getImportedKeys(null, null, tableName).use { rs ->
-            val grouped = linkedMapOf<String, MutableMap<String, Any>>()
-            while (rs.next()) {
-                val fkName = rs.getString("FK_NAME") ?: continue
-                val col = rs.getString("FKCOLUMN_NAME") ?: ""
-                val refCol = rs.getString("PKCOLUMN_NAME") ?: ""
-                val refTable = rs.getString("PKTABLE_NAME") ?: ""
-                val keySeq = rs.getInt("KEY_SEQ")
-                val updateRule = rs.getInt("UPDATE_RULE")
-                val deleteRule = rs.getInt("DELETE_RULE")
+    override suspend fun listForeignKeys(
+        conn: Connection,
+        tableName: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            // H2 没有 KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME — 通过 DatabaseMetaData 跨方言获取外键
+            val fks = mutableListOf<Map<String, String>>()
+            // 按 FK 名 + KEY_SEQ 分组聚合列
+            conn.metaData.getImportedKeys(null, null, tableName).use { rs ->
+                val grouped = linkedMapOf<String, MutableMap<String, Any>>()
+                while (rs.next()) {
+                    val fkName = rs.getString("FK_NAME") ?: continue
+                    val col = rs.getString("FKCOLUMN_NAME") ?: ""
+                    val refCol = rs.getString("PKCOLUMN_NAME") ?: ""
+                    val refTable = rs.getString("PKTABLE_NAME") ?: ""
+                    val keySeq = rs.getInt("KEY_SEQ")
+                    val updateRule = rs.getInt("UPDATE_RULE")
+                    val deleteRule = rs.getInt("DELETE_RULE")
 
-                val entry = grouped.getOrPut(fkName) {
-                    mutableMapOf(
-                        "name" to fkName,
-                        "columns" to mutableListOf<String>(),
-                        "ref_table" to refTable,
-                        "ref_columns" to mutableListOf<String>(),
-                        "on_update" to mapRule(updateRule),
-                        "on_delete" to mapRule(deleteRule)
+                    val entry =
+                        grouped.getOrPut(fkName) {
+                            mutableMapOf(
+                                "name" to fkName,
+                                "columns" to mutableListOf<String>(),
+                                "ref_table" to refTable,
+                                "ref_columns" to mutableListOf<String>(),
+                                "on_update" to mapRule(updateRule),
+                                "on_delete" to mapRule(deleteRule),
+                            )
+                        }
+                    @Suppress("UNCHECKED_CAST")
+                    (entry["columns"] as MutableList<String>)
+                        .also { while (it.size < keySeq) it.add("") }
+                        .let { if (keySeq in 1..it.size) it[keySeq - 1] = col else it.add(col) }
+                    @Suppress("UNCHECKED_CAST")
+                    (entry["ref_columns"] as MutableList<String>)
+                        .also { while (it.size < keySeq) it.add("") }
+                        .let { if (keySeq in 1..it.size) it[keySeq - 1] = refCol else it.add(refCol) }
+                }
+                grouped.values.forEach { entry ->
+                    fks.add(
+                        mapOf(
+                            "name" to (entry["name"] as String),
+                            "columns" to (entry["columns"] as List<String>).joinToString(","),
+                            "ref_table" to (entry["ref_table"] as String),
+                            "ref_columns" to (entry["ref_columns"] as List<String>).joinToString(","),
+                            "on_update" to (entry["on_update"] as String),
+                            "on_delete" to (entry["on_delete"] as String),
+                        ),
                     )
                 }
-                @Suppress("UNCHECKED_CAST")
-                (entry["columns"] as MutableList<String>)
-                    .also { while (it.size < keySeq) it.add("") }
-                    .let { if (keySeq in 1..it.size) it[keySeq - 1] = col else it.add(col) }
-                @Suppress("UNCHECKED_CAST")
-                (entry["ref_columns"] as MutableList<String>)
-                    .also { while (it.size < keySeq) it.add("") }
-                    .let { if (keySeq in 1..it.size) it[keySeq - 1] = refCol else it.add(refCol) }
             }
-            grouped.values.forEach { entry ->
-                fks.add(mapOf(
-                    "name" to (entry["name"] as String),
-                    "columns" to (entry["columns"] as List<String>).joinToString(","),
-                    "ref_table" to (entry["ref_table"] as String),
-                    "ref_columns" to (entry["ref_columns"] as List<String>).joinToString(","),
-                    "on_update" to (entry["on_update"] as String),
-                    "on_delete" to (entry["on_delete"] as String)
-                ))
-            }
+            fks
         }
-        fks
-    }
 
-    private fun mapRule(code: Int): String = when (code) {
-        java.sql.DatabaseMetaData.importedKeyCascade -> "CASCADE"
-        java.sql.DatabaseMetaData.importedKeySetNull -> "SET NULL"
-        java.sql.DatabaseMetaData.importedKeySetDefault -> "SET DEFAULT"
-        java.sql.DatabaseMetaData.importedKeyRestrict -> "RESTRICT"
-        java.sql.DatabaseMetaData.importedKeyNoAction -> "NO ACTION"
-        else -> "RESTRICT"
-    }
+    private fun mapRule(code: Int): String =
+        when (code) {
+            java.sql.DatabaseMetaData.importedKeyCascade -> "CASCADE"
+            java.sql.DatabaseMetaData.importedKeySetNull -> "SET NULL"
+            java.sql.DatabaseMetaData.importedKeySetDefault -> "SET DEFAULT"
+            java.sql.DatabaseMetaData.importedKeyRestrict -> "RESTRICT"
+            java.sql.DatabaseMetaData.importedKeyNoAction -> "NO ACTION"
+            else -> "RESTRICT"
+        }
 
     override suspend fun addForeignKey(
         conn: Connection,
@@ -1239,139 +1478,177 @@ class H2Dialect : DatabaseDialect {
         refTable: String,
         refColumns: List<String>,
         onDelete: String?,
-        onUpdate: String?
-    ): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeFk = sanitizeIdentifier(fkName, "foreign key name")
-        val cols = columns.joinToString(", ") { quoteIdentifier(it) }
-        val refCols = refColumns.joinToString(", ") { quoteIdentifier(it) }
-        val sql = buildString {
-            append("ALTER TABLE ${quoteIdentifier(safeTable)} ADD CONSTRAINT ${quoteIdentifier(safeFk)} ")
-            append("FOREIGN KEY ($cols) REFERENCES ${quoteIdentifier(refTable)} ($refCols)")
-            onDelete?.takeIf { it.isNotBlank() }?.let { append(" ON DELETE $it") }
-            onUpdate?.takeIf { it.isNotBlank() }?.let { append(" ON UPDATE $it") }
+        onUpdate: String?,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            val safeFk = sanitizeIdentifier(fkName, "foreign key name")
+            val cols = columns.joinToString(", ") { quoteIdentifier(it) }
+            val refCols = refColumns.joinToString(", ") { quoteIdentifier(it) }
+            val sql =
+                buildString {
+                    append("ALTER TABLE ${quoteIdentifier(safeTable)} ADD CONSTRAINT ${quoteIdentifier(safeFk)} ")
+                    append("FOREIGN KEY ($cols) REFERENCES ${quoteIdentifier(refTable)} ($refCols)")
+                    onDelete?.takeIf { it.isNotBlank() }?.let { append(" ON DELETE $it") }
+                    onUpdate?.takeIf { it.isNotBlank() }?.let { append(" ON UPDATE $it") }
+                }
+            conn.createStatement().use { stmt -> stmt.execute(sql) }
+            true
         }
-        conn.createStatement().use { stmt -> stmt.execute(sql) }
-        true
-    }
 
-    override suspend fun dropForeignKey(conn: Connection, tableName: String, fkName: String, ifExists: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        val safeFk = sanitizeIdentifier(fkName, "foreign key name")
-        conn.createStatement().use { stmt ->
-            // H2 没有 IF EXISTS for ALTER TABLE DROP CONSTRAINT — 需预查询
-            if (ifExists) {
-                val exists = stmt.executeQuery(
-                    "SELECT 1 FROM information_schema.table_constraints " +
-                    "WHERE table_name='$safeTable' AND constraint_name='$safeFk' LIMIT 1"
-                ).use { rs -> rs.next() }
-                if (!exists) return@withContext true
+    override suspend fun dropForeignKey(
+        conn: Connection,
+        tableName: String,
+        fkName: String,
+        ifExists: Boolean,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            val safeFk = sanitizeIdentifier(fkName, "foreign key name")
+            conn.createStatement().use { stmt ->
+                // H2 没有 IF EXISTS for ALTER TABLE DROP CONSTRAINT — 需预查询
+                if (ifExists) {
+                    val exists =
+                        stmt
+                            .executeQuery(
+                                "SELECT 1 FROM information_schema.table_constraints " +
+                                    "WHERE table_name='$safeTable' AND constraint_name='$safeFk' LIMIT 1",
+                            ).use { rs -> rs.next() }
+                    if (!exists) return@withContext true
+                }
+                stmt.execute("ALTER TABLE ${quoteIdentifier(safeTable)} DROP CONSTRAINT ${quoteIdentifier(safeFk)}")
             }
-            stmt.execute("ALTER TABLE ${quoteIdentifier(safeTable)} DROP CONSTRAINT ${quoteIdentifier(safeFk)}")
+            true
         }
-        true
-    }
 
     // endregion
 
     // region Triggers
 
-    override suspend fun listTriggers(conn: Connection, schema: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
-        val triggers = mutableListOf<Map<String, String>>()
-        conn.prepareStatement(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
-            "FROM INFORMATION_SCHEMA.TRIGGERS " +
-            "WHERE TRIGGER_SCHEMA = ? " +
-            "ORDER BY TRIGGER_NAME"
-        ).use { stmt ->
-            stmt.setString(1, targetSchema)
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    triggers.add(mapOf(
-                        "name" to rs.getString("TRIGGER_NAME"),
-                        "table" to rs.getString("EVENT_OBJECT_TABLE"),
-                        "description" to (rs.getString("REMARKS") ?: ""),
-                        "schema" to targetSchema
-                    ))
+    override suspend fun listTriggers(
+        conn: Connection,
+        schema: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            val targetSchema = if (schema.isNotBlank()) schema else "PUBLIC"
+            val triggers = mutableListOf<Map<String, String>>()
+            conn
+                .prepareStatement(
+                    "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, REMARKS " +
+                        "FROM INFORMATION_SCHEMA.TRIGGERS " +
+                        "WHERE TRIGGER_SCHEMA = ? " +
+                        "ORDER BY TRIGGER_NAME",
+                ).use { stmt ->
+                    stmt.setString(1, targetSchema)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            triggers.add(
+                                mapOf(
+                                    "name" to rs.getString("TRIGGER_NAME"),
+                                    "table" to rs.getString("EVENT_OBJECT_TABLE"),
+                                    "description" to (rs.getString("REMARKS") ?: ""),
+                                    "schema" to targetSchema,
+                                ),
+                            )
+                        }
+                    }
                 }
-            }
+            triggers
         }
-        triggers
-    }
 
-    override suspend fun getTriggerDDL(conn: Connection, triggerName: String, schema: String): String = withContext(Dispatchers.IO) {
-        // H2 不存储触发器原始 DDL — 返回占位说明
-        throw UnsupportedOperationException("H2 不暴露触发器原始 DDL，请保留 CREATE 时的原始 SQL")
-    }
+    override suspend fun getTriggerDDL(
+        conn: Connection,
+        triggerName: String,
+        schema: String,
+    ): String =
+        withContext(Dispatchers.IO) {
+            // H2 不存储触发器原始 DDL — 返回占位说明
+            throw UnsupportedOperationException("H2 不暴露触发器原始 DDL，请保留 CREATE 时的原始 SQL")
+        }
 
     // endregion
 
     // region Table Operations
 
-    override suspend fun renameTable(conn: Connection, oldName: String, newName: String): Boolean = withContext(Dispatchers.IO) {
-        val safeOld = sanitizeIdentifier(oldName, "table name")
-        val safeNew = sanitizeIdentifier(newName, "table name")
-        conn.createStatement().use { stmt ->
-            stmt.execute("ALTER TABLE ${quoteIdentifier(safeOld)} RENAME TO ${quoteIdentifier(safeNew)}")
+    override suspend fun renameTable(
+        conn: Connection,
+        oldName: String,
+        newName: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeOld = sanitizeIdentifier(oldName, "table name")
+            val safeNew = sanitizeIdentifier(newName, "table name")
+            conn.createStatement().use { stmt ->
+                stmt.execute("ALTER TABLE ${quoteIdentifier(safeOld)} RENAME TO ${quoteIdentifier(safeNew)}")
+            }
+            true
         }
-        true
-    }
 
-    override suspend fun truncateTable(conn: Connection, tableName: String): Boolean = withContext(Dispatchers.IO) {
-        val safeTable = sanitizeIdentifier(tableName, "table name")
-        conn.createStatement().use { stmt ->
-            stmt.execute("TRUNCATE TABLE ${quoteIdentifier(safeTable)}")
+    override suspend fun truncateTable(
+        conn: Connection,
+        tableName: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            val safeTable = sanitizeIdentifier(tableName, "table name")
+            conn.createStatement().use { stmt ->
+                stmt.execute("TRUNCATE TABLE ${quoteIdentifier(safeTable)}")
+            }
+            true
         }
-        true
-    }
 
     // endregion
 
     // region SQL — EXPLAIN
 
-    override suspend fun explainSQL(conn: Connection, sql: String): List<Map<String, String>> = withContext(Dispatchers.IO) {
-        if (sql.contains(';')) throw IllegalArgumentException("EXPLAIN 不允许包含分号")
-        val rows = mutableListOf<Map<String, String>>()
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery("EXPLAIN $sql").use { rs ->
-                val meta = rs.metaData
-                val columnCount = meta.columnCount
-                while (rs.next()) {
-                    val row = mutableMapOf<String, String>()
-                    for (i in 1..columnCount) {
-                        row[meta.getColumnLabel(i)] = rs.getString(i) ?: ""
+    override suspend fun explainSQL(
+        conn: Connection,
+        sql: String,
+    ): List<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            if (sql.contains(';')) throw IllegalArgumentException("EXPLAIN 不允许包含分号")
+            val rows = mutableListOf<Map<String, String>>()
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery("EXPLAIN $sql").use { rs ->
+                    val meta = rs.metaData
+                    val columnCount = meta.columnCount
+                    while (rs.next()) {
+                        val row = mutableMapOf<String, String>()
+                        for (i in 1..columnCount) {
+                            row[meta.getColumnLabel(i)] = rs.getString(i) ?: ""
+                        }
+                        rows.add(row)
                     }
-                    rows.add(row)
                 }
             }
+            rows
         }
-        rows
-    }
 
     // endregion
 
     // region Server
 
-    override suspend fun getServerInfo(conn: Connection): Map<String, String> = withContext(Dispatchers.IO) {
-        val meta = conn.metaData
-        mapOf(
-            "product" to (meta.databaseProductName ?: ""),
-            "version" to (meta.databaseProductVersion ?: ""),
-            "driver" to (meta.driverName ?: ""),
-            "driverVersion" to (meta.driverVersion ?: ""),
-            "url" to (meta.url ?: ""),
-            "userName" to (meta.userName ?: "")
-        )
-    }
+    override suspend fun getServerInfo(conn: Connection): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            val meta = conn.metaData
+            mapOf(
+                "product" to (meta.databaseProductName ?: ""),
+                "version" to (meta.databaseProductVersion ?: ""),
+                "driver" to (meta.driverName ?: ""),
+                "driverVersion" to (meta.driverVersion ?: ""),
+                "url" to (meta.url ?: ""),
+                "userName" to (meta.userName ?: ""),
+            )
+        }
 
     // endregion
 
-    private fun buildTypeSpec(type: String, size: Int?): String {
-        return if (size != null && type.uppercase() in SIZABLE_TYPES) {
+    private fun buildTypeSpec(
+        type: String,
+        size: Int?,
+    ): String =
+        if (size != null && type.uppercase() in SIZABLE_TYPES) {
             "$type($size)"
         } else {
             type
         }
-    }
 }

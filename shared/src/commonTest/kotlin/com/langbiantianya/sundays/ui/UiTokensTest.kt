@@ -39,7 +39,6 @@ import kotlin.test.assertTrue
  * classpath 资源），由 `UiTokensTest` 的 KDoc 记录约定，实际以 grep 检查为准。
  */
 class UiTokensTest {
-
     private val brightness = listOf(true, false)
 
     @Test
@@ -162,9 +161,13 @@ class UiTokensTest {
         val custom = Color(0xFF123456)
         ThemePalette.entries.forEach { palette ->
             val scheme = palette.schemeFor(useDark = false)
-            val (bg, _) = selectionColorsFor(
-                palette.uiTokens(useDark = false), scheme, selected = false, unselected = custom,
-            )
+            val (bg, _) =
+                selectionColorsFor(
+                    palette.uiTokens(useDark = false),
+                    scheme,
+                    selected = false,
+                    unselected = custom,
+                )
             assertEquals(custom, bg, "${palette.labelKey} 未选中底色应原样返回调用方传入值")
         }
     }
@@ -211,7 +214,10 @@ class UiTokensTest {
 
     private fun Double.pow(e: Double): Double = Math.pow(this, e)
 
-    private fun contrastRatio(a: Color, b: Color): Double {
+    private fun contrastRatio(
+        a: Color,
+        b: Color,
+    ): Double {
         val la = luminance(a)
         val lb = luminance(b)
         val hi = if (la > lb) la else lb

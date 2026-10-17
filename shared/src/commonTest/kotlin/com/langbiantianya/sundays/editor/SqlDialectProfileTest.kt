@@ -29,9 +29,10 @@ import kotlin.test.assertTrue
  * 不需要把私有词表暴露给测试。
  */
 class SqlDialectProfileTest {
-
-    private fun typeOf(profile: SqlDialectProfile, word: String): TokenType =
-        SqlLanguage(profile).tokenize(word).single().type
+    private fun typeOf(
+        profile: SqlDialectProfile,
+        word: String,
+    ): TokenType = SqlLanguage(profile).tokenize(word).single().type
 
     @Test
     fun `profile language ids are unique and match the language`() {
@@ -93,13 +94,14 @@ class SqlDialectProfileTest {
     /** 标准档位不带任何方言词 —— 只有连上某个方言才认识它特有的词。 */
     @Test
     fun `dialect specific words are unknown to the standard profile`() {
-        val dialectWords = mapOf(
-            SqlDialectProfile.MYSQL to listOf("ZEROFILL", "STRAIGHT_JOIN", "GROUP_CONCAT", "UNSIGNED"),
-            SqlDialectProfile.POSTGRESQL to listOf("LATERAL", "TSVECTOR", "GENERATE_SERIES", "TABLESAMPLE"),
-            SqlDialectProfile.H2 to listOf("CSVREAD", "H2VERSION", "MODE", "VARCHAR_IGNORECASE"),
-            SqlDialectProfile.DUCKDB to listOf("QUALIFY", "HUGEINT", "QUANTILE_CONT", "PIVOT"),
-            SqlDialectProfile.SQLITE to listOf("PRAGMA", "GLOB", "STRFTIME", "WITHOUT"),
-        )
+        val dialectWords =
+            mapOf(
+                SqlDialectProfile.MYSQL to listOf("ZEROFILL", "STRAIGHT_JOIN", "GROUP_CONCAT", "UNSIGNED"),
+                SqlDialectProfile.POSTGRESQL to listOf("LATERAL", "TSVECTOR", "GENERATE_SERIES", "TABLESAMPLE"),
+                SqlDialectProfile.H2 to listOf("CSVREAD", "H2VERSION", "MODE", "VARCHAR_IGNORECASE"),
+                SqlDialectProfile.DUCKDB to listOf("QUALIFY", "HUGEINT", "QUANTILE_CONT", "PIVOT"),
+                SqlDialectProfile.SQLITE to listOf("PRAGMA", "GLOB", "STRFTIME", "WITHOUT"),
+            )
         dialectWords.forEach { (profile, words) ->
             words.forEach { word ->
                 assertNotEquals(

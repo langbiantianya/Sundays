@@ -13,9 +13,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.rightClick
@@ -96,7 +96,6 @@ import kotlin.time.Duration.Companion.minutes
  */
 @OptIn(ExperimentalTestApi::class)
 class TreeContextMenuUiTest {
-
     private lateinit var tempHome: File
     private lateinit var originalHome: String
     private lateinit var engine: IdbEngine
@@ -107,6 +106,7 @@ class TreeContextMenuUiTest {
     /** 记录所有被复制出去的文本 —— 断言锚点是「剪贴板里该出现什么」。 */
     private class Recorder : (String) -> Boolean {
         val written = mutableListOf<String>()
+
         override fun invoke(text: String): Boolean {
             written += text
             return true
@@ -140,14 +140,15 @@ class TreeContextMenuUiTest {
             }
         }
 
-        connection = ConnectionConfig(
-            id = "tm-${System.nanoTime()}",
-            name = "TreeH2",
-            dialect = DialectType.H2,
-            username = "sa",
-            password = "",
-            jdbcUrl = jdbcUrl,
-        )
+        connection =
+            ConnectionConfig(
+                id = "tm-${System.nanoTime()}",
+                name = "TreeH2",
+                dialect = DialectType.H2,
+                username = "sa",
+                password = "",
+                jdbcUrl = jdbcUrl,
+            )
         recorder = Recorder()
         center = NotificationCenter()
     }
@@ -157,11 +158,16 @@ class TreeContextMenuUiTest {
         // scope 先 cancel，再关引擎 —— 顺序反了会出现「协程正用着池，池先被关了」的竞态
         scopes.forEach { runCatching { it.cancel() } }
         scopes.clear()
-        try { PoolManager.closeAll() } catch (_: Exception) {}
         try {
-            DriverManager.getConnection(jdbcUrl, "sa", "")
+            PoolManager.closeAll()
+        } catch (_: Exception) {
+        }
+        try {
+            DriverManager
+                .getConnection(jdbcUrl, "sa", "")
                 .use { it.createStatement().use { s -> s.execute("SHUTDOWN") } }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
         System.setProperty("user.home", originalHome)
     }
 
@@ -233,11 +239,12 @@ class TreeContextMenuUiTest {
      * 混成一件就等不到（见 [awaitCondition]）。
      */
     private fun androidx.compose.ui.test.ComposeUiTest.render(browser: DatabaseBrowserState) {
-        val sheet = SheetDescriptor(
-            connection = connection,
-            browser = browser,
-            status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
-        )
+        val sheet =
+            SheetDescriptor(
+                connection = connection,
+                browser = browser,
+                status = ConnectionStatus(ConnectionState.CONNECTED, "H2"),
+            )
         setContent {
             MaterialTheme {
                 DatabaseBrowserScreen(
@@ -281,8 +288,7 @@ class TreeContextMenuUiTest {
         }
 
     /** 等表叶子就位（库已在 [render] 里展开过）。 */
-    private fun androidx.compose.ui.test.ComposeUiTest.awaitTableLeafReady() =
-        awaitTableLeaf("USERS")
+    private fun androidx.compose.ui.test.ComposeUiTest.awaitTableLeafReady() = awaitTableLeaf("USERS")
 
     /**
      * 注入一次**右键**。
@@ -308,8 +314,7 @@ class TreeContextMenuUiTest {
         awaitCondition("右键菜单出现在 $tag") { onAllNodesWithTagSafe(TREE_MENU_COPY_NAME_TAG) > 0 }
     }
 
-    private fun androidx.compose.ui.test.ComposeUiTest.onAllNodesWithTagSafe(tag: String): Int =
-        runCatching { onAllNodesWithTag(tag).fetchSemanticsNodes().size }.getOrDefault(0)
+    private fun androidx.compose.ui.test.ComposeUiTest.onAllNodesWithTagSafe(tag: String): Int = runCatching { onAllNodesWithTag(tag).fetchSemanticsNodes().size }.getOrDefault(0)
 
     private fun androidx.compose.ui.test.ComposeUiTest.clickMenuItem(tag: String) {
         // ⚠️ 必须等「**新增**一次写入」而不是「有过写入」：
@@ -333,138 +338,144 @@ class TreeContextMenuUiTest {
     // ==================================================================
 
     @Test
-    fun `右键库节点 - 菜单项集合与两种复制的内容`() = runComposeUiTest(testTimeout = 2.minutes) {
-        val b = browser()
-        render(b)
-        awaitTableLeafReady()
-        val db = b.databases.first()
+    fun `右键库节点 - 菜单项集合与两种复制的内容`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            val b = browser()
+            render(b)
+            awaitTableLeafReady()
+            val db = b.databases.first()
 
-        rightClickOn(schemaDbNodeTag(db))
-        onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
-        onNodeWithTag(TREE_MENU_COPY_REF_TAG).assertExists()
-        // ⚠️ 库节点**不该**有 DDL 项：「这个库的建表语句」不存在这种东西。
-        // 有了它，用户点了只会拿到一个报错。
-        assertEquals(0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG), "库节点上不应出现「复制建表 DDL」")
+            rightClickOn(schemaDbNodeTag(db))
+            onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
+            onNodeWithTag(TREE_MENU_COPY_REF_TAG).assertExists()
+            // ⚠️ 库节点**不该**有 DDL 项：「这个库的建表语句」不存在这种东西。
+            // 有了它，用户点了只会拿到一个报错。
+            assertEquals(0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG), "库节点上不应出现「复制建表 DDL」")
 
-        clickMenuItem(TREE_MENU_COPY_NAME_TAG)
-        // H2 的库名在树上显示什么，裸名就是什么
-        assertEquals(listOf(db), recorder.written)
+            clickMenuItem(TREE_MENU_COPY_NAME_TAG)
+            // H2 的库名在树上显示什么，裸名就是什么
+            assertEquals(listOf(db), recorder.written)
 
-        rightClickOn(schemaDbNodeTag(db))
-        clickMenuItem(TREE_MENU_COPY_REF_TAG)
-        assertEquals(listOf(db, "\"$db\""), recorder.written)
-    }
+            rightClickOn(schemaDbNodeTag(db))
+            clickMenuItem(TREE_MENU_COPY_REF_TAG)
+            assertEquals(listOf(db, "\"$db\""), recorder.written)
+        }
 
     // ==================================================================
     // 表节点
     // ==================================================================
 
     @Test
-    fun `右键表节点 - 引用名与建表 DDL 都进剪贴板并留下通知`() = runComposeUiTest(testTimeout = 2.minutes) {
-        val b = browser()
-        render(b)
-        awaitTableLeafReady()
-        awaitSchema(b)
+    fun `右键表节点 - 引用名与建表 DDL 都进剪贴板并留下通知`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            val b = browser()
+            render(b)
+            awaitTableLeafReady()
+            awaitSchema(b)
 
-        rightClickOn(schemaTableLeafTag("USERS"))
-        // ⚠️ 表节点**必须**有 DDL 项 —— 这是本次功能的主入口
-        onNodeWithTag(TREE_MENU_COPY_DDL_TAG).assertExists()
+            rightClickOn(schemaTableLeafTag("USERS"))
+            // ⚠️ 表节点**必须**有 DDL 项 —— 这是本次功能的主入口
+            onNodeWithTag(TREE_MENU_COPY_DDL_TAG).assertExists()
 
-        clickMenuItem(TREE_MENU_COPY_REF_TAG)
-        assertEquals(listOf("\"PUBLIC\".\"USERS\""), recorder.written)
-        assertTrue(
-            center.notifications.any { it.severity == AppNotification.Severity.SUCCESS },
-            "复制成功必须有一条 SUCCESS 通知 —— 用户看不到就不知道成没成",
-        )
+            clickMenuItem(TREE_MENU_COPY_REF_TAG)
+            assertEquals(listOf("\"PUBLIC\".\"USERS\""), recorder.written)
+            assertTrue(
+                center.notifications.any { it.severity == AppNotification.Severity.SUCCESS },
+                "复制成功必须有一条 SUCCESS 通知 —— 用户看不到就不知道成没成",
+            )
 
-        rightClickOn(schemaTableLeafTag("USERS"))
-        clickMenuItem(TREE_MENU_COPY_DDL_TAG)
+            rightClickOn(schemaTableLeafTag("USERS"))
+            clickMenuItem(TREE_MENU_COPY_DDL_TAG)
 
-        val ddl = recorder.written.last()
-        assertTrue(
-            ddl.contains("CREATE TABLE", ignoreCase = true),
-            "复制到的应是建表语句，实际：$ddl",
-        )
-        assertTrue(ddl.contains("USERNAME", ignoreCase = true), "DDL 应含 USERS 的字段，实际：$ddl")
-        // DDL 必须**来自引擎**：五个方言的建表语句差异大到没有共性可循
-        // （PG 回填主键/UNIQUE/CHECK，SQLite 读 sqlite_master 原文…），
-        // 前端拼一份只会在某一个方言上看起来对。
-    }
+            val ddl = recorder.written.last()
+            assertTrue(
+                ddl.contains("CREATE TABLE", ignoreCase = true),
+                "复制到的应是建表语句，实际：$ddl",
+            )
+            assertTrue(ddl.contains("USERNAME", ignoreCase = true), "DDL 应含 USERS 的字段，实际：$ddl")
+            // DDL 必须**来自引擎**：五个方言的建表语句差异大到没有共性可循
+            // （PG 回填主键/UNIQUE/CHECK，SQLite 读 sqlite_master 原文…），
+            // 前端拼一份只会在某一个方言上看起来对。
+        }
 
     @Test
-    fun `右键表节点 - 菜单弹出但不顺带打开表预览`() = runComposeUiTest(testTimeout = 2.minutes) {
-        // `onRightClick` 与 `clickable` 共用这一行。菜单弹出时若 `b.tabs` 也变了，
-        // 用户右键的同时右栏就换了一张表 —— 而他根本没点左键。
-        val b = browser()
-        render(b)
-        awaitTableLeafReady()
-        assertEquals(0, b.tabs.size, "右键前不应有标签页")
+    fun `右键表节点 - 菜单弹出但不顺带打开表预览`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            // `onRightClick` 与 `clickable` 共用这一行。菜单弹出时若 `b.tabs` 也变了，
+            // 用户右键的同时右栏就换了一张表 —— 而他根本没点左键。
+            val b = browser()
+            render(b)
+            awaitTableLeafReady()
+            assertEquals(0, b.tabs.size, "右键前不应有标签页")
 
-        // rightClickOn 内部已等「菜单出现」，所以这条同时钉住了「菜单确实弹了」
-        rightClickOn(schemaTableLeafTag("USERS"))
-        onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
+            // rightClickOn 内部已等「菜单出现」，所以这条同时钉住了「菜单确实弹了」
+            rightClickOn(schemaTableLeafTag("USERS"))
+            onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
 
-        assertEquals(0, b.tabs.size, "菜单弹出时不应顺带打开表预览")
-    }
+            assertEquals(0, b.tabs.size, "菜单弹出时不应顺带打开表预览")
+        }
 
     // ==================================================================
     // 菜单生命周期
     // ==================================================================
 
     @Test
-    fun `菜单项点了之后立刻消失且状态清空`() = runComposeUiTest(testTimeout = 2.minutes) {
-        // 「点菜单项 → 菜单消失 → 下一次右键能弹新菜单」这条链路分两截，各由不同机制保证：
-        // - 点**菜单项**走 `menu.dismiss()`（在 onClick 里显式调用）→ 这条用例覆盖
-        // - 点**菜单外** / 按 Esc 走 `Popup.onDismissRequest` → UI 测试里**测不到**（见下）
-        //
-        // 本条只管前一截，并确认 dismiss 之后状态确实干净（`target` 清空），
-        // 否则下一次右键会拿旧菜单顶替新菜单。
-        val b = browser()
-        render(b)
-        awaitTableLeafReady()
-        val db = b.databases.first()
+    fun `菜单项点了之后立刻消失且状态清空`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            // 「点菜单项 → 菜单消失 → 下一次右键能弹新菜单」这条链路分两截，各由不同机制保证：
+            // - 点**菜单项**走 `menu.dismiss()`（在 onClick 里显式调用）→ 这条用例覆盖
+            // - 点**菜单外** / 按 Esc 走 `Popup.onDismissRequest` → UI 测试里**测不到**（见下）
+            //
+            // 本条只管前一截，并确认 dismiss 之后状态确实干净（`target` 清空），
+            // 否则下一次右键会拿旧菜单顶替新菜单。
+            val b = browser()
+            render(b)
+            awaitTableLeafReady()
+            val db = b.databases.first()
 
-        rightClickOn(schemaTableLeafTag("USERS"))
-        onNodeWithTag(TREE_MENU_COPY_DDL_TAG).assertExists()
+            rightClickOn(schemaTableLeafTag("USERS"))
+            onNodeWithTag(TREE_MENU_COPY_DDL_TAG).assertExists()
 
-        clickMenuItem(TREE_MENU_COPY_NAME_TAG)
-        assertEquals(listOf("USERS"), recorder.written)
+            clickMenuItem(TREE_MENU_COPY_NAME_TAG)
+            assertEquals(listOf("USERS"), recorder.written)
 
-        // 换到库节点再右键：菜单项集合必须跟着换（表节点有 DDL，库节点没有）
-        rightClickOn(schemaDbNodeTag(db))
-        assertEquals(
-            0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG),
-            "dismiss 不彻底时，第二次右键弹的还是上一次的菜单",
-        )
-        onNodeWithTag(TREE_MENU_COPY_REF_TAG).assertExists()
-    }
+            // 换到库节点再右键：菜单项集合必须跟着换（表节点有 DDL，库节点没有）
+            rightClickOn(schemaDbNodeTag(db))
+            assertEquals(
+                0,
+                onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG),
+                "dismiss 不彻底时，第二次右键弹的还是上一次的菜单",
+            )
+            onNodeWithTag(TREE_MENU_COPY_REF_TAG).assertExists()
+        }
 
     // ==================================================================
     // 字段节点
     // ==================================================================
 
     @Test
-    fun `右键字段 - 给表点字段引用且没有 DDL 项`() = runComposeUiTest(testTimeout = 2.minutes) {
-        val b = browser()
-        render(b)
-        awaitTableLeafReady()
-        // 展开表节点 → 字段行。同样走状态机而不是点那个 16dp 的小箭头：
-        // 那个 Icon 上的 `clickable` 与外层 Row 的右键检测共用事件通道，
-        // 语义点击在这里的时序窗口比等一个节点出现还窄。
-        b.toggleTableObjects(b.databases.first(), "USERS")
-        awaitCondition("字段行出现 USERNAME") {
-            onAllNodesWithText("USERNAME", ignoreCase = true).fetchSemanticsNodes().isNotEmpty()
+    fun `右键字段 - 给表点字段引用且没有 DDL 项`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            val b = browser()
+            render(b)
+            awaitTableLeafReady()
+            // 展开表节点 → 字段行。同样走状态机而不是点那个 16dp 的小箭头：
+            // 那个 Icon 上的 `clickable` 与外层 Row 的右键检测共用事件通道，
+            // 语义点击在这里的时序窗口比等一个节点出现还窄。
+            b.toggleTableObjects(b.databases.first(), "USERS")
+            awaitCondition("字段行出现 USERNAME") {
+                onAllNodesWithText("USERNAME", ignoreCase = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            awaitSchema(b)
+
+            rightClickOn(schemaColumnTag("USERNAME"))
+            onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
+            // DDL 是**整张表**的，从字段上点它拿到的是一张毫不相干的表的语句
+            assertEquals(0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG), "字段节点上不应出现「复制建表 DDL」")
+
+            clickMenuItem(TREE_MENU_COPY_REF_TAG)
+            // 裸的 "USERNAME" 在库里不存在（它在 USERS 表里）——
+            // 复制出来的引用必须能直接粘进 SQL 跑通。
+            assertEquals(listOf("\"PUBLIC\".\"USERS\".\"USERNAME\""), recorder.written)
         }
-        awaitSchema(b)
-
-        rightClickOn(schemaColumnTag("USERNAME"))
-        onNodeWithTag(TREE_MENU_COPY_NAME_TAG).assertExists()
-        // DDL 是**整张表**的，从字段上点它拿到的是一张毫不相干的表的语句
-        assertEquals(0, onAllNodesWithTagSafe(TREE_MENU_COPY_DDL_TAG), "字段节点上不应出现「复制建表 DDL」")
-
-        clickMenuItem(TREE_MENU_COPY_REF_TAG)
-        // 裸的 "USERNAME" 在库里不存在（它在 USERS 表里）——
-        // 复制出来的引用必须能直接粘进 SQL 跑通。
-        assertEquals(listOf("\"PUBLIC\".\"USERS\".\"USERNAME\""), recorder.written)
-    }
 }

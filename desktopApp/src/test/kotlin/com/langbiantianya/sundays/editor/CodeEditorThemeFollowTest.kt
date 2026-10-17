@@ -81,7 +81,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class, InternalComposeUiApi::class)
 class CodeEditorThemeFollowTest {
-
     private val sql = "SELECT id, name FROM users WHERE id > 1"
 
     // ==========================================================================
@@ -190,7 +189,10 @@ class CodeEditorThemeFollowTest {
      * [systemDark] 通过 `LocalSystemTheme` 钉进组合：桌面端 `isSystemInDarkTheme()` 读的
      * 就是它，故这一个 provider 足以让「读系统设置」的错误实现稳定暴露。
      */
-    private fun resolvedEditorTheme(appDark: Boolean, systemDark: Boolean): CodeEditorTheme {
+    private fun resolvedEditorTheme(
+        appDark: Boolean,
+        systemDark: Boolean,
+    ): CodeEditorTheme {
         var result: CodeEditorTheme? = null
         runComposeUiTest {
             registerBuiltinEditors()
@@ -209,7 +211,10 @@ class CodeEditorThemeFollowTest {
     }
 
     /** 真渲染一遍 [CodeEditor] 并量编辑区域内的像素亮度。 */
-    private fun renderedCenterLuma(appDark: Boolean, systemDark: Boolean): Float {
+    private fun renderedCenterLuma(
+        appDark: Boolean,
+        systemDark: Boolean,
+    ): Float {
         var image: ImageBitmap? = null
         runComposeUiTest {
             registerBuiltinEditors()
@@ -259,8 +264,7 @@ class CodeEditorThemeFollowTest {
         return (max + min) / 2f
     }
 
-    private fun systemThemeOf(dark: Boolean): SystemTheme =
-        if (dark) SystemTheme.Dark else SystemTheme.Light
+    private fun systemThemeOf(dark: Boolean): SystemTheme = if (dark) SystemTheme.Dark else SystemTheme.Light
 
     private companion object {
         const val EDITOR_TAG = "code-editor"

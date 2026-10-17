@@ -11,9 +11,9 @@ package com.langbiantianya.pool
 import com.langbiantianya.dialect.H2Dialect
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.testutil.TestIds
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import com.langbiantianya.testutil.TestIds
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -28,7 +28,6 @@ import kotlin.test.assertTrue
  * 4. getConnection(schema) 调用 setSearchPath
  */
 class PoolManagerTest {
-
     private lateinit var h2: H2Dialect
     private val dbName: String = TestIds.uniqueName("pmtest")
 
@@ -50,16 +49,18 @@ class PoolManagerTest {
         user: String = "sa",
         password: String = "",
         database: String = "db1",
-        schema: String = ""
-    ): ConnectionConfig = ConnectionConfig.newBuilder()
-        .setDriver(driver)
-        .setHost(host)
-        .setPort(port)
-        .setUser(user)
-        .setPassword(password)
-        .setDatabase(database)
-        .setSchema(schema)
-        .build()
+        schema: String = "",
+    ): ConnectionConfig =
+        ConnectionConfig
+            .newBuilder()
+            .setDriver(driver)
+            .setHost(host)
+            .setPort(port)
+            .setUser(user)
+            .setPassword(password)
+            .setDatabase(database)
+            .setSchema(schema)
+            .build()
 
     @Test
     fun `cache key is equal for identical configs`() {
@@ -186,8 +187,10 @@ class PoolManagerTest {
                 assertTrue(rs.next())
                 val current = rs.getString(1)
                 assertNotNull(current)
-                assertTrue(current.equals("MY_SCHEMA", ignoreCase = true),
-                    "schema 应切换到 MY_SCHEMA，实际：$current")
+                assertTrue(
+                    current.equals("MY_SCHEMA", ignoreCase = true),
+                    "schema 应切换到 MY_SCHEMA，实际：$current",
+                )
             }
         }
         conn.close()

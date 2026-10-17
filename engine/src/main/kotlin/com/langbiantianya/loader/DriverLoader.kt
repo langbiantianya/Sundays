@@ -13,7 +13,7 @@ import java.io.File
 import java.net.URLClassLoader
 import java.sql.Driver
 import java.sql.DriverManager
-import java.util.*
+import java.util.ServiceLoader
 
 object DriverLoader {
     private val logger = LoggerFactory.getLogger(DriverLoader::class.java)
@@ -74,26 +74,28 @@ object DriverLoader {
         // 合法 provider（已实测：坏条目在前、好条目在后时，好条目仍被发现）。
         // hasNext() 抛错则不再继续 —— 此时无法安全判断是否还有内容，避免死循环。
         while (true) {
-            val hasNext = try {
-                iterator.hasNext()
-            } catch (e: Throwable) {
-                logger.warn("Aborting driver scan of ${dir.absolutePath} (hasNext failed): ${e.message}")
-                break
-            }
-            if (!hasNext) break
-
-            val driver = try {
-                iterator.next()
-            } catch (e: Throwable) {
-                failures++
-                logger.warn("Skipping unloadable JDBC driver entry in ${dir.absolutePath}: ${e.message}")
-                // 防御：理论上 JDK 每次都会前进；若某实现不前进则在此止损
-                if (++consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
-                    logger.warn("Too many consecutive driver failures, aborting scan of ${dir.absolutePath}")
+            val hasNext =
+                try {
+                    iterator.hasNext()
+                } catch (e: Throwable) {
+                    logger.warn("Aborting driver scan of ${dir.absolutePath} (hasNext failed): ${e.message}")
                     break
                 }
-                continue
-            }
+            if (!hasNext) break
+
+            val driver =
+                try {
+                    iterator.next()
+                } catch (e: Throwable) {
+                    failures++
+                    logger.warn("Skipping unloadable JDBC driver entry in ${dir.absolutePath}: ${e.message}")
+                    // 防御：理论上 JDK 每次都会前进；若某实现不前进则在此止损
+                    if (++consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                        logger.warn("Too many consecutive driver failures, aborting scan of ${dir.absolutePath}")
+                        break
+                    }
+                    continue
+                }
             consecutiveFailures = 0
             try {
                 DriverManager.registerDriver(driver)
@@ -112,7 +114,7 @@ object DriverLoader {
             classLoader.close()
             logger.warn(
                 "No valid JDBC drivers found in ${dir.absolutePath}" +
-                    if (failures == 0) "" else " (skipped $failures broken plugin entr(ies))"
+                    if (failures == 0) "" else " (skipped $failures broken plugin entr(ies))",
             )
         }
     }
@@ -125,7 +127,10 @@ object DriverLoader {
 
     fun closeAll() {
         driverClassLoader?.let {
-            try { it.close() } catch (_: Exception) {}
+            try {
+                it.close()
+            } catch (_: Exception) {
+            }
         }
         driverClassLoader = null
     }

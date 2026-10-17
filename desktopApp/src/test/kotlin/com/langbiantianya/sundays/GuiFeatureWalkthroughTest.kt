@@ -11,9 +11,9 @@ package com.langbiantianya.sundays
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -30,6 +30,13 @@ import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -37,13 +44,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 
 /**
  * **已实现功能的 GUI 走查（鼠标 + 键盘）** —— 逐项在真实界面上过一遍。
@@ -83,7 +83,6 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class GuiFeatureWalkthroughTest {
-
     private companion object {
         const val TABLE = "gui_orders"
         const val ROWS = 30
@@ -110,11 +109,16 @@ class GuiFeatureWalkthroughTest {
         // 关闭后**仍然存活**，而 `setUp` 每个用例都跑一次 —— 固定库名会让第二个用例
         // 撞上 `Table "GUI_ORDERS" already exists`，九个用例一起红。
         // 这条在本仓反复出现过（每处都写着「库名必须唯一」），这里又犯了一次。
-        cfg = ConnectionConfig(
-            id = "gui-h2", name = "GuiH2", dialect = DialectType.H2,
-            username = "sa", password = "", database = "guiwalk",
-            jdbcUrl = "jdbc:h2:mem:guiwalk${System.nanoTime()};DB_CLOSE_DELAY=-1",
-        )
+        cfg =
+            ConnectionConfig(
+                id = "gui-h2",
+                name = "GuiH2",
+                dialect = DialectType.H2,
+                username = "sa",
+                password = "",
+                database = "guiwalk",
+                jdbcUrl = "jdbc:h2:mem:guiwalk${System.nanoTime()};DB_CLOSE_DELAY=-1",
+            )
         DriverManager.getConnection(cfg.jdbcUrl, "sa", "").use { c ->
             c.createStatement().use { s ->
                 s.executeUpdate("CREATE TABLE $TABLE (id INT PRIMARY KEY, amount INT, status VARCHAR(32))")
@@ -123,7 +127,8 @@ class GuiFeatureWalkthroughTest {
             }
             c.prepareStatement("INSERT INTO $TABLE VALUES (?, ?, ?)").use { ps ->
                 for (i in 1..ROWS) {
-                    ps.setInt(1, i); ps.setInt(2, i * 10)
+                    ps.setInt(1, i)
+                    ps.setInt(2, i * 10)
                     ps.setString(3, if (i % 3 == 0) "PAID" else "PENDING")
                     ps.addBatch()
                 }
@@ -135,7 +140,11 @@ class GuiFeatureWalkthroughTest {
     @After
     fun tearDown() {
         scope.cancel()
-        try { engine.close() } catch (e: Exception) { println("engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("engine.close 抛了：$e")
+        }
         System.setProperty("user.home", originalHome)
         tempHome.deleteRecursively()
     }
@@ -147,9 +156,10 @@ class GuiFeatureWalkthroughTest {
         browser.bindConnection(cfg)
         browser.refreshDatabases()
         await("库列表") { !browser.loadingDatabases && browser.databases.isNotEmpty() }
-        val sheets = listOf(
-            SheetDescriptor(cfg, browser, ConnectionStatus(ConnectionState.CONNECTED, "H2")),
-        )
+        val sheets =
+            listOf(
+                SheetDescriptor(cfg, browser, ConnectionStatus(ConnectionState.CONNECTED, "H2")),
+            )
         setContent {
             ProvideTestStrings {
                 MaterialTheme {
@@ -157,8 +167,11 @@ class GuiFeatureWalkthroughTest {
                         sheets = sheets,
                         activeSheetId = sheets.first().connection.id,
                         connections = listOf(cfg),
-                        onSelectSheet = {}, onCloseSheet = {}, onAddSheet = {},
-                        onConnect = {}, onDisconnect = {},
+                        onSelectSheet = {},
+                        onCloseSheet = {},
+                        onAddSheet = {},
+                        onConnect = {},
+                        onDisconnect = {},
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -170,99 +183,105 @@ class GuiFeatureWalkthroughTest {
 
     /** **① 浏览**：鼠标点库 → 点表 → 出预览。 */
     @Test
-    fun `browse database and open a table preview with the mouse`() = runComposeUiTest(testTimeout = 3.minutes) {
-        launchBrowser()
-        val db = browser.databases.first()
+    fun `browse database and open a table preview with the mouse`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            launchBrowser()
+            val db = browser.databases.first()
 
-        // 树节点的语义点击在本环境不稳（见 H2GuiWalkthroughTest 的说明）：
-        // **先试真点，点不到才走状态机**，并把实际走了哪条路打印出来。
-        val viaMouse = runCatching {
-            onNodeWithText(db, substring = true).performClick()
-            onAllNodesWithText(TABLE, substring = true).fetchSemanticsNodes()
-        }.getOrNull()?.isNotEmpty() == true
-        if (!viaMouse) {
-            println("  · 树的语义点击不可用，改走状态机（渲染的是同一棵组合树）")
-            browser.toggleDatabase(db)
+            // 树节点的语义点击在本环境不稳（见 H2GuiWalkthroughTest 的说明）：
+            // **先试真点，点不到才走状态机**，并把实际走了哪条路打印出来。
+            val viaMouse =
+                runCatching {
+                    onNodeWithText(db, substring = true).performClick()
+                    onAllNodesWithText(TABLE, substring = true).fetchSemanticsNodes()
+                }.getOrNull()?.isNotEmpty() == true
+            if (!viaMouse) {
+                println("  · 树的语义点击不可用，改走状态机（渲染的是同一棵组合树）")
+                browser.toggleDatabase(db)
+            }
+            await("表列表") { db !in browser.loadingTables }
+
+            val openedByMouse =
+                runCatching {
+                    onAllNodesWithText(TABLE, substring = true)[0].performClick()
+                    onAllNodesWithText(TABLE, substring = true)[0].performClick()
+                }.isSuccess
+            if (!openedByMouse) browser.openTab(browser.currentSchema(), TABLE)
+            await("预览加载") { browser.tabs.isNotEmpty() && browser.tabs.none { it.loading } }
+
+            val tab = browser.tabs.single()
+            assertNull(tab.error, "预览不应报错：${tab.error}")
+            assertEquals(ROWS.toLong(), tab.total, "预览应显示 $ROWS 行")
+            println("RESULT GUI-browse 库=$db 表=${tab.tableName} 总行数=${tab.total} 双击走鼠标=$openedByMouse")
         }
-        await("表列表") { db !in browser.loadingTables }
-
-        val openedByMouse = runCatching {
-            onAllNodesWithText(TABLE, substring = true)[0].performClick()
-            onAllNodesWithText(TABLE, substring = true)[0].performClick()
-        }.isSuccess
-        if (!openedByMouse) browser.openTab(browser.currentSchema(), TABLE)
-        await("预览加载") { browser.tabs.isNotEmpty() && browser.tabs.none { it.loading } }
-
-        val tab = browser.tabs.single()
-        assertNull(tab.error, "预览不应报错：${tab.error}")
-        assertEquals(ROWS.toLong(), tab.total, "预览应显示 $ROWS 行")
-        println("RESULT GUI-browse 库=$db 表=${tab.tableName} 总行数=${tab.total} 双击走鼠标=$openedByMouse")
-    }
 
     /** **② SQL 工作台**：键盘写 SQL + 鼠标点「执行 SQL」。 */
     @Test
-    fun `execute sql with keyboard and mouse`() = runComposeUiTest(testTimeout = 3.minutes) {
-        launchBrowser()
-        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()                    // 鼠标切工作台
-        browser.selectPane(BrowserPane.SQL)
-        val sheet = browser.currentSqlSheet()!!
+    fun `execute sql with keyboard and mouse`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            launchBrowser()
+            onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick() // 鼠标切工作台
+            browser.selectPane(BrowserPane.SQL)
+            val sheet = browser.currentSqlSheet()!!
 
-        onNode(hasSetTextAction()).performTextInput(                 // 键盘打字
-            "SELECT id, status FROM $TABLE WHERE id <= 3 ORDER BY id",
-        )
-        waitForIdle()
-        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()                    // 鼠标点执行
-        await("执行结束") { !sheet.running }
-        assertNull(sheet.error, "执行不应报错：${sheet.error}")
-        assertEquals(3, sheet.rows.size, "应返回 3 行")
-        println("RESULT GUI-sql 列=${sheet.columns.map { it.header }} 行=${sheet.rows.size}")
-    }
+            onNode(hasSetTextAction()).performTextInput( // 键盘打字
+                "SELECT id, status FROM $TABLE WHERE id <= 3 ORDER BY id",
+            )
+            waitForIdle()
+            onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick() // 鼠标点执行
+            await("执行结束") { !sheet.running }
+            assertNull(sheet.error, "执行不应报错：${sheet.error}")
+            assertEquals(3, sheet.rows.size, "应返回 3 行")
+            println("RESULT GUI-sql 列=${sheet.columns.map { it.header }} 行=${sheet.rows.size}")
+        }
 
     /** **③ 多语句**：鼠标点「多语句」开关，键盘写脚本，鼠标点执行。 */
     @Test
-    fun `run a multi statement script from the workbench`() = runComposeUiTest(testTimeout = 3.minutes) {
-        launchBrowser()
-        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
-        browser.selectPane(BrowserPane.SQL)
-        val sheet = browser.currentSqlSheet()!!
+    fun `run a multi statement script from the workbench`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            launchBrowser()
+            onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
+            browser.selectPane(BrowserPane.SQL)
+            val sheet = browser.currentSqlSheet()!!
 
-        onNodeWithTag(SQL_MULTI_STATEMENT_CHIP_TAG).performClick()   // 鼠标点开开关
-        waitForIdle()
-        assertTrue(sheet.multiStatement, "鼠标点开关后 multiStatement 应为 true")
+            onNodeWithTag(SQL_MULTI_STATEMENT_CHIP_TAG).performClick() // 鼠标点开开关
+            waitForIdle()
+            assertTrue(sheet.multiStatement, "鼠标点开关后 multiStatement 应为 true")
 
-        onNode(hasSetTextAction()).performTextInput(
-            "CREATE TABLE gui_multi (id INT PRIMARY KEY); INSERT INTO gui_multi VALUES (1); INSERT INTO gui_multi VALUES (2)",
-        )
-        waitForIdle()
-        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
-        await("多语句执行结束") { !sheet.running }
-        assertNull(sheet.error, "多语句不应报错：${sheet.error}")
-        assertEquals(2L, countRows("gui_multi"), "多语句应把两条 INSERT 都执行掉")
-        println("RESULT GUI-multi-statement 表 gui_multi 有 ${countRows("gui_multi")} 行")
-    }
+            onNode(hasSetTextAction()).performTextInput(
+                "CREATE TABLE gui_multi (id INT PRIMARY KEY); INSERT INTO gui_multi VALUES (1); INSERT INTO gui_multi VALUES (2)",
+            )
+            waitForIdle()
+            onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
+            await("多语句执行结束") { !sheet.running }
+            assertNull(sheet.error, "多语句不应报错：${sheet.error}")
+            assertEquals(2L, countRows("gui_multi"), "多语句应把两条 INSERT 都执行掉")
+            println("RESULT GUI-multi-statement 表 gui_multi 有 ${countRows("gui_multi")} 行")
+        }
 
     /** **④ 危险写操作**：执行 → 弹确认框 → 鼠标点「仍然执行」。 */
     @Test
-    fun `dangerous sql asks for confirmation before executing`() = runComposeUiTest(testTimeout = 3.minutes) {
-        launchBrowser()
-        onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
-        browser.selectPane(BrowserPane.SQL)
-        val sheet = browser.currentSqlSheet()!!
-        browser.readOnly = false
+    fun `dangerous sql asks for confirmation before executing`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            launchBrowser()
+            onNodeWithText(zh(StrKey.SQL_WORKBENCH)).performClick()
+            browser.selectPane(BrowserPane.SQL)
+            val sheet = browser.currentSqlSheet()!!
+            browser.readOnly = false
 
-        onNode(hasSetTextAction()).performTextInput("UPDATE $TABLE SET status = 'X'")
-        waitForIdle()
-        onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
-        waitForIdle()
+            onNode(hasSetTextAction()).performTextInput("UPDATE $TABLE SET status = 'X'")
+            waitForIdle()
+            onNodeWithText(zh(StrKey.EXECUTE_SQL)).performClick()
+            waitForIdle()
 
-        onNodeWithText(zh(StrKey.CONFIRM_DANGEROUS_OPERATION)).assertIsDisplayed()      // 确认框应出现
-        assertEquals(ROWS.toLong(), countRows(TABLE), "点确认前不应执行")
+            onNodeWithText(zh(StrKey.CONFIRM_DANGEROUS_OPERATION)).assertIsDisplayed() // 确认框应出现
+            assertEquals(ROWS.toLong(), countRows(TABLE), "点确认前不应执行")
 
-        onNodeWithTag(DANGEROUS_CONFIRM_BTN_TAG).performClick()   // 鼠标点「仍然执行」
-        await("确认后执行") { !sheet.running && countRows(TABLE) == ROWS.toLong() }
-        assertNull(sheet.error, "确认后应执行成功：${sheet.error}")
-        println("RESULT GUI-dangerous 确认框 → 仍然执行 通过")
-    }
+            onNodeWithTag(DANGEROUS_CONFIRM_BTN_TAG).performClick() // 鼠标点「仍然执行」
+            await("确认后执行") { !sheet.running && countRows(TABLE) == ROWS.toLong() }
+            assertNull(sheet.error, "确认后应执行成功：${sheet.error}")
+            println("RESULT GUI-dangerous 确认框 → 仍然执行 通过")
+        }
 
     /**
      * **⑤ 导出对话框**：鼠标点开、键盘填参数、按钮状态正确。
@@ -274,31 +293,36 @@ class GuiFeatureWalkthroughTest {
      * `ExportQueryValidationTest` 单独覆盖。
      */
     @Test
-    fun `export dialog opens and accepts input through mouse and keyboard`() = runComposeUiTest(testTimeout = 3.minutes) {
-        launchBrowser()
-        browser.toggleDatabase(browser.databases.first())
-        await("表列表") { browser.tablesByDatabase[it0()] != null }
-        browser.openTab(browser.currentSchema(), TABLE)
-        await("预览") { browser.tabs.isNotEmpty() && browser.tabs.none { t -> t.loading } }
+    fun `export dialog opens and accepts input through mouse and keyboard`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            launchBrowser()
+            browser.toggleDatabase(browser.databases.first())
+            await("表列表") { browser.tablesByDatabase[it0()] != null }
+            browser.openTab(browser.currentSchema(), TABLE)
+            await("预览") { browser.tabs.isNotEmpty() && browser.tabs.none { t -> t.loading } }
 
-        onNodeWithTag(TABLE_EXPORT_BTN_TAG).performClick()        // 鼠标点「导出」
-        waitForIdle()
-        onNodeWithText(zh(StrKey.EXPORT_RESULT)).assertIsDisplayed()
+            onNodeWithTag(TABLE_EXPORT_BTN_TAG).performClick() // 鼠标点「导出」
+            waitForIdle()
+            onNodeWithText(zh(StrKey.EXPORT_RESULT)).assertIsDisplayed()
 
-        onNodeWithTag(EXPORT_DIR_FIELD_TAG).performClick()
-        onNodeWithTag(EXPORT_DIR_FIELD_TAG).performTextInput(tempHome.absolutePath)
-        onNodeWithTag(EXPORT_NAME_FIELD_TAG).performClick()
-        onNodeWithTag(EXPORT_NAME_FIELD_TAG).performTextInput("导出结果")
-        waitForIdle()
-        onNodeWithTag(EXPORT_CONFIRM_BTN_TAG).assertIsDisplayed()  // 参数齐了按钮才可点
-        println("RESULT GUI-export 导出对话框可开、参数可填、按钮状态正确")
-    }
+            onNodeWithTag(EXPORT_DIR_FIELD_TAG).performClick()
+            onNodeWithTag(EXPORT_DIR_FIELD_TAG).performTextInput(tempHome.absolutePath)
+            onNodeWithTag(EXPORT_NAME_FIELD_TAG).performClick()
+            onNodeWithTag(EXPORT_NAME_FIELD_TAG).performTextInput("导出结果")
+            waitForIdle()
+            onNodeWithTag(EXPORT_CONFIRM_BTN_TAG).assertIsDisplayed() // 参数齐了按钮才可点
+            println("RESULT GUI-export 导出对话框可开、参数可填、按钮状态正确")
+        }
 
     // ==================================================================
 
     private fun it0(): String = browser.databases.first()
 
-    private fun await(what: String, timeoutMs: Long = 60_000, cond: () -> Boolean) {
+    private fun await(
+        what: String,
+        timeoutMs: Long = 60_000,
+        cond: () -> Boolean,
+    ) {
         val start = System.currentTimeMillis()
         while (!cond()) {
             check(System.currentTimeMillis() - start < timeoutMs) {
@@ -315,7 +339,10 @@ class GuiFeatureWalkthroughTest {
     private fun countRows(table: String): Long =
         DriverManager.getConnection(cfg.jdbcUrl, "sa", "").use { c ->
             c.createStatement().use { s ->
-                s.executeQuery("SELECT COUNT(*) FROM $table").use { rs -> rs.next(); rs.getLong(1) }
+                s.executeQuery("SELECT COUNT(*) FROM $table").use { rs ->
+                    rs.next()
+                    rs.getLong(1)
+                }
             }
         }
 }

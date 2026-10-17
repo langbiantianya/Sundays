@@ -31,7 +31,6 @@ import kotlin.test.assertTrue
  * 只有把映射写死才能被测到。
  */
 class ThemeModeTest {
-
     @Test
     fun cycle_order_is_system_light_dark() {
         assertEquals(ThemeMode.LIGHT, ThemeMode.SYSTEM.next)

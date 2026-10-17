@@ -15,7 +15,6 @@ package com.langbiantianya.sundays.settings
  * loading / 成功 / 失败三态写纯 UI 测试 —— 组件本身不需要起引擎。
  */
 sealed interface SystemInfoState {
-
     /** 尚未请求（默认态）。 */
     data object Idle : SystemInfoState
 
@@ -23,10 +22,14 @@ sealed interface SystemInfoState {
     data object Loading : SystemInfoState
 
     /** 成功。 */
-    data class Loaded(val info: SystemInfo) : SystemInfoState
+    data class Loaded(
+        val info: SystemInfo,
+    ) : SystemInfoState
 
     /** 失败（引擎异常 / gRPC 不可达）。 */
-    data class Failed(val message: String) : SystemInfoState
+    data class Failed(
+        val message: String,
+    ) : SystemInfoState
 
     /**
      * 是否已成功加载过 —— 设置页据此决定「切到系统信息分类」时是否要重新请求，

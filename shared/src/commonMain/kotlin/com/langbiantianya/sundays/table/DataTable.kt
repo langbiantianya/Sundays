@@ -10,12 +10,12 @@ package com.langbiantianya.sundays.table
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.HorizontalScrollbar
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,9 +32,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -43,6 +44,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,15 +55,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.setText
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -69,6 +63,12 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setText
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
@@ -230,40 +230,48 @@ fun DataTable(
     // 计算当前页的行。
     // [serverSidePaging] 时**必须**跳过本地切片：调用方给的 rows 已经是「数据源返回的那一页」，
     // 再按 (currentPage-1) 偏移一次会在第 2 页起直接切空（start 越界 → emptyList）。
-    val pageRows: List<TableRow> = if (pageSize.isAll || serverSidePaging) {
-        rows
-    } else {
-        val start = (currentPage - 1).coerceAtLeast(0) * pageSize.value
-        if (start >= rows.size) emptyList() else rows.drop(start).take(pageSize.value)
-    }
-    val totalPages: Int = if (pageSize.isAll) 1
-    else maxOf(1, (totalCount + pageSize.value - 1) / pageSize.value)
+    val pageRows: List<TableRow> =
+        if (pageSize.isAll || serverSidePaging) {
+            rows
+        } else {
+            val start = (currentPage - 1).coerceAtLeast(0) * pageSize.value
+            if (start >= rows.size) emptyList() else rows.drop(start).take(pageSize.value)
+        }
+    val totalPages: Int =
+        if (pageSize.isAll) {
+            1
+        } else {
+            maxOf(1, (totalCount + pageSize.value - 1) / pageSize.value)
+        }
 
     // 当 totalCount / pageSize 变化导致 currentPage 越界时自动回退
     LaunchedEffect(totalCount, pageSize, totalPages) {
         if (currentPage > totalPages) onPageChange(totalPages)
     }
 
-    val selectedRow = remember(rows, effectiveSelectedRowId) {
-        effectiveSelectedRowId?.let { id -> rows.find { it.id == id } }
-    }
+    val selectedRow =
+        remember(rows, effectiveSelectedRowId) {
+            effectiveSelectedRowId?.let { id -> rows.find { it.id == id } }
+        }
 
     // 高度策略：
     // - `fillParentHeight = true`（默认）→ `fillMaxSize()` —— 与 `CodeEditor.maxLines = null` 一致，
     //   不施加高度上限但仍受父容器约束，不会溢出
     // - `fillParentHeight = false` → 按内容自适应高度（外部父容器需自己处理滚动 / 尺寸）
-    val outerModifier = if (fillParentHeight) {
-        modifier.fillMaxSize()
-    } else {
-        modifier
-    }
+    val outerModifier =
+        if (fillParentHeight) {
+            modifier.fillMaxSize()
+        } else {
+            modifier
+        }
 
     Row(modifier = outerModifier) {
         // 主表格区域
         Surface(
-            modifier = Modifier
-                .weight(1f - detailPanelRatio.coerceAtLeast(0f))
-                .fillMaxHeight(),
+            modifier =
+                Modifier
+                    .weight(1f - detailPanelRatio.coerceAtLeast(0f))
+                    .fillMaxHeight(),
             color = theme.rowBackground,
             shape = winShape(4.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
@@ -274,122 +282,130 @@ fun DataTable(
             BoxWithConstraints {
                 val contentWidth = contentWidthFor(columns, maxWidth)
                 Column(modifier = Modifier.fillMaxSize()) {
-                // 表头与表体**共用同一个** ScrollState。
-                //
-                // 两处各 `rememberScrollState()` 时，表头能横滚、表体不能 —— 用户拖表头把
-                // 「第 20 列」的名字拖到左边，数据行还停在原处，于是**列名与数据列对不上**，
-                // 按列名读数会读到隔壁那一列。对数据库工具来说这是会读错数据的缺陷，
-                // 不是「体验不好」。
-                val hScroll = rememberScrollState()
-                TableHeader(
-                    columns = columns, theme = theme, hScroll = hScroll,
-                    contentWidth = contentWidth,
-                )
-                WinDivider(color = theme.borderColor)
-                TableBody(
-                    columns = columns,
-                    rows = pageRows,
-                    theme = theme,
-                    selectedRowId = effectiveSelectedRowId,
-                    onRowClick = { row -> setSelected(if (row.id == effectiveSelectedRowId) null else row) },
-                    contextMenuState = contextMenuState,
-                    hScroll = hScroll,
-                    editable = cellEditable,
-                    onCellEdit = onCellEdit,
-                    contentWidth = contentWidth,
-                )
-                // 横向滚动条 —— 放在表体与分页栏**之间**。
-                //
-                // 为什么非有不可：`contentWidthFor` 让列一多就宽于视口，于是右侧的列
-                // **滚出屏幕外**。而 `Modifier.horizontalScroll` 默认只响应触控板横扫 /
-                // Shift+滚轮 —— 普通鼠标用户没有任何可见的提示，**根本不知道右边还有列**。
-                // 那不叫「支持横向滚动」，那叫「把数据藏起来了」。
-                //
-                // 用**可见且可拖**的滚动条是因为它同时解决两件事：
-                //   1. 溢出**可见**（拇指宽度 = 可见比例，用户一眼看出还有多少列没露出来）
-                //   2. **可达**（拖着就能到任何一列，不依赖用户知道 Shift+滚轮这回事）
-                //
-                // 与表头、表体共用 [hScroll]，所以拖它时列名与数据列一起走 —— 不会出现
-                // 「数据滑过去了、列名还停在原地」这种会读错列的状态。
-                //
-                // 不做「溢出时才出现」的条件渲染：列数会随数据加载变化（先 5 列后 23 列），
-                // 滚动条忽隐忽现会引发布局跳动，比一条不滚动时的满格轨道更糟。
-                // 满格轨道正是「当前没有溢出」的正确视觉，与 Excel 等表格一致。
-                HorizontalScrollbar(
-                    adapter = rememberScrollbarAdapter(hScroll),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(TABLE_HSCROLLBAR_TAG),
-                    // ⚠️ **必须显式给 style，不能用默认样式**。
+                    // 表头与表体**共用同一个** ScrollState。
                     //
-                    // 默认 `ScrollbarStyle` 的 `unhoverColor` 在深色档实测是 `#1F232D`，
-                    // 而轨道背后就是表格底色 `#232833` —— 每通道只差 4，**肉眼几乎看不出**
-                    // 「这里有条滚动条」，更看不出右边还有列。那等于白加：溢出依然不可见。
+                    // 两处各 `rememberScrollState()` 时，表头能横滚、表体不能 —— 用户拖表头把
+                    // 「第 20 列」的名字拖到左边，数据行还停在原处，于是**列名与数据列对不上**，
+                    // 按列名读数会读到隔壁那一列。对数据库工具来说这是会读错数据的缺陷，
+                    // 不是「体验不好」。
+                    val hScroll = rememberScrollState()
+                    TableHeader(
+                        columns = columns,
+                        theme = theme,
+                        hScroll = hScroll,
+                        contentWidth = contentWidth,
+                    )
+                    WinDivider(color = theme.borderColor)
+                    TableBody(
+                        columns = columns,
+                        rows = pageRows,
+                        theme = theme,
+                        selectedRowId = effectiveSelectedRowId,
+                        onRowClick = { row -> setSelected(if (row.id == effectiveSelectedRowId) null else row) },
+                        contextMenuState = contextMenuState,
+                        hScroll = hScroll,
+                        editable = cellEditable,
+                        onCellEdit = onCellEdit,
+                        contentWidth = contentWidth,
+                    )
+                    // 横向滚动条 —— 放在表体与分页栏**之间**。
                     //
-                    // `unhoverColor` 给成实色 ⇒ 拇指**常驻可见**（而不是悬停才淡入）。
-                    // 这是刻意的取舍：自动隐藏的滚动条很「现代」，但它服务的是
-                    // 「已经知道要横滚」的人；这里要解决的是**还不知道右边有列**的人。
+                    // 为什么非有不可：`contentWidthFor` 让列一多就宽于视口，于是右侧的列
+                    // **滚出屏幕外**。而 `Modifier.horizontalScroll` 默认只响应触控板横扫 /
+                    // Shift+滚轮 —— 普通鼠标用户没有任何可见的提示，**根本不知道右边还有列**。
+                    // 那不叫「支持横向滚动」，那叫「把数据藏起来了」。
                     //
-                    // ⚠️ **颜色取 `cellText.color`（墨色），不取任何「表面色」**。
+                    // 用**可见且可拖**的滚动条是因为它同时解决两件事：
+                    //   1. 溢出**可见**（拇指宽度 = 可见比例，用户一眼看出还有多少列没露出来）
+                    //   2. **可达**（拖着就能到任何一列，不依赖用户知道 Shift+滚轮这回事）
                     //
-                    // 这一点是被真窗口像素实测纠正过来的：初版取 `headerBackground`
-                    // （深色档 `#2C3240`），理由是「与表头、分页栏同色、已在主题里」。
-                    // 理由成立，**结论却是错的** —— 截图量下来拇指确实是 `#2C3240`，
-                    // 可它背后的轨道底色就是行底 `#232833`，两者每通道只差 9/10/17：
+                    // 与表头、表体共用 [hScroll]，所以拖它时列名与数据列一起走 —— 不会出现
+                    // 「数据滑过去了、列名还停在原地」这种会读错列的状态。
                     //
-                    //   对比度（WCAG，相对亮度比）= **1.15 : 1**
-                    //
-                    // 1.15:1 意味着「渲染出来了」但「看不出」—— 而这个缺陷的全部要害
-                    // 恰恰是「看不出右边还有列」，所以它等于没修。
-                    //
-                    // 根子在选色**维度**选错了：`headerBackground` / `borderColor` /
-                    // `paginationBackground` 全都是**表面色**，而全部现代档的表面色都挤在
-                    // `#232833 ~ #333A48` 这一条窄带里，互相之间天然只有 1.1~1.3:1。
-                    // 从这条窄带里挑任何一个，都不可能指望它跟背景拉开距离。
-                    //
-                    // 滚动条拇指不是表面，是**控件**，控件就该用墨色（`cellText.color`）：
-                    //   - 深色档 `#CBD1DC` on `#232833` = **9.6 : 1**
-                    //   - 浅色档 `#000000` on `#FFFFFF` = **21 : 1**
-                    //
-                    // 明暗两档都远超 WCAG 对非文本 UI 部件的 3:1，且该色在每套主题里
-                    // 都有定义（现代档用常量、复古档取 `onSurface`），不必新造取值。
-                    // 代价是拇指比数据醒目 —— 但「醒目」正是此处要的效果：
-                    // 它是一个需要被看见才能被使用的控件。
-                    //
-                    // 这条对比度不是靠肉眼认的，`TableHorizontalScrollbarTest` 会
-                    // `captureToImage()` 取真实像素算 WCAG 比值并卡下限。
-                    style = ScrollbarStyle(
-                        12.dp, 8.dp, winShape(4.dp),
-                        150,
-                        theme.cellText.color,
-                        theme.cellText.color,
-                    ),
-                )
-                WinDivider(color = theme.borderColor)
-                TablePagination(
-                    theme = theme,
-                    pageSize = pageSize,
-                    onPageSizeChange = onPageSizeChange,
-                    currentPage = currentPage,
-                    onPageChange = onPageChange,
-                    totalPages = totalPages,
-                    totalCount = totalCount,
-                    // 服务端分页下「全部」不是合法取值（见 KDoc），下拉里不提供
-                    pageSizeOptions = if (serverSidePaging) {
-                        PageSize.ALL_VALUES.filterNot { it.isAll }
-                    } else {
-                        PageSize.ALL_VALUES
-                    },
-                )
+                    // 不做「溢出时才出现」的条件渲染：列数会随数据加载变化（先 5 列后 23 列），
+                    // 滚动条忽隐忽现会引发布局跳动，比一条不滚动时的满格轨道更糟。
+                    // 满格轨道正是「当前没有溢出」的正确视觉，与 Excel 等表格一致。
+                    HorizontalScrollbar(
+                        adapter = rememberScrollbarAdapter(hScroll),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .testTag(TABLE_HSCROLLBAR_TAG),
+                        // ⚠️ **必须显式给 style，不能用默认样式**。
+                        //
+                        // 默认 `ScrollbarStyle` 的 `unhoverColor` 在深色档实测是 `#1F232D`，
+                        // 而轨道背后就是表格底色 `#232833` —— 每通道只差 4，**肉眼几乎看不出**
+                        // 「这里有条滚动条」，更看不出右边还有列。那等于白加：溢出依然不可见。
+                        //
+                        // `unhoverColor` 给成实色 ⇒ 拇指**常驻可见**（而不是悬停才淡入）。
+                        // 这是刻意的取舍：自动隐藏的滚动条很「现代」，但它服务的是
+                        // 「已经知道要横滚」的人；这里要解决的是**还不知道右边有列**的人。
+                        //
+                        // ⚠️ **颜色取 `cellText.color`（墨色），不取任何「表面色」**。
+                        //
+                        // 这一点是被真窗口像素实测纠正过来的：初版取 `headerBackground`
+                        // （深色档 `#2C3240`），理由是「与表头、分页栏同色、已在主题里」。
+                        // 理由成立，**结论却是错的** —— 截图量下来拇指确实是 `#2C3240`，
+                        // 可它背后的轨道底色就是行底 `#232833`，两者每通道只差 9/10/17：
+                        //
+                        //   对比度（WCAG，相对亮度比）= **1.15 : 1**
+                        //
+                        // 1.15:1 意味着「渲染出来了」但「看不出」—— 而这个缺陷的全部要害
+                        // 恰恰是「看不出右边还有列」，所以它等于没修。
+                        //
+                        // 根子在选色**维度**选错了：`headerBackground` / `borderColor` /
+                        // `paginationBackground` 全都是**表面色**，而全部现代档的表面色都挤在
+                        // `#232833 ~ #333A48` 这一条窄带里，互相之间天然只有 1.1~1.3:1。
+                        // 从这条窄带里挑任何一个，都不可能指望它跟背景拉开距离。
+                        //
+                        // 滚动条拇指不是表面，是**控件**，控件就该用墨色（`cellText.color`）：
+                        //   - 深色档 `#CBD1DC` on `#232833` = **9.6 : 1**
+                        //   - 浅色档 `#000000` on `#FFFFFF` = **21 : 1**
+                        //
+                        // 明暗两档都远超 WCAG 对非文本 UI 部件的 3:1，且该色在每套主题里
+                        // 都有定义（现代档用常量、复古档取 `onSurface`），不必新造取值。
+                        // 代价是拇指比数据醒目 —— 但「醒目」正是此处要的效果：
+                        // 它是一个需要被看见才能被使用的控件。
+                        //
+                        // 这条对比度不是靠肉眼认的，`TableHorizontalScrollbarTest` 会
+                        // `captureToImage()` 取真实像素算 WCAG 比值并卡下限。
+                        style =
+                            ScrollbarStyle(
+                                12.dp,
+                                8.dp,
+                                winShape(4.dp),
+                                150,
+                                theme.cellText.color,
+                                theme.cellText.color,
+                            ),
+                    )
+                    WinDivider(color = theme.borderColor)
+                    TablePagination(
+                        theme = theme,
+                        pageSize = pageSize,
+                        onPageSizeChange = onPageSizeChange,
+                        currentPage = currentPage,
+                        onPageChange = onPageChange,
+                        totalPages = totalPages,
+                        totalCount = totalCount,
+                        // 服务端分页下「全部」不是合法取值（见 KDoc），下拉里不提供
+                        pageSizeOptions =
+                            if (serverSidePaging) {
+                                PageSize.ALL_VALUES.filterNot { it.isAll }
+                            } else {
+                                PageSize.ALL_VALUES
+                            },
+                    )
                 }
             }
         }
         if (showDetailPanel) {
             Spacer(modifier = Modifier.width(8.dp))
             Surface(
-                modifier = Modifier
-                    .weight(detailPanelRatio.coerceAtLeast(0.05f))
-                    .fillMaxHeight(),
+                modifier =
+                    Modifier
+                        .weight(detailPanelRatio.coerceAtLeast(0.05f))
+                        .fillMaxHeight(),
                 color = theme.rowBackground,
                 shape = winShape(4.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, theme.borderColor),
@@ -402,10 +418,11 @@ fun DataTable(
     // 右键菜单 —— 浮在表格之上，不绑定具体行（位置由 ContextMenuState 记录）
     if (contextMenuState.visible) {
         val density = LocalDensity.current
-        val menuOffset = androidx.compose.ui.unit.DpOffset(
-            x = with(density) { contextMenuState.position.x.toDp() },
-            y = with(density) { contextMenuState.position.y.toDp() },
-        )
+        val menuOffset =
+            androidx.compose.ui.unit.DpOffset(
+                x = with(density) { contextMenuState.position.x.toDp() },
+                y = with(density) { contextMenuState.position.y.toDp() },
+            )
         DropdownMenu(
             expanded = true,
             onDismissRequest = { contextMenuState.dismiss() },
@@ -465,7 +482,10 @@ fun DataTable(
  * 100dp 大约容纳 13~14 个字符，够放下常见的列名（`last_login_at` 正好 13 个），
  * 也让一位数字看得清；再窄就得横滚才看得见，那不如一开始就给足宽度。
  */
-private fun contentWidthFor(columns: List<TableColumn>, viewport: Dp): Dp {
+private fun contentWidthFor(
+    columns: List<TableColumn>,
+    viewport: Dp,
+): Dp {
     if (columns.isEmpty()) return viewport
     val fixed = columns.fold(0.dp) { acc, c -> acc + (c.width ?: 0.dp) }
     val weightedCount = columns.count { it.width == null }
@@ -611,41 +631,42 @@ private fun TableHeader(
     contentWidth: Dp,
 ) {
     Row(
-        modifier = Modifier
-            // ⚠️ **`horizontalScroll` 必须排在 `width` 之前** —— 顺序反了会同时坏掉两件事，
-            // 而且坏得**很安静**：不报错、不塌成 0、只是列宽悄悄变成另一个数。
-            //
-            // `Modifier.width` 是**按传入约束钳位**的（`coerceIn(minWidth, maxWidth)`），
-            // 不是「设一个绝对宽度」。排在外面时它拿到的是父 `Column` 给的
-            // `maxWidth = 视口宽`，于是 `contentWidth` 被**钳回视口宽**：
-            //
-            // ```kotlin
-            //   .width(contentWidth)        // ← 2346dp 被 coerce 成 1024dp（视口宽）
-            //   .horizontalScroll(hScroll)  // ← 视口 = 1024dp，于是 weight 在 1024 里分
-            // ```
-            //
-            // 实测（`runComposeUiTest`，23 个加权列，视口 1024dp，contentWidth 2346dp）：
-            //
-            // | | 每列间距 | 每列宽 |
-            // |---|---|---|
-            // | 表头 | **43dp** | 44.5dp（1024 ÷ 23） |
-            // | 表体 | **102dp** | 102dp（2346 ÷ 23） |
-            //
-            // 两者的 `hScroll.maxValue` 都是 1322（= 2346 − 1024），所以**滚动量是对的**，
-            // 也正因如此 §9.24 那些断言「两种顺序下都 > 0」全绿 —— 43dp 当然 > 0。
-            // **表头与表体在用两套不同的宽度基准**，于是列名与数据列整体错位，
-            // 而表头每列只剩 44.5dp（扣掉左右各 8dp 内边距后文本区仅 28dp），
-            // `maxLines = 1` + `Ellipsis` 之下 22 个长列名被省略成看不出的一小截，
-            // 只有 `id` 这种短名字还认得出 —— 即 §9.24「表头只剩第一个列名」。
-            //
-            // 挪进滚动层后 `width` 拿到的是**无界**约束，`coerceIn` 不再钳它，
-            // 表头与表体用同一个 2346dp 基准分列，两者逐列对齐。
-            .horizontalScroll(hScroll)
-            .width(contentWidth)
-            .background(theme.headerBackground)
-            // 供 TableColumnAlignmentTest 量「表头是否真的能横滚」与表体位移是否一致
-            .testTag(TABLE_HEADER_TAG)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier =
+            Modifier
+                // ⚠️ **`horizontalScroll` 必须排在 `width` 之前** —— 顺序反了会同时坏掉两件事，
+                // 而且坏得**很安静**：不报错、不塌成 0、只是列宽悄悄变成另一个数。
+                //
+                // `Modifier.width` 是**按传入约束钳位**的（`coerceIn(minWidth, maxWidth)`），
+                // 不是「设一个绝对宽度」。排在外面时它拿到的是父 `Column` 给的
+                // `maxWidth = 视口宽`，于是 `contentWidth` 被**钳回视口宽**：
+                //
+                // ```kotlin
+                //   .width(contentWidth)        // ← 2346dp 被 coerce 成 1024dp（视口宽）
+                //   .horizontalScroll(hScroll)  // ← 视口 = 1024dp，于是 weight 在 1024 里分
+                // ```
+                //
+                // 实测（`runComposeUiTest`，23 个加权列，视口 1024dp，contentWidth 2346dp）：
+                //
+                // | | 每列间距 | 每列宽 |
+                // |---|---|---|
+                // | 表头 | **43dp** | 44.5dp（1024 ÷ 23） |
+                // | 表体 | **102dp** | 102dp（2346 ÷ 23） |
+                //
+                // 两者的 `hScroll.maxValue` 都是 1322（= 2346 − 1024），所以**滚动量是对的**，
+                // 也正因如此 §9.24 那些断言「两种顺序下都 > 0」全绿 —— 43dp 当然 > 0。
+                // **表头与表体在用两套不同的宽度基准**，于是列名与数据列整体错位，
+                // 而表头每列只剩 44.5dp（扣掉左右各 8dp 内边距后文本区仅 28dp），
+                // `maxLines = 1` + `Ellipsis` 之下 22 个长列名被省略成看不出的一小截，
+                // 只有 `id` 这种短名字还认得出 —— 即 §9.24「表头只剩第一个列名」。
+                //
+                // 挪进滚动层后 `width` 拿到的是**无界**约束，`coerceIn` 不再钳它，
+                // 表头与表体用同一个 2346dp 基准分列，两者逐列对齐。
+                .horizontalScroll(hScroll)
+                .width(contentWidth)
+                .background(theme.headerBackground)
+                // 供 TableColumnAlignmentTest 量「表头是否真的能横滚」与表体位移是否一致
+                .testTag(TABLE_HEADER_TAG)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TableRowCells(columns = columns, theme = theme) { column, modifier ->
@@ -680,10 +701,11 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
 ) {
     if (rows.isEmpty()) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(32.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(32.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(str(StrKey.EMPTY_DATA), style = MaterialTheme.typography.bodyMedium)
@@ -691,12 +713,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
         return
     }
     LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f)
-            // 与表头共用：横向滚动一份状态，列名与数据列永远对齐
-            .horizontalScroll(hScroll)
-            .testTag(TABLE_BODY_TAG),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                // 与表头共用：横向滚动一份状态，列名与数据列永远对齐
+                .horizontalScroll(hScroll)
+                .testTag(TABLE_BODY_TAG),
     ) {
         itemsIndexed(items = rows, key = { _, row -> row.id }) { index, row ->
             val isSelected = row.id == selectedRowId
@@ -763,11 +786,12 @@ private fun TableRowView(
     /** 行宽 —— 见 [contentWidthFor]。 */
     contentWidth: Dp,
 ) {
-    val background = when {
-        isSelected -> theme.rowBackgroundSelected
-        isAlternate && theme.rowBackgroundAlt != null -> theme.rowBackgroundAlt
-        else -> theme.rowBackground
-    }
+    val background =
+        when {
+            isSelected -> theme.rowBackgroundSelected
+            isAlternate && theme.rowBackgroundAlt != null -> theme.rowBackgroundAlt
+            else -> theme.rowBackground
+        }
     val cellStyle = if (isSelected && theme.cellTextSelected != null) theme.cellTextSelected else theme.cellText
 
     // 正在编辑的单元格列 key —— 提升到**行**这一层而不是各自 remember：
@@ -787,14 +811,15 @@ private fun TableRowView(
     // 即整表不再横向溢出）—— 12 列 × 140dp 的定宽列宽被压没了。
     // 「把 SelectionContainer 挪进 Row 里、只包单元格」这个看起来无害的重构，
     // 改变了受约束节点的测量链。
-    val rowModifier = Modifier
-        // ⚠️ **不能**用 `fillMaxWidth()`：本行在 `horizontalScroll` 里，拿到的是无界宽度，
-        // fillMaxWidth 会静默失效，整行收缩成一个字符宽、几列叠在一起（见 [contentWidthFor]）。
-        .width(contentWidth)
-        .background(background)
-        .then(if (editable) Modifier else Modifier.clickable(onClick = onClick))
-        .onRightClick { offset -> contextMenuState.show(offset, row) }
-        .padding(horizontal = 12.dp, vertical = 8.dp)
+    val rowModifier =
+        Modifier
+            // ⚠️ **不能**用 `fillMaxWidth()`：本行在 `horizontalScroll` 里，拿到的是无界宽度，
+            // fillMaxWidth 会静默失效，整行收缩成一个字符宽、几列叠在一起（见 [contentWidthFor]）。
+            .width(contentWidth)
+            .background(background)
+            .then(if (editable) Modifier else Modifier.clickable(onClick = onClick))
+            .onRightClick { offset -> contextMenuState.show(offset, row) }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
 
     @Composable
     fun RowScope.rowContent() {
@@ -826,18 +851,19 @@ private fun TableRowView(
                     //
                     // 为什么不是双击：双击要先等判定间隔、且与「选中行」这个高频动作
                     // 语义重叠 —— 用户在可编辑表格里点一下就想改值，选中行是**浏览**态才需要的。
-                    cellModifier = if (editable) {
-                        Modifier
-                            .testTag(TABLE_CELL_TAG_PREFIX + column.key)
-                            .pointerInput(row.id, column.key) {
-                                detectTapGestures(
-                                    onTap = { editingColumn = column.key },
-                                    onDoubleTap = { editingColumn = column.key },
-                                )
-                            }
-                    } else {
-                        Modifier
-                    },
+                    cellModifier =
+                        if (editable) {
+                            Modifier
+                                .testTag(TABLE_CELL_TAG_PREFIX + column.key)
+                                .pointerInput(row.id, column.key) {
+                                    detectTapGestures(
+                                        onTap = { editingColumn = column.key },
+                                        onDoubleTap = { editingColumn = column.key },
+                                    )
+                                }
+                        } else {
+                            Modifier
+                        },
                 )
             }
         }
@@ -904,36 +930,47 @@ private fun CellEditor(
         onValueChange = { text = it },
         singleLine = true,
         textStyle = theme.cellText,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = theme.cellEditingBackground,
-            unfocusedContainerColor = theme.cellEditingBackground,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-        ),
-        modifier = modifier
-            .focusRequester(focusRequester)
-            .onFocusChanged { focused = it.isFocused }
-            // 显式补 `SetText` 语义。
-            //
-            // `TextField` 内部把输入语义挂在**它自己的**子节点上，而这里的
-            // `modifier`（列宽约束）来自 `TableRowCells`，两者不在同一层 ——
-            // 于是从表格这一侧用 `hasSetTextAction()` 找不到可编辑目标，
-            // 读屏软件同样会认为这格「只是个文字」。
-            .semantics {
-                setText { new ->
-                    // 入参是 AnnotatedString（与 `TextField` 内部同名回调一致），
-                    // 状态里存的是 String，这里取 .text
-                    text = new.text
-                    true
-                }
-            }
-            .onPreviewKeyEvent { e ->
-                when (e.key) {
-                    Key.Enter -> { onCommit(text); true }
-                    Key.Escape -> { onCancel(); true }
-                    else -> false
-                }
-            },
+        colors =
+            TextFieldDefaults.colors(
+                focusedContainerColor = theme.cellEditingBackground,
+                unfocusedContainerColor = theme.cellEditingBackground,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+        modifier =
+            modifier
+                .focusRequester(focusRequester)
+                .onFocusChanged { focused = it.isFocused }
+                // 显式补 `SetText` 语义。
+                //
+                // `TextField` 内部把输入语义挂在**它自己的**子节点上，而这里的
+                // `modifier`（列宽约束）来自 `TableRowCells`，两者不在同一层 ——
+                // 于是从表格这一侧用 `hasSetTextAction()` 找不到可编辑目标，
+                // 读屏软件同样会认为这格「只是个文字」。
+                .semantics {
+                    setText { new ->
+                        // 入参是 AnnotatedString（与 `TextField` 内部同名回调一致），
+                        // 状态里存的是 String，这里取 .text
+                        text = new.text
+                        true
+                    }
+                }.onPreviewKeyEvent { e ->
+                    when (e.key) {
+                        Key.Enter -> {
+                            onCommit(text)
+                            true
+                        }
+
+                        Key.Escape -> {
+                            onCancel()
+                            true
+                        }
+
+                        else -> {
+                            false
+                        }
+                    }
+                },
     )
 }
 
@@ -961,10 +998,12 @@ private fun RowScope.TableRowCells(
             column,
             if (column.width != null) Modifier.width(column.width) else Modifier.weight(column.weight),
         )
-        if (column != columns.last()) VerticalDivider(
-            color = theme.borderColor,
-            modifier = Modifier.height(20.dp),
-        )
+        if (column != columns.last()) {
+            VerticalDivider(
+                color = theme.borderColor,
+                modifier = Modifier.height(20.dp),
+            )
+        }
     }
 }
 
@@ -991,15 +1030,17 @@ private fun TableCell(
         // ⚠️ `modifier`（含 `Modifier.weight(...)`）必须排在这两者**之前**。
         // 顺序不是随意的：`weight` 依赖 RowScope，插在中间的节点修饰符会截断它，
         // 表现为所有列宽塌成内容宽、整表不再横向溢出。
-        modifier = modifier
-            .then(cellModifier)
-            .padding(horizontal = 8.dp),
-        contentAlignment = when (column.alignment) {
-            TextAlign.Start, TextAlign.Left -> Alignment.CenterStart
-            TextAlign.End, TextAlign.Right -> Alignment.CenterEnd
-            TextAlign.Center -> Alignment.Center
-            else -> Alignment.CenterStart
-        },
+        modifier =
+            modifier
+                .then(cellModifier)
+                .padding(horizontal = 8.dp),
+        contentAlignment =
+            when (column.alignment) {
+                TextAlign.Start, TextAlign.Left -> Alignment.CenterStart
+                TextAlign.End, TextAlign.Right -> Alignment.CenterEnd
+                TextAlign.Center -> Alignment.Center
+                else -> Alignment.CenterStart
+            },
     ) {
         Text(
             text = text,
@@ -1031,11 +1072,12 @@ private fun TablePagination(
         // 窄容器下隐藏「首页 / 末页 / 共 N 条」—— 见 [PAGINATION_COMPACT_WIDTH] 的说明。
         val compact = maxWidth < PAGINATION_COMPACT_WIDTH
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(theme.paginationBackground)
-                .testTag(TABLE_PAGINATION_TAG)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .background(theme.paginationBackground)
+                    .testTag(TABLE_PAGINATION_TAG)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 左组 `weight(1f, fill = false)`：`Row` 先测量无 weight 的子项，右组因此
@@ -1149,7 +1191,12 @@ private fun TablePagination(
  * 不是缺陷修复，等它真的成为问题再说。
  */
 @Composable
-private fun NavButton(label: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
+private fun NavButton(
+    label: String,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit,
+) {
     WinButton(
         onClick = onClick,
         enabled = enabled,
@@ -1176,9 +1223,10 @@ fun DefaultDetailPanel(
     theme: DataTableTheme,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp),
     ) {
         Text(
             text = str(StrKey.DETAIL),
@@ -1200,9 +1248,10 @@ fun DefaultDetailPanel(
         } else {
             SelectionContainer {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
                 ) {
                     DetailField(str(StrKey.PRIMARY_KEY), row.id.toString(), theme)
                     WinDivider(color = theme.borderColor, modifier = Modifier.padding(vertical = 4.dp))
@@ -1217,7 +1266,11 @@ fun DefaultDetailPanel(
 }
 
 @Composable
-private fun DetailField(label: String, value: String, theme: DataTableTheme) {
+private fun DetailField(
+    label: String,
+    value: String,
+    theme: DataTableTheme,
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = label,
@@ -1249,19 +1302,20 @@ private fun previewUsers(count: Int = 1000): List<TableRow> =
         )
     }
 
-private val PREVIEW_COLUMNS = listOf(
-    TableColumn(key = "id", header = "ID", width = 80.dp, alignment = TextAlign.End),
-    TableColumn(key = "name", header = "姓名"),
-    TableColumn(key = "email", header = "邮箱"),
-    TableColumn(key = "age", header = "年龄", width = 80.dp, alignment = TextAlign.End),
-    TableColumn(
-        key = "active",
-        header = "状态",
-        width = 80.dp,
-        alignment = TextAlign.Center,
-        formatter = { if (it == true) "✓" else "✗" },
-    ),
-)
+private val PREVIEW_COLUMNS =
+    listOf(
+        TableColumn(key = "id", header = "ID", width = 80.dp, alignment = TextAlign.End),
+        TableColumn(key = "name", header = "姓名"),
+        TableColumn(key = "email", header = "邮箱"),
+        TableColumn(key = "age", header = "年龄", width = 80.dp, alignment = TextAlign.End),
+        TableColumn(
+            key = "active",
+            header = "状态",
+            width = 80.dp,
+            alignment = TextAlign.Center,
+            formatter = { if (it == true) "✓" else "✗" },
+        ),
+    )
 
 /**
  * 默认浅色主题预览 — 1000 行用户数据演示虚拟滚动。
@@ -1330,7 +1384,7 @@ private fun DataTableContextMenuPreview() {
                 text = { Text("删除 ${row?.id ?: ""}") },
                 onClick = { },
             )
-        }
+        },
     )
 }
 

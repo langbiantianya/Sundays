@@ -26,7 +26,6 @@ import kotlin.test.assertTrue
  * `user.home` 指向临时目录，绝不碰真实的 `~/.config/sundays/`。
  */
 class SettingsStorageTest {
-
     private lateinit var tempHome: String
     private lateinit var originalHome: String
 
@@ -86,11 +85,12 @@ class SettingsStorageTest {
     @Test
     fun all_three_axes_survive_together() {
         // 三轴同时非默认 —— 抓「只存了其中一个字段」这类漏写
-        val settings = AppSettings(
-            palette = ThemePalette.CYBERPUNK,
-            themeMode = ThemeMode.DARK,
-            systemInfoRefresh = SystemInfoRefresh.S1,
-        )
+        val settings =
+            AppSettings(
+                palette = ThemePalette.CYBERPUNK,
+                themeMode = ThemeMode.DARK,
+                systemInfoRefresh = SystemInfoRefresh.S1,
+            )
         SettingsStorage.save(settings)
         assertEquals(settings, SettingsStorage.load(), "三项设置必须一起往返")
     }
@@ -106,12 +106,13 @@ class SettingsStorageTest {
 
     @Test
     fun every_axis_survives_together() {
-        val settings = AppSettings(
-            palette = ThemePalette.WIN_XP,
-            themeMode = ThemeMode.LIGHT,
-            systemInfoRefresh = SystemInfoRefresh.S5,
-            compactMode = true,
-        )
+        val settings =
+            AppSettings(
+                palette = ThemePalette.WIN_XP,
+                themeMode = ThemeMode.LIGHT,
+                systemInfoRefresh = SystemInfoRefresh.S5,
+                compactMode = true,
+            )
         SettingsStorage.save(settings)
         assertEquals(settings, SettingsStorage.load(), "全部设置项必须一起往返")
     }

@@ -10,6 +10,7 @@ package com.langbiantianya.sundays.editor.formatter
 
 import com.langbiantianya.sundays.editor.CodeLanguageRegistry
 import com.langbiantianya.sundays.editor.TokenType
+
 /**
  * Lua 代码格式化器 — **轻量级规范化**（**安全优先** — 不会破坏代码）：
  *
@@ -34,7 +35,6 @@ import com.langbiantianya.sundays.editor.TokenType
 class LuaFormatter(
     private val normalizeCase: Boolean = false,
 ) : CodeFormatter {
-
     override val languageId: String = "lua"
 
     override fun format(source: String): String {
@@ -50,11 +50,15 @@ class LuaFormatter(
         var prevText: String? = null
         var prevType: TokenType? = null
 
-        fun emit(type: TokenType, text: String) {
+        fun emit(
+            type: TokenType,
+            text: String,
+        ) {
             val left = prevText
             if (!atLineStart && left != null) {
-                val glued = TokenSpacing.bindsRight(left, prevType!!) ||
-                    TokenSpacing.bindsLeft(text, type, left, prevType, EXTRA_TIGHT)
+                val glued =
+                    TokenSpacing.bindsRight(left, prevType!!) ||
+                        TokenSpacing.bindsLeft(text, type, left, prevType, EXTRA_TIGHT)
                 if (!glued) sb.append(' ')
             }
             sb.append(text)
@@ -76,14 +80,25 @@ class LuaFormatter(
                     }
                     // 同行内的空白不携带信息 —— 贴不贴只看 token 身份（见 [TokenSpacing]）
                 }
+
                 // 注释内容原样搬，只清行尾空白
-                TokenType.COMMENT -> emit(TokenType.COMMENT, stripTrailingSpacePerLine(token.text))
-                TokenType.STRING, TokenType.ERROR -> emit(token.type, token.text)
-                TokenType.KEYWORD ->
+                TokenType.COMMENT -> {
+                    emit(TokenType.COMMENT, stripTrailingSpacePerLine(token.text))
+                }
+
+                TokenType.STRING, TokenType.ERROR -> {
+                    emit(token.type, token.text)
+                }
+
+                TokenType.KEYWORD -> {
                     emit(TokenType.KEYWORD, if (normalizeCase) token.text.lowercase() else token.text)
+                }
+
                 TokenType.IDENTIFIER, TokenType.BUILTIN, TokenType.TYPE, TokenType.NUMBER,
                 TokenType.OPERATOR, TokenType.PUNCTUATION,
-                -> emit(token.type, token.text)
+                -> {
+                    emit(token.type, token.text)
+                }
             }
         }
         return sb.toString().trimEnd()
@@ -95,8 +110,7 @@ class LuaFormatter(
      * 单行注释的尾随空白最容易漏（写完随手敲空格），旧实现在无换行时直接原样返回，
      * 格式化后行尾仍挂着空白，diff 全是噪音。
      */
-    private fun stripTrailingSpacePerLine(text: String): String =
-        text.trimEnd().split('\n').joinToString("\n") { it.trimEnd() }
+    private fun stripTrailingSpacePerLine(text: String): String = text.trimEnd().split('\n').joinToString("\n") { it.trimEnd() }
 
     companion object {
         /** Lua 私有的贴标点：方法调用冒号 `obj:method()` 两向都贴。 */
@@ -104,7 +118,10 @@ class LuaFormatter(
 
         /** 默认注册入口。 */
         fun register() {
-            CodeLanguageRegistry.register(com.langbiantianya.sundays.editor.language.LuaLanguage())
+            CodeLanguageRegistry.register(
+                com.langbiantianya.sundays.editor.language
+                    .LuaLanguage(),
+            )
             CodeFormatterRegistry.register(LuaFormatter())
         }
     }

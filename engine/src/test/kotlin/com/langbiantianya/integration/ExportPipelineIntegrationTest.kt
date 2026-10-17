@@ -8,8 +8,8 @@
 
 package com.langbiantianya.integration
 
-import com.langbiantianya.export.ExportSubProcess
 import com.langbiantianya.export.ExportProcessManager
+import com.langbiantianya.export.ExportSubProcess
 import com.langbiantianya.grpc.ExportCommand
 import com.langbiantianya.grpc.ExportHubGrpc
 import com.langbiantianya.grpc.ExportHubResponse
@@ -73,7 +73,6 @@ private const val HUB_HOST = "127.0.0.1"
  * 真要覆盖它，得先把「从 classes 目录也能起子进程」这件事做掉（另议）。
  */
 class ExportPipelineIntegrationTest : H2Fixture() {
-
     @TempDir
     lateinit var outDir: Path
 
@@ -98,63 +97,73 @@ class ExportPipelineIntegrationTest : H2Fixture() {
         executeUpdate("INSERT INTO export_items VALUES (1, '第一行', 12.50), (2, 'second, with comma', -3.00), (3, NULL, 0.00)")
     }
 
-    private fun exportRequest(sql: String, dir: File, name: String) =
-        com.langbiantianya.grpc.Request.newBuilder()
-            .setId(TestIds.next("r-exp"))
-            .setCategory(com.langbiantianya.grpc.Category.EXPORT)
-            .setAction(com.langbiantianya.grpc.Action.RUN_EXPORT)
-            .setConnection(config)
-            .setExportRequest(
-                com.langbiantianya.grpc.ExportRequest.newBuilder()
-                    .setRunExport(
-                        com.langbiantianya.grpc.ExportRunRequest.newBuilder()
-                            .setSql(sql)
-                            .setOutputDir(dir.absolutePath)
-                            .setFileName(name)
-                            .setFormat("CSV")
-                            .build()
-                    )
-                    .build()
-            )
-            .build()
+    private fun exportRequest(
+        sql: String,
+        dir: File,
+        name: String,
+    ) = com.langbiantianya.grpc.Request
+        .newBuilder()
+        .setId(TestIds.next("r-exp"))
+        .setCategory(com.langbiantianya.grpc.Category.EXPORT)
+        .setAction(com.langbiantianya.grpc.Action.RUN_EXPORT)
+        .setConnection(config)
+        .setExportRequest(
+            com.langbiantianya.grpc.ExportRequest
+                .newBuilder()
+                .setRunExport(
+                    com.langbiantianya.grpc.ExportRunRequest
+                        .newBuilder()
+                        .setSql(sql)
+                        .setOutputDir(dir.absolutePath)
+                        .setFileName(name)
+                        .setFormat("CSV")
+                        .build(),
+                ).build(),
+        ).build()
 
     // ---------------------------------------------------------------------
     // ① 引擎本体：真连库、真写文件
     // ---------------------------------------------------------------------
 
     @Test
-    fun `subprocess export writes the file`() = runBlocking {
-        val frames = ExportHandler.executeAsSubprocess(
-            exportRequest("SELECT id, name, amount FROM export_items ORDER BY id", outDir.toFile(), "items.csv")
-        ).toList()
+    fun `subprocess export writes the file`() =
+        runBlocking {
+            val frames =
+                ExportHandler
+                    .executeAsSubprocess(
+                        exportRequest("SELECT id, name, amount FROM export_items ORDER BY id", outDir.toFile(), "items.csv"),
+                    ).toList()
 
-        val last = frames.last()
-        assertTrue(last.success, "导出应成功：success=false error=${last.error}")
+            val last = frames.last()
+            assertTrue(last.success, "导出应成功：success=false error=${last.error}")
 
-        val file = outDir.resolve("items.csv")
-        assertTrue(file.toFile().exists(), "文件没生成：${outDir.toAbsolutePath()} 下没有 items.csv")
+            val file = outDir.resolve("items.csv")
+            assertTrue(file.toFile().exists(), "文件没生成：${outDir.toAbsolutePath()} 下没有 items.csv")
 
-        // 内容也要看 —— 只断言「文件存在」的话，导出一个空文件也能过
-        val text = file.toFile().readText()
-        assertTrue(text.contains("第一行"), "中文没写进去：$text")
-        assertTrue(text.contains("-3.00"), "负数没写进去：$text")
-        assertTrue(text.contains("\"second, with comma\""), "含逗号的字段必须加引号：$text")
-    }
+            // 内容也要看 —— 只断言「文件存在」的话，导出一个空文件也能过
+            val text = file.toFile().readText()
+            assertTrue(text.contains("第一行"), "中文没写进去：$text")
+            assertTrue(text.contains("-3.00"), "负数没写进去：$text")
+            assertTrue(text.contains("\"second, with comma\""), "含逗号的字段必须加引号：$text")
+        }
 
     @Test
-    fun `a bad output directory fails loudly instead of silently`() = runBlocking {
-        val frames = ExportHandler.executeAsSubprocess(
-            exportRequest("SELECT 1", File("Z:/definitely/not/here"), "x.csv")
-        ).toList()
+    fun `a bad output directory fails loudly instead of silently`() =
+        runBlocking {
+            val frames =
+                ExportHandler
+                    .executeAsSubprocess(
+                        exportRequest("SELECT 1", File("Z:/definitely/not/here"), "x.csv"),
+                    ).toList()
 
-        val last = frames.last()
-        // 这条钉的是 §9.13 的教训：**任何一步炸了都必须变成一帧可见的失败**
-        assertEquals(true, last.end, "失败也必须收口（end=true），否则上游永远等着")
-        assertTrue(
-            !last.success && last.error.isNotBlank(),
-            "写不了目录必须报出原因，而不是「什么都没发生」：success=${last.success} error='${last.error}'",
-        )
-    }
+            val last = frames.last()
+            // 这条钉的是 §9.13 的教训：**任何一步炸了都必须变成一帧可见的失败**
+            assertEquals(true, last.end, "失败也必须收口（end=true），否则上游永远等着")
+            assertTrue(
+                !last.success && last.error.isNotBlank(),
+                "写不了目录必须报出原因，而不是「什么都没发生」：success=${last.success} error='${last.error}'",
+            )
+        }
 
     // ---------------------------------------------------------------------
     // ② gRPC ExportHub 通道：命令下去，帧要回来
@@ -185,19 +194,24 @@ class ExportPipelineIntegrationTest : H2Fixture() {
             val gotAny = AtomicReference(false)
 
             val stub = ExportHubGrpc.newStub(channel)
-            val commands = stub.stream(object : StreamObserver<ExportHubResponse> {
-                override fun onNext(value: ExportHubResponse) {
-                    gotAny.set(true)
-                    lastFrame.set(value)
-                    if (value.end) done.countDown()
-                }
+            val commands =
+                stub.stream(
+                    object : StreamObserver<ExportHubResponse> {
+                        override fun onNext(value: ExportHubResponse) {
+                            gotAny.set(true)
+                            lastFrame.set(value)
+                            if (value.end) done.countDown()
+                        }
 
-                override fun onError(t: Throwable) = done.countDown()
-                override fun onCompleted() = done.countDown()
-            })
+                        override fun onError(t: Throwable) = done.countDown()
+
+                        override fun onCompleted() = done.countDown()
+                    },
+                )
 
             commands.onNext(
-                ExportCommand.newBuilder()
+                ExportCommand
+                    .newBuilder()
                     .setKind(ExportCommand.Kind.START_EXPORT)
                     .setId("export-it-1")
                     .setConnection(config)
@@ -205,7 +219,7 @@ class ExportPipelineIntegrationTest : H2Fixture() {
                     .putPayload("outputDir", stringValue(outDir.toFile().absolutePath))
                     .putPayload("fileName", stringValue("hub.csv"))
                     .putPayload("format", stringValue("CSV"))
-                    .build()
+                    .build(),
             )
 
             val finished = done.await(30, TimeUnit.SECONDS)
@@ -238,7 +252,10 @@ class ExportPipelineIntegrationTest : H2Fixture() {
      * 轮询 TCP 能连上才是可靠判据：连上了就说明对面已经 accept。
      * 这也是生产代码 `ExportProcessManager.awaitHubReadyOrReportFailure` 的做法。
      */
-    private fun awaitPort(port: Int, timeoutMs: Long = 20_000): Boolean {
+    private fun awaitPort(
+        port: Int,
+        timeoutMs: Long = 20_000,
+    ): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val up = runCatching { java.net.Socket(HUB_HOST, port).use { true } }.getOrDefault(false)
@@ -285,25 +302,29 @@ class ExportPipelineIntegrationTest : H2Fixture() {
             val streamErrors = ConcurrentLinkedQueue<String>()
 
             val stub = ExportHubGrpc.newStub(channel)
-            val commands = stub.stream(object : StreamObserver<ExportHubResponse> {
-                override fun onNext(value: ExportHubResponse) {
-                    lastFrame[value.id] = value
-                    if (value.end) done.countDown()
-                }
+            val commands =
+                stub.stream(
+                    object : StreamObserver<ExportHubResponse> {
+                        override fun onNext(value: ExportHubResponse) {
+                            lastFrame[value.id] = value
+                            if (value.end) done.countDown()
+                        }
 
-                override fun onError(t: Throwable) {
-                    streamErrors.add(t.message ?: t.toString())
-                    // 流一挂，所有在等的都放行，否则测试只能等到超时
-                    repeat(concurrent) { done.countDown() }
-                }
+                        override fun onError(t: Throwable) {
+                            streamErrors.add(t.message ?: t.toString())
+                            // 流一挂，所有在等的都放行，否则测试只能等到超时
+                            repeat(concurrent) { done.countDown() }
+                        }
 
-                override fun onCompleted() = repeat(concurrent) { done.countDown() }
-            })
+                        override fun onCompleted() = repeat(concurrent) { done.countDown() }
+                    },
+                )
 
             // 连发 N 条真导出 —— 子进程会并发处理它们
             (1..concurrent).forEach { n ->
                 commands.onNext(
-                    ExportCommand.newBuilder()
+                    ExportCommand
+                        .newBuilder()
                         .setKind(ExportCommand.Kind.START_EXPORT)
                         .setId("conc-$n")
                         .setConnection(config)
@@ -311,7 +332,7 @@ class ExportPipelineIntegrationTest : H2Fixture() {
                         .putPayload("outputDir", stringValue(outDir.toFile().absolutePath))
                         .putPayload("fileName", stringValue("conc-$n.csv"))
                         .putPayload("format", stringValue("CSV"))
-                        .build()
+                        .build(),
                 )
             }
 
@@ -323,8 +344,9 @@ class ExportPipelineIntegrationTest : H2Fixture() {
 
             // 每一个都必须以「成功 + 结束帧」收场，且文件真的在
             (1..concurrent).forEach { n ->
-                val frame = lastFrame["conc-$n"]
-                    ?: error("conc-$n 一帧都没回来 —— 它的导出被别的并发导出挤掉了")
+                val frame =
+                    lastFrame["conc-$n"]
+                        ?: error("conc-$n 一帧都没回来 —— 它的导出被别的并发导出挤掉了")
                 assertTrue(frame.success, "conc-$n 失败：error='${frame.error}'")
                 assertTrue(frame.end, "conc-$n 没有结束帧")
                 assertTrue(
@@ -339,7 +361,10 @@ class ExportPipelineIntegrationTest : H2Fixture() {
     }
 
     private fun stringValue(v: String): com.google.protobuf.Value =
-        com.google.protobuf.Value.newBuilder().setStringValue(v).build()
+        com.google.protobuf.Value
+            .newBuilder()
+            .setStringValue(v)
+            .build()
 
     // ---------------------------------------------------------------------
     // ④ 通道可用性：断流之后必须能自愈
@@ -370,47 +395,51 @@ class ExportPipelineIntegrationTest : H2Fixture() {
     }
 
     @Test
-    fun `流丢了之后下一次导出必须自愈而不是报通道未就绪`() = runBlocking {
-        // ## 这条对「把判据写回 isRunning」是**红**的
-        //
-        // 摆出漂移态（进程在、流没了），然后走**父进程**路径真跑一次导出。
-        // 判据写错时：[ensureSubprocessRunning] 直接 return → startExport 拿到
-        // null observer → 回「导出子进程通道未就绪（ExportHub 未连接）」；
-        // 判据正确时：重建流 → 命令发得出去 → 文件真的写出来。
-        //
-        // ⚠️ 必须走 [ExportHandler.executeInMainProcess] 而不是 `executeAsSubprocess`：
-        // 后者是**子进程侧**入口，直接调 `ExportEngine.export`，**根本不碰**
-        // `ExportProcessManager` —— 第一版用了它，于是永远成功、0.09 秒跑完，
-        // 判据写对写错都是绿的。测「建流判据」就得测**编排那一侧**。
-        //
-        // 断言的是**文件是否存在**而不是「有没有报错」——
-        // 后者对「换个错法继续失败」没抵抗力。
-        val dir = java.nio.file.Files.createTempDirectory("sundays-heal").toFile()
-        try {
-            // ⚠️ 必须先 `stop()` 清残留：[ExportProcessManager] 是单例，
-            // 其它用例起过子进程、结束时 `stop()` —— 谁后跑状态就不一样。
-            // 而 `stop()` 在 `_isRunning` 已是 false 时会**提前 return、不清 observer**，
-            // 所以还要显式摆一次漂移态。
-            ExportProcessManager.stop()
-            ExportProcessManager.simulateStreamLostWhileProcessAlive()
-            assertTrue(ExportProcessManager.isRunning, "漂移态：进程标记为真")
-            assertFalse(ExportProcessManager.hasUsableChannel, "漂移态：流确实没有")
+    fun `流丢了之后下一次导出必须自愈而不是报通道未就绪`() =
+        runBlocking {
+            // ## 这条对「把判据写回 isRunning」是**红**的
+            //
+            // 摆出漂移态（进程在、流没了），然后走**父进程**路径真跑一次导出。
+            // 判据写错时：[ensureSubprocessRunning] 直接 return → startExport 拿到
+            // null observer → 回「导出子进程通道未就绪（ExportHub 未连接）」；
+            // 判据正确时：重建流 → 命令发得出去 → 文件真的写出来。
+            //
+            // ⚠️ 必须走 [ExportHandler.executeInMainProcess] 而不是 `executeAsSubprocess`：
+            // 后者是**子进程侧**入口，直接调 `ExportEngine.export`，**根本不碰**
+            // `ExportProcessManager` —— 第一版用了它，于是永远成功、0.09 秒跑完，
+            // 判据写对写错都是绿的。测「建流判据」就得测**编排那一侧**。
+            //
+            // 断言的是**文件是否存在**而不是「有没有报错」——
+            // 后者对「换个错法继续失败」没抵抗力。
+            val dir =
+                java.nio.file.Files
+                    .createTempDirectory("sundays-heal")
+                    .toFile()
+            try {
+                // ⚠️ 必须先 `stop()` 清残留：[ExportProcessManager] 是单例，
+                // 其它用例起过子进程、结束时 `stop()` —— 谁后跑状态就不一样。
+                // 而 `stop()` 在 `_isRunning` 已是 false 时会**提前 return、不清 observer**，
+                // 所以还要显式摆一次漂移态。
+                ExportProcessManager.stop()
+                ExportProcessManager.simulateStreamLostWhileProcessAlive()
+                assertTrue(ExportProcessManager.isRunning, "漂移态：进程标记为真")
+                assertFalse(ExportProcessManager.hasUsableChannel, "漂移态：流确实没有")
 
-            val frames = ExportHandler.executeInMainProcess(exportRequest("SELECT 1", dir, "healed.csv")).toList()
-            val last = frames.last()
-            assertTrue(
-                last.success,
-                "漂移态下应当重建流并成功导出，而不是「通道未就绪」：error='${last.error}'",
-            )
-            assertTrue(
-                File(dir, "healed.csv").exists(),
-                "文件应已生成：${dir.absolutePath}",
-            )
-        } finally {
-            runCatching { ExportProcessManager.stop() }
-            dir.deleteRecursively()
+                val frames = ExportHandler.executeInMainProcess(exportRequest("SELECT 1", dir, "healed.csv")).toList()
+                val last = frames.last()
+                assertTrue(
+                    last.success,
+                    "漂移态下应当重建流并成功导出，而不是「通道未就绪」：error='${last.error}'",
+                )
+                assertTrue(
+                    File(dir, "healed.csv").exists(),
+                    "文件应已生成：${dir.absolutePath}",
+                )
+            } finally {
+                runCatching { ExportProcessManager.stop() }
+                dir.deleteRecursively()
+            }
         }
-    }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }

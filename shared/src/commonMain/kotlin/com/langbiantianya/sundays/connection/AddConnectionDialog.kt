@@ -89,9 +89,10 @@ fun AddConnectionDialog(
             Column(modifier = Modifier.fillMaxSize()) {
                 // 标题栏：标题 + 关闭按钮（Material3 AlertDialog 原先自带的这两个槽位，这里自行提供）
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -128,9 +129,10 @@ fun AddConnectionDialog(
                     onTestConnection = onTestConnection,
                     onConnect = onConnect,
                     onDisconnect = onDisconnect,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                 )
             }
         }

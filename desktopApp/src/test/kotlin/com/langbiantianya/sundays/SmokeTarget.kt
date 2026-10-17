@@ -84,11 +84,16 @@ interface SmokeTarget {
      * 事务用例靠它判「未提交的数据对别人不可见」——**这必须在引擎之外看**，
      * 在引擎里看只能看到自己那个会话，永远「可见」。
      */
-    fun count(workspace: String, table: String, where: String = "1 = 1"): Int =
+    fun count(
+        workspace: String,
+        table: String,
+        where: String = "1 = 1",
+    ): Int =
         direct(workspace).use { c ->
             c.createStatement().use { s ->
                 s.executeQuery("SELECT COUNT(*) FROM $table WHERE $where").use { rs ->
-                    rs.next(); rs.getInt(1)
+                    rs.next()
+                    rs.getInt(1)
                 }
             }
         }
@@ -99,12 +104,16 @@ interface SmokeTarget {
      * **刻意不用 `INFORMATION_SCHEMA`** —— 那是 H2 专有的元数据视图，SQLite 上直接语法错。
      * 改成「直接查它，查得动就说明表还在」：这本来就是要回答的问题，且全方言通用。
      */
-    fun tableExists(workspace: String, table: String): Boolean = runCatching {
-        direct(workspace).use { c ->
-            c.createStatement().use { s -> s.executeQuery("SELECT COUNT(*) FROM $table").use { it.next() } }
-        }
-        true
-    }.getOrDefault(false)
+    fun tableExists(
+        workspace: String,
+        table: String,
+    ): Boolean =
+        runCatching {
+            direct(workspace).use { c ->
+                c.createStatement().use { s -> s.executeQuery("SELECT COUNT(*) FROM $table").use { it.next() } }
+            }
+            true
+        }.getOrDefault(false)
 
     /**
      * 引擎能不能回**真实的**外键约束名 —— 且是不是**用户给的那个**名字。
@@ -127,7 +136,9 @@ interface SmokeTarget {
  */
 abstract class LocalSmokeTarget : SmokeTarget {
     override fun reachable(): Boolean = true
+
     override fun provision(scope: File): String = ""
+
     override fun teardown(workspace: String) = Unit
 
     /** 让参数化测试的名字读起来是 `[H2]` 而不是 `[H2Smoke@1f2a3b]`。 */
@@ -150,10 +161,15 @@ object H2Smoke : LocalSmokeTarget() {
         url = "jdbc:h2:mem:smoke${System.nanoTime()};DB_CLOSE_DELAY=-1"
     }
 
-    override fun config(workspace: String) = ConnectionConfig(
-        id = "smoke-h2", name = "SmokeH2", dialect = DialectType.H2,
-        username = "sa", password = "", jdbcUrl = url,
-    )
+    override fun config(workspace: String) =
+        ConnectionConfig(
+            id = "smoke-h2",
+            name = "SmokeH2",
+            dialect = DialectType.H2,
+            username = "sa",
+            password = "",
+            jdbcUrl = url,
+        )
 
     override fun direct(workspace: String): Connection = DriverManager.getConnection(url, "sa", "")
 }
@@ -170,10 +186,15 @@ object SQLiteSmoke : LocalSmokeTarget() {
         url = "jdbc:sqlite:${f.absolutePath.replace('\\', '/')}"
     }
 
-    override fun config(workspace: String) = ConnectionConfig(
-        id = "smoke-sqlite", name = "SmokeSQLite", dialect = DialectType.SQLITE,
-        username = "", password = "", jdbcUrl = url,
-    )
+    override fun config(workspace: String) =
+        ConnectionConfig(
+            id = "smoke-sqlite",
+            name = "SmokeSQLite",
+            dialect = DialectType.SQLITE,
+            username = "",
+            password = "",
+            jdbcUrl = url,
+        )
 
     override fun direct(workspace: String): Connection = DriverManager.getConnection(url)
 
@@ -208,10 +229,16 @@ object DuckDbSmoke : SmokeTarget {
         file = null
     }
 
-    override fun config(workspace: String) = ConnectionConfig(
-        id = "smoke-duckdb", name = "SmokeDuckDB", dialect = DialectType.DUCKDB,
-        username = "", password = "", database = workspace, jdbcUrl = urlFor(workspace),
-    )
+    override fun config(workspace: String) =
+        ConnectionConfig(
+            id = "smoke-duckdb",
+            name = "SmokeDuckDB",
+            dialect = DialectType.DUCKDB,
+            username = "",
+            password = "",
+            database = workspace,
+            jdbcUrl = urlFor(workspace),
+        )
 
     /**
      * ⚠️ **必须显式传空用户名/密码**，不能只给 URL。
@@ -227,8 +254,7 @@ object DuckDbSmoke : SmokeTarget {
      *
      * （`SET schema` 不算配置，已单独验证过 —— 所以不必去对齐 search_path。）
      */
-    override fun direct(workspace: String): Connection =
-        DriverManager.getConnection(urlFor(workspace), "", "")
+    override fun direct(workspace: String): Connection = DriverManager.getConnection(urlFor(workspace), "", "")
 
     /** 见 [SmokeTarget.keepsUserGivenForeignKeyName]：DuckDB 忽略外键子句里的名字。 */
     override fun keepsUserGivenForeignKeyName(): Boolean = false
@@ -287,10 +313,11 @@ abstract class ServerSmokeTarget(
     /** 建库 / 连库时的引导库。 */
     private val bootstrapDb: String,
 ) : SmokeTarget {
-    override fun reachable(): Boolean = runCatching {
-        Socket().use { it.connect(InetSocketAddress(host, port), 2000) }
-        true
-    }.getOrDefault(false)
+    override fun reachable(): Boolean =
+        runCatching {
+            Socket().use { it.connect(InetSocketAddress(host, port), 2000) }
+            true
+        }.getOrDefault(false)
 
     protected abstract fun urlFor(database: String): String
 
@@ -308,15 +335,24 @@ abstract class ServerSmokeTarget(
      * （实测：`DialectSmokeTest` S3 一条红）。
      * 而视图恰恰是 S3 这条用例自己建的 —— 只清表就必然漏。
      */
-    protected abstract fun listViews(conn: Connection, workspace: String): List<String>
+    protected abstract fun listViews(
+        conn: Connection,
+        workspace: String,
+    ): List<String>
 
-    protected abstract fun listBaseTables(conn: Connection, workspace: String): List<String>
+    protected abstract fun listBaseTables(
+        conn: Connection,
+        workspace: String,
+    ): List<String>
 
     /**
      * 把上面那批对象一次性 DROP 掉。**必须视图在前、表在后** —— 视图依赖底下的表，
      * 反过来会被依赖挡住。多表单语句是有意为之：外键与视图的顺序问题一次解决。
      */
-    protected abstract fun dropStatements(views: List<String>, tables: List<String>): List<String>
+    protected abstract fun dropStatements(
+        views: List<String>,
+        tables: List<String>,
+    ): List<String>
 
     /** 见 [LocalSmokeTarget.toString]：让参数化测试的名字读起来是 `[MySQL]`。 */
     override fun toString(): String = label
@@ -382,44 +418,62 @@ object MySqlSmoke : ServerSmokeTarget("192.168.1.5", 3306, "root", "666666", "my
         }
     }
 
-    override fun listViews(conn: Connection, workspace: String): List<String> =
-        conn.prepareStatement(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
-                "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'VIEW'"
-        ).use { st ->
-            st.setString(1, workspace)
-            st.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
-        }
-
-    override fun listBaseTables(conn: Connection, workspace: String): List<String> =
-        conn.prepareStatement(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
-                "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'"
-        ).use { st ->
-            st.setString(1, workspace)
-            st.executeQuery().use { rs ->
-                buildList { while (rs.next()) add(rs.getString(1)) }
+    override fun listViews(
+        conn: Connection,
+        workspace: String,
+    ): List<String> =
+        conn
+            .prepareStatement(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'VIEW'",
+            ).use { st ->
+                st.setString(1, workspace)
+                st.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
             }
-        }
+
+    override fun listBaseTables(
+        conn: Connection,
+        workspace: String,
+    ): List<String> =
+        conn
+            .prepareStatement(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+            ).use { st ->
+                st.setString(1, workspace)
+                st.executeQuery().use { rs ->
+                    buildList { while (rs.next()) add(rs.getString(1)) }
+                }
+            }
 
     /**
      * 先关外键检查再一把 DROP 完 —— `smoke_child` 引用 `smoke_items`，
      * 不关的话单独 DROP 父表会被外键挡住，而「按依赖顺序排」在测试里维护不起。
      * 视图先删、基表后删（MySQL 里 `DROP VIEW` 与 `DROP TABLE` 不能混在一个语句里）。
      */
-    override fun dropStatements(views: List<String>, tables: List<String>): List<String> = buildList {
-        add("SET FOREIGN_KEY_CHECKS = 0")
-        if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) })
-        if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) })
-        add("SET FOREIGN_KEY_CHECKS = 1")
-    }
+    override fun dropStatements(
+        views: List<String>,
+        tables: List<String>,
+    ): List<String> =
+        buildList {
+            add("SET FOREIGN_KEY_CHECKS = 0")
+            if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) })
+            if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) })
+            add("SET FOREIGN_KEY_CHECKS = 1")
+        }
 
     override fun config(workspace: String): ConnectionConfig {
         val (u, p) = creds()
         return ConnectionConfig(
-            id = "smoke-mysql", name = "SmokeMySQL", dialect = DialectType.MYSQL,
-            host = "192.168.1.5", port = 3306, username = u, password = p,
-            database = workspace, connectionType = ConnectionType.CLIENT_SERVER,
+            id = "smoke-mysql",
+            name = "SmokeMySQL",
+            dialect = DialectType.MYSQL,
+            host = "192.168.1.5",
+            port = 3306,
+            username = u,
+            password = p,
+            database = workspace,
+            connectionType = ConnectionType.CLIENT_SERVER,
             jdbcUrl = urlFor(workspace),
         )
     }
@@ -450,24 +504,31 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5433, "postgres", "66666
      */
     override fun ensureDatabase(name: String) {
         boot().use { c ->
-            val exists = c.prepareStatement("SELECT 1 FROM pg_database WHERE datname = ?").use { st ->
-                st.setString(1, name)
-                st.executeQuery().use { it.next() }
-            }
+            val exists =
+                c.prepareStatement("SELECT 1 FROM pg_database WHERE datname = ?").use { st ->
+                    st.setString(1, name)
+                    st.executeQuery().use { it.next() }
+                }
             if (!exists) {
                 c.createStatement().use { it.execute("CREATE DATABASE ${quoteIdent(name)}") }
             }
         }
     }
 
-    override fun listViews(conn: Connection, workspace: String): List<String> =
+    override fun listViews(
+        conn: Connection,
+        workspace: String,
+    ): List<String> =
         conn.createStatement().use { s ->
             s.executeQuery("SELECT viewname FROM pg_views WHERE schemaname = 'public'").use { rs ->
                 buildList { while (rs.next()) add(rs.getString(1)) }
             }
         }
 
-    override fun listBaseTables(conn: Connection, workspace: String): List<String> =
+    override fun listBaseTables(
+        conn: Connection,
+        workspace: String,
+    ): List<String> =
         conn.createStatement().use { s ->
             // PG 里 database ≈ schema，用户表都在 public 下；`tablename` 只含基表
             s.executeQuery("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").use { rs ->
@@ -480,17 +541,27 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5433, "postgres", "66666
      * 不用在测试里维护拓扑。PG 里 `DROP TABLE ... CASCADE` 会连带把依赖它的视图一起带走，
      * 但视图先删更直白，也让「视图确实被显式删掉了」这件事看得见。
      */
-    override fun dropStatements(views: List<String>, tables: List<String>): List<String> = buildList {
-        if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) } + " CASCADE")
-        if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) } + " CASCADE")
-    }
+    override fun dropStatements(
+        views: List<String>,
+        tables: List<String>,
+    ): List<String> =
+        buildList {
+            if (views.isNotEmpty()) add("DROP VIEW IF EXISTS " + views.joinToString(", ") { quoteIdent(it) } + " CASCADE")
+            if (tables.isNotEmpty()) add("DROP TABLE IF EXISTS " + tables.joinToString(", ") { quoteIdent(it) } + " CASCADE")
+        }
 
     override fun config(workspace: String): ConnectionConfig {
         val (u, p) = creds()
         return ConnectionConfig(
-            id = "smoke-postgres", name = "SmokePG", dialect = DialectType.POSTGRESQL,
-            host = "192.168.1.5", port = 5433, username = u, password = p,
-            database = workspace, connectionType = ConnectionType.CLIENT_SERVER,
+            id = "smoke-postgres",
+            name = "SmokePG",
+            dialect = DialectType.POSTGRESQL,
+            host = "192.168.1.5",
+            port = 5433,
+            username = u,
+            password = p,
+            database = workspace,
+            connectionType = ConnectionType.CLIENT_SERVER,
             jdbcUrl = urlFor(workspace),
         )
     }
@@ -508,5 +579,4 @@ object PostgresSmoke : ServerSmokeTarget("192.168.1.5", 5433, "postgres", "66666
  * 才会暴露的东西（`CAST` 目标类型、DDL 隐式提交、标识符折叠、连接池 autoCommit 约定），
  * 本地嵌入式库一条都照不出来。
  */
-fun smokeTargets(): List<SmokeTarget> =
-    listOf(H2Smoke, SQLiteSmoke, DuckDbSmoke, MySqlSmoke, PostgresSmoke)
+fun smokeTargets(): List<SmokeTarget> = listOf(H2Smoke, SQLiteSmoke, DuckDbSmoke, MySqlSmoke, PostgresSmoke)

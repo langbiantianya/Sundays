@@ -185,7 +185,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 | 组件 | 一句话 | 关键点（详见 KDoc） | 源码 |
 |---|---|---|---|
-| `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenu.kt) |
+| `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenuState.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenuState.kt) |
 | `Modifier.onRightClick` | 右键检测 | 只在主指针通道消费；不复用 Foundation 的 `internal onRightClickDown`（跨模块不可见） | [`ui/RightClick.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/RightClick.kt) |
 | `DragHandle` | 可拖拽分隔条 | 受控组件（宽度归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位** | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
 | `FocusRing` | 可见焦点环 | 给「自带焦点能力、默认不画焦点指示」的容器补一圈焦点环 | [`ui/FocusRing.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/FocusRing.kt) |

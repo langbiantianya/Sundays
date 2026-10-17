@@ -29,22 +29,25 @@ import java.sql.Connection
  * DuckDB 1.5.5.1 严格校验同文件连接配置是否一致，混合 DriverManager + HikariCP 会失败。
  */
 abstract class DuckDBFixture {
-
     protected val dialect = DuckDBDialect()
-    // DuckDB 1.5.5.1 会拒绝打开 0 字节文件 —— 必须先建空路径再让 DuckDB自己创建
-    protected val dbFile: File = Files.createTempFile("duckdb-it-", ".duckdb").toFile().apply {
-        deleteOnExit()
-        delete()  // 删掉空文件，让 DuckDB 首次连接时创建
-    }
 
-    protected val config: ConnectionConfig = ConnectionConfig.newBuilder()
-        .setDriver("Duckdb")
-        .setHost("embedded")
-        .setPort(0)
-        .setUser("")
-        .setPassword("")
-        .setDatabase(dbFile.absolutePath)
-        .build()
+    // DuckDB 1.5.5.1 会拒绝打开 0 字节文件 —— 必须先建空路径再让 DuckDB自己创建
+    protected val dbFile: File =
+        Files.createTempFile("duckdb-it-", ".duckdb").toFile().apply {
+            deleteOnExit()
+            delete() // 删掉空文件，让 DuckDB 首次连接时创建
+        }
+
+    protected val config: ConnectionConfig =
+        ConnectionConfig
+            .newBuilder()
+            .setDriver("Duckdb")
+            .setHost("embedded")
+            .setPort(0)
+            .setUser("")
+            .setPassword("")
+            .setDatabase(dbFile.absolutePath)
+            .build()
 
     @BeforeEach
     fun registerDuckDBDialect() {
@@ -53,54 +56,69 @@ abstract class DuckDBFixture {
 
     @AfterEach
     fun cleanupDuckDB() {
-        try { PoolManager.closeAll() } catch (_: Exception) {}
-        try { dbFile.delete() } catch (_: Exception) {}
-        try { ExcelToDuckDbCache.cleanup() } catch (_: Exception) {}
+        try {
+            PoolManager.closeAll()
+        } catch (_: Exception) {
+        }
+        try {
+            dbFile.delete()
+        } catch (_: Exception) {
+        }
+        try {
+            ExcelToDuckDbCache.cleanup()
+        } catch (_: Exception) {
+        }
     }
 
     /** 走 PoolManager（dialect）的连接 —— 与其他 handler 测试的连接路径一致 */
     protected fun newConnection(): Connection = PoolManager.getConnection(config)
 
-    protected inline fun <R> withConnection(block: (Connection) -> R): R =
-        newConnection().use(block)
+    protected inline fun <R> withConnection(block: (Connection) -> R): R = newConnection().use(block)
 
-    protected fun executeUpdate(sql: String): Int = withConnection { conn ->
-        conn.createStatement().use { it.executeUpdate(sql) }
-    }
+    protected fun executeUpdate(sql: String): Int =
+        withConnection { conn ->
+            conn.createStatement().use { it.executeUpdate(sql) }
+        }
 
-    protected fun executeQuerySingle(sql: String): String? = withConnection { conn ->
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery(sql).use { rs ->
-                if (rs.next()) rs.getString(1) else null
+    protected fun executeQuerySingle(sql: String): String? =
+        withConnection { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(sql).use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
             }
         }
-    }
 
-    protected fun tableExists(tableName: String): Boolean = withConnection { conn ->
-        conn.metaData.getTables(null, "main", "%", arrayOf("TABLE")).use { rs ->
-            while (rs.next()) {
-                if (rs.getString("TABLE_NAME").equals(tableName, ignoreCase = true)) return@withConnection true
+    protected fun tableExists(tableName: String): Boolean =
+        withConnection { conn ->
+            conn.metaData.getTables(null, "main", "%", arrayOf("TABLE")).use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("TABLE_NAME").equals(tableName, ignoreCase = true)) return@withConnection true
+                }
+                false
             }
-            false
         }
-    }
 
-    protected fun schemaExists(schemaName: String): Boolean = withConnection { conn ->
-        conn.metaData.schemas.use { rs ->
-            while (rs.next()) {
-                if (rs.getString("TABLE_SCHEM").equals(schemaName, ignoreCase = true)) return@withConnection true
+    protected fun schemaExists(schemaName: String): Boolean =
+        withConnection { conn ->
+            conn.metaData.schemas.use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("TABLE_SCHEM").equals(schemaName, ignoreCase = true)) return@withConnection true
+                }
+                false
             }
-            false
         }
-    }
 
     /**
      * 创建一个唯一的 .duckdb 路径（用于并发测试避免共享）
      */
     protected fun newTempDbPath(): String {
         val prefix = TestIds.uniqueName("duckdb-it")
-        return Files.createTempFile("$prefix-", ".duckdb").toFile().apply {
-            deleteOnExit()
-        }.absolutePath
+        return Files
+            .createTempFile("$prefix-", ".duckdb")
+            .toFile()
+            .apply {
+                deleteOnExit()
+            }.absolutePath
     }
 }

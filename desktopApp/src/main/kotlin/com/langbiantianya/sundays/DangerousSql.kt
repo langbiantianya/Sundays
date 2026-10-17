@@ -28,7 +28,6 @@ import com.langbiantianya.i18n.StrKey
  * 漏报的代价是数据没了。
  */
 internal object DangerousSql {
-
     /** 一条被判为「需要用户确认」的写操作。 */
     data class Finding(
         /** 命中的类别，用于给确认框一个具体标题（「这会删除表」而不是「危险操作」）。 */
@@ -40,7 +39,9 @@ internal object DangerousSql {
          * 类别对应的文案**键**而非文案本身 —— 本文件不含 `@Composable`（[scan] 可能被
          * 非组合上下文调用），渲染方在自己的组合作用域里 `str(kind.labelKey)` 取译文。
          */
-        enum class Kind(val labelKey: StrKey) {
+        enum class Kind(
+            val labelKey: StrKey,
+        ) {
             DROP(StrKey.RISK_DROP),
             TRUNCATE(StrKey.RISK_TRUNCATE),
             DELETE_WITHOUT_WHERE(StrKey.RISK_DELETE_NO_WHERE),
@@ -80,6 +81,7 @@ internal object DangerousSql {
                         i++
                     }
                 }
+
                 // 块注释 /* ... */
                 c == '/' && i + 1 < n && sql[i + 1] == '*' -> {
                     i += 2
@@ -89,26 +91,43 @@ internal object DangerousSql {
                     // `SELECT 1 DROP TABLE t` —— 与行注释同一个漏报
                     out.append(' ')
                 }
+
                 // 字符串 '...'（标准 SQL 用 '' 转义）
                 c == '\'' -> {
                     i++
                     while (i < n) {
                         if (sql[i] == '\'') {
-                            if (i + 1 < n && sql[i + 1] == '\'') i += 2 else { i++; break }
-                        } else i++
+                            if (i + 1 < n && sql[i + 1] == '\'') {
+                                i += 2
+                            } else {
+                                i++
+                                break
+                            }
+                        } else {
+                            i++
+                        }
                     }
-                    out.append(' ')   // 用空格占位，保持语句分隔
+                    out.append(' ') // 用空格占位，保持语句分隔
                 }
+
                 // 双引号标识符 "..."（PG / H2 的引号标识符）—— 里面的内容不是关键字
                 c == '"' -> {
                     i++
                     while (i < n) {
                         if (sql[i] == '"') {
-                            if (i + 1 < n && sql[i + 1] == '"') i += 2 else { i++; break }
-                        } else i++
+                            if (i + 1 < n && sql[i + 1] == '"') {
+                                i += 2
+                            } else {
+                                i++
+                                break
+                            }
+                        } else {
+                            i++
+                        }
                     }
                     out.append(' ')
                 }
+
                 else -> {
                     out.append(c)
                     i++
@@ -119,8 +138,7 @@ internal object DangerousSql {
     }
 
     /** 按顶层 \`;\` 切句。字符串与注释已在调用前剥掉，这里只需认分号。 */
-    private fun statements(sql: String): List<String> =
-        sql.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+    private fun statements(sql: String): List<String> = sql.split(';').map { it.trim() }.filter { it.isNotEmpty() }
 
     /**
      * 判断一条 SQL 里有没有需要确认的写操作。
@@ -133,6 +151,7 @@ internal object DangerousSql {
         val out = mutableListOf<Finding>()
         for (raw in statements(stripCommentsAndLiterals(sql))) {
             val upper = raw.uppercase()
+
             // 判据是「**这一句里出现了**危险关键字」，不是「第一个词是它」。
             //
             // 早先写成 `head.startsWith("DROP ")`，而 `SELECT 1 -- 注释\nDROP TABLE t`
@@ -143,13 +162,25 @@ internal object DangerousSql {
             // 不该被当成关键字。
             fun has(kw: String) = Regex("\\b$kw\\b").containsMatchIn(upper)
             when {
-                has("DROP") -> out += Finding(Finding.Kind.DROP, raw)
-                has("TRUNCATE") -> out += Finding(Finding.Kind.TRUNCATE, raw)
-                has("GRANT") -> out += Finding(Finding.Kind.GRANT, raw)
-                has("DELETE") && !has("WHERE") ->
+                has("DROP") -> {
+                    out += Finding(Finding.Kind.DROP, raw)
+                }
+
+                has("TRUNCATE") -> {
+                    out += Finding(Finding.Kind.TRUNCATE, raw)
+                }
+
+                has("GRANT") -> {
+                    out += Finding(Finding.Kind.GRANT, raw)
+                }
+
+                has("DELETE") && !has("WHERE") -> {
                     out += Finding(Finding.Kind.DELETE_WITHOUT_WHERE, raw)
-                has("UPDATE") && !has("WHERE") ->
+                }
+
+                has("UPDATE") && !has("WHERE") -> {
                     out += Finding(Finding.Kind.UPDATE_WITHOUT_WHERE, raw)
+                }
             }
         }
         return out

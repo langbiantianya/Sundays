@@ -11,10 +11,10 @@ package com.langbiantianya.sundays.onboarding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
@@ -30,9 +30,9 @@ import com.langbiantianya.sundays.ui.SundaysTheme
 import com.langbiantianya.sundays.ui.ThemeMode
 import com.langbiantianya.sundays.ui.ThemePalette
 import com.langbiantianya.sundays.zh
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlin.test.Test
 
 /**
  * 首次启动引导页的行为契约（在 `:desktopApp` 跑 —— `:shared/commonTest` 没有 Compose 测试依赖）。
@@ -44,7 +44,6 @@ import kotlin.test.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class OnboardingScreenTest {
-
     private fun androidx.compose.ui.test.ComposeUiTest.render(
         state: AppearanceState,
         dark: Boolean = false,
@@ -81,224 +80,245 @@ class OnboardingScreenTest {
     // =========================================================================
 
     @Test
-    fun `every palette is offered`() = runComposeUiTest {
-        render(AppearanceState())
-        ThemePalette.entries.forEach {
-            onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
+    fun `every palette is offered`() =
+        runComposeUiTest {
+            render(AppearanceState())
+            ThemePalette.entries.forEach {
+                onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
+            }
         }
-    }
 
     @Test
-    fun `every theme mode is offered`() = runComposeUiTest {
-        render(AppearanceState())
-        // 紧凑模式下这一组在初始档，看得见；万一将来布局再变，至少先证明它渲染过
-        ThemeMode.entries.forEach {
-            onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
+    fun `every theme mode is offered`() =
+        runComposeUiTest {
+            render(AppearanceState())
+            // 紧凑模式下这一组在初始档，看得见；万一将来布局再变，至少先证明它渲染过
+            ThemeMode.entries.forEach {
+                onNodeWithText(zh(it.labelKey)).assertIsDisplayed()
+            }
         }
-    }
 
     @Test
-    fun `the three sections are labelled`() = runComposeUiTest {
-        render(AppearanceState())
-        onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
-    }
+    fun `the three sections are labelled`() =
+        runComposeUiTest {
+            render(AppearanceState())
+            onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
+        }
 
     // =========================================================================
     // 点选生效：这是本页唯一真正的功能
     // =========================================================================
 
     @Test
-    fun `picking a palette changes the whole app immediately`() = runComposeUiTest {
-        val state = AppearanceState()
-        render(state)
-        assertEquals(ThemePalette.BLUE_GRAY, state.palette)
+    fun `picking a palette changes the whole app immediately`() =
+        runComposeUiTest {
+            val state = AppearanceState()
+            render(state)
+            assertEquals(ThemePalette.BLUE_GRAY, state.palette)
 
-        onNodeWithText(zh(ThemePalette.CYBERPUNK.labelKey)).performClick()
-        waitForIdle()
+            onNodeWithText(zh(ThemePalette.CYBERPUNK.labelKey)).performClick()
+            waitForIdle()
 
-        // 断言的是**外部状态**变了，不是页内显示变了
-        assertEquals(ThemePalette.CYBERPUNK, state.palette, "点色卡应回写外部状态（进而落盘 + 换主题）")
-    }
-
-    @Test
-    fun `picking a theme mode changes the whole app immediately`() = runComposeUiTest {
-        val state = AppearanceState()
-        render(state)
-        assertEquals(ThemeMode.SYSTEM, state.mode)
-
-        onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
-        waitForIdle()
-        assertEquals(ThemeMode.DARK, state.mode)
-
-        onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
-        waitForIdle()
-        assertEquals(ThemeMode.LIGHT, state.mode)
-    }
+            // 断言的是**外部状态**变了，不是页内显示变了
+            assertEquals(ThemePalette.CYBERPUNK, state.palette, "点色卡应回写外部状态（进而落盘 + 换主题）")
+        }
 
     @Test
-    fun `toggling compact mode changes density immediately`() = runComposeUiTest {
-        val state = AppearanceState()
-        render(state)
-        onNode(isToggleable()).assertIsOff()
+    fun `picking a theme mode changes the whole app immediately`() =
+        runComposeUiTest {
+            val state = AppearanceState()
+            render(state)
+            assertEquals(ThemeMode.SYSTEM, state.mode)
 
-        // 必须先滚到视口内再点：引导页顶部新增了语言分组，整页内容比默认测试窗口高，
-        // 紧凑开关被挤到了折叠线以下。不滚动时 performClick 把坐标发到窗口外，
-        // 点击落空 —— 报出来的却是「开关没回写状态」，把原因指错了方向。
-        onNode(isToggleable()).performScrollTo().performClick()
-        waitForIdle()
-        assertTrue(state.compactMode, "拨开关应回写外部状态（进而缩放 LocalDensity）")
-        onNode(isToggleable()).assertIsOn()
-    }
+            onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
+            waitForIdle()
+            assertEquals(ThemeMode.DARK, state.mode)
 
-    @Test
-    fun `the incoming selection is reflected on first render`() = runComposeUiTest {
-        // 反向：外部已经选好了什么，页面必须**如实显示**。若页面自己维护一份选中态，
-        // 引导页与设置页就会显示两套不同的选择，而用户以为设置页覆盖了引导页的结果。
-        val state = AppearanceState(
-            initialPalette = ThemePalette.WIN_XP,
-            initialMode = ThemeMode.DARK,
-            initialCompactMode = true,
-        )
-        render(state, dark = true)
-
-        onNode(isToggleable()).assertIsOn()
-        assertEquals(
-            3,
-            onAllNodes(isSelectable()).fetchSemanticsNodes()
-                .count { it.config[SemanticsProperties.Selected] == true },
-            "5 张配色卡 + 3 个明暗单选 + 6 个语言 chip 里，" +
-                "应恰好选中 1 个配色 + 1 个明暗档位 + 1 种语言（语言 chip 用 selectable + " +
-                "Role.RadioButton，导盲要读出选中态，所以也算进来）",
-        )
-    }
+            onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
+            waitForIdle()
+            assertEquals(ThemeMode.LIGHT, state.mode)
+        }
 
     @Test
-    fun `palette swatches actually differ between the light and dark schemes`() = runComposeUiTest {
-        // 这是 [OnboardingScreen] 的 `dark` 参数**存在的前提**：`PaletteCard` 用
-        // `option.schemeFor(dark)` 取色，所以一旦 `dark` 为 true / false，同一张色卡必须画出
-        // 不同的颜色。锁住这个前提，`dark` 传错（恒为 false、恒为 true）才会立刻显形。
-        //
-        // 逐个主题比对「同一主题浅色档 vs 深色档」的取色条三色是否相等 ——
-        // 若哪天 `schemeFor` 忽略 `useDark`，色卡会全部退化成同一套颜色，本测试转红。
-        render(AppearanceState())
-        ThemePalette.entries.forEach { option ->
-            // 参数名是 `useDark` 不是 `dark` —— 见 ThemePalette.schemeFor 的 KDoc：
-            // 叫 `dark` 会遮蔽同名的 `dark` 配色属性，整条 when 退化成 Any
-            val light = option.schemeFor(useDark = false)
-            val dark = option.schemeFor(useDark = true)
-            assertTrue(
-                light.surface != dark.surface || light.primary != dark.primary,
-                "${option.labelKey} 的浅色 / 深色取色不应完全相同 —— 否则色卡无法反映明暗档位",
+    fun `toggling compact mode changes density immediately`() =
+        runComposeUiTest {
+            val state = AppearanceState()
+            render(state)
+            onNode(isToggleable()).assertIsOff()
+
+            // 必须先滚到视口内再点：引导页顶部新增了语言分组，整页内容比默认测试窗口高，
+            // 紧凑开关被挤到了折叠线以下。不滚动时 performClick 把坐标发到窗口外，
+            // 点击落空 —— 报出来的却是「开关没回写状态」，把原因指错了方向。
+            onNode(isToggleable()).performScrollTo().performClick()
+            waitForIdle()
+            assertTrue(state.compactMode, "拨开关应回写外部状态（进而缩放 LocalDensity）")
+            onNode(isToggleable()).assertIsOn()
+        }
+
+    @Test
+    fun `the incoming selection is reflected on first render`() =
+        runComposeUiTest {
+            // 反向：外部已经选好了什么，页面必须**如实显示**。若页面自己维护一份选中态，
+            // 引导页与设置页就会显示两套不同的选择，而用户以为设置页覆盖了引导页的结果。
+            val state =
+                AppearanceState(
+                    initialPalette = ThemePalette.WIN_XP,
+                    initialMode = ThemeMode.DARK,
+                    initialCompactMode = true,
+                )
+            render(state, dark = true)
+
+            onNode(isToggleable()).assertIsOn()
+            assertEquals(
+                3,
+                onAllNodes(isSelectable())
+                    .fetchSemanticsNodes()
+                    .count { it.config[SemanticsProperties.Selected] == true },
+                "5 张配色卡 + 3 个明暗单选 + 6 个语言 chip 里，" +
+                    "应恰好选中 1 个配色 + 1 个明暗档位 + 1 种语言（语言 chip 用 selectable + " +
+                    "Role.RadioButton，导盲要读出选中态，所以也算进来）",
             )
         }
-    }
+
+    @Test
+    fun `palette swatches actually differ between the light and dark schemes`() =
+        runComposeUiTest {
+            // 这是 [OnboardingScreen] 的 `dark` 参数**存在的前提**：`PaletteCard` 用
+            // `option.schemeFor(dark)` 取色，所以一旦 `dark` 为 true / false，同一张色卡必须画出
+            // 不同的颜色。锁住这个前提，`dark` 传错（恒为 false、恒为 true）才会立刻显形。
+            //
+            // 逐个主题比对「同一主题浅色档 vs 深色档」的取色条三色是否相等 ——
+            // 若哪天 `schemeFor` 忽略 `useDark`，色卡会全部退化成同一套颜色，本测试转红。
+            render(AppearanceState())
+            ThemePalette.entries.forEach { option ->
+                // 参数名是 `useDark` 不是 `dark` —— 见 ThemePalette.schemeFor 的 KDoc：
+                // 叫 `dark` 会遮蔽同名的 `dark` 配色属性，整条 when 退化成 Any
+                val light = option.schemeFor(useDark = false)
+                val dark = option.schemeFor(useDark = true)
+                assertTrue(
+                    light.surface != dark.surface || light.primary != dark.primary,
+                    "${option.labelKey} 的浅色 / 深色取色不应完全相同 —— 否则色卡无法反映明暗档位",
+                )
+            }
+        }
 
     // =========================================================================
     // 收尾
     // =========================================================================
 
     @Test
-    fun `the finish button completes the onboarding`() = runComposeUiTest {
-        var finished = false
-        val state = AppearanceState(initialOnboardingCompleted = false)
-        render(state, onFinish = { finished = true })
+    fun `the finish button completes the onboarding`() =
+        runComposeUiTest {
+            var finished = false
+            val state = AppearanceState(initialOnboardingCompleted = false)
+            render(state, onFinish = { finished = true })
 
-        // 刻意**不**调 performScrollTo：收尾条固定在滚动区外面，任何窗口高度下都应直接可点。
-        // 若哪天按钮被挪回滚动区里、用户在 1024×768 下够不着，这条会直接红。
-        onNodeWithText(zh(StrKey.START_USING)).performClick()
-        waitForIdle()
+            // 刻意**不**调 performScrollTo：收尾条固定在滚动区外面，任何窗口高度下都应直接可点。
+            // 若哪天按钮被挪回滚动区里、用户在 1024×768 下够不着，这条会直接红。
+            onNodeWithText(zh(StrKey.START_USING)).performClick()
+            waitForIdle()
 
-        assertTrue(finished, "「开始使用」必须触发完成回调，否则下次启动引导页会重新出现")
-    }
-
-    @Test
-    fun `the finish button is visible without scrolling`() = runComposeUiTest {
-        // 回归：三组控件在 1024×768 下约 900px 高。按钮原先放在滚动区内，
-        // 首次渲染时它的语义 bounds 是 Rect(0,0,0,0) —— 唯一的出口完全在视口外，
-        // 用户必须先意识到「下面还有东西」才够得着。固定到底部后必须**直接可点**。
-        render(AppearanceState())
-        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
-    }
-
-    @Test
-    fun `the finish button survives compact mode too`() = runComposeUiTest {
-        // 紧凑档把整棵树缩到 85%，理论上更容易放下。但反过来，**将来**若有人把收尾条
-        // 挪回滚动区内，这条会比普通档更早暴露问题 —— 两档都断言更保险。
-        render(AppearanceState(initialCompactMode = true))
-        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
-    }
-
-    @Test
-    fun `the header and the finish button are on screen at the same time`() = runComposeUiTest {
-        // 引导是「一眼看完」的设计：顶部说明与底部出口应当**同屏可见**，
-        // 而不是让人先滚到底才知道还有下一步。
-        render(AppearanceState())
-        val header = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
-        val finish = onNodeWithText(zh(StrKey.START_USING)).fetchSemanticsNode().boundsInRoot
-        val root = onRoot().fetchSemanticsNode().boundsInRoot
-
-        assertTrue(
-            header.top >= root.top && finish.bottom <= root.bottom,
-            "首尾两个关键节点应同屏可见，实测 header=$header finish=$finish 视口=$root",
-        )
-        // 收尾条必须在**下**方 —— 否则等于按钮飘到了内容中间
-        assertTrue(finish.top > header.bottom, "收尾条应位于内容下方，实测 $header / $finish")
-    }
-
-    @Test
-    fun `there is no separate skip button`() = runComposeUiTest {
-        // 默认值本身就是一份合法答案，「开始使用」已兼任跳过。
-        // 单列一个「跳过」反而会让「跳过到底跳到哪」变模糊 —— 而它们的行为其实完全一样。
-        render(AppearanceState())
-        // 文案表里没有「跳过」这个键（这正是本测试要守住的事实之一），所以只能按中文字面量
-        // 断言它**不存在**。这条是负向断言：无论界面切到什么语言、按钮叫什么，
-        // 「没有单独的跳过按钮」都必须成立 —— 与界面语言无关。
-        onAllNodesWithText("跳过").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
-        onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
-    }
-
-    @Test
-    fun `the content block stays horizontally centered in both density modes`() = runComposeUiTest {
-        // 回归：滚动区那个 Column 曾**漏掉 `fillMaxWidth()`**，于是它按内容宽度（960dp）
-        // 收缩后被父级左对齐，`horizontalAlignment` 只在这 960dp 内部生效。
-        // 后果是窗口越宽右侧空得越离谱（用户 1580px 窗口下右侧空了约 530px），
-        // 而紧凑档更明显：内容缩到 816px，1024px 窗口里标题中心偏左 84px。
-        //
-        // 断言「内容块中心 == 窗口中心」，两档都测 —— 紧凑档是当初暴露它的那一档。
-        for (compact in listOf(false, true)) {
-            render(AppearanceState(initialCompactMode = compact))
-            val root = onRoot().fetchSemanticsNode().boundsInRoot
-            val section = onNodeWithText(zh(StrKey.UI_DENSITY)).fetchSemanticsNode().boundsInRoot
-            val title = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
-
-            assertEquals(
-                root.center.x, section.center.x, absoluteTolerance = 1f,
-                "紧凑=$compact 时分组标题应水平居中（内容块中心 ${section.center.x} vs 窗口 ${root.center.x}）",
-            )
-            assertEquals(
-                root.center.x, title.center.x, absoluteTolerance = 1f,
-                "紧凑=$compact 时页面大标题应水平居中（${title.center.x} vs ${root.center.x}）",
-            )
+            assertTrue(finished, "「开始使用」必须触发完成回调，否则下次启动引导页会重新出现")
         }
-    }
 
     @Test
-    fun `choices made before finishing survive`() = runComposeUiTest {
-        // 用户先调好外观再点「开始使用」—— 这些选择必须**保留**，不能被引导的默认值覆盖。
-        val state = AppearanceState(initialOnboardingCompleted = false)
-        render(state, onFinish = state::completeOnboarding)
+    fun `the finish button is visible without scrolling`() =
+        runComposeUiTest {
+            // 回归：三组控件在 1024×768 下约 900px 高。按钮原先放在滚动区内，
+            // 首次渲染时它的语义 bounds 是 Rect(0,0,0,0) —— 唯一的出口完全在视口外，
+            // 用户必须先意识到「下面还有东西」才够得着。固定到底部后必须**直接可点**。
+            render(AppearanceState())
+            onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
+        }
 
-        onNodeWithText(zh(ThemePalette.BILI_PINK.labelKey)).performClick()
-        onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
-        onNodeWithText(zh(StrKey.START_USING)).performClick()
-        waitForIdle()
+    @Test
+    fun `the finish button survives compact mode too`() =
+        runComposeUiTest {
+            // 紧凑档把整棵树缩到 85%，理论上更容易放下。但反过来，**将来**若有人把收尾条
+            // 挪回滚动区内，这条会比普通档更早暴露问题 —— 两档都断言更保险。
+            render(AppearanceState(initialCompactMode = true))
+            onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
+        }
 
-        assertEquals(ThemePalette.BILI_PINK, state.palette)
-        assertEquals(ThemeMode.DARK, state.mode)
-        assertTrue(state.onboardingCompleted, "完成后应标记为已完成")
-    }
+    @Test
+    fun `the header and the finish button are on screen at the same time`() =
+        runComposeUiTest {
+            // 引导是「一眼看完」的设计：顶部说明与底部出口应当**同屏可见**，
+            // 而不是让人先滚到底才知道还有下一步。
+            render(AppearanceState())
+            val header = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
+            val finish = onNodeWithText(zh(StrKey.START_USING)).fetchSemanticsNode().boundsInRoot
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+
+            assertTrue(
+                header.top >= root.top && finish.bottom <= root.bottom,
+                "首尾两个关键节点应同屏可见，实测 header=$header finish=$finish 视口=$root",
+            )
+            // 收尾条必须在**下**方 —— 否则等于按钮飘到了内容中间
+            assertTrue(finish.top > header.bottom, "收尾条应位于内容下方，实测 $header / $finish")
+        }
+
+    @Test
+    fun `there is no separate skip button`() =
+        runComposeUiTest {
+            // 默认值本身就是一份合法答案，「开始使用」已兼任跳过。
+            // 单列一个「跳过」反而会让「跳过到底跳到哪」变模糊 —— 而它们的行为其实完全一样。
+            render(AppearanceState())
+            // 文案表里没有「跳过」这个键（这正是本测试要守住的事实之一），所以只能按中文字面量
+            // 断言它**不存在**。这条是负向断言：无论界面切到什么语言、按钮叫什么，
+            // 「没有单独的跳过按钮」都必须成立 —— 与界面语言无关。
+            onAllNodesWithText("跳过").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
+            onNodeWithText(zh(StrKey.START_USING)).assertIsDisplayed()
+        }
+
+    @Test
+    fun `the content block stays horizontally centered in both density modes`() =
+        runComposeUiTest {
+            // 回归：滚动区那个 Column 曾**漏掉 `fillMaxWidth()`**，于是它按内容宽度（960dp）
+            // 收缩后被父级左对齐，`horizontalAlignment` 只在这 960dp 内部生效。
+            // 后果是窗口越宽右侧空得越离谱（用户 1580px 窗口下右侧空了约 530px），
+            // 而紧凑档更明显：内容缩到 816px，1024px 窗口里标题中心偏左 84px。
+            //
+            // 断言「内容块中心 == 窗口中心」，两档都测 —— 紧凑档是当初暴露它的那一档。
+            for (compact in listOf(false, true)) {
+                render(AppearanceState(initialCompactMode = compact))
+                val root = onRoot().fetchSemanticsNode().boundsInRoot
+                val section = onNodeWithText(zh(StrKey.UI_DENSITY)).fetchSemanticsNode().boundsInRoot
+                val title = onNodeWithText(zh(StrKey.WELCOME)).fetchSemanticsNode().boundsInRoot
+
+                assertEquals(
+                    root.center.x,
+                    section.center.x,
+                    absoluteTolerance = 1f,
+                    "紧凑=$compact 时分组标题应水平居中（内容块中心 ${section.center.x} vs 窗口 ${root.center.x}）",
+                )
+                assertEquals(
+                    root.center.x,
+                    title.center.x,
+                    absoluteTolerance = 1f,
+                    "紧凑=$compact 时页面大标题应水平居中（${title.center.x} vs ${root.center.x}）",
+                )
+            }
+        }
+
+    @Test
+    fun `choices made before finishing survive`() =
+        runComposeUiTest {
+            // 用户先调好外观再点「开始使用」—— 这些选择必须**保留**，不能被引导的默认值覆盖。
+            val state = AppearanceState(initialOnboardingCompleted = false)
+            render(state, onFinish = state::completeOnboarding)
+
+            onNodeWithText(zh(ThemePalette.BILI_PINK.labelKey)).performClick()
+            onNodeWithText(zh(ThemeMode.DARK.labelKey)).performClick()
+            onNodeWithText(zh(StrKey.START_USING)).performClick()
+            waitForIdle()
+
+            assertEquals(ThemePalette.BILI_PINK, state.palette)
+            assertEquals(ThemeMode.DARK, state.mode)
+            assertTrue(state.onboardingCompleted, "完成后应标记为已完成")
+        }
 
     // =========================================================================
     // 设置页重进（firstRun = false）
@@ -332,55 +352,59 @@ class OnboardingScreenTest {
     }
 
     @Test
-    fun `the replay must not claim it is a first run`() = runComposeUiTest {
-        // 用户在设置里主动点「重新打开引导」时若还看到「欢迎使用 sundays」，
-        // 会以为应用被重置了 —— 首启话术只属于首启。
-        renderReplay(AppearanceState())
-        onNodeWithText(zh(StrKey.APPEARANCE_ONBOARDING)).assertIsDisplayed()
-        onAllNodesWithText(zh(StrKey.WELCOME)).fetchSemanticsNodes().let {
-            assertTrue(it.isEmpty(), "重进引导不应再自称「欢迎使用」")
+    fun `the replay must not claim it is a first run`() =
+        runComposeUiTest {
+            // 用户在设置里主动点「重新打开引导」时若还看到「欢迎使用 sundays」，
+            // 会以为应用被重置了 —— 首启话术只属于首启。
+            renderReplay(AppearanceState())
+            onNodeWithText(zh(StrKey.APPEARANCE_ONBOARDING)).assertIsDisplayed()
+            onAllNodesWithText(zh(StrKey.WELCOME)).fetchSemanticsNodes().let {
+                assertTrue(it.isEmpty(), "重进引导不应再自称「欢迎使用」")
+            }
         }
-    }
 
     @Test
-    fun `the replay finishes with a neutral label`() = runComposeUiTest {
-        // 已经在主界面里了，再说「开始使用」语义不对
-        renderReplay(AppearanceState())
-        onNodeWithText(zh(StrKey.DONE)).assertIsDisplayed()
-        onAllNodesWithText(zh(StrKey.START_USING)).fetchSemanticsNodes().let {
-            assertTrue(it.isEmpty(), "重进引导的收尾按钮不应叫「开始使用」")
+    fun `the replay finishes with a neutral label`() =
+        runComposeUiTest {
+            // 已经在主界面里了，再说「开始使用」语义不对
+            renderReplay(AppearanceState())
+            onNodeWithText(zh(StrKey.DONE)).assertIsDisplayed()
+            onAllNodesWithText(zh(StrKey.START_USING)).fetchSemanticsNodes().let {
+                assertTrue(it.isEmpty(), "重进引导的收尾按钮不应叫「开始使用」")
+            }
         }
-    }
 
     @Test
-    fun `the replay still applies and persists the choices`() = runComposeUiTest {
-        // 重进不是只读回顾 —— 它是同一套外观状态的另一个编辑入口。
-        // 若这条转绿而落盘没跟上，用户会觉得「改了没反应，下次启动又变回去」。
-        var finished = false
-        val state = AppearanceState(initialOnboardingCompleted = true)
-        renderReplay(state, onFinish = { finished = true })
+    fun `the replay still applies and persists the choices`() =
+        runComposeUiTest {
+            // 重进不是只读回顾 —— 它是同一套外观状态的另一个编辑入口。
+            // 若这条转绿而落盘没跟上，用户会觉得「改了没反应，下次启动又变回去」。
+            var finished = false
+            val state = AppearanceState(initialOnboardingCompleted = true)
+            renderReplay(state, onFinish = { finished = true })
 
-        onNodeWithText(zh(ThemePalette.WIN_2000.labelKey)).performClick()
-        onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
-        waitForIdle()
-        assertEquals(ThemePalette.WIN_2000, state.palette)
-        assertEquals(ThemeMode.LIGHT, state.mode)
+            onNodeWithText(zh(ThemePalette.WIN_2000.labelKey)).performClick()
+            onNodeWithText(zh(ThemeMode.LIGHT.labelKey)).performClick()
+            waitForIdle()
+            assertEquals(ThemePalette.WIN_2000, state.palette)
+            assertEquals(ThemeMode.LIGHT, state.mode)
 
-        onNodeWithText(zh(StrKey.DONE)).performClick()
-        waitForIdle()
-        assertTrue(finished, "「完成」应收起浮层")
-        // 重进**不**改 onboardingCompleted —— 它早就是 true
-        assertTrue(state.onboardingCompleted)
-    }
+            onNodeWithText(zh(StrKey.DONE)).performClick()
+            waitForIdle()
+            assertTrue(finished, "「完成」应收起浮层")
+            // 重进**不**改 onboardingCompleted —— 它早就是 true
+            assertTrue(state.onboardingCompleted)
+        }
 
     @Test
-    fun `the replay offers exactly the same three groups`() = runComposeUiTest {
-        // 「重新打开引导」应当等价于首启那一页；若某组控件被条件编译 / 漏传，
-        // 用户会觉得重进了个简化版
-        renderReplay(AppearanceState())
-        onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
-        ThemePalette.entries.forEach { onNodeWithText(zh(it.labelKey)).assertIsDisplayed() }
-    }
+    fun `the replay offers exactly the same three groups`() =
+        runComposeUiTest {
+            // 「重新打开引导」应当等价于首启那一页；若某组控件被条件编译 / 漏传，
+            // 用户会觉得重进了个简化版
+            renderReplay(AppearanceState())
+            onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.THEME_MODE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.UI_DENSITY)).assertIsDisplayed()
+            ThemePalette.entries.forEach { onNodeWithText(zh(it.labelKey)).assertIsDisplayed() }
+        }
 }

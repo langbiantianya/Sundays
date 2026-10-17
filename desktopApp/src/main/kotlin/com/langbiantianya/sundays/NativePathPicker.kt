@@ -55,9 +55,11 @@ import javax.swing.SwingUtilities
  * 既不卡界面，也不会在 Skiko 的渲染线程上开第二个事件循环。
  */
 object NativePathPicker {
-
     /** 选出来的结果：`dir` 一定是绝对路径；`name` 可能为空（只选了目录）。 */
-    data class Picked(val dir: String, val name: String)
+    data class Picked(
+        val dir: String,
+        val name: String,
+    )
 
     /**
      * 选一个**完整的输出文件**（目录 + 文件名一起）。
@@ -65,17 +67,21 @@ object NativePathPicker {
      * @param initialName 起始文件名 —— 预填进去，用户多半只需要改扩展名
      * @return 用户取消返回 `null`
      */
-    suspend fun pickFile(initialDir: String, initialName: String): Picked? =
+    suspend fun pickFile(
+        initialDir: String,
+        initialName: String,
+    ): Picked? =
         withContext(Dispatchers.IO) {
             val dir = File(initialDir.takeIf { it.isNotBlank() } ?: userHome())
             if (dir.isDirectory) dir.mkdirs()
-            val chosen = choose(
-                start = dir,
-                fileName = initialName,
-                title = Msg.text(StrKey.PICK_EXPORT_FILE),
-                approveText = Msg.text(StrKey.SAVE),
-                saveMode = true,
-            ) { it.fileSelectionMode = JFileChooser.FILES_ONLY } ?: return@withContext null
+            val chosen =
+                choose(
+                    start = dir,
+                    fileName = initialName,
+                    title = Msg.text(StrKey.PICK_EXPORT_FILE),
+                    approveText = Msg.text(StrKey.SAVE),
+                    saveMode = true,
+                ) { it.fileSelectionMode = JFileChooser.FILES_ONLY } ?: return@withContext null
             val f = File(chosen)
             if (f.isDirectory) {
                 // 用户挑中了文件夹：只定目录，文件名沿用当前值
@@ -86,17 +92,21 @@ object NativePathPicker {
         }
 
     /** 只选一个**目录**。 */
-    suspend fun pickDirectory(initialDir: String, initialName: String = ""): Picked? =
+    suspend fun pickDirectory(
+        initialDir: String,
+        initialName: String = "",
+    ): Picked? =
         withContext(Dispatchers.IO) {
             val start = File(initialDir.takeIf { it.isNotBlank() } ?: userHome())
             if (start.isDirectory) start.mkdirs()
-            val chosen = choose(
-                start = start,
-                fileName = initialName,
-                title = Msg.text(StrKey.PICK_OUTPUT_DIR),
-                approveText = Msg.text(StrKey.CHOOSE),
-                saveMode = false,
-            ) { it.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY } ?: return@withContext null
+            val chosen =
+                choose(
+                    start = start,
+                    fileName = initialName,
+                    title = Msg.text(StrKey.PICK_OUTPUT_DIR),
+                    approveText = Msg.text(StrKey.CHOOSE),
+                    saveMode = false,
+                ) { it.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY } ?: return@withContext null
             Picked(dir = File(chosen).absolutePath, name = initialName)
         }
 
@@ -112,33 +122,34 @@ object NativePathPicker {
         approveText: String,
         saveMode: Boolean,
         configure: (JFileChooser) -> Unit,
-    ): String? = try {
-        val out = arrayOfNulls<File>(1)
-        SwingUtilities.invokeAndWait {
-            val chooser = JFileChooser(start).apply {
-                dialogTitle = title
-                approveButtonText = approveText
-                isAcceptAllFileFilterUsed = false
-                configure(this)
-                // 只在「保存」模式下预填文件名：目录模式下预填一个文件名
-                // 会让用户以为自己已经选好了文件
-                if (fileName.isNotBlank() && saveMode) {
-                    selectedFile = File(start, fileName)
+    ): String? =
+        try {
+            val out = arrayOfNulls<File>(1)
+            SwingUtilities.invokeAndWait {
+                val chooser =
+                    JFileChooser(start).apply {
+                        dialogTitle = title
+                        approveButtonText = approveText
+                        isAcceptAllFileFilterUsed = false
+                        configure(this)
+                        // 只在「保存」模式下预填文件名：目录模式下预填一个文件名
+                        // 会让用户以为自己已经选好了文件
+                        if (fileName.isNotBlank() && saveMode) {
+                            selectedFile = File(start, fileName)
+                        }
+                    }
+                if (chooser.showDialog(null, approveText) == JFileChooser.APPROVE_OPTION) {
+                    out[0] = chooser.selectedFile
                 }
             }
-            if (chooser.showDialog(null, approveText) == JFileChooser.APPROVE_OPTION) {
-                out[0] = chooser.selectedFile
-            }
+            out[0]?.absolutePath
+        } catch (t: Throwable) {
+            // 无头环境（CI / headless JVM）或 AWT 起不来：安静地返回 null，
+            // 调用方保留「手动输入路径」那条路 —— 这只是辅助功能，不该让应用崩
+            null
         }
-        out[0]?.absolutePath
-    } catch (t: Throwable) {
-        // 无头环境（CI / headless JVM）或 AWT 起不来：安静地返回 null，
-        // 调用方保留「手动输入路径」那条路 —— 这只是辅助功能，不该让应用崩
-        null
-    }
 
-    private fun absoluteDir(f: File): String =
-        (if (f.isDirectory) f else f.parentFile ?: f).absoluteFile.absolutePath
+    private fun absoluteDir(f: File): String = (if (f.isDirectory) f else f.parentFile ?: f).absoluteFile.absolutePath
 
     private fun userHome(): String = System.getProperty("user.home") ?: "."
 }

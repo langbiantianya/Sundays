@@ -29,7 +29,6 @@ import kotlin.test.assertTrue
  * 本文件只钉**不依赖组合**的那一半，因此可以在 commonTest 里裸跑。
  */
 class OnboardingStateTest {
-
     private lateinit var tempHome: String
     private lateinit var originalHome: String
 
@@ -105,9 +104,12 @@ class OnboardingStateTest {
         // 模拟老版本写出的 JSON：字段缺失。`exists()` 只看文件在不在，不解析内容，
         // 因此损坏 / 缺字段都判为「已配置过」—— 这正是我们要的（别拿升级当首启）。
         SettingsStorage.save(AppSettings())
-        val file = Files.createDirectories(
-            java.nio.file.Paths.get(tempHome, ".config", "sundays"),
-        ).resolve("settings.json")
+        val file =
+            Files
+                .createDirectories(
+                    java.nio.file.Paths
+                        .get(tempHome, ".config", "sundays"),
+                ).resolve("settings.json")
         Files.writeString(file, """{"version":1,"palette":"BLUE_GRAY","themeMode":"SYSTEM"}""")
 
         assertTrue(SettingsStorage.exists(), "缺字段的老文件仍算「文件已存在」")
@@ -148,10 +150,11 @@ class OnboardingStateTest {
     @Test
     fun completing_twice_is_idempotent() {
         var persistCount = 0
-        val state = AppearanceState(
-            initialOnboardingCompleted = false,
-            onChange = { persistCount++ },
-        )
+        val state =
+            AppearanceState(
+                initialOnboardingCompleted = false,
+                onChange = { persistCount++ },
+            )
         state.completeOnboarding()
         val afterFirst = persistCount
         state.completeOnboarding()

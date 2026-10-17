@@ -61,7 +61,6 @@ data class AppNotification(
  * 逐条已读会逼用户逐条点，而**打开面板本身**就是一次确认。
  */
 class NotificationCenter {
-
     private val _notifications = mutableStateListOf<AppNotification>()
     val notifications: List<AppNotification> get() = _notifications
 
@@ -83,14 +82,20 @@ class NotificationCenter {
      */
     private val notifiedSources = mutableSetOf<String>()
 
-    fun push(severity: AppNotification.Severity, title: String, detail: String) {
-        push(AppNotification(
-            id = nextId(),
-            severity = severity,
-            title = title,
-            detail = detail,
-            timestamp = System.currentTimeMillis(),
-        ))
+    fun push(
+        severity: AppNotification.Severity,
+        title: String,
+        detail: String,
+    ) {
+        push(
+            AppNotification(
+                id = nextId(),
+                severity = severity,
+                title = title,
+                detail = detail,
+                timestamp = System.currentTimeMillis(),
+            ),
+        )
     }
 
     /**
@@ -98,7 +103,12 @@ class NotificationCenter {
      *
      * 同一个 [sourceKey] 在「没被 [forgetSource] 忘掉」的情况下只推一次。
      */
-    fun pushOnce(sourceKey: String, severity: AppNotification.Severity, title: String, detail: String) {
+    fun pushOnce(
+        sourceKey: String,
+        severity: AppNotification.Severity,
+        title: String,
+        detail: String,
+    ) {
         if (!notifiedSources.add(sourceKey)) return
         push(severity, title, detail)
     }
@@ -143,11 +153,15 @@ class NotificationCenter {
         notifiedSources.clear()
     }
 
-    private fun nextId(): String = "n-" + java.util.concurrent.atomic.AtomicLong(NOTIFY_SEQ).incrementAndGet()
+    private fun nextId(): String =
+        "n-" +
+            java.util.concurrent.atomic
+                .AtomicLong(notifySeq)
+                .incrementAndGet()
 
     private companion object {
         /** 列表上限。60 条足够回溯一个下午，且滚动条不会长得像日志文件。 */
         const val MAX_NOTIFICATIONS = 60
-        var NOTIFY_SEQ = 0L
+        var notifySeq = 0L
     }
 }

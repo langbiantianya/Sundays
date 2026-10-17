@@ -20,11 +20,11 @@ import com.langbiantianya.grpc.SqlExplainRequest
 import com.langbiantianya.grpc.SqlExplainResponse
 import com.langbiantianya.grpc.SqlSelectRowFrame
 import com.langbiantianya.grpc.SqlStatementResult
-import com.langbiantianya.grpc.sqlStatementResult
 import com.langbiantianya.grpc.row
 import com.langbiantianya.grpc.sqlExecuteResponse
 import com.langbiantianya.grpc.sqlExplainResponse
 import com.langbiantianya.grpc.sqlSelectRowFrame
+import com.langbiantianya.grpc.sqlStatementResult
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
@@ -50,18 +50,19 @@ object SqlEngineHandler {
         sessionId: String = "",
         requestId: String = "",
         onRow: (suspend (SqlSelectRowFrame) -> Unit)? = null,
-    ): SqlExecuteResponse = withContext(Dispatchers.IO) {
-        if (req.sql.isBlank()) throw IllegalArgumentException("Missing 'sql' in payload")
-        if (req.multiStatement) {
-            return@withContext executeScript(config, req, onRow, sessionId, requestId)
+    ): SqlExecuteResponse =
+        withContext(Dispatchers.IO) {
+            if (req.sql.isBlank()) throw IllegalArgumentException("Missing 'sql' in payload")
+            if (req.multiStatement) {
+                return@withContext executeScript(config, req, onRow, sessionId, requestId)
+            }
+            val conn = PoolManager.getConnection(config, req.schema, sessionId)
+            try {
+                executeOne(conn, config, req.sql, onRow, requestId)
+            } finally {
+                releaseIfUnbound(conn, sessionId)
+            }
         }
-        val conn = PoolManager.getConnection(config, req.schema, sessionId)
-        try {
-            executeOne(conn, config, req.sql, onRow, requestId)
-        } finally {
-            releaseIfUnbound(conn, sessionId)
-        }
-    }
 
     /**
      * 多语句脚本 —— 按语句边界拆分后**顺序执行**。
@@ -76,48 +77,50 @@ object SqlEngineHandler {
         onRow: (suspend (SqlSelectRowFrame) -> Unit)?,
         sessionId: String,
         requestId: String,
-    ): SqlExecuteResponse = withContext(Dispatchers.IO) {
-        val parts = SqlScriptSplitter.split(req.sql)
-        if (parts.isEmpty()) {
-            throw IllegalArgumentException("multi_statement script contains no executable statement")
-        }
-        val conn = PoolManager.getConnection(config, req.schema, sessionId)
-        val results = mutableListOf<SqlStatementResult>()
-        var totalAffected = 0
-        try {
-            for ((index, sql) in parts.withIndex()) {
-                val result = try {
-                    val resp = executeOne(conn, config, sql, onRow, "$requestId#$index")
-                    sqlStatementResult {
-                        this.index = index
-                        this.sql = sql
-                        affectedRows = resp.affectedRows
-                        success = true
-                    }
-                } catch (e: Exception) {
-                    // 取消导致的异常与普通 SQL 错误同形 —— 记录后停止执行后续语句
-                    sqlStatementResult {
-                        this.index = index
-                        this.sql = sql
-                        this.success = false
-                        error = e.message ?: e.javaClass.simpleName
-                    }
-                }
-                results += result
-                if (result.success) {
-                    totalAffected += result.affectedRows
-                } else {
-                    break   // 遇错即停
-                }
+    ): SqlExecuteResponse =
+        withContext(Dispatchers.IO) {
+            val parts = SqlScriptSplitter.split(req.sql)
+            if (parts.isEmpty()) {
+                throw IllegalArgumentException("multi_statement script contains no executable statement")
             }
-        } finally {
-            releaseIfUnbound(conn, sessionId)
+            val conn = PoolManager.getConnection(config, req.schema, sessionId)
+            val results = mutableListOf<SqlStatementResult>()
+            var totalAffected = 0
+            try {
+                for ((index, sql) in parts.withIndex()) {
+                    val result =
+                        try {
+                            val resp = executeOne(conn, config, sql, onRow, "$requestId#$index")
+                            sqlStatementResult {
+                                this.index = index
+                                this.sql = sql
+                                affectedRows = resp.affectedRows
+                                success = true
+                            }
+                        } catch (e: Exception) {
+                            // 取消导致的异常与普通 SQL 错误同形 —— 记录后停止执行后续语句
+                            sqlStatementResult {
+                                this.index = index
+                                this.sql = sql
+                                this.success = false
+                                error = e.message ?: e.javaClass.simpleName
+                            }
+                        }
+                    results += result
+                    if (result.success) {
+                        totalAffected += result.affectedRows
+                    } else {
+                        break // 遇错即停
+                    }
+                }
+            } finally {
+                releaseIfUnbound(conn, sessionId)
+            }
+            sqlExecuteResponse {
+                affectedRows = totalAffected
+                statements.addAll(results)
+            }
         }
-        sqlExecuteResponse {
-            affectedRows = totalAffected
-            statements.addAll(results)
-        }
-    }
 
     /** 在给定连接上执行单条 SQL。Statement 全程登记到 [StatementRegistry] 以支持取消。 */
     private suspend fun executeOne(
@@ -128,48 +131,49 @@ object SqlEngineHandler {
         requestId: String,
     ): SqlExecuteResponse {
         val dialect = DialectLoader.getDialect(config.driver)
-        return conn.createStatement(
-            ResultSet.TYPE_FORWARD_ONLY,
-            ResultSet.CONCUR_READ_ONLY
-        ).use { stmt ->
-            StatementRegistry.register(requestId, stmt)
-            try {
-                val originalAutoCommit = dialect.configureConnectionForStreaming(conn)
+        return conn
+            .createStatement(
+                ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY,
+            ).use { stmt ->
+                StatementRegistry.register(requestId, stmt)
                 try {
-                    val hasResultSet = stmt.execute(sql)
-                    if (hasResultSet) {
-                        if (onRow != null) {
-                            // 游标流式模式
-                            stmt.fetchSize = 100
-                            stmt.resultSet.use { rs ->
-                                var pageIdx = 0
-                                while (rs.next()) {
-                                    onRow(
-                                        sqlSelectRowFrame {
-                                            this.total = -1L
-                                            this.page = pageIdx
-                                            this.pageSize = 1
-                                            row = buildRow(rs)
-                                        }
-                                    )
-                                    pageIdx++
+                    val originalAutoCommit = dialect.configureConnectionForStreaming(conn)
+                    try {
+                        val hasResultSet = stmt.execute(sql)
+                        if (hasResultSet) {
+                            if (onRow != null) {
+                                // 游标流式模式
+                                stmt.fetchSize = 100
+                                stmt.resultSet.use { rs ->
+                                    var pageIdx = 0
+                                    while (rs.next()) {
+                                        onRow(
+                                            sqlSelectRowFrame {
+                                                this.total = -1L
+                                                this.page = pageIdx
+                                                this.pageSize = 1
+                                                row = buildRow(rs)
+                                            },
+                                        )
+                                        pageIdx++
+                                    }
                                 }
+                                sqlExecuteResponse { }
+                            } else {
+                                // 非流式模式：此路径 dispatcher 不会调用（dispatcher 总走流式），保留占位
+                                sqlExecuteResponse { }
                             }
-                            sqlExecuteResponse { }
                         } else {
-                            // 非流式模式：此路径 dispatcher 不会调用（dispatcher 总走流式），保留占位
-                            sqlExecuteResponse { }
+                            sqlExecuteResponse { this.affectedRows = stmt.updateCount }
                         }
-                    } else {
-                        sqlExecuteResponse { this.affectedRows = stmt.updateCount }
+                    } finally {
+                        dialect.restoreConnectionAfterStreaming(conn, originalAutoCommit)
                     }
                 } finally {
-                    dialect.restoreConnectionAfterStreaming(conn, originalAutoCommit)
+                    StatementRegistry.unregister(requestId)
                 }
-            } finally {
-                StatementRegistry.unregister(requestId)
             }
-        }
     }
 
     /**
@@ -178,7 +182,10 @@ object SqlEngineHandler {
      * 会话连接由 [TransactionManager] 持有，在 COMMIT / ROLLBACK 之前 close() 会把它
      * 还回池中，后续语句将落到另一条物理连接上，事务语义直接失效。
      */
-    private fun releaseIfUnbound(conn: java.sql.Connection, sessionId: String) {
+    private fun releaseIfUnbound(
+        conn: java.sql.Connection,
+        sessionId: String,
+    ) {
         if (sessionId.isBlank()) conn.close()
     }
 
@@ -192,11 +199,12 @@ object SqlEngineHandler {
             for (i in 1..columnCount) {
                 val columnName = metaData.getColumnName(i)
                 val columnType = metaData.getColumnTypeName(i)
-                val value: Value = if (columnType in listOf("BLOB", "LONGTEXT", "BYTEA", "TEXT")) {
-                    PayloadAdapter.toValue(JsonPrimitive("[LOB Data]"))
-                } else {
-                    PayloadAdapter.toValue(JsonPrimitive(rs.getString(i)))
-                }
+                val value: Value =
+                    if (columnType in listOf("BLOB", "LONGTEXT", "BYTEA", "TEXT")) {
+                        PayloadAdapter.toValue(JsonPrimitive("[LOB Data]"))
+                    } else {
+                        PayloadAdapter.toValue(JsonPrimitive(rs.getString(i)))
+                    }
                 values.put(columnName, value)
             }
         }
@@ -205,23 +213,28 @@ object SqlEngineHandler {
     /**
      * EXPLAIN — 返回 SQL 的执行计划
      */
-    suspend fun explain(config: ConnectionConfig, req: SqlExplainRequest): SqlExplainResponse = withContext(Dispatchers.IO) {
-        if (req.sql.isBlank()) throw IllegalArgumentException("Missing 'sql' in payload")
-        val schema = req.schema
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
-        return@withContext connection.use { conn ->
-            val rows = dialect.explainSQL(conn, req.sql)
-            sqlExplainResponse {
-                rows.forEach { row ->
-                    val r = row {
-                        row.forEach { (k, v) ->
-                            values.put(k, PayloadAdapter.toValue(JsonPrimitive(v)))
-                        }
+    suspend fun explain(
+        config: ConnectionConfig,
+        req: SqlExplainRequest,
+    ): SqlExplainResponse =
+        withContext(Dispatchers.IO) {
+            if (req.sql.isBlank()) throw IllegalArgumentException("Missing 'sql' in payload")
+            val schema = req.schema
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
+            return@withContext connection.use { conn ->
+                val rows = dialect.explainSQL(conn, req.sql)
+                sqlExplainResponse {
+                    rows.forEach { row ->
+                        val r =
+                            row {
+                                row.forEach { (k, v) ->
+                                    values.put(k, PayloadAdapter.toValue(JsonPrimitive(v)))
+                                }
+                            }
+                        this.rows += r
                     }
-                    this.rows += r
                 }
             }
         }
-    }
 }

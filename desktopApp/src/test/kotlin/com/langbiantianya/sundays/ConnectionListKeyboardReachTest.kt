@@ -54,19 +54,19 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalTestApi::class)
 class ConnectionListKeyboardReachTest {
-
-    private val cfg = ConnectionConfig(
-        id = "kb-mysql",
-        name = "键盘探针",
-        dialect = DialectType.MYSQL,
-        host = "192.168.1.5",
-        port = 3306,
-        database = "sundays_probe",
-        username = "root",
-        password = "666666",
-        connectionType = ConnectionType.CLIENT_SERVER,
-        jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe?useSSL=false",
-    )
+    private val cfg =
+        ConnectionConfig(
+            id = "kb-mysql",
+            name = "键盘探针",
+            dialect = DialectType.MYSQL,
+            host = "192.168.1.5",
+            port = 3306,
+            database = "sundays_probe",
+            username = "root",
+            password = "666666",
+            connectionType = ConnectionType.CLIENT_SERVER,
+            jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe?useSSL=false",
+        )
 
     @Test
     fun `the connection card carries a testTag and can be reached by tab`() =
@@ -107,7 +107,14 @@ class ConnectionListKeyboardReachTest {
             for (i in 0 until 10) {
                 root.performKeyInput { pressKey(Key.Tab) }
                 waitForIdle()
-                if (runCatching { card.assertIsFocused(); true }.getOrDefault(false)) { reached = true; break }
+                if (runCatching {
+                        card.assertIsFocused()
+                        true
+                    }.getOrDefault(false)
+                ) {
+                    reached = true
+                    break
+                }
             }
             assertTrue(reached, "连续 10 次 Tab 之后连接卡片仍未获得焦点 —— 键盘用户无法选中它")
         }
@@ -159,14 +166,22 @@ class ConnectionListKeyboardReachTest {
             for (i in 0 until 10) {
                 root.performKeyInput { pressKey(Key.Tab) }
                 waitForIdle()
-                if (runCatching { card.assertIsFocused(); true }.getOrDefault(false)) break
+                if (runCatching {
+                        card.assertIsFocused()
+                        true
+                    }.getOrDefault(false)
+                ) {
+                    break
+                }
             }
 
             // 焦点环挂的是 `onFocusChanged` + 绘制，绘制不进语义树；
             // 但**焦点状态进了语义树**，所以用它做判据 ——
             // 这正是「少这一层环就画不出来」的那一环（断言写在语义上，不在像素上）。
-            val focused = card.fetchSemanticsNode()
-                .config[androidx.compose.ui.semantics.SemanticsProperties.Focused]
+            val focused =
+                card
+                    .fetchSemanticsNode()
+                    .config[androidx.compose.ui.semantics.SemanticsProperties.Focused]
             assertEquals(true, focused, "卡片获得键盘焦点后语义树里必须带 Focused —— 焦点环靠它绘制")
         }
 }

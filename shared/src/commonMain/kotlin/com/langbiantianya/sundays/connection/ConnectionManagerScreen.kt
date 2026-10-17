@@ -24,29 +24,29 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import com.langbiantianya.i18n.StrKey
-import com.langbiantianya.sundays.ui.focusRing
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.ui.SettingsEntryButton
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
+import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.WinMenuItem
-import com.langbiantianya.sundays.ui.WinProgressIndicator
-import com.langbiantianya.sundays.ui.selectionIndicatorColors
-import com.langbiantianya.sundays.ui.uiBevel
 import com.langbiantianya.sundays.ui.WinOutlinedButton
+import com.langbiantianya.sundays.ui.WinProgressIndicator
 import com.langbiantianya.sundays.ui.WinTextButton
 import com.langbiantianya.sundays.ui.WinTextField
+import com.langbiantianya.sundays.ui.focusRing
 import com.langbiantianya.sundays.ui.isClassicChrome
-import com.langbiantianya.sundays.ui.WinIconButton
-import com.langbiantianya.sundays.ui.winShape
 import com.langbiantianya.sundays.ui.selectionContainerColor
 import com.langbiantianya.sundays.ui.selectionContentColor
+import com.langbiantianya.sundays.ui.selectionIndicatorColors
 import com.langbiantianya.sundays.ui.str
+import com.langbiantianya.sundays.ui.uiBevel
+import com.langbiantianya.sundays.ui.winShape
 import kotlinx.coroutines.launch
 
 /**
@@ -184,9 +184,10 @@ fun ConnectionManagerScreen(
             onDeleteConnection = requestDelete,
             isEmbeddedInDialog = isEmbeddedInDialog,
             onOpenSettings = onOpenSettings,
-            modifier = Modifier
-                .width(250.dp)
-                .fillMaxHeight(),
+            modifier =
+                Modifier
+                    .width(250.dp)
+                    .fillMaxHeight(),
         )
 
         VerticalDivider(
@@ -216,16 +217,17 @@ fun ConnectionManagerScreen(
             onDisconnect = onDisconnect,
             onEditConnection = onEditConnection,
             onDeleteConnection = requestDelete,
-            modifier = Modifier
-                // ⚠️ 这里**曾经**试过改成 `fillMaxWidth()`：本意是「右栏是从属区域，
-                // 应当占满剩余宽度」，想顺带治 §9.4 的按钮溢出。**实测毫无变化** ——
-                // 步骤条宽度与改之前逐像素一致（各 383px、总宽 1550px），说明右栏
-                // 本来就是满宽的，溢出来自更里面。所以改动被回退了：
-                // 留一个验证不了的「修复」只会让人以为问题解决了。
-                //
-                // §9.4 的真因仍未隔离，已知事实见 TEST_CASES.md §9.4。
-                .widthIn(min = 350.dp)
-                .fillMaxHeight(),
+            modifier =
+                Modifier
+                    // ⚠️ 这里**曾经**试过改成 `fillMaxWidth()`：本意是「右栏是从属区域，
+                    // 应当占满剩余宽度」，想顺带治 §9.4 的按钮溢出。**实测毫无变化** ——
+                    // 步骤条宽度与改之前逐像素一致（各 383px、总宽 1550px），说明右栏
+                    // 本来就是满宽的，溢出来自更里面。所以改动被回退了：
+                    // 留一个验证不了的「修复」只会让人以为问题解决了。
+                    //
+                    // §9.4 的真因仍未隔离，已知事实见 TEST_CASES.md §9.4。
+                    .widthIn(min = 350.dp)
+                    .fillMaxHeight(),
         )
     }
 
@@ -285,10 +287,11 @@ private fun DeleteConnectionConfirmDialog(
         confirmButton = {
             WinButton(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
                 shape = SundaysPalette.buttonShape,
             ) { Text(str(StrKey.DELETE)) }
         },
@@ -322,22 +325,25 @@ data class ConnectionStatus(
 
 /** 引导步骤 */
 enum class WizardStep {
-    IDLE,           // 空闲状态 (未编辑)
-    QUICK_CONNECT,  // 快速连接：选方言 (跳过 BASIC_INFO / CONNECTION_TYPE)
-    BASIC_INFO,     // 普通流程：基础信息 (名称 + 方言选择)
+    IDLE, // 空闲状态 (未编辑)
+    QUICK_CONNECT, // 快速连接：选方言 (跳过 BASIC_INFO / CONNECTION_TYPE)
+    BASIC_INFO, // 普通流程：基础信息 (名称 + 方言选择)
     CONNECTION_TYPE, // 普通流程：连接类型 (CLIENT_SERVER / EMBEDDED / FILE_BASED / IN_MEMORY)
-    CREDENTIALS,    // 认证信息 (主机/端口/用户名/密码 或 文件路径)
-    TEST_SAVE,      // 测试连接 & 保存
+    CREDENTIALS, // 认证信息 (主机/端口/用户名/密码 或 文件路径)
+    TEST_SAVE, // 测试连接 & 保存
 }
 
 /** 当前引导流程类型 (用于步骤指示器自适应) */
 enum class WizardFlow { QUICK_CONNECT, NORMAL }
 
 /** 当前流程的总步骤数 (用于步骤指示器自适应) */
-private fun totalStepsFor(flow: WizardFlow): Int = when (flow) {
-    WizardFlow.QUICK_CONNECT -> 3   // 快速连接：选方言 → 凭据 → 测试保存
-    WizardFlow.NORMAL -> 4          // 普通：基础 → 类型 → 凭据 → 测试保存
-}
+private fun totalStepsFor(flow: WizardFlow): Int =
+    when (flow) {
+        WizardFlow.QUICK_CONNECT -> 3
+
+        // 快速连接：选方言 → 凭据 → 测试保存
+        WizardFlow.NORMAL -> 4 // 普通：基础 → 类型 → 凭据 → 测试保存
+    }
 
 /**
  * 左侧连接列表面板.
@@ -357,9 +363,10 @@ private fun ConnectionListPanel(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
+        modifier =
+            modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(12.dp),
     ) {
         // 标题 + 新建/快速连接按钮
         Row(
@@ -392,9 +399,10 @@ private fun ConnectionListPanel(
         // 连接列表
         if (connections.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -441,19 +449,28 @@ private fun ConnectionListItem(
     // 而 `Modifier.clickable` 在非触摸模式下会加入 Tab 序却不画任何焦点指示 ——
     // 键盘用户 Tab 得到这里时，界面和没聚焦时一模一样。
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .focusRing()
-            .clickable(onClick = onClick)
-            .testTag(connectionCardTag(connection.id)),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .focusRing()
+                .clickable(onClick = onClick)
+                .testTag(connectionCardTag(connection.id)),
         shape = winShape(8.dp),
         contentColor = selectionContentColor(isSelected),
         color = selectionContainerColor(isSelected),
-        border = if (isClassicChrome) null else BorderStroke(
-            1.dp,
-            if (isSelected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outlineVariant,
-        ),
+        border =
+            if (isClassicChrome) {
+                null
+            } else {
+                BorderStroke(
+                    1.dp,
+                    if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                )
+            },
     ) {
         Row(
             modifier = Modifier.padding(10.dp),
@@ -461,14 +478,15 @@ private fun ConnectionListItem(
         ) {
             // 数据库类型图标
             Icon(
-                imageVector = when (connection.dialect) {
-                    DialectType.MYSQL -> Icons.Default.Storage
-                    DialectType.POSTGRESQL -> Icons.Default.Storage
-                    DialectType.H2 -> Icons.Default.Memory
-                    DialectType.DUCKDB -> Icons.Default.Analytics
-                    DialectType.SQLITE -> Icons.Default.FolderOpen
-                    DialectType.UNKNOWN -> Icons.Default.QuestionMark
-                },
+                imageVector =
+                    when (connection.dialect) {
+                        DialectType.MYSQL -> Icons.Default.Storage
+                        DialectType.POSTGRESQL -> Icons.Default.Storage
+                        DialectType.H2 -> Icons.Default.Memory
+                        DialectType.DUCKDB -> Icons.Default.Analytics
+                        DialectType.SQLITE -> Icons.Default.FolderOpen
+                        DialectType.UNKNOWN -> Icons.Default.QuestionMark
+                    },
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.primary,
@@ -528,21 +546,26 @@ private fun ConnectionListItem(
 
 /** 连接状态色点 —— 列表项 / 总览面板共用 */
 @Composable
-private fun ConnectionStatusDot(state: ConnectionState, size: Dp = 8.dp) {
+private fun ConnectionStatusDot(
+    state: ConnectionState,
+    size: Dp = 8.dp,
+) {
     Box(
-        modifier = Modifier
-            .size(size)
-            .background(connectionStateColor(state), androidx.compose.foundation.shape.CircleShape),
+        modifier =
+            Modifier
+                .size(size)
+                .background(connectionStateColor(state), androidx.compose.foundation.shape.CircleShape),
     )
 }
 
 @Composable
-private fun connectionStateColor(state: ConnectionState) = when (state) {
-    ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
-    ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
-    ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
-    ConnectionState.FAILED -> MaterialTheme.colorScheme.error
-}
+private fun connectionStateColor(state: ConnectionState) =
+    when (state) {
+        ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
+        ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+        ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+        ConnectionState.FAILED -> MaterialTheme.colorScheme.error
+    }
 
 /**
  * 连接状态文案 —— **返回键而不是成品串**。
@@ -550,12 +573,13 @@ private fun connectionStateColor(state: ConnectionState) = when (state) {
  * `str()` 是 `@Composable`，而这里是普通函数（`when` 只做映射，不该有副作用），
  * 因此把「取文案」留给渲染处：`str(connectionStateLabel(status.state))`。
  */
-private fun connectionStateLabel(state: ConnectionState): StrKey = when (state) {
-    ConnectionState.DISCONNECTED -> StrKey.NOT_CONNECTED
-    ConnectionState.CONNECTING -> StrKey.CONNECTING
-    ConnectionState.CONNECTED -> StrKey.CONNECTED
-    ConnectionState.FAILED -> StrKey.CONNECT_FAILED
-}
+private fun connectionStateLabel(state: ConnectionState): StrKey =
+    when (state) {
+        ConnectionState.DISCONNECTED -> StrKey.NOT_CONNECTED
+        ConnectionState.CONNECTING -> StrKey.CONNECTING
+        ConnectionState.CONNECTED -> StrKey.CONNECTED
+        ConnectionState.FAILED -> StrKey.CONNECT_FAILED
+    }
 
 /**
  * 右侧连接信息引导面板.
@@ -645,94 +669,121 @@ fun ConnectionWizardContent(
     val totalSteps = totalStepsFor(wizardFlow)
 
     Column(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(24.dp)
-            .verticalScroll(scrollState),
+        modifier =
+            modifier
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(24.dp)
+                .verticalScroll(scrollState),
     ) {
         // 使用 safe render 避免 editingConnection 为 null 时崩溃
         when (wizardStep) {
-            WizardStep.IDLE -> idleContent()
-            WizardStep.QUICK_CONNECT -> editingConnection?.let { config ->
-                QuickConnectStep(
-                    stepIndex = 1,
-                    totalSteps = totalSteps,
-                    onSelectDialect = { dialect ->
-                        onUpdateEditingConnection(config.withDialect(dialect))
-                        onWizardNext(WizardStep.CREDENTIALS)
-                    },
-                    onBack = onWizardBack,
-                    onCancel = onCancelEdit,
-                )
+            WizardStep.IDLE -> {
+                idleContent()
             }
-            WizardStep.BASIC_INFO -> editingConnection?.let { config ->
-                BasicInfoStep(
-                    editingConnection = config,
-                    stepIndex = stepIndexOf(wizardStep, wizardFlow),
-                    totalSteps = totalSteps,
-                    onNameChange = { onUpdateEditingConnection(config.copy(name = it)) },
-                    onDialectChange = { newDialect ->
-                        onUpdateEditingConnection(config.withDialect(newDialect))
-                    },
-                    onNext = { onWizardNext(WizardStep.CONNECTION_TYPE) },
-                    onCancel = onCancelEdit,
-                )
+
+            WizardStep.QUICK_CONNECT -> {
+                editingConnection?.let { config ->
+                    QuickConnectStep(
+                        stepIndex = 1,
+                        totalSteps = totalSteps,
+                        onSelectDialect = { dialect ->
+                            onUpdateEditingConnection(config.withDialect(dialect))
+                            onWizardNext(WizardStep.CREDENTIALS)
+                        },
+                        onBack = onWizardBack,
+                        onCancel = onCancelEdit,
+                    )
+                }
             }
-            WizardStep.CONNECTION_TYPE -> editingConnection?.let { config ->
-                ConnectionTypeStep(
-                    editingConnection = config,
-                    stepIndex = stepIndexOf(wizardStep, wizardFlow),
-                    totalSteps = totalSteps,
-                    onConnectionTypeChange = { onUpdateEditingConnection(config.withConnectionType(it)) },
-                    onNext = { onWizardNext(WizardStep.CREDENTIALS) },
-                    onBack = onWizardBack,
-                    onCancel = onCancelEdit,
-                )
+
+            WizardStep.BASIC_INFO -> {
+                editingConnection?.let { config ->
+                    BasicInfoStep(
+                        editingConnection = config,
+                        stepIndex = stepIndexOf(wizardStep, wizardFlow),
+                        totalSteps = totalSteps,
+                        onNameChange = { onUpdateEditingConnection(config.copy(name = it)) },
+                        onDialectChange = { newDialect ->
+                            onUpdateEditingConnection(config.withDialect(newDialect))
+                        },
+                        onNext = { onWizardNext(WizardStep.CONNECTION_TYPE) },
+                        onCancel = onCancelEdit,
+                    )
+                }
             }
-            WizardStep.CREDENTIALS -> editingConnection?.let { config ->
-                CredentialsStep(
-                    editingConnection = config,
-                    stepIndex = stepIndexOf(wizardStep, wizardFlow),
-                    totalSteps = totalSteps,
-                    onNext = { onWizardNext(WizardStep.TEST_SAVE) },
-                    onBack = onWizardBack,
-                    onCancel = onCancelEdit,
-                    onUpdateEditingConnection = onUpdateEditingConnection,
-                )
+
+            WizardStep.CONNECTION_TYPE -> {
+                editingConnection?.let { config ->
+                    ConnectionTypeStep(
+                        editingConnection = config,
+                        stepIndex = stepIndexOf(wizardStep, wizardFlow),
+                        totalSteps = totalSteps,
+                        onConnectionTypeChange = { onUpdateEditingConnection(config.withConnectionType(it)) },
+                        onNext = { onWizardNext(WizardStep.CREDENTIALS) },
+                        onBack = onWizardBack,
+                        onCancel = onCancelEdit,
+                    )
+                }
             }
-            WizardStep.TEST_SAVE -> editingConnection?.let { config ->
-                TestSaveStep(
-                    editingConnection = config,
-                    stepIndex = stepIndexOf(wizardStep, wizardFlow),
-                    totalSteps = totalSteps,
-                    wizardFlow = wizardFlow,
-                    onSave = onSaveConnection,
-                    onQuickConnectDirect = onQuickConnectDirect,
-                    onTestConnection = onTestConnection,
-                    onBack = onWizardBack,
-                    onCancel = onCancelEdit,
-                )
+
+            WizardStep.CREDENTIALS -> {
+                editingConnection?.let { config ->
+                    CredentialsStep(
+                        editingConnection = config,
+                        stepIndex = stepIndexOf(wizardStep, wizardFlow),
+                        totalSteps = totalSteps,
+                        onNext = { onWizardNext(WizardStep.TEST_SAVE) },
+                        onBack = onWizardBack,
+                        onCancel = onCancelEdit,
+                        onUpdateEditingConnection = onUpdateEditingConnection,
+                    )
+                }
+            }
+
+            WizardStep.TEST_SAVE -> {
+                editingConnection?.let { config ->
+                    TestSaveStep(
+                        editingConnection = config,
+                        stepIndex = stepIndexOf(wizardStep, wizardFlow),
+                        totalSteps = totalSteps,
+                        wizardFlow = wizardFlow,
+                        onSave = onSaveConnection,
+                        onQuickConnectDirect = onQuickConnectDirect,
+                        onTestConnection = onTestConnection,
+                        onBack = onWizardBack,
+                        onCancel = onCancelEdit,
+                    )
+                }
             }
         }
     }
 }
 
 /** 根据当前流程计算步骤索引 (1-based) */
-private fun stepIndexOf(step: WizardStep, flow: WizardFlow): Int = when (flow) {
-    WizardFlow.QUICK_CONNECT -> when (step) {
-        WizardStep.QUICK_CONNECT -> 1
-        WizardStep.CREDENTIALS -> 2
-        WizardStep.TEST_SAVE -> 3
-        else -> 0
+private fun stepIndexOf(
+    step: WizardStep,
+    flow: WizardFlow,
+): Int =
+    when (flow) {
+        WizardFlow.QUICK_CONNECT -> {
+            when (step) {
+                WizardStep.QUICK_CONNECT -> 1
+                WizardStep.CREDENTIALS -> 2
+                WizardStep.TEST_SAVE -> 3
+                else -> 0
+            }
+        }
+
+        WizardFlow.NORMAL -> {
+            when (step) {
+                WizardStep.BASIC_INFO -> 1
+                WizardStep.CONNECTION_TYPE -> 2
+                WizardStep.CREDENTIALS -> 3
+                WizardStep.TEST_SAVE -> 4
+                else -> 0
+            }
+        }
     }
-    WizardFlow.NORMAL -> when (step) {
-        WizardStep.BASIC_INFO -> 1
-        WizardStep.CONNECTION_TYPE -> 2
-        WizardStep.CREDENTIALS -> 3
-        WizardStep.TEST_SAVE -> 4
-        else -> 0
-    }
-}
 
 /**
  * 选中连接总览 (`wizardStep == IDLE` 且已选中连接时取代空闲引导页).
@@ -751,9 +802,10 @@ private fun ConnectionOverviewPanel(
     onDelete: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(CONNECT_OVERVIEW_PANEL_TAG),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(CONNECT_OVERVIEW_PANEL_TAG),
     ) {
         // 历史配置可能没有 jdbcUrl（v2.11 之前保存的空 URL）—— 引擎侧无法建池，先引导去补全
         val connectable = buildJdbcUrl(connection).isNotBlank()
@@ -774,10 +826,11 @@ private fun ConnectionOverviewPanel(
         Spacer(modifier = Modifier.height(16.dp))
 
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(CONNECT_OVERVIEW_CARD_TAG)
-                .uiBevel(raised = true),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .testTag(CONNECT_OVERVIEW_CARD_TAG)
+                    .uiBevel(raised = true),
             shape = winShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
@@ -790,8 +843,12 @@ private fun ConnectionOverviewPanel(
                     Text(
                         text = str(connectionStateLabel(status.state)),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (status.state == ConnectionState.FAILED) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.onSurface,
+                        color =
+                            if (status.state == ConnectionState.FAILED) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
                     )
                 }
                 if (status.message.isNotBlank()) {
@@ -799,8 +856,12 @@ private fun ConnectionOverviewPanel(
                     Text(
                         text = status.message,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (status.state == ConnectionState.FAILED) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color =
+                            if (status.state == ConnectionState.FAILED) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                     )
                 }
 
@@ -815,9 +876,10 @@ private fun ConnectionOverviewPanel(
         Spacer(modifier = Modifier.height(24.dp))
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(CONNECT_OVERVIEW_ACTIONS_TAG),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .testTag(CONNECT_OVERVIEW_ACTIONS_TAG),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -830,31 +892,39 @@ private fun ConnectionOverviewPanel(
             }
             Spacer(modifier = Modifier.width(8.dp))
             when (status.state) {
-                ConnectionState.CONNECTED -> WinOutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
-                    Icon(Icons.Default.LinkOff, null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(str(StrKey.DISCONNECT))
-                }
-                ConnectionState.CONNECTING -> WinButton(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
-                    WinProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(str(StrKey.CONNECTING_ELLIPSIS))
-                }
-                ConnectionState.DISCONNECTED, ConnectionState.FAILED -> Column(
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    WinButton(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
-                        Icon(Icons.Default.Bolt, null)
+                ConnectionState.CONNECTED -> {
+                    WinOutlinedButton(onClick = onDisconnect, shape = SundaysPalette.buttonShape) {
+                        Icon(Icons.Default.LinkOff, null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(str(StrKey.CONNECT))
+                        Text(str(StrKey.DISCONNECT))
                     }
-                    if (!connectable) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = str(StrKey.MISSING_JDBC_URL),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                }
+
+                ConnectionState.CONNECTING -> {
+                    WinButton(onClick = {}, enabled = false, shape = SundaysPalette.buttonShape) {
+                        WinProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(str(StrKey.CONNECTING_ELLIPSIS))
+                    }
+                }
+
+                ConnectionState.DISCONNECTED, ConnectionState.FAILED -> {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        WinButton(onClick = onConnect, enabled = connectable, shape = SundaysPalette.buttonShape) {
+                            Icon(Icons.Default.Bolt, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(str(StrKey.CONNECT))
+                        }
+                        if (!connectable) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = str(StrKey.MISSING_JDBC_URL),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -988,11 +1058,12 @@ private fun QuickConnectCard(
     onClick: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .focusRing()
-            .clickable(onClick = onClick)
-            .testTag(quickConnectCardTag(title)),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .focusRing()
+                .clickable(onClick = onClick)
+                .testTag(quickConnectCardTag(title)),
         shape = winShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1118,19 +1189,28 @@ private fun SelectableOptionRow(
     // [focusRing] 必需：这行是向导里「选方言 / 选连接类型」的唯一点击目标，
     // 而 `clickable` 在非触摸模式下会进 Tab 序却不画焦点指示。
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .focusRing()
-            .clickable(onClick = onClick)
-            .testTag(selectableOptionTag(title)),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .focusRing()
+                .clickable(onClick = onClick)
+                .testTag(selectableOptionTag(title)),
         shape = winShape(8.dp),
         contentColor = selectionContentColor(isSelected),
         color = selectionContainerColor(isSelected),
-        border = if (isClassicChrome) null else BorderStroke(
-            1.dp,
-            if (isSelected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outlineVariant,
-        ),
+        border =
+            if (isClassicChrome) {
+                null
+            } else {
+                BorderStroke(
+                    1.dp,
+                    if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                )
+            },
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -1159,14 +1239,15 @@ private fun DialectOption(
 ) {
     SelectableOptionRow(
         title = dialect.name,
-        description = when (dialect) {
-            DialectType.MYSQL -> str(StrKey.DIALECT_MYSQL_DESC)
-            DialectType.POSTGRESQL -> str(StrKey.DIALECT_POSTGRESQL_DESC)
-            DialectType.H2 -> str(StrKey.DIALECT_H2_DESC)
-            DialectType.DUCKDB -> str(StrKey.DIALECT_DUCKDB_DESC)
-            DialectType.SQLITE -> str(StrKey.DIALECT_SQLITE_DESC)
-            DialectType.UNKNOWN -> ""
-        },
+        description =
+            when (dialect) {
+                DialectType.MYSQL -> str(StrKey.DIALECT_MYSQL_DESC)
+                DialectType.POSTGRESQL -> str(StrKey.DIALECT_POSTGRESQL_DESC)
+                DialectType.H2 -> str(StrKey.DIALECT_H2_DESC)
+                DialectType.DUCKDB -> str(StrKey.DIALECT_DUCKDB_DESC)
+                DialectType.SQLITE -> str(StrKey.DIALECT_SQLITE_DESC)
+                DialectType.UNKNOWN -> ""
+            },
         isSelected = isSelected,
         onClick = onClick,
     )
@@ -1228,20 +1309,22 @@ private fun ConnectionTypeOption(
     onClick: () -> Unit,
 ) {
     SelectableOptionRow(
-        title = when (connectionType) {
-            ConnectionType.CLIENT_SERVER -> str(StrKey.MODE_CLIENT_SERVER)
-            ConnectionType.EMBEDDED -> str(StrKey.MODE_EMBEDDED)
-            ConnectionType.IN_MEMORY -> str(StrKey.CONN_TYPE_IN_MEMORY)
-            ConnectionType.FILE_BASED -> str(StrKey.CONN_TYPE_FILE)
-            ConnectionType.UNKNOWN -> str(StrKey.MODE_UNKNOWN)
-        },
-        description = when (connectionType) {
-            ConnectionType.CLIENT_SERVER -> str(StrKey.DESC_NEEDS_HOST_PORT)
-            ConnectionType.EMBEDDED -> str(StrKey.DESC_EMBEDDED_IN_APP)
-            ConnectionType.IN_MEMORY -> str(StrKey.DESC_IN_MEMORY_VOLATILE)
-            ConnectionType.FILE_BASED -> str(StrKey.DESC_SINGLE_FILE)
-            ConnectionType.UNKNOWN -> ""
-        },
+        title =
+            when (connectionType) {
+                ConnectionType.CLIENT_SERVER -> str(StrKey.MODE_CLIENT_SERVER)
+                ConnectionType.EMBEDDED -> str(StrKey.MODE_EMBEDDED)
+                ConnectionType.IN_MEMORY -> str(StrKey.CONN_TYPE_IN_MEMORY)
+                ConnectionType.FILE_BASED -> str(StrKey.CONN_TYPE_FILE)
+                ConnectionType.UNKNOWN -> str(StrKey.MODE_UNKNOWN)
+            },
+        description =
+            when (connectionType) {
+                ConnectionType.CLIENT_SERVER -> str(StrKey.DESC_NEEDS_HOST_PORT)
+                ConnectionType.EMBEDDED -> str(StrKey.DESC_EMBEDDED_IN_APP)
+                ConnectionType.IN_MEMORY -> str(StrKey.DESC_IN_MEMORY_VOLATILE)
+                ConnectionType.FILE_BASED -> str(StrKey.DESC_SINGLE_FILE)
+                ConnectionType.UNKNOWN -> ""
+            },
         isSelected = isSelected,
         onClick = onClick,
     )
@@ -1439,24 +1522,36 @@ private const val DATABASE_NAME_LABEL_UNTRANSLATED = "数据库名称"
  */
 private fun embeddedFieldSpec(
     connection: ConnectionConfig,
-): Triple<StrKey?, StrKey, androidx.compose.ui.graphics.vector.ImageVector> = when (connection.dialect) {
-    DialectType.H2 -> if (connection.connectionType == ConnectionType.FILE_BASED) {
-        Triple(StrKey.DATABASE_FILE_PATH, StrKey.DATABASE_FILE_PATH_HINT_H2, Icons.Default.FolderOpen)
-    } else {
-        Triple(null, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
+): Triple<StrKey?, StrKey, androidx.compose.ui.graphics.vector.ImageVector> =
+    when (connection.dialect) {
+        DialectType.H2 -> {
+            if (connection.connectionType == ConnectionType.FILE_BASED) {
+                Triple(StrKey.DATABASE_FILE_PATH, StrKey.DATABASE_FILE_PATH_HINT_H2, Icons.Default.FolderOpen)
+            } else {
+                Triple(null, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
+            }
+        }
+
+        DialectType.DUCKDB -> {
+            Triple(
+                StrKey.DATABASE_FILE_PATH_LABEL,
+                StrKey.DATABASE_FILE_PATH_HINT_DUCKDB,
+                Icons.Default.FolderOpen,
+            )
+        }
+
+        DialectType.SQLITE -> {
+            Triple(
+                StrKey.DATABASE_FILE_PATH_LABEL,
+                StrKey.DATABASE_FILE_PATH_HINT_SQLITE,
+                Icons.Default.FolderOpen,
+            )
+        }
+
+        else -> {
+            Triple(StrKey.DATABASE, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
+        }
     }
-    DialectType.DUCKDB -> Triple(
-        StrKey.DATABASE_FILE_PATH_LABEL,
-        StrKey.DATABASE_FILE_PATH_HINT_DUCKDB,
-        Icons.Default.FolderOpen,
-    )
-    DialectType.SQLITE -> Triple(
-        StrKey.DATABASE_FILE_PATH_LABEL,
-        StrKey.DATABASE_FILE_PATH_HINT_SQLITE,
-        Icons.Default.FolderOpen,
-    )
-    else -> Triple(StrKey.DATABASE, StrKey.DATABASE_NAME_HINT, Icons.Default.Storage)
-}
 
 /** 测试 & 保存步骤 (普通流程 4 / 快速连接 3) */
 @Composable
@@ -1511,11 +1606,12 @@ private fun TestSaveStep(
                     val probe = onTestConnection ?: return@WinButton
                     scope.launch {
                         isTesting = true
-                        testResult = try {
-                            probe(editingConnection)
-                        } catch (e: Exception) {
-                            TestResult(success = false, message = e.message ?: "Unknown error")
-                        }
+                        testResult =
+                            try {
+                                probe(editingConnection)
+                            } catch (e: Exception) {
+                                TestResult(success = false, message = e.message ?: "Unknown error")
+                            }
                         isTesting = false
                     }
                 },
@@ -1543,8 +1639,12 @@ private fun TestSaveStep(
             Surface(
                 modifier = Modifier.fillMaxWidth().uiBevel(raised = true),
                 shape = winShape(8.dp),
-                color = if (result.success) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.errorContainer,
+                color =
+                    if (result.success) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
@@ -1553,15 +1653,27 @@ private fun TestSaveStep(
                     Icon(
                         imageVector = if (result.success) Icons.Default.CheckCircle else Icons.Default.Error,
                         contentDescription = null,
-                        tint = if (result.success) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.error,
+                        tint =
+                            if (result.success) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (result.success) str(StrKey.CONNECT_SUCCESS)
-                               else str(StrKey.CONNECT_FAILED_WITH_REASON, result.message),
-                        color = if (result.success) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onErrorContainer,
+                        text =
+                            if (result.success) {
+                                str(StrKey.CONNECT_SUCCESS)
+                            } else {
+                                str(StrKey.CONNECT_FAILED_WITH_REASON, result.message)
+                            },
+                        color =
+                            if (result.success) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            },
                     )
                 }
             }
@@ -1607,8 +1719,11 @@ private fun ConnectionSummary(connection: ConnectionConfig) {
             SummaryRow(str(StrKey.USER), connection.username)
         } else if (connection.database.isNotBlank()) {
             SummaryRow(
-                if (connection.connectionType == ConnectionType.IN_MEMORY) str(StrKey.DATABASE)
-                else str(StrKey.TARGET),
+                if (connection.connectionType == ConnectionType.IN_MEMORY) {
+                    str(StrKey.DATABASE)
+                } else {
+                    str(StrKey.TARGET)
+                },
                 connection.database,
             )
         }
@@ -1619,7 +1734,10 @@ private fun ConnectionSummary(connection: ConnectionConfig) {
 }
 
 @Composable
-private fun SummaryRow(label: String, value: String) {
+private fun SummaryRow(
+    label: String,
+    value: String,
+) {
     Row {
         Text(
             text = "$label:",
@@ -1635,7 +1753,10 @@ private fun SummaryRow(label: String, value: String) {
 }
 
 /** 测试结果 */
-data class TestResult(val success: Boolean, val message: String = "")
+data class TestResult(
+    val success: Boolean,
+    val message: String = "",
+)
 
 /** 步骤布局 */
 @Composable
@@ -1677,14 +1798,18 @@ private fun StepLayout(
         ) {
             repeat(totalSteps) { index ->
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(4.dp)
-                        .background(
-                            if (index < step) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            winShape(2.dp),
-                        ),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .background(
+                                if (index < step) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                winShape(2.dp),
+                            ),
                 )
             }
         }

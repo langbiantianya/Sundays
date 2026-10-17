@@ -30,7 +30,6 @@ import kotlin.test.assertTrue
  * 每个测试只验证一个语法点，与 SQL 测试风格保持一致。
  */
 class LuaTokenizerTest {
-
     private val lang = LuaLanguage()
 
     @Test
@@ -251,13 +250,14 @@ class LuaTokenizerTest {
 
     @Test
     fun realistic_lua_function() {
-        val source = """
+        val source =
+            """
             local function greet(name)
               local msg = 'Hello, ' .. name
               print(msg)
               return msg
             end
-        """.trimIndent()
+            """.trimIndent()
         val tokens = lang.tokenize(source)
         // 关键字：local function local return end = 5
         assertEquals(5, tokens.count { it.type == TokenType.KEYWORD })
@@ -270,11 +270,12 @@ class LuaTokenizerTest {
     @Test
     fun realistic_table_insert_script() {
         // 模拟项目 §5.7 造数引擎实际使用的 Lua 脚本
-        val source = """
+        val source =
+            """
             for i = 1, 100 do
               insert('users', {name='user_'..i, email=random_email(), age=random_int(18,65)})
             end
-        """.trimIndent()
+            """.trimIndent()
         val tokens = lang.tokenize(source)
         // 关键字：for do end = 3
         assertEquals(3, tokens.count { it.type == TokenType.KEYWORD })

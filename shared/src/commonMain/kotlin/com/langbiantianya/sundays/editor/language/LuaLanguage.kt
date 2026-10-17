@@ -32,15 +32,15 @@ import com.langbiantianya.sundays.editor.selectCompletions
  * - 长字符串 / 块注释层级解析只支持 `[=*]` 等长形式（不支持跨层级错误嵌套）
  */
 class LuaLanguage : CodeLanguage {
-
     override val id: String = "lua"
     override val displayName: String = "Lua"
 
     /** 补全候选池 —— 构造期排好序，每次按键只做线性过滤。 */
-    private val completionPool: List<CompletionItem> = buildCompletionPool(
-        CompletionKind.KEYWORD to KEYWORDS,
-        CompletionKind.BUILTIN to BUILTINS,
-    )
+    private val completionPool: List<CompletionItem> =
+        buildCompletionPool(
+            CompletionKind.KEYWORD to KEYWORDS,
+            CompletionKind.BUILTIN to BUILTINS,
+        )
 
     /**
      * Lua 关键字**大小写敏感**（`local` 是关键字，`LOCAL` 是普通标识符），因此补全也**必须**
@@ -50,8 +50,10 @@ class LuaLanguage : CodeLanguage {
      * 实际上是把一个**语义不同的标识符**塞进了他们的代码 —— 在大小写敏感的语言里这属于改 bug。
      * 宁可少提示，也不能改语义。
      */
-    override fun completionCandidates(prefix: String, limit: Int): List<CompletionItem> =
-        selectCompletions(completionPool, prefix, caseSensitive = true, limit = limit)
+    override fun completionCandidates(
+        prefix: String,
+        limit: Int,
+    ): List<CompletionItem> = selectCompletions(completionPool, prefix, caseSensitive = true, limit = limit)
 
     override fun tokenize(source: String): List<CodeToken> {
         if (source.isEmpty()) return emptyList()
@@ -66,6 +68,7 @@ class LuaLanguage : CodeLanguage {
                     while (i < len && source[i].isWhitespace()) i++
                     out.add(CodeToken(start, i, source.substring(start, i), TokenType.WHITESPACE))
                 }
+
                 // 单行注释 -- ...\n（也可能扩展为块注释 --[[ ... ]]）
                 c == '-' && i + 1 < len && source[i + 1] == '-' -> {
                     // 检查是否是块注释 --[[ ... ]] 或 --[==[ ... ]==]
@@ -85,6 +88,7 @@ class LuaLanguage : CodeLanguage {
                     while (i < len && source[i] != '\n') i++
                     out.add(CodeToken(start, i, source.substring(start, i), TokenType.COMMENT))
                 }
+
                 // 长字符串 [[ ... ]] 或 [==[ ... ]==]
                 c == '[' && i + 1 < len && source[i + 1] in LONG_BRACKET_LEVELS_OR_FIRST_EQ -> {
                     // 必须是 `[` 跟 0..N 个 `=` 再跟 `[` — 才是长字符串开头
@@ -101,6 +105,7 @@ class LuaLanguage : CodeLanguage {
                         i++
                     }
                 }
+
                 // 短字符串 '...' 或 "..."
                 c == '\'' || c == '"' -> {
                     val start = i
@@ -114,9 +119,20 @@ class LuaLanguage : CodeLanguage {
                                 closed = true
                                 break
                             }
-                            '\\' -> if (i + 1 < len) i += 2 else i++  // 转义序列（\\n \\t \\r 等）
-                            '\n' -> break  // 字符串不允许跨行 — 未闭合
-                            else -> i++
+
+                            '\\' -> {
+                                if (i + 1 < len) i += 2 else i++
+                            }
+
+                            // 转义序列（\\n \\t \\r 等）
+                            '\n' -> {
+                                break
+                            }
+
+                            // 字符串不允许跨行 — 未闭合
+                            else -> {
+                                i++
+                            }
                         }
                     }
                     out.add(
@@ -128,6 +144,7 @@ class LuaLanguage : CodeLanguage {
                         ),
                     )
                 }
+
                 // 数字
                 c.isDigit() || (c == '.' && i + 1 < len && source[i + 1].isDigit()) -> {
                     val start = i
@@ -154,20 +171,25 @@ class LuaLanguage : CodeLanguage {
                     }
                     out.add(CodeToken(start, i, source.substring(start, i), TokenType.NUMBER))
                 }
+
                 // 标识符 / 关键字
                 c.isLetter() || c == '_' -> {
                     val start = i
                     while (i < len && (source[i].isLetterOrDigit() || source[i] == '_')) i++
                     val word = source.substring(start, i)
-                    val type = when {
-                        // 大小写敏感
-                        word in KEYWORDS -> TokenType.KEYWORD
-                        word in BUILTINS -> TokenType.BUILTIN
-                        // Lua 字面量 nil / true / false 算关键字
-                        else -> TokenType.IDENTIFIER
-                    }
+                    val type =
+                        when {
+                            // 大小写敏感
+                            word in KEYWORDS -> TokenType.KEYWORD
+
+                            word in BUILTINS -> TokenType.BUILTIN
+
+                            // Lua 字面量 nil / true / false 算关键字
+                            else -> TokenType.IDENTIFIER
+                        }
                     out.add(CodeToken(start, i, word, type))
                 }
+
                 // 操作符（双字符优先）
                 else -> {
                     val two = if (i + 1 < len) source.substring(i, i + 2) else ""
@@ -177,14 +199,17 @@ class LuaLanguage : CodeLanguage {
                             out.add(CodeToken(i, i + 2, "::", TokenType.OPERATOR))
                             i += 2
                         }
+
                         two in MULTI_CHAR_OPS -> {
                             out.add(CodeToken(i, i + 2, two, TokenType.OPERATOR))
                             i += 2
                         }
+
                         c in SINGLE_CHAR_OPS -> {
                             out.add(CodeToken(i, i + 1, c.toString(), TokenType.OPERATOR))
                             i++
                         }
+
                         else -> {
                             out.add(CodeToken(i, i + 1, c.toString(), TokenType.PUNCTUATION))
                             i++
@@ -202,7 +227,11 @@ class LuaLanguage : CodeLanguage {
      * @param isComment true 表示 `--[...]` 块注释；false 表示 `[[...]]` 长字符串
      * @return 单个 CodeToken，type 由是否闭合决定（COMMENT/STRING vs ERROR）
      */
-    private fun consumeLongBracket(source: String, start: Int, isComment: Boolean): CodeToken {
+    private fun consumeLongBracket(
+        source: String,
+        start: Int,
+        isComment: Boolean,
+    ): CodeToken {
         val len = source.length
         val prefix = if (isComment) "--" else ""
         var i = start + prefix.length
@@ -212,7 +241,7 @@ class LuaLanguage : CodeLanguage {
             val end = (if (isComment) consumeLineComment(source, start) else start + 2).coerceAtMost(len)
             return CodeToken(start, end, source.substring(start, end), if (isComment) TokenType.COMMENT else TokenType.STRING)
         }
-        i++  // skip '['
+        i++ // skip '['
         var level = 0
         while (i < len && source[i] == '=') {
             level++
@@ -223,7 +252,7 @@ class LuaLanguage : CodeLanguage {
             val end = (start + prefix.length + 1).coerceAtMost(len)
             return CodeToken(start, end, source.substring(start, end), if (isComment) TokenType.COMMENT else TokenType.STRING)
         }
-        i++  // skip last '['
+        i++ // skip last '['
         // 找闭合 ]=*]
         while (i < len) {
             if (source[i] == ']') {
@@ -251,7 +280,10 @@ class LuaLanguage : CodeLanguage {
         return CodeToken(start, len, source.substring(start, len), TokenType.ERROR)
     }
 
-    private fun consumeLineComment(source: String, start: Int): Int {
+    private fun consumeLineComment(
+        source: String,
+        start: Int,
+    ): Int {
         var i = start + 2
         val len = source.length
         while (i < len && source[i] != '\n') i++
@@ -259,63 +291,197 @@ class LuaLanguage : CodeLanguage {
     }
 
     companion object {
-
         /** Lua 关键字 — 大小写敏感。 */
-        private val KEYWORDS: Set<String> = setOf(
-            "and", "break", "do", "else", "elseif", "end", "false", "for",
-            "function", "goto", "if", "in", "local", "nil", "not", "or",
-            "repeat", "return", "then", "true", "until", "while",
-        )
+        private val KEYWORDS: Set<String> =
+            setOf(
+                "and",
+                "break",
+                "do",
+                "else",
+                "elseif",
+                "end",
+                "false",
+                "for",
+                "function",
+                "goto",
+                "if",
+                "in",
+                "local",
+                "nil",
+                "not",
+                "or",
+                "repeat",
+                "return",
+                "then",
+                "true",
+                "until",
+                "while",
+            )
 
         /** Lua 内置函数 / 标准库。 */
-        private val BUILTINS: Set<String> = setOf(
-            // 基础
-            "print", "tostring", "tonumber", "type", "error", "assert",
-            "pcall", "xpcall", "select",
-            // table
-            "table", "pairs", "ipairs", "next", "unpack", "rawget", "rawset",
-            "rawequal", "rawlen", "setmetatable", "getmetatable",
-            // string
-            "string", "string.format", "string.sub", "string.find", "string.gmatch",
-            "string.gsub", "string.match", "string.char", "string.byte", "string.len",
-            "string.lower", "string.upper", "string.rep", "string.reverse",
-            // math
-            "math", "math.abs", "math.floor", "math.ceil", "math.sqrt",
-            "math.pow", "math.max", "math.min", "math.random", "math.randomseed",
-            "math.sin", "math.cos", "math.tan", "math.log", "math.exp",
-            "math.huge", "math.pi",
-            // io
-            "io", "io.write", "io.read", "io.open", "io.close", "io.flush",
-            // os
-            "os", "os.time", "os.date", "os.clock", "os.exit",
-            // debug
-            "debug", "debug.traceback", "debug.getinfo", "debug.getlocal",
-            "debug.setlocal", "debug.getupvalue", "debug.setupvalue",
-            // Lua 5.2+
-            "load", "loadstring", "loadfile", "dofile", "require",
-            // 协程
-            "coroutine", "coroutine.create", "coroutine.resume", "coroutine.yield",
-            "coroutine.wrap", "coroutine.status",
-        )
+        private val BUILTINS: Set<String> =
+            setOf(
+                // 基础
+                "print",
+                "tostring",
+                "tonumber",
+                "type",
+                "error",
+                "assert",
+                "pcall",
+                "xpcall",
+                "select",
+                // table
+                "table",
+                "pairs",
+                "ipairs",
+                "next",
+                "unpack",
+                "rawget",
+                "rawset",
+                "rawequal",
+                "rawlen",
+                "setmetatable",
+                "getmetatable",
+                // string
+                "string",
+                "string.format",
+                "string.sub",
+                "string.find",
+                "string.gmatch",
+                "string.gsub",
+                "string.match",
+                "string.char",
+                "string.byte",
+                "string.len",
+                "string.lower",
+                "string.upper",
+                "string.rep",
+                "string.reverse",
+                // math
+                "math",
+                "math.abs",
+                "math.floor",
+                "math.ceil",
+                "math.sqrt",
+                "math.pow",
+                "math.max",
+                "math.min",
+                "math.random",
+                "math.randomseed",
+                "math.sin",
+                "math.cos",
+                "math.tan",
+                "math.log",
+                "math.exp",
+                "math.huge",
+                "math.pi",
+                // io
+                "io",
+                "io.write",
+                "io.read",
+                "io.open",
+                "io.close",
+                "io.flush",
+                // os
+                "os",
+                "os.time",
+                "os.date",
+                "os.clock",
+                "os.exit",
+                // debug
+                "debug",
+                "debug.traceback",
+                "debug.getinfo",
+                "debug.getlocal",
+                "debug.setlocal",
+                "debug.getupvalue",
+                "debug.setupvalue",
+                // Lua 5.2+
+                "load",
+                "loadstring",
+                "loadfile",
+                "dofile",
+                "require",
+                // 协程
+                "coroutine",
+                "coroutine.create",
+                "coroutine.resume",
+                "coroutine.yield",
+                "coroutine.wrap",
+                "coroutine.status",
+            )
 
-        private val MULTI_CHAR_OPS: Set<String> = setOf(
-            "..", "..=", "<<", ">>", "<=", ">=", "==", "~=", "::", "//",
-            "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", ">>=", "<<=", "::",
-        )
+        private val MULTI_CHAR_OPS: Set<String> =
+            setOf(
+                "..",
+                "..=",
+                "<<",
+                ">>",
+                "<=",
+                ">=",
+                "==",
+                "~=",
+                "::",
+                "//",
+                "+=",
+                "-=",
+                "*=",
+                "/=",
+                "%=",
+                "^=",
+                "&=",
+                "|=",
+                ">>=",
+                "<<=",
+                "::",
+            )
 
-        private val SINGLE_CHAR_OPS: Set<Char> = setOf(
-            '+', '-', '*', '/', '%', '^', '#',
-            '=', '<', '>', '~', '&', '|',
-            ':',
-        )
+        private val SINGLE_CHAR_OPS: Set<Char> =
+            setOf(
+                '+',
+                '-',
+                '*',
+                '/',
+                '%',
+                '^',
+                '#',
+                '=',
+                '<',
+                '>',
+                '~',
+                '&',
+                '|',
+                ':',
+            )
 
         /** 长括号开头第二位允许的字符：= 或 [（即 `--[[` / `--[==[` 两种形式）。 */
         private val LONG_BRACKET_LEVELS_OR_FIRST_EQ: Set<Char> = setOf('[', '=')
 
-        private val HEX_DIGITS: Set<Char> = setOf(
-            '0', '1', '2', '3', '4', '5', '6', '7',
-            '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
-            'A', 'B', 'C', 'D', 'E', 'F',
-        )
+        private val HEX_DIGITS: Set<Char> =
+            setOf(
+                '0',
+                '1',
+                '2',
+                '3',
+                '4',
+                '5',
+                '6',
+                '7',
+                '8',
+                '9',
+                'a',
+                'b',
+                'c',
+                'd',
+                'e',
+                'f',
+                'A',
+                'B',
+                'C',
+                'D',
+                'E',
+                'F',
+            )
     }
 }

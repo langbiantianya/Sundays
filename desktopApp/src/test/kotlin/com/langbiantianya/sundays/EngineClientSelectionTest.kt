@@ -24,7 +24,6 @@ import kotlin.test.assertTrue
  * 实际连的是自己进程里的引擎），或者端点写错时连到错误的进程。因此两种分支都要钉住。
  */
 class EngineClientSelectionTest {
-
     @After
     fun tearDown() {
         System.clearProperty(ENDPOINT_PROPERTY)

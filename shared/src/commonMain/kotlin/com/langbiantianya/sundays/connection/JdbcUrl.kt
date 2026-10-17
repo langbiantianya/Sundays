@@ -8,14 +8,14 @@
 
 package com.langbiantianya.sundays.connection
 
-/**
+/*
  * JDBC URL 编解码 —— 连接配置的**真相源**（v2.12）。
  *
  * `ConnectionConfig.jdbcUrl` 是引擎侧唯一消费的连接标识（`PoolManager` 非空 URL 时直接用 URL 建池，
  * 方言由 URL scheme 反查），因此 UI 侧的所有字段编辑都必须收敛到一条合法 URL 上：
  *
- * - [buildJdbcUrl]：字段 → URL，覆盖全部 5 个方言 × 每个方言支持的连接类型
- * - [parseJdbcUrl]：URL → 字段，供持久化加载（[ConnectionStorage]）与向导的 URL 输入框反向同步
+ * - `buildJdbcUrl`：字段 → URL，覆盖全部 5 个方言 × 每个方言支持的连接类型
+ * - `parseJdbcUrl`：URL → 字段，供持久化加载（`ConnectionStorage`）与向导的 URL 输入框反向同步
  *
  * **与引擎的一致性**：URL 形状镜像 `engine` 侧各方言的 `DatabaseDialect.buildJdbcUrl`
  * （`Mysql` / `Postgresql` / `H2` / `Duckdb` / `Sqlite`）。新增方言或改动 URL 规则时**两处同步**：
@@ -23,7 +23,7 @@ package com.langbiantianya.sundays.connection
  * | 方言 | URL 形状 |
  * |---|---|
  * | MySQL | `jdbc:mysql://[user[:pass]@]host[:port][/db][?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC]` |
- * | PostgreSQL | `jdbc:postgresql://host[:port][/db]` —— **不带 userinfo**，见 [buildJdbcUrl] |
+ * | PostgreSQL | `jdbc:postgresql://host[:port][/db]` —— **不带 userinfo**，见 `buildJdbcUrl` |
  * | H2（内存） | `jdbc:h2:mem:<db>;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE` |
  * | H2（文件） | `jdbc:h2:file:<path>` |
  * | DuckDB | `jdbc:duckdb:<path>`（空 = 内存库） |
@@ -41,19 +41,26 @@ private const val MYSQL_DEFAULT_PARAMS =
  * 保留字母数字与 `-._~!$&'()*+,;=`，这样绝大多数用户名/密码生成的 URL 仍然人类可读，
  * 与改造前完全一致。空格编码为 `%20`（而非 `+`）—— userinfo 段不做 `+`→空格 的还原。
  */
-private fun encodeUserInfo(raw: String): String = buildString(raw.length) {
-    for (ch in raw) {
-        when {
-            ch.isLetterOrDigit() && ch.code < 128 -> append(ch)
-            ch in "-._~!\$&'()*+,;=" -> append(ch)
-            else -> {
-                for (b in ch.toString().toByteArray(Charsets.UTF_8)) {
-                    append('%').append("%02X".format(b.toInt() and 0xFF))
+private fun encodeUserInfo(raw: String): String =
+    buildString(raw.length) {
+        for (ch in raw) {
+            when {
+                ch.isLetterOrDigit() && ch.code < 128 -> {
+                    append(ch)
+                }
+
+                ch in "-._~!\$&'()*+,;=" -> {
+                    append(ch)
+                }
+
+                else -> {
+                    for (b in ch.toString().toByteArray(Charsets.UTF_8)) {
+                        append('%').append("%02X".format(b.toInt() and 0xFF))
+                    }
                 }
             }
         }
     }
-}
 
 /**
  * userinfo 的 percent-decoding —— 与 [encodeUserInfo] 成对。
@@ -99,30 +106,46 @@ private fun decodeUserInfo(raw: String): String {
  * @return 字段不足以构成 URL 时返回 `""`（例如 CLIENT_SERVER 缺主机、H2 缺库名）——
  *   向导据此禁用「下一步 / 保存 / 连接 / 测试连接」，保证交给引擎的配置一定有合法 URL。
  */
-internal fun buildJdbcUrl(config: ConnectionConfig, extraQuery: String = ""): String {
+internal fun buildJdbcUrl(
+    config: ConnectionConfig,
+    extraQuery: String = "",
+): String {
     val database = config.database.trim()
     return when (config.dialect) {
         // MySQL 与 PostgreSQL 形状同源，但**凭据是否进 URL 完全不同**，必须分开写 ——
         // 见 [mysqlCredPart] 与下面 PostgreSQL 分支的说明。
-        DialectType.MYSQL -> clientServerUrl(config, database, "jdbc:mysql", MYSQL_DEFAULT_PARAMS, extraQuery)
-        DialectType.POSTGRESQL -> clientServerUrl(config, database, "jdbc:postgresql", "", extraQuery)
+        DialectType.MYSQL -> {
+            clientServerUrl(config, database, "jdbc:mysql", MYSQL_DEFAULT_PARAMS, extraQuery)
+        }
 
-        DialectType.H2 -> when {
-            database.isEmpty() -> ""
-            config.connectionType == ConnectionType.FILE_BASED -> "jdbc:h2:file:$database"
-            else -> "jdbc:h2:mem:$database;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE"
+        DialectType.POSTGRESQL -> {
+            clientServerUrl(config, database, "jdbc:postgresql", "", extraQuery)
+        }
+
+        DialectType.H2 -> {
+            when {
+                database.isEmpty() -> ""
+                config.connectionType == ConnectionType.FILE_BASED -> "jdbc:h2:file:$database"
+                else -> "jdbc:h2:mem:$database;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE"
+            }
         }
 
         // DuckDB：database 为空 = 内存库（引擎 DuckDBDialect 语义）
-        DialectType.DUCKDB -> "jdbc:duckdb:$database"
-
-        // SQLite：database 为空 / :memory: = 内存库（引擎 SQLiteDialect 语义）
-        DialectType.SQLITE -> when (database) {
-            "", ":memory:" -> "jdbc:sqlite::memory:"
-            else -> "jdbc:sqlite:$database"
+        DialectType.DUCKDB -> {
+            "jdbc:duckdb:$database"
         }
 
-        DialectType.UNKNOWN -> ""
+        // SQLite：database 为空 / :memory: = 内存库（引擎 SQLiteDialect 语义）
+        DialectType.SQLITE -> {
+            when (database) {
+                "", ":memory:" -> "jdbc:sqlite::memory:"
+                else -> "jdbc:sqlite:$database"
+            }
+        }
+
+        DialectType.UNKNOWN -> {
+            ""
+        }
     }
 }
 
@@ -214,7 +237,10 @@ private fun credPartFor(config: ConnectionConfig): String {
  * 只有当用户下次保存时才会落成新形状。改版本号 + 扫盘迁移要处理「读旧文件失败」
  * 这类分支，而这里根本不需要碰磁盘就能拿到同样的效果。
  */
-internal fun normalizeJdbcUrl(url: String, dialect: DialectType): String {
+internal fun normalizeJdbcUrl(
+    url: String,
+    dialect: DialectType,
+): String {
     if (dialect != DialectType.POSTGRESQL) return url
     val scheme = "jdbc:postgresql:"
     if (!url.startsWith(scheme, ignoreCase = true)) return url
@@ -287,24 +313,41 @@ internal data class UrlParts(
 )
 
 /** 从 JDBC URL 解析字段（方言决定解析规则；不匹配 / 空 URL 返回空 [UrlParts]）。 */
-internal fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
+internal fun parseJdbcUrl(
+    url: String,
+    dialect: DialectType,
+): UrlParts {
     val trimmed = url.trim()
     if (trimmed.isEmpty()) return UrlParts()
 
     return when (dialect) {
-        DialectType.MYSQL -> parseClientServerUrl(trimmed, "jdbc:mysql")
-        DialectType.POSTGRESQL -> parseClientServerUrl(trimmed, "jdbc:postgresql")
-        DialectType.H2 -> parseH2Url(trimmed)
-        DialectType.DUCKDB -> {
-            if (!trimmed.startsWith("jdbc:duckdb:", ignoreCase = true)) UrlParts()
-            else UrlParts(
-                database = trimmed.substring("jdbc:duckdb:".length).substringBefore(';'),
-                connectionType = ConnectionType.EMBEDDED,
-            )
+        DialectType.MYSQL -> {
+            parseClientServerUrl(trimmed, "jdbc:mysql")
         }
+
+        DialectType.POSTGRESQL -> {
+            parseClientServerUrl(trimmed, "jdbc:postgresql")
+        }
+
+        DialectType.H2 -> {
+            parseH2Url(trimmed)
+        }
+
+        DialectType.DUCKDB -> {
+            if (!trimmed.startsWith("jdbc:duckdb:", ignoreCase = true)) {
+                UrlParts()
+            } else {
+                UrlParts(
+                    database = trimmed.substring("jdbc:duckdb:".length).substringBefore(';'),
+                    connectionType = ConnectionType.EMBEDDED,
+                )
+            }
+        }
+
         DialectType.SQLITE -> {
-            if (!trimmed.startsWith("jdbc:sqlite:", ignoreCase = true)) UrlParts()
-            else {
+            if (!trimmed.startsWith("jdbc:sqlite:", ignoreCase = true)) {
+                UrlParts()
+            } else {
                 val body = trimmed.substring("jdbc:sqlite:".length).substringBefore('?')
                 UrlParts(
                     database = if (body == ":memory:") "" else body,
@@ -312,12 +355,18 @@ internal fun parseJdbcUrl(url: String, dialect: DialectType): UrlParts {
                 )
             }
         }
-        DialectType.UNKNOWN -> UrlParts()
+
+        DialectType.UNKNOWN -> {
+            UrlParts()
+        }
     }
 }
 
 /** 解析 `jdbc:mysql://user:pass@host:port/db?params` / `jdbc:postgresql://...` 形状。 */
-private fun parseClientServerUrl(url: String, scheme: String): UrlParts {
+private fun parseClientServerUrl(
+    url: String,
+    scheme: String,
+): UrlParts {
     if (!url.startsWith(scheme, ignoreCase = true)) return UrlParts()
     val withoutScheme = url.substring(scheme.length).removePrefix("://")
 
@@ -360,14 +409,22 @@ private fun parseH2Url(url: String): UrlParts {
     if (!url.startsWith("jdbc:h2:", ignoreCase = true)) return UrlParts()
     val body = url.substring("jdbc:h2:".length)
     return when {
-        body.startsWith("mem:", ignoreCase = true) -> UrlParts(
-            database = body.substring(4).substringBefore(';'),
-            connectionType = ConnectionType.IN_MEMORY,
-        )
-        body.startsWith("file:", ignoreCase = true) -> UrlParts(
-            database = body.substring(5).substringBefore(';'),
-            connectionType = ConnectionType.FILE_BASED,
-        )
-        else -> UrlParts()
+        body.startsWith("mem:", ignoreCase = true) -> {
+            UrlParts(
+                database = body.substring(4).substringBefore(';'),
+                connectionType = ConnectionType.IN_MEMORY,
+            )
+        }
+
+        body.startsWith("file:", ignoreCase = true) -> {
+            UrlParts(
+                database = body.substring(5).substringBefore(';'),
+                connectionType = ConnectionType.FILE_BASED,
+            )
+        }
+
+        else -> {
+            UrlParts()
+        }
     }
 }

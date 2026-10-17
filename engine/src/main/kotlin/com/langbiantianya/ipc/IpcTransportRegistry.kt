@@ -21,23 +21,26 @@ import com.langbiantianya.ipc.impl.UnixSocketIpcTransport
  *  - [IpcKind.PIPE] 仅 Windows（POSIX 会抛错）
  */
 object IpcTransportRegistry {
-
-    fun resolve(config: IpcConfig): IpcTransport = when (config.kind) {
-        IpcKind.TCP -> TcpIpcTransport(config)
-        IpcKind.UNIX -> {
-            require(!isWindows()) {
-                "Unix domain sockets are not supported on Windows — pass --ipc=tcp or --ipc=pipe"
+    fun resolve(config: IpcConfig): IpcTransport =
+        when (config.kind) {
+            IpcKind.TCP -> {
+                TcpIpcTransport(config)
             }
-            UnixSocketIpcTransport(config)
-        }
-        IpcKind.PIPE -> {
-            require(isWindows()) {
-                "Named pipes are only supported on Windows — pass --ipc=tcp or --ipc=unix"
-            }
-            NamedPipeIpcTransport(config)
-        }
-    }
 
-    private fun isWindows(): Boolean =
-        System.getProperty("os.name", "").lowercase().contains("win")
+            IpcKind.UNIX -> {
+                require(!isWindows()) {
+                    "Unix domain sockets are not supported on Windows — pass --ipc=tcp or --ipc=pipe"
+                }
+                UnixSocketIpcTransport(config)
+            }
+
+            IpcKind.PIPE -> {
+                require(isWindows()) {
+                    "Named pipes are only supported on Windows — pass --ipc=tcp or --ipc=unix"
+                }
+                NamedPipeIpcTransport(config)
+            }
+        }
+
+    private fun isWindows(): Boolean = System.getProperty("os.name", "").lowercase().contains("win")
 }

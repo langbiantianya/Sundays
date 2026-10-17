@@ -17,13 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -39,8 +39,8 @@ import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.WizardFlow
 import com.langbiantianya.sundays.connection.WizardStep
-import kotlin.test.assertTrue
 import org.junit.Test
+import kotlin.test.assertTrue
 
 /**
  * 连接总览面板的**首屏可用性** —— 「连接 / 编辑 / 删除」必须开屏就看得见。
@@ -66,7 +66,6 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class ConnectionOverviewPrimaryActionVisibilityTest {
-
     /**
      * 最小支持窗口扣掉非内容区后，右栏真正能用的高度。
      *
@@ -74,19 +73,20 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
      * - 标题栏约 24dp
      * - 向导内容的上下内边距各 24dp（`ConnectionWizardContent` 的 padding）
      */
-    private val MIN_CONTENT_HEIGHT = (640 - 24 - 48).dp
+    private val minContentHeight = (640 - 24 - 48).dp
 
-    private val conn = ConnectionConfig(
-        id = "vis-1",
-        name = "可见性连接",
-        dialect = DialectType.MYSQL,
-        username = "root",
-        password = "",
-        host = "192.168.1.5",
-        port = 3306,
-        database = "sundays_probe",
-        jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe",
-    )
+    private val conn =
+        ConnectionConfig(
+            id = "vis-1",
+            name = "可见性连接",
+            dialect = DialectType.MYSQL,
+            username = "root",
+            password = "",
+            host = "192.168.1.5",
+            port = 3306,
+            database = "sundays_probe",
+            jdbcUrl = "jdbc:mysql://192.168.1.5:3306/sundays_probe",
+        )
 
     /** 量「布局算出来的」边界 —— 不可见的节点才量得到，语义树本身证明不了「在不在屏上」。 */
     private fun boundsOf(node: SemanticsNodeInteraction) = node.getUnclippedBoundsInRoot()
@@ -117,9 +117,10 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
                     MaterialTheme {
                         Box(modifier = Modifier.fillMaxSize()) {
                             Box(
-                                modifier = Modifier
-                                    .size(1024.dp, heightDp.dp)
-                                    .testTag(VIEWPORT_TAG),
+                                modifier =
+                                    Modifier
+                                        .size(1024.dp, heightDp.dp)
+                                        .testTag(VIEWPORT_TAG),
                             ) {
                                 ConnectionManagerScreen(
                                     connections = listOf(conn),
@@ -138,9 +139,10 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
                                     onWizardNext = {},
                                     onWizardBack = {},
                                     onUpdateEditingConnection = {},
-                                    connectionStatuses = mapOf(
-                                        conn.id to ConnectionStatus(ConnectionState.DISCONNECTED),
-                                    ),
+                                    connectionStatuses =
+                                        mapOf(
+                                            conn.id to ConnectionStatus(ConnectionState.DISCONNECTED),
+                                        ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -225,27 +227,28 @@ class ConnectionOverviewPrimaryActionVisibilityTest {
         }
 
     @Test
-    fun `the info card and the action row share the same content width`() = runComposeUiTest {
-        // 右栏两段必须**左右对齐**：卡片铺满而按钮行按内容收缩时，
-        // `Arrangement.End` 会把按钮推到与卡片右缘不一致的位置，
-        // 看上去像「右边少了一块内边距」（§9.12 里那条误判的视觉来源之一）。
-        renderOverview(640)
-        val card = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_CARD_TAG))
-        val actions = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_ACTIONS_TAG))
-        assertTrue(
-            kotlin.math.abs(card.left.value - actions.left.value) < 1f,
-            "卡片与按钮行左缘应一致：card=$card actions=$actions",
-        )
-        assertTrue(
-            kotlin.math.abs(card.right.value - actions.right.value) < 1f,
-            "卡片与按钮行右缘应一致（按钮行必须 fillMaxWidth，不能按内容收缩）：" +
-                "card=$card actions=$actions",
-        )
-        // 两者都应落在总览列内，而不是把列撑宽 —— 这一条才是「右边距没有消失」的正面写法
-        val panel = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_PANEL_TAG))
-        assertTrue(
-            card.right.value <= panel.right.value + 0.5f,
-            "卡片不该超出总览列：panel=$panel card=$card",
-        )
-    }
+    fun `the info card and the action row share the same content width`() =
+        runComposeUiTest {
+            // 右栏两段必须**左右对齐**：卡片铺满而按钮行按内容收缩时，
+            // `Arrangement.End` 会把按钮推到与卡片右缘不一致的位置，
+            // 看上去像「右边少了一块内边距」（§9.12 里那条误判的视觉来源之一）。
+            renderOverview(640)
+            val card = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_CARD_TAG))
+            val actions = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_ACTIONS_TAG))
+            assertTrue(
+                kotlin.math.abs(card.left.value - actions.left.value) < 1f,
+                "卡片与按钮行左缘应一致：card=$card actions=$actions",
+            )
+            assertTrue(
+                kotlin.math.abs(card.right.value - actions.right.value) < 1f,
+                "卡片与按钮行右缘应一致（按钮行必须 fillMaxWidth，不能按内容收缩）：" +
+                    "card=$card actions=$actions",
+            )
+            // 两者都应落在总览列内，而不是把列撑宽 —— 这一条才是「右边距没有消失」的正面写法
+            val panel = boundsOf(onNodeWithTag(CONNECT_OVERVIEW_PANEL_TAG))
+            assertTrue(
+                card.right.value <= panel.right.value + 0.5f,
+                "卡片不该超出总览列：panel=$panel card=$card",
+            )
+        }
 }

@@ -63,17 +63,21 @@ object TransactionManager {
      *
      * @param schema 初始 schema（非空时立即设置 search_path）
      */
-    fun begin(config: ConnectionConfig, schema: String = ""): TransactionSession {
+    fun begin(
+        config: ConnectionConfig,
+        schema: String = "",
+    ): TransactionSession {
         val connection = PoolManager.getConnection(config, schema)
         connection.autoCommit = false
         val driver = PoolManager.resolveDialect(config).driverName
-        val session = TransactionSession(
-            id = UUID.randomUUID().toString(),
-            connection = connection,
-            config = config,
-            driverName = driver,
-            startedAt = System.currentTimeMillis(),
-        )
+        val session =
+            TransactionSession(
+                id = UUID.randomUUID().toString(),
+                connection = connection,
+                config = config,
+                driverName = driver,
+                startedAt = System.currentTimeMillis(),
+            )
         session.appliedSchema = schema
         sessions[session.id] = session
         logger.info("Transaction session started: id={} driver={} database={}", session.id, driver, config.database)
@@ -85,12 +89,17 @@ object TransactionManager {
      *
      * @throws IllegalStateException 会话不存在或已结束（调用方应回落到无事务路径或直接报错）
      */
-    fun connectionFor(sessionId: String, config: ConnectionConfig, schema: String): Connection {
-        val session = sessions[sessionId]
-            ?: throw IllegalStateException(
-                "Unknown or already-closed transaction session: '$sessionId' " +
-                    "(did the client COMMIT/ROLLBACK it, or was the engine restarted?)"
-            )
+    fun connectionFor(
+        sessionId: String,
+        config: ConnectionConfig,
+        schema: String,
+    ): Connection {
+        val session =
+            sessions[sessionId]
+                ?: throw IllegalStateException(
+                    "Unknown or already-closed transaction session: '$sessionId' " +
+                        "(did the client COMMIT/ROLLBACK it, or was the engine restarted?)",
+                )
         val effectiveSchema = schema.ifBlank { config.schema }
         if (effectiveSchema.isNotBlank() && effectiveSchema != session.appliedSchema) {
             DialectLoader.getDialect(config.driver).setSearchPath(session.connection, effectiveSchema)
@@ -117,11 +126,15 @@ object TransactionManager {
     /** 回滚并结束会话。语义与 [commit] 对称。 */
     fun rollback(sessionId: String): Boolean = finish(sessionId, rollbackFirst = true)
 
-    private fun finish(sessionId: String, rollbackFirst: Boolean): Boolean {
-        val session = sessions.remove(sessionId) ?: run {
-            logger.debug("Transaction session already closed: {}", sessionId)
-            return false
-        }
+    private fun finish(
+        sessionId: String,
+        rollbackFirst: Boolean,
+    ): Boolean {
+        val session =
+            sessions.remove(sessionId) ?: run {
+                logger.debug("Transaction session already closed: {}", sessionId)
+                return false
+            }
         return try {
             if (rollbackFirst) {
                 if (!session.connection.autoCommit) session.connection.rollback()
@@ -161,7 +174,7 @@ object TransactionManager {
     }
 
     private fun discard(session: TransactionSession) {
-        if (!sessions.remove(session.id, session)) return   // 已被并发 finish 掉
+        if (!sessions.remove(session.id, session)) return // 已被并发 finish 掉
         try {
             if (!session.connection.autoCommit) session.connection.rollback()
         } catch (e: Exception) {
@@ -180,7 +193,7 @@ object TransactionManager {
             logger.debug("Restoring autoCommit failed for session {}: {}", session.id, e.message)
         }
         try {
-            session.connection.close()   // HikariCP 的 close() = 归还连接，不是物理关闭
+            session.connection.close() // HikariCP 的 close() = 归还连接，不是物理关闭
         } catch (e: Exception) {
             logger.debug("Returning session connection to pool failed: {}", e.message)
         }

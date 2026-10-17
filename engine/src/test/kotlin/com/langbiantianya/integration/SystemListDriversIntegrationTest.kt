@@ -32,7 +32,6 @@ import kotlin.test.assertTrue
  * 4. capabilities 集合正确反映方言功能
  */
 class SystemListDriversIntegrationTest {
-
     @BeforeEach
     fun setUp() {
         // 清空方言表，重新注册（测试间隔离）
@@ -164,8 +163,10 @@ class SystemListDriversIntegrationTest {
     fun `jdbcDriverClassName is filled for each dialect`() {
         val res = SystemHandler.listDrivers()
         res.itemsList.forEach { info ->
-            assertTrue(info.jdbcDriverClassName.isNotEmpty(),
-                "jdbcDriverClassName 不能为空: ${info.driverName}")
+            assertTrue(
+                info.jdbcDriverClassName.isNotEmpty(),
+                "jdbcDriverClassName 不能为空: ${info.driverName}",
+            )
         }
     }
 }

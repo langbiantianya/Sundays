@@ -93,46 +93,47 @@ fun DragHandle(
     val currentMinWidth by rememberUpdatedState(minWidth)
 
     Box(
-        modifier = modifier
-            .width(hitWidth)
-            .fillMaxHeight()
-            .background(if (dragging) highlightColor else Color.Transparent)
-            .pointerInput(density) {
-                detectDragGestures(
-                    onDragStart = { dragging = true },
-                    onDragEnd = { dragging = false },
-                    onDragCancel = { dragging = false },
-                ) { change, dragAmount ->
-                    // 只消费**位置变化**：不消费的话这个 8dp 宽的 Box 会把拖拽
-                    // 事件往父级的滚动容器传，拖分隔条时顺带把列表滚了
-                    change.consume()
-                    onWidthChange(
-                        nextPaneWidth(
-                            current = currentWidth,
-                            dragDeltaPx = dragAmount.x,
-                            density = density,
-                            minWidth = currentMinWidth,
-                            maxWidth = currentMaxWidth,
-                        ),
-                    )
-                }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onDoubleTap = {
+        modifier =
+            modifier
+                .width(hitWidth)
+                .fillMaxHeight()
+                .background(if (dragging) highlightColor else Color.Transparent)
+                .pointerInput(density) {
+                    detectDragGestures(
+                        onDragStart = { dragging = true },
+                        onDragEnd = { dragging = false },
+                        onDragCancel = { dragging = false },
+                    ) { change, dragAmount ->
+                        // 只消费**位置变化**：不消费的话这个 8dp 宽的 Box 会把拖拽
+                        // 事件往父级的滚动容器传，拖分隔条时顺带把列表滚了
+                        change.consume()
                         onWidthChange(
-                            clampPaneWidth(defaultWidth, currentMinWidth, currentMaxWidth),
+                            nextPaneWidth(
+                                current = currentWidth,
+                                dragDeltaPx = dragAmount.x,
+                                density = density,
+                                minWidth = currentMinWidth,
+                                maxWidth = currentMaxWidth,
+                            ),
                         )
-                    },
-                )
-            },
+                    }
+                }.pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            onWidthChange(
+                                clampPaneWidth(defaultWidth, currentMinWidth, currentMaxWidth),
+                            )
+                        },
+                    )
+                },
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(1.dp)
-                .background(if (dragging) highlightColor else color),
+            modifier =
+                Modifier
+                    .fillMaxHeight()
+                    .width(1.dp)
+                    .background(if (dragging) highlightColor else color),
         )
     }
 }
@@ -148,7 +149,11 @@ fun DragHandle(
  * 于是本函数在那一帧把宽度往回拽 —— 这是要的行为（布局必须服从当前窗口），
  * 但也意味着窗口缩窄后不会保留用户之前拖到的宽度。
  */
-fun clampPaneWidth(value: Dp, minWidth: Dp, maxWidth: Dp): Dp = value.coerceIn(minWidth, maxWidth)
+fun clampPaneWidth(
+    value: Dp,
+    minWidth: Dp,
+    maxWidth: Dp,
+): Dp = value.coerceIn(minWidth, maxWidth)
 
 /**
  * 把分隔条的拖拽增量换算成新的左右栏宽度。

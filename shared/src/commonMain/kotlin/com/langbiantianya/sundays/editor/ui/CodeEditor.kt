@@ -8,8 +8,8 @@
 
 package com.langbiantianya.sundays.editor.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,8 +97,9 @@ import com.langbiantianya.sundays.ui.winShape
  * [setText] 用于「整段替换」（用户输入、格式化、重置），**保留光标 / 选区**（越界时夹到新文本范围内）——
  * 受控输入每个键都会回调它，把光标弹到文末会让用户无法在文本中间编辑。
  */
-class CodeEditorState(initialText: String = "") {
-
+class CodeEditorState(
+    initialText: String = "",
+) {
     /** 输入框的值（文本 + 光标/选区） */
     var value: TextFieldValue by mutableStateOf(TextFieldValue(initialText, TextRange.Zero))
         private set
@@ -122,13 +123,15 @@ class CodeEditorState(initialText: String = "") {
         if (value.text == newText) return
         val len = newText.length
         val selection = value.selection
-        value = value.copy(
-            text = newText,
-            selection = TextRange(
-                selection.min.coerceIn(0, len),
-                selection.max.coerceIn(0, len),
-            ),
-        )
+        value =
+            value.copy(
+                text = newText,
+                selection =
+                    TextRange(
+                        selection.min.coerceIn(0, len),
+                        selection.max.coerceIn(0, len),
+                    ),
+            )
     }
 }
 
@@ -137,8 +140,7 @@ class CodeEditorState(initialText: String = "") {
  * 传入 [initialText] 仅在**首次创建**时生效 —— 之后的文本变化由 [CodeEditor] 的 `text` 参数同步。
  */
 @Composable
-fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
-    remember { CodeEditorState(initialText) }
+fun rememberCodeEditorState(initialText: String = ""): CodeEditorState = remember { CodeEditorState(initialText) }
 
 /**
  * 可扩展的代码编辑器 Composable —— 支持语法高亮、格式化、语言切换、行号显示。
@@ -148,7 +150,7 @@ fun rememberCodeEditorState(initialText: String = ""): CodeEditorState =
  * - **解耦语言与 UI**：通过 [CodeLanguageRegistry] 查找语言，新增语言只需 `registry.register(...)`
  * - **tokenize 缓存**：使用 [rememberCodeHighlighter] 复用 [SyntaxHighlighter]，避免每次 recompose 创建
  * - **tokenize 时机**：[text] 与 [languageId] 变化时重新 tokenize + 高亮，在 UI 线程同步执行 ——
-   SQL / Lua 典型体量（< 10K 行）足够快；大文本如需异步化见 §8.2 未来扩展
+ SQL / Lua 典型体量（< 10K 行）足够快；大文本如需异步化见 §8.2 未来扩展
  * - **共享 ScrollState**：行号 gutter 与代码编辑区是同一个 `verticalScroll` 容器的两个子节点，
  *   因此垂直滚动天然同步（用户滚编辑器时行号同步移动，反之亦然）
  *
@@ -258,9 +260,10 @@ fun CodeEditor(
     extraCompletions: List<CompletionItem> = emptyList(),
     extraCompletionsCaseSensitive: Boolean = true,
 ) {
-    val language = remember(languageId) {
-        languageId?.let { CodeLanguageRegistry.get(it) }
-    }
+    val language =
+        remember(languageId) {
+            languageId?.let { CodeLanguageRegistry.get(it) }
+        }
     val highlighter = rememberCodeHighlighter(theme)
     val fieldValue = editorState.value
 
@@ -271,16 +274,17 @@ fun CodeEditor(
         }
     }
 
-    val transformation = remember(language, highlighter, fieldValue.text) {
-        CodeVisualTransformation(language, highlighter)
-    }
+    val transformation =
+        remember(language, highlighter, fieldValue.text) {
+            CodeVisualTransformation(language, highlighter)
+        }
 
     // 输入区内边距 —— 光标坐标取自**文本**布局，而文本原点在输入区内边距之后，
     // 所以补全弹层定位时必须把内边距加回去。用常量而非字面量，避免两处数值漂移。
-    val EDITOR_PADDING_H = 12.dp
-    val EDITOR_PADDING_V = 8.dp
+    val editorPaddingH = 12.dp
+    val editorPaddingV = 8.dp
     // 弹层单行高度估算（字体 14 + 上下各 6dp 内边距）—— 仅用于「上翻」判断，允许误差
-    val COMPLETION_ROW_HEIGHT = 28.dp
+    val completionRowHeight = 28.dp
 
     // =========================================================================
     // 补全（「提示」功能）状态
@@ -298,8 +302,13 @@ fun CodeEditor(
     val collapsedSelection = fieldValue.selection.collapsed
 
     LaunchedEffect(
-        enableCompletion, language, textNow, selectionStart, collapsedSelection,
-        extraCompletions, extraCompletionsCaseSensitive,
+        enableCompletion,
+        language,
+        textNow,
+        selectionStart,
+        collapsedSelection,
+        extraCompletions,
+        extraCompletionsCaseSensitive,
     ) {
         val lang = language
         if (!enableCompletion || lang == null || !collapsedSelection) {
@@ -307,20 +316,22 @@ fun CodeEditor(
             return@LaunchedEffect
         }
         val prefix = wordPrefixBefore(textNow, selectionStart)
-        completionItems = if (prefix.length < MIN_COMPLETION_PREFIX) {
-            emptyList()
-        } else {
-            // **额外候选优先**：它们是当前工作台的核心语义（造数沙箱的 random_* 等），
-            // 用户敲 `rand` 时最想看到的就是它们，语言候选在后兜底。
-            val fromLanguage = lang.completionCandidates(prefix, maxCompletionItems)
-            val fromExtras = selectExtras(
-                prefix = prefix,
-                extras = extraCompletions,
-                limit = maxCompletionItems,
-                caseSensitive = extraCompletionsCaseSensitive,
-            )
-            (fromExtras + fromLanguage).take(maxCompletionItems)
-        }
+        completionItems =
+            if (prefix.length < MIN_COMPLETION_PREFIX) {
+                emptyList()
+            } else {
+                // **额外候选优先**：它们是当前工作台的核心语义（造数沙箱的 random_* 等），
+                // 用户敲 `rand` 时最想看到的就是它们，语言候选在后兜底。
+                val fromLanguage = lang.completionCandidates(prefix, maxCompletionItems)
+                val fromExtras =
+                    selectExtras(
+                        prefix = prefix,
+                        extras = extraCompletions,
+                        limit = maxCompletionItems,
+                        caseSensitive = extraCompletionsCaseSensitive,
+                    )
+                (fromExtras + fromLanguage).take(maxCompletionItems)
+            }
         // 候选集一变就回到第一条：保留旧下标会指向一条不相干的词
         completionIndex = 0
     }
@@ -348,21 +359,27 @@ fun CodeEditor(
                 acceptCompletion(completionItems[completionIndex.coerceIn(0, size - 1)])
                 true
             }
+
             Key.Escape -> {
                 // 显式关闭：仅清候选即可，用户下次敲字会重新触发
                 completionItems = emptyList()
                 true
             }
+
             Key.DirectionDown -> {
                 completionIndex = (completionIndex + 1) % size
                 true
             }
+
             Key.DirectionUp -> {
                 // Kotlin 的 % 会给出负余数，这里补 size 再取模实现**向上循环**
                 completionIndex = (completionIndex - 1 + size) % size
                 true
             }
-            else -> false
+
+            else -> {
+                false
+            }
         }
     }
 
@@ -376,27 +393,30 @@ fun CodeEditor(
     val sharedScrollState = editorState.scrollState
 
     // 计算行数（按 \n 分割 + 1，至少为 1）
-    val lineCount = remember(text) {
-        if (text.isEmpty()) 1 else text.count { it == '\n' } + 1
-    }
+    val lineCount =
+        remember(text) {
+            if (text.isEmpty()) 1 else text.count { it == '\n' } + 1
+        }
 
     // 高度策略：
     // - [maxLines] 已设置 → 显式上限（高度介于 [minHeight] 与 [maxHeight]）
     // - [maxLines] 未设置（默认 `null`）→ 不施加高度上限，填充父容器剩余高度
     //   （`fillMaxHeight()` 使编辑器在父容器剩余空间内自动展开；
     //    配合 [verticalScroll]，内容超过可用高度时仍可滚动而不溢出父容器）
-    val sizeModifier = if (maxHeightDp != null) {
-        Modifier.heightIn(min = minHeight, max = maxHeightDp)
-    } else {
-        Modifier.fillMaxHeight().heightIn(min = minHeight)
-    }
+    val sizeModifier =
+        if (maxHeightDp != null) {
+            Modifier.heightIn(min = minHeight, max = maxHeightDp)
+        } else {
+            Modifier.fillMaxHeight().heightIn(min = minHeight)
+        }
 
     BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(theme.backgroundColor, winShape(6.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, winShape(6.dp))
-            .then(sizeModifier),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(theme.backgroundColor, winShape(6.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, winShape(6.dp))
+                .then(sizeModifier),
     ) {
         // 编辑框可视高度 —— 用于把 BasicTextField 撑满整框。
         //
@@ -408,11 +428,12 @@ fun CodeEditor(
         //
         // 用 `constraints.maxHeight`（Int, px）而非 scope 的 `maxHeight`（Dp）：后者会被本函数
         // 同名的局部变量遮蔽（已改名 [maxHeightDp] 规避），这里保持显式以免重蹈覆辙。
-        val boxHeightDp = if (constraints.hasBoundedHeight) {
-            with(LocalDensity.current) { constraints.maxHeight.toDp() }
-        } else {
-            null
-        }
+        val boxHeightDp =
+            if (constraints.hasBoundedHeight) {
+                with(LocalDensity.current) { constraints.maxHeight.toDp() }
+            } else {
+                null
+            }
 
         // 补全弹层「上翻」判断需要的可视边界 —— **必须在这里取**：
         // 弹层所在的 `Box` 也有自己的 `constraints` 接收者，在其内部读到的是那个（会遮蔽外层）。
@@ -424,13 +445,14 @@ fun CodeEditor(
         val editorMaxWidthPx = constraints.maxWidth
 
         Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(sharedScrollState)
-                // 右键菜单 —— 监听容器内的右键点击
-                .onRightClick { offset ->
-                    contextMenuState.show(offset, EditorContextMenuPayload(text = text, languageId = languageId))
-                },
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(sharedScrollState)
+                    // 右键菜单 —— 监听容器内的右键点击
+                    .onRightClick { offset ->
+                        contextMenuState.show(offset, EditorContextMenuPayload(text = text, languageId = languageId))
+                    },
         ) {
             if (showLineNumbers) {
                 LineNumberGutter(
@@ -448,14 +470,17 @@ fun CodeEditor(
                         if (newValue.text != text) onTextChange(newValue.text)
                     },
                     onTextLayout = { layoutResult = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier)
-                        .padding(horizontal = EDITOR_PADDING_H, vertical = EDITOR_PADDING_V)
-                        .onPreviewKeyEvent { onCompletionKey(it) },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .then(if (boxHeightDp != null) Modifier.heightIn(min = boxHeightDp) else Modifier)
+                            .padding(horizontal = editorPaddingH, vertical = editorPaddingV)
+                            .onPreviewKeyEvent { onCompletionKey(it) },
                     textStyle = theme.textStyle,
                     visualTransformation = transformation,
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.textStyle.color),
+                    cursorBrush =
+                        androidx.compose.ui.graphics
+                            .SolidColor(theme.textStyle.color),
                 )
 
                 // 补全弹层 —— 定位到光标正下方；空间不够时上翻
@@ -466,50 +491,59 @@ fun CodeEditor(
                     // 一次就足以打断整轮 recompose，把弹层变成崩溃的开关。
                     // 用 `getCursorRect` 而非 `getBoundingBox`：前者才是「光标矩形」的正解，
                     // 光标落在末尾时也不会偏到最后一个字符的左边。
-                    val caretRect = layoutResult?.let { lr ->
-                        val len = lr.layoutInput.text.length
-                        if (len <= 0) null
-                        else lr.getCursorRect(fieldValue.selection.start.coerceIn(0, len - 1))
-                    }
+                    val caretRect =
+                        layoutResult?.let { lr ->
+                            val len = lr.layoutInput.text.length
+                            if (len <= 0) {
+                                null
+                            } else {
+                                lr.getCursorRect(fieldValue.selection.start.coerceIn(0, len - 1))
+                            }
+                        }
                     val density = LocalDensity.current
                     // 光标坐标取自**文本**布局，而文本原点落在输入区内边距之后，
                     // 所以这里要把内边距加回去，否则弹层会整体左上偏移一个内边距的距离。
-                    val paddingH = with(density) { EDITOR_PADDING_H.roundToPx() }
-                    val paddingV = with(density) { EDITOR_PADDING_V.roundToPx() }
+                    val paddingH = with(density) { editorPaddingH.roundToPx() }
+                    val paddingV = with(density) { editorPaddingV.roundToPx() }
                     val caretX = paddingH + (caretRect?.left ?: 0f).toInt()
                     val caretBottom = paddingV + (caretRect?.bottom ?: 0f).toInt()
                     val caretTop = paddingV + (caretRect?.top ?: 0f).toInt()
                     // 上翻阈值：按行高估算弹层高度，放不下就退到光标上方
-                    val estimatedHeight = with(density) {
-                        // Dp 的 `times` 只在接收者一侧，Int * Dp 不成立 —— 必须是 Dp * Int
-                        (COMPLETION_ROW_HEIGHT * completionItems.size + 12.dp).roundToPx()
-                    }
-                    val y = if (caretBottom + estimatedHeight > editorMaxHeightPx) {
-                        caretTop - estimatedHeight
-                    } else {
-                        caretBottom
-                    }
+                    val estimatedHeight =
+                        with(density) {
+                            // Dp 的 `times` 只在接收者一侧，Int * Dp 不成立 —— 必须是 Dp * Int
+                            (completionRowHeight * completionItems.size + 12.dp).roundToPx()
+                        }
+                    val y =
+                        if (caretBottom + estimatedHeight > editorMaxHeightPx) {
+                            caretTop - estimatedHeight
+                        } else {
+                            caretBottom
+                        }
                     // 宽度上限与横向落点都走纯函数 —— 定位规则要能单测，
                     // 而且这两条规则（贴光标 / 靠右翻转）是肉眼在界面上证伪不了的。
                     val popupMaxWidth = completionPopupMaxWidth(editorMaxWidthDp)
                     val popupMaxWidthPx = with(density) { popupMaxWidth.roundToPx() }
-                    val x = completionPopupX(
-                        caretX = caretX,
-                        editorWidth = editorMaxWidthPx,
-                        popupMaxWidthPx = popupMaxWidthPx,
-                    )
+                    val x =
+                        completionPopupX(
+                            caretX = caretX,
+                            editorWidth = editorMaxWidthPx,
+                            popupMaxWidthPx = popupMaxWidthPx,
+                        )
                     CompletionPopup(
                         items = completionItems,
-                        selectedIndex = completionIndex.coerceIn(
-                            0,
-                            (completionItems.size - 1).coerceAtLeast(0),
-                        ),
+                        selectedIndex =
+                            completionIndex.coerceIn(
+                                0,
+                                (completionItems.size - 1).coerceAtLeast(0),
+                            ),
                         onAccept = ::acceptCompletion,
                         maxWidth = popupMaxWidth,
-                        modifier = Modifier.atCaret(
-                            x = x,
-                            y = y.coerceAtLeast(0),
-                        ),
+                        modifier =
+                            Modifier.atCaret(
+                                x = x,
+                                y = y.coerceAtLeast(0),
+                            ),
                     )
                 }
             }
@@ -519,10 +553,11 @@ fun CodeEditor(
     // 右键菜单 —— 浮在编辑器之上，不绑定具体位置（位置由 EditorContextMenuState 记录）
     if (contextMenuState.visible) {
         val density = LocalDensity.current
-        val menuOffset = androidx.compose.ui.unit.DpOffset(
-            x = with(density) { contextMenuState.position.x.toDp() },
-            y = with(density) { contextMenuState.position.y.toDp() },
-        )
+        val menuOffset =
+            androidx.compose.ui.unit.DpOffset(
+                x = with(density) { contextMenuState.position.x.toDp() },
+                y = with(density) { contextMenuState.position.y.toDp() },
+            )
         DropdownMenu(
             expanded = true,
             onDismissRequest = { contextMenuState.dismiss() },
@@ -564,10 +599,11 @@ private fun LineNumberGutter(
     val lineNumberColor = theme.textStyle.color.copy(alpha = 0.5f)
 
     Column(
-        modifier = Modifier
-            .width(gutterWidth)
-            .background(theme.gutterColor)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
+        modifier =
+            Modifier
+                .width(gutterWidth)
+                .background(theme.gutterColor)
+                .padding(vertical = 8.dp, horizontal = 4.dp),
     ) {
         for (i in 1..lineCount) {
             Text(
@@ -738,9 +774,10 @@ private fun EditorToolbar(
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -788,8 +825,7 @@ private fun EditorToolbar(
  * 用法：`val highlighter = rememberCodeHighlighter(theme)`
  */
 @Composable
-fun rememberCodeHighlighter(theme: CodeEditorTheme): SyntaxHighlighter =
-    remember(theme) { SyntaxHighlighter(theme.colors) }
+fun rememberCodeHighlighter(theme: CodeEditorTheme): SyntaxHighlighter = remember(theme) { SyntaxHighlighter(theme.colors) }
 
 /**
  * Compose [VisualTransformation] — 把原始字符串渲染为带 token 颜色的 [TransformedText]。
@@ -806,16 +842,18 @@ private class CodeVisualTransformation(
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val toHighlight = text.text
-        val annotated = if (language != null) {
-            val tokens = try {
-                language.tokenize(toHighlight)
-            } catch (_: Throwable) {
-                emptyList()
+        val annotated =
+            if (language != null) {
+                val tokens =
+                    try {
+                        language.tokenize(toHighlight)
+                    } catch (_: Throwable) {
+                        emptyList()
+                    }
+                highlighter.highlight(toHighlight, tokens)
+            } else {
+                AnnotatedString(toHighlight)
             }
-            highlighter.highlight(toHighlight, tokens)
-        } else {
-            AnnotatedString(toHighlight)
-        }
         return TransformedText(annotated, OffsetMapping.Identity)
     }
 }
@@ -845,13 +883,15 @@ private class CodeVisualTransformation(
 fun registerBuiltinEditors() {
     // SQL 家族：SqlFormatter.register() 一次注册全部方言档位（"sql" / "sql-mysql" / …）的语言 + formatter
     if (!CodeLanguageRegistry.contains(SqlDialectProfile.STANDARD.languageId)) {
-        com.langbiantianya.sundays.editor.formatter.SqlFormatter.register()
+        com.langbiantianya.sundays.editor.formatter.SqlFormatter
+            .register()
     }
     if (!CodeLanguageRegistry.contains("lua")) {
         CodeLanguageRegistry.register(LuaLanguage())
     }
     if (CodeFormatterRegistry.get("lua") == null) {
-        com.langbiantianya.sundays.editor.formatter.LuaFormatter.register()
+        com.langbiantianya.sundays.editor.formatter.LuaFormatter
+            .register()
     }
 }
 
@@ -956,7 +996,6 @@ end
 return main
 """
 
-
 // ============================================================================
 // 预览脚手架
 // ============================================================================
@@ -977,6 +1016,7 @@ private fun EditorPreview(
         Box(modifier = Modifier.padding(16.dp)) { content() }
     }
 }
+
 /**
  * [CodeEditor] 浅色主题预览 — SQL 样本 + 行号。
  */
@@ -1114,8 +1154,9 @@ private fun CodeEditorSqlLightDarkPreview() {
 private fun CodeEditorPlainTextPreview() {
     EditorPreview(lightColorScheme()) {
         CodeEditor(
-            text = "// 此处 languageId=null，无语法高亮\n" +
-                "SELECT id, name FROM users -- 普通文本模式",
+            text =
+                "// 此处 languageId=null，无语法高亮\n" +
+                    "SELECT id, name FROM users -- 普通文本模式",
             onTextChange = {},
             languageId = null,
             theme = CodeEditorTheme.Light,
@@ -1210,10 +1251,10 @@ private fun CodeEditorWithToolbarFixedLanguagePreview() {
         CodeEditorWithToolbar(
             text = PREVIEW_SQL_SAMPLE,
             onTextChange = {},
-            languageId = "sql",  // 在实例化时直接指定，固定为 SQL
+            languageId = "sql", // 在实例化时直接指定，固定为 SQL
             // onLanguageChange 省略 —— 切换器已隐藏，不会被调用
             theme = CodeEditorTheme.Light,
-            showLanguageSwitcher = false,  // 隐藏切换下拉框
+            showLanguageSwitcher = false, // 隐藏切换下拉框
         )
     }
 }
@@ -1270,7 +1311,7 @@ private fun CodeEditorContextMenuPreview() {
                     onClick = { },
                     enabled = false,
                 )
-            }
+            },
         )
     }
 }
@@ -1297,7 +1338,7 @@ private fun CodeEditorWithToolbarContextMenuPreview() {
                     text = { Text("保存到剪贴板") },
                     onClick = { },
                 )
-            }
+            },
         )
     }
 }

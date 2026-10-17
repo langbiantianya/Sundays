@@ -46,61 +46,75 @@ import kotlin.test.assertTrue
  * 目标表都在测试里先 `executeUpdate` 建好；临时文件用 JUnit `@TempDir`，测试结束自动清理。
  */
 class ImportIntegrationTest : H2Fixture() {
-
     /** 走 dispatcher 的 IMPORT 流式路由，返回完整帧序列。 */
     private suspend fun runImport(
         id: String = TestIds.next("r-imp"),
         sessionId: String = "",
         configure: ImportRunRequest.Builder.() -> Unit,
     ): List<Response> {
-        val request = request {
-            this.id = id
-            category = Category.IMPORT
-            action = Action.RUN_IMPORT
-            connection = config
-            this.sessionId = sessionId
-            importRequest = ImportRequest.newBuilder()
-                .setRunImport(ImportRunRequest.newBuilder().apply(configure).build())
-                .build()
-        }
+        val request =
+            request {
+                this.id = id
+                category = Category.IMPORT
+                action = Action.RUN_IMPORT
+                connection = config
+                this.sessionId = sessionId
+                importRequest =
+                    ImportRequest
+                        .newBuilder()
+                        .setRunImport(ImportRunRequest.newBuilder().apply(configure).build())
+                        .build()
+            }
         return RequestDispatcher.dispatch(request).toList()
     }
 
     /** 派发一条 SYSTEM 事务命令（BEGIN / COMMIT / ROLLBACK）。 */
-    private suspend fun dispatchSystem(action: Action, sessionId: String = ""): Response =
-        RequestDispatcher.dispatch(
-            request {
-                id = TestIds.next("r-sys")
-                category = Category.SYSTEM
-                this.action = action
-                connection = config
-                this.sessionId = sessionId
-                systemRequest = SystemRequest.newBuilder().setSessionId(sessionId).build()
-            }
-        ).toList().single()
+    private suspend fun dispatchSystem(
+        action: Action,
+        sessionId: String = "",
+    ): Response =
+        RequestDispatcher
+            .dispatch(
+                request {
+                    id = TestIds.next("r-sys")
+                    category = Category.SYSTEM
+                    this.action = action
+                    connection = config
+                    this.sessionId = sessionId
+                    systemRequest = SystemRequest.newBuilder().setSessionId(sessionId).build()
+                },
+            ).toList()
+            .single()
 
-    private fun file(dir: Path, name: String, content: String): File =
-        dir.resolve(name).toFile().apply { writeText(content) }
+    private fun file(
+        dir: Path,
+        name: String,
+        content: String,
+    ): File = dir.resolve(name).toFile().apply { writeText(content) }
 
-    private fun rowCount(table: String): Int =
-        executeQuerySingle("SELECT COUNT(*) FROM $table")!!.toInt()
+    private fun rowCount(table: String): Int = executeQuerySingle("SELECT COUNT(*) FROM $table")!!.toInt()
 
     @Test
-    fun `CSV with header imports rows including quoted commas and escaped quotes`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `CSV with header imports rows including quoted commas and escaped quotes`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_csv (id INT, name VARCHAR(50), note VARCHAR(200))")
-        val csv = file(
-            dir, "people.csv",
-            "id,name,note\n" +
-                "1,Alice,\"hello, world\"\n" +
-                "2,Bob,\"said \"\"hi\"\" and, left\"\n" +
-                "3,Carol,plain\n"
-        )
+        val csv =
+            file(
+                dir,
+                "people.csv",
+                "id,name,note\n" +
+                    "1,Alice,\"hello, world\"\n" +
+                    "2,Bob,\"said \"\"hi\"\" and, left\"\n" +
+                    "3,Carol,plain\n",
+            )
 
-        val frames = runImport {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_csv"
-        }
+        val frames =
+            runImport {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_csv"
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.end, "最后一帧必须是终止帧（end=true）")
@@ -121,23 +135,28 @@ class ImportIntegrationTest : H2Fixture() {
     }
 
     @Test
-    fun `progress frames precede the terminal frame and every frame carries the request id`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `progress frames precede the terminal frame and every frame carries the request id`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_progress (id INT PRIMARY KEY, name VARCHAR(50))")
-        val csv = file(
-            dir, "many.csv",
-            buildString {
-                append("id,name\n")
-                for (i in 1..6) append("$i,name_$i\n")
-            }
-        )
+        val csv =
+            file(
+                dir,
+                "many.csv",
+                buildString {
+                    append("id,name\n")
+                    for (i in 1..6) append("$i,name_$i\n")
+                },
+            )
 
         val requestId = TestIds.next("r-imp")
-        val frames = runImport(requestId) {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_progress"
-            batchSize = 2
-        }
+        val frames =
+            runImport(requestId) {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_progress"
+                batchSize = 2
+            }
 
         assertTrue(frames.isNotEmpty(), "至少要有终止帧")
         assertTrue(frames.all { it.id == requestId }, "每一帧都必须携带请求 id")
@@ -153,19 +172,24 @@ class ImportIntegrationTest : H2Fixture() {
     }
 
     @Test
-    fun `JSON_LINES keeps numbers booleans and nested objects`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `JSON_LINES keeps numbers booleans and nested objects`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_json (id INT, active BOOLEAN, meta VARCHAR(200))")
-        val jsonl = file(
-            dir, "rows.jsonl",
-            """{"id":1,"active":true,"meta":{"a":1}}""" + "\n" +
-                """{"id":2,"active":false,"meta":{"b":[1,2],"c":"x"}}""" + "\n"
-        )
+        val jsonl =
+            file(
+                dir,
+                "rows.jsonl",
+                """{"id":1,"active":true,"meta":{"a":1}}""" + "\n" +
+                    """{"id":2,"active":false,"meta":{"b":[1,2],"c":"x"}}""" + "\n",
+            )
 
-        val frames = runImport {
-            filePath = jsonl.absolutePath
-            format = "JSON_LINES"
-            tableName = "import_json"
-        }
+        val frames =
+            runImport {
+                filePath = jsonl.absolutePath
+                format = "JSON_LINES"
+                tableName = "import_json"
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.success, "导入应成功：${terminal.error}")
@@ -182,19 +206,22 @@ class ImportIntegrationTest : H2Fixture() {
     }
 
     @Test
-    fun `truncateFirst clears the table before loading`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `truncateFirst clears the table before loading`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_trunc (id INT, name VARCHAR(50))")
         executeUpdate("INSERT INTO import_trunc VALUES (99, 'stale'), (100, 'older')")
         assertEquals(2, rowCount("import_trunc"))
 
         val csv = file(dir, "fresh.csv", "id,name\n1,Alice\n2,Bob\n")
 
-        val frames = runImport {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_trunc"
-            truncateFirst = true
-        }
+        val frames =
+            runImport {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_trunc"
+                truncateFirst = true
+            }
 
         assertTrue(frames.last().success, "导入应成功：${frames.last().error}")
         assertEquals(2, rowCount("import_trunc"), "导入前必须清表，只保留导入的行")
@@ -215,17 +242,20 @@ class ImportIntegrationTest : H2Fixture() {
      * 代价是吞吐下降 —— 这是用户主动选择容忍坏行时的合理取舍。
      */
     @Test
-    fun `ignoreErrors skips bad rows and counts them`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `ignoreErrors skips bad rows and counts them`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_skip (id INT, name VARCHAR(50))")
         // 中间一行 id 不是数字 —— H2 在写入时必然报类型转换错误
         val csv = file(dir, "dirty.csv", "id,name\n1,Alice\nnot-a-number,Bob\n3,Carol\n")
 
-        val frames = runImport {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_skip"
-            ignoreErrors = true
-        }
+        val frames =
+            runImport {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_skip"
+                ignoreErrors = true
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.end)
@@ -236,8 +266,10 @@ class ImportIntegrationTest : H2Fixture() {
         // 坏行的根因要回传给调用方 —— success=true 但 error 里有摘要，
         // 前端据此提示「完成，但有 1 行被跳过」
         assertTrue(
-            terminal.import.result.error.contains("row 3", ignoreCase = true) ||
-                terminal.import.result.error.contains("conversion", ignoreCase = true),
+            terminal.import.result.error
+                .contains("row 3", ignoreCase = true) ||
+                terminal.import.result.error
+                    .contains("conversion", ignoreCase = true),
             "应说明被跳过的行或原因：${terminal.import.result.error}",
         )
 
@@ -255,18 +287,21 @@ class ImportIntegrationTest : H2Fixture() {
      * （见下一个用例）—— 这也正是事务功能存在的意义。
      */
     @Test
-    fun `without ignoreErrors a bad row aborts the whole import`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `without ignoreErrors a bad row aborts the whole import`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_strict (id INT, name VARCHAR(50))")
         val csv = file(dir, "dirty-strict.csv", "id,name\n1,Alice\nnot-a-number,Bob\n3,Carol\n")
 
-        val frames = runImport {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_strict"
-            // batchSize = 1 让「遇错即停」可精确观察：批次一大，坏行所在批次里的
-            // 后续行早已随 addBatch 一起提交，失败点会被批边界掩盖。
-            batchSize = 1
-        }
+        val frames =
+            runImport {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_strict"
+                // batchSize = 1 让「遇错即停」可精确观察：批次一大，坏行所在批次里的
+                // 后续行早已随 addBatch 一起提交，失败点会被批边界掩盖。
+                batchSize = 1
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.end)
@@ -286,7 +321,9 @@ class ImportIntegrationTest : H2Fixture() {
      * 正是数据事故的典型来源。
      */
     @Test
-    fun `a failed import inside a transaction rolls back completely`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `a failed import inside a transaction rolls back completely`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_atomic (id INT, name VARCHAR(50))")
         val csv = file(dir, "atomic.csv", "id,name\n1,Alice\nnot-a-number,Bob\n")
 
@@ -294,11 +331,12 @@ class ImportIntegrationTest : H2Fixture() {
         assertTrue(begun.success, "BEGIN failed: ${begun.error}")
         val sessionId = begun.system.begin.sessionId
 
-        val frames = runImport(sessionId = sessionId) {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_atomic"
-        }
+        val frames =
+            runImport(sessionId = sessionId) {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_atomic"
+            }
         assertFalse(frames.last().success, "坏行必须让导入失败")
 
         val rolledBack = dispatchSystem(Action.ROLLBACK, sessionId)
@@ -308,15 +346,18 @@ class ImportIntegrationTest : H2Fixture() {
     }
 
     @Test
-    fun `a missing file fails cleanly without inserting anything`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `a missing file fails cleanly without inserting anything`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_missing (id INT, name VARCHAR(50))")
         val missing = dir.resolve("does-not-exist.csv").toFile()
 
-        val frames = runImport {
-            filePath = missing.absolutePath
-            format = "CSV"
-            tableName = "import_missing"
-        }
+        val frames =
+            runImport {
+                filePath = missing.absolutePath
+                format = "CSV"
+                tableName = "import_missing"
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.end)
@@ -327,23 +368,29 @@ class ImportIntegrationTest : H2Fixture() {
         )
         assertTrue(terminal.hasImport(), "失败终止帧也必须携带 import.result")
         assertFalse(terminal.import.result.success)
-        assertTrue(terminal.import.result.error.isNotBlank())
+        assertTrue(
+            terminal.import.result.error
+                .isNotBlank(),
+        )
 
         assertEquals(0, rowCount("import_missing"), "失败导入不得插入任何行")
     }
 
     @Test
-    fun `headerless CSV imports every row using the target table columns`(@TempDir dir: Path) = runBlocking<Unit> {
+    fun `headerless CSV imports every row using the target table columns`(
+        @TempDir dir: Path,
+    ) = runBlocking<Unit> {
         executeUpdate("CREATE TABLE import_noheader (id INT, name VARCHAR(50), email VARCHAR(80))")
         // 第一行也是数据（1,Alice,...），不能被当作表头吃掉
         val csv = file(dir, "noheader.csv", "1,Alice,alice@example.com\n2,Bob,bob@example.com\n")
 
-        val frames = runImport {
-            filePath = csv.absolutePath
-            format = "CSV"
-            tableName = "import_noheader"
-            hasHeader = false
-        }
+        val frames =
+            runImport {
+                filePath = csv.absolutePath
+                format = "CSV"
+                tableName = "import_noheader"
+                hasHeader = false
+            }
 
         val terminal = frames.last()
         assertTrue(terminal.success, "导入应成功：${terminal.error}")

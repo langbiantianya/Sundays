@@ -33,7 +33,6 @@ import kotlin.test.assertTrue
  * 而实现恰恰**丢弃**了缩进 —— 那是文档与实现不符，不是设计。
  */
 class FormatterSpacingTest {
-
     @BeforeTest
     fun registerLanguages() {
         // formatter 内部按 languageId 反查语言，查不到就原样返回 ——
@@ -42,8 +41,7 @@ class FormatterSpacingTest {
         LuaFormatter.register()
     }
 
-    private fun sql(source: String) =
-        SqlFormatter(SqlDialectProfile.STANDARD.languageId).format(source)
+    private fun sql(source: String) = SqlFormatter(SqlDialectProfile.STANDARD.languageId).format(source)
 
     private fun lua(source: String) = LuaFormatter().format(source)
 
@@ -225,15 +223,16 @@ class FormatterSpacingTest {
     fun `formatting twice changes nothing`() {
         // 这条曾经**假通过**：旧实现对 `IN (1, 2)` 输出 `IN(1, 2)`，再格式化一次又变回
         // `IN (1, 2)` —— 看着像"空白微调"，其实是 `lastType` 被 WHITESPACE 覆盖的 bug。
-        val cases = listOf(
-            "select id, name from users where age >= 18",
-            "select * from t where id in (1,2,3)",
-            "select\n  a, -- a\n  b\nfrom t",
-            "select count(*), max(x) from t",
-            "-- 头注释\nselect 1 /* 尾 */ from t where a>1",
-            "select a::int from t",
-            "select 1;\n\n-- 段\n\nselect 2;",
-        )
+        val cases =
+            listOf(
+                "select id, name from users where age >= 18",
+                "select * from t where id in (1,2,3)",
+                "select\n  a, -- a\n  b\nfrom t",
+                "select count(*), max(x) from t",
+                "-- 头注释\nselect 1 /* 尾 */ from t where a>1",
+                "select a::int from t",
+                "select 1;\n\n-- 段\n\nselect 2;",
+            )
         for (src in cases) {
             val once = sql(src)
             assertEquals(once, sql(once), "SQL 格式化不幂等：输入=$src")
@@ -242,14 +241,15 @@ class FormatterSpacingTest {
 
     @Test
     fun `lua formatting twice changes nothing`() {
-        val cases = listOf(
-            "local a=1;return a",
-            "local t={1,2,3}",
-            "return (a+b)",
-            "if a>b and c<d then",
-            "-- 注释\nlocal a = 1 -- 尾\nprint(a)",
-            "local t = {\n  1,\n  2\n}",
-        )
+        val cases =
+            listOf(
+                "local a=1;return a",
+                "local t={1,2,3}",
+                "return (a+b)",
+                "if a>b and c<d then",
+                "-- 注释\nlocal a = 1 -- 尾\nprint(a)",
+                "local t = {\n  1,\n  2\n}",
+            )
         for (src in cases) {
             val once = lua(src)
             assertEquals(once, lua(once), "Lua 格式化不幂等：输入=$src")
@@ -262,13 +262,14 @@ class FormatterSpacingTest {
 
     @Test
     fun `no line ever ends with trailing whitespace`() {
-        val cases = listOf(
-            "select a, \n b from t ",
-            // 每条都刻意让行尾空白**不在**文件末尾，否则收尾 trimEnd 会兜住，断言形同虚设
-            "select 1 -- 注释   \nfrom t",
-            "select 1 /* 尾 */   \nfrom t",
-            "/* a   \n b   */\nselect 1",
-        )
+        val cases =
+            listOf(
+                "select a, \n b from t ",
+                // 每条都刻意让行尾空白**不在**文件末尾，否则收尾 trimEnd 会兜住，断言形同虚设
+                "select 1 -- 注释   \nfrom t",
+                "select 1 /* 尾 */   \nfrom t",
+                "/* a   \n b   */\nselect 1",
+            )
         for (src in cases) {
             val out = sql(src)
             assertFalse(

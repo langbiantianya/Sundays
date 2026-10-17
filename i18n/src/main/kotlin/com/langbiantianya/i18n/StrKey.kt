@@ -226,6 +226,7 @@ enum class StrKey {
     DB_NAME_PLACEHOLDER,
     CONNECT_FAILED_PREFIX,
     READ_TABLE_FAILED,
+
     /** 库级对象（视图 / 触发器 / 过程）加载失败时的行内前缀 —— `视图：<原始报错>`。 */
     OBJECT_LOAD_ERROR_PREFIX,
 
@@ -256,6 +257,7 @@ enum class StrKey {
     FORMAT_SQL_INSERT,
     FORMAT_EXCEL,
     FORMAT_PARQUET,
+
     /**
      * 纯 ASCII 的格式名，**各语言原样保留**。与 [PALETTE_WIN2000] 同理：它没有对应的
      * 简体源串，但仍占一个键，好让 `ExportFormat` 的 label 字段类型统一，
@@ -319,6 +321,7 @@ enum class StrKey {
     UNKNOWN_ERROR,
     NO_RETURN_RESULT,
     CANNOT_STOP,
+
     /** 工作台顶部的 schema 副标题 —— `schema: public`。`schema` 是 SQL 标准术语，不译。 */
     SCHEMA_LABEL,
 
@@ -409,6 +412,7 @@ enum class StrKey {
     PALETTE_CYBERPUNK_DESC,
     PALETTE_BILI_PINK,
     PALETTE_BILI_PINK_DESC,
+
     /**
      * 专有名词，**各语言原样保留**。它没有对应的简体源串（纯 ASCII 的产品名不进表），
      * 但仍占一个键 —— 这样 `ThemePalette` 的 label 字段类型统一，渲染侧不必写
@@ -425,6 +429,7 @@ enum class StrKey {
     AUTO_REFRESH_1S,
 
     // ──────────────── 语言 ────────────────
+
     /**
      * 语言选择器的分组标题。
      *
@@ -433,8 +438,10 @@ enum class StrKey {
      * 一个看不懂 `Deutsch` 的人无法用搜索找到它，所以不能把语言名翻成当前界面语言。
      */
     LANGUAGE,
+
     /** 引导页里的说明（与设置页的措辞不同：引导页说「现在就挑」，设置页说「随时改」）。 */
     LANGUAGE_HINT_ONBOARDING,
+
     /** 设置页里的说明。 */
     LANGUAGE_HINT_SETTINGS,
 
@@ -546,6 +553,7 @@ enum class StrKey {
     EXCEL_FILE_NOT_FOUND,
 
     // ──────────────── DuckDB 方言 ────────────────
+
     /**
      * 下面这组错误消息原本就是英文，但它们会经引擎 `Response.error` **原样上屏** ——
      * 德语界面里蹦英文与蹦中文是同一种缺陷，所以一并入表。
@@ -570,6 +578,7 @@ enum class StrKey {
     DUCKDB_DDL_UNPARSABLE,
     DUCKDB_VIEW_DEF_SEMICOLON,
     DUCKDB_EXPLAIN_SEMICOLON,
+
     /**
      * `debugRoutine` 的 INFO 段落与两条失败说明。这些原本是英文的 `Name: …` / `(not found: …)`，
      * 经引擎返回后由函数调试面板原样显示 —— 同样是界面文案，一并入表。
@@ -581,6 +590,7 @@ enum class StrKey {
     DUCKDB_DEBUG_RETURN_TYPE,
     DUCKDB_DEBUG_NOT_FOUND,
     DUCKDB_DEBUG_NO_DDL,
+
     /**
      * 标识符校验（`sanitizeIdentifier`）的六类对象名词。调用方传 **键** 而不是英文短语 ——
      * 否则报错里会夹一句英文，在德语界面上又变成一处「英文漏出」。
@@ -591,6 +601,7 @@ enum class StrKey {
     IDENT_KIND_INDEX,
     IDENT_KIND_FOREIGN_KEY,
     IDENT_KIND_ROUTINE,
+
     /**
      * 标识符校验的五条失败原因，句式统一为「{0} + 原因」，`{0}` 传上面那组名词键的译文。
      * 拆开而不是合成一条：原因本身要跟着语言变（德语名词有性、俄语格变化），

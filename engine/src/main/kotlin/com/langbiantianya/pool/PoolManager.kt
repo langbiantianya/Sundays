@@ -42,7 +42,10 @@ object PoolManager {
      * 池 key 包含 effective schema — 同一 (driver/host/.../database) 在不同 schema 下
      * 使用不同连接池,避免 SET search_path 残留在 HikariCP close() 之后污染下一次借用。
      */
-    fun getConnection(config: ConnectionConfig, schema: String): Connection {
+    fun getConnection(
+        config: ConnectionConfig,
+        schema: String,
+    ): Connection {
         val effectiveSchema = schema.ifBlank { config.schema }
         val hashKey = poolKey(config, effectiveSchema)
         val dataSource = pools.computeIfAbsent(hashKey) { createDataSource(config, effectiveSchema) }
@@ -75,7 +78,7 @@ object PoolManager {
      * ```
      * Table 'sundays_probe.orders' doesn't exist
      * ```
-         * 而用户在树上点的是 `shop`。表现就是：**连接配置里指定的那个库能看，
+     * 而用户在树上点的是 `shop`。表现就是：**连接配置里指定的那个库能看，
      * 其他库一点就报错**，且错误信息里那个库名恰好是「我没点的那个」，
      * 很难自己联想到根因。
      *
@@ -96,7 +99,10 @@ object PoolManager {
      *
      * 与 schema 完全同构：不靠建池时的 `connectionInitSql`，**每次借出都设一遍**。
      */
-    private fun applyCatalog(conn: Connection, config: ConnectionConfig) {
+    private fun applyCatalog(
+        conn: Connection,
+        config: ConnectionConfig,
+    ) {
         val catalog = config.database
         if (catalog.isBlank()) return
         try {
@@ -122,7 +128,7 @@ object PoolManager {
         if (config.jdbcUrl.isNotBlank()) {
             DialectLoader.getDialectByJdbcUrl(config.jdbcUrl)
                 ?: throw UnsupportedOperationException(
-                    "No dialect plugin matches JDBC URL: ${config.jdbcUrl}"
+                    "No dialect plugin matches JDBC URL: ${config.jdbcUrl}",
                 )
         } else {
             DialectLoader.getDialect(config.driver)
@@ -145,13 +151,15 @@ object PoolManager {
      * 结构化的两段式 key 让 [close] 能按配置前缀定位该配置下的**所有** schema 维度连接池
      * （单段 hash 无法反查归属）。
      */
-    private fun poolKey(config: ConnectionConfig, schema: String): String {
+    private fun poolKey(
+        config: ConnectionConfig,
+        schema: String,
+    ): String {
         val base = configKey(config)
         return if (schema.isBlank()) base else "$base#${sha256(schema)}"
     }
 
-    private fun sha256(input: String): String =
-        MessageDigest.getInstance("SHA-256").digest(input.toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun sha256(input: String): String = MessageDigest.getInstance("SHA-256").digest(input.toByteArray()).joinToString("") { "%02x".format(it) }
 
     /** 当前活跃连接池数量（诊断 / 集成测试用）。 */
     fun activePoolCount(): Int = pools.size
@@ -201,14 +209,24 @@ object PoolManager {
         schema: String,
         sessionId: String,
     ): Connection =
-        if (sessionId.isBlank()) getConnection(config, schema)
-        else TransactionManager.connectionFor(sessionId, config, schema)
+        if (sessionId.isBlank()) {
+            getConnection(config, schema)
+        } else {
+            TransactionManager.connectionFor(sessionId, config, schema)
+        }
 
-    private fun createDataSource(config: ConnectionConfig, schema: String): HikariDataSource {
+    private fun createDataSource(
+        config: ConnectionConfig,
+        schema: String,
+    ): HikariDataSource {
         val dialect = resolveDialect(config)
         // 局部名不能叫 jdbcUrl —— apply{} 内简单名会解析到 HikariConfig.jdbcUrl 上，导致自赋值
-        val rawJdbcUrl = if (config.jdbcUrl.isNotBlank()) config.jdbcUrl
-                         else dialect.buildJdbcUrl(config.host, config.port, config.database)
+        val rawJdbcUrl =
+            if (config.jdbcUrl.isNotBlank()) {
+                config.jdbcUrl
+            } else {
+                dialect.buildJdbcUrl(config.host, config.port, config.database)
+            }
 
         // 建池时就把 URL 指向 `config.database`。
         //
@@ -231,27 +249,28 @@ object PoolManager {
             Thread.currentThread().contextClassLoader = it
         }
 
-        val hikariConfig = HikariConfig().apply {
-            jdbcUrl = resolvedJdbcUrl
-            username = config.user
-            password = config.password
-            driverClassName = dialect.jdbcDriverClassName
+        val hikariConfig =
+            HikariConfig().apply {
+                jdbcUrl = resolvedJdbcUrl
+                username = config.user
+                password = config.password
+                driverClassName = dialect.jdbcDriverClassName
 
-            // Performance tuning for desktop app
-            maximumPoolSize = 5
-            minimumIdle = 0
-            idleTimeout = 600_000 // 10 minutes
-            connectionTimeout = 5_000 // 5 seconds
-            maxLifetime = 1_800_000 // 30 minutes
+                // Performance tuning for desktop app
+                maximumPoolSize = 5
+                minimumIdle = 0
+                idleTimeout = 600_000 // 10 minutes
+                connectionTimeout = 5_000 // 5 seconds
+                maxLifetime = 1_800_000 // 30 minutes
 
-            connectionTestQuery = "SELECT 1"
+                connectionTestQuery = "SELECT 1"
 
-            // 新建连接时自动设置 search_path (PostgreSQL/H2/DuckDB)
-            // SQLite 不支持 schema,setSearchPath 实现为空操作,initSql 也不会设置 — 安全。
-            if (schema.isNotBlank()) {
-                dialect.buildSetSearchPathSql(schema)?.let { connectionInitSql = it }
+                // 新建连接时自动设置 search_path (PostgreSQL/H2/DuckDB)
+                // SQLite 不支持 schema,setSearchPath 实现为空操作,initSql 也不会设置 — 安全。
+                if (schema.isNotBlank()) {
+                    dialect.buildSetSearchPathSql(schema)?.let { connectionInitSql = it }
+                }
             }
-        }
 
         return HikariDataSource(hikariConfig)
     }
@@ -264,4 +283,3 @@ object PoolManager {
         pools.clear()
     }
 }
-

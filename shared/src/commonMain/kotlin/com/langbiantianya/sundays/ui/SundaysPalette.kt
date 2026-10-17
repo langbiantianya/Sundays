@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
  * 对比度要求（只做 1~2dp 的线），故不纳入该断言。
  */
 object SundaysPalette {
-
     // =========================================================================
     // 浅色 —— 中性灰蓝底 + 靛蓝主色
     // =========================================================================
@@ -119,36 +118,37 @@ object SundaysPalette {
      * （如 `primary` 对 surface 达 12.2:1，而蓝灰配色同项是 4.6:1），因此这套「刺眼」的
      * 观感在无障碍上是安全的。`SundaysPaletteTest` 对本配色逐对断言。
      */
-    val CyberpunkDarkColorScheme: ColorScheme = darkColorScheme(
-        primary = NeonPrimary,
-        onPrimary = NeonOnPrimary,
-        primaryContainer = NeonPrimaryContainer,
-        onPrimaryContainer = NeonOnPrimaryContainer,
-        inversePrimary = NeonSecondary,
-        secondary = NeonSecondary,
-        onSecondary = NeonOnSecondary,
-        secondaryContainer = NeonSecondaryContainer,
-        onSecondaryContainer = NeonOnSecondaryContainer,
-        tertiary = NeonTertiary,
-        onTertiary = NeonOnTertiary,
-        tertiaryContainer = NeonTertiaryContainer,
-        onTertiaryContainer = NeonOnTertiaryContainer,
-        background = NeonBackground,
-        onBackground = NeonOnSurface,
-        surface = NeonSurface,
-        onSurface = NeonOnSurface,
-        surfaceVariant = NeonSurfaceVariant,
-        onSurfaceVariant = NeonOnSurfaceVariant,
-        inverseSurface = NeonOnSurface,
-        inverseOnSurface = NeonBackground,
-        error = NeonError,
-        onError = NeonOnError,
-        errorContainer = NeonErrorContainer,
-        onErrorContainer = NeonOnErrorContainer,
-        outline = NeonOutline,
-        outlineVariant = NeonOutlineVariant,
-        surfaceTint = Color.Transparent,
-    )
+    val CyberpunkDarkColorScheme: ColorScheme =
+        darkColorScheme(
+            primary = NeonPrimary,
+            onPrimary = NeonOnPrimary,
+            primaryContainer = NeonPrimaryContainer,
+            onPrimaryContainer = NeonOnPrimaryContainer,
+            inversePrimary = NeonSecondary,
+            secondary = NeonSecondary,
+            onSecondary = NeonOnSecondary,
+            secondaryContainer = NeonSecondaryContainer,
+            onSecondaryContainer = NeonOnSecondaryContainer,
+            tertiary = NeonTertiary,
+            onTertiary = NeonOnTertiary,
+            tertiaryContainer = NeonTertiaryContainer,
+            onTertiaryContainer = NeonOnTertiaryContainer,
+            background = NeonBackground,
+            onBackground = NeonOnSurface,
+            surface = NeonSurface,
+            onSurface = NeonOnSurface,
+            surfaceVariant = NeonSurfaceVariant,
+            onSurfaceVariant = NeonOnSurfaceVariant,
+            inverseSurface = NeonOnSurface,
+            inverseOnSurface = NeonBackground,
+            error = NeonError,
+            onError = NeonOnError,
+            errorContainer = NeonErrorContainer,
+            onErrorContainer = NeonOnErrorContainer,
+            outline = NeonOutline,
+            outlineVariant = NeonOutlineVariant,
+            surfaceTint = Color.Transparent,
+        )
 
     /**
      * 赛博朋克 **浅色**配色 —— 把近黑底整体提亮成淡紫灰，霓虹色相应压暗。
@@ -158,36 +158,37 @@ object SundaysPalette {
      * 因此主色降饱和压深到 `#00697A` 一档，其余角色同理 —— 观感仍是「青 / 品红 / 绿」
      * 的赛博配色，只是底色反了过来。
      */
-    val CyberpunkLightColorScheme: ColorScheme = lightColorScheme(
-        primary = Color(0xFF00697A),
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFA8F0FA),
-        onPrimaryContainer = Color(0xFF00272E),
-        inversePrimary = NeonPrimary,
-        secondary = Color(0xFFA8135C),
-        onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFFFFD6E7),
-        onSecondaryContainer = Color(0xFF3B0020),
-        tertiary = Color(0xFF1B6B33),
-        onTertiary = Color(0xFFFFFFFF),
-        tertiaryContainer = Color(0xFFB7F0C8),
-        onTertiaryContainer = Color(0xFF00210F),
-        background = Color(0xFFF4EFFA),
-        onBackground = Color(0xFF1C1626),
-        surface = Color(0xFFFBF8FF),
-        onSurface = Color(0xFF1C1626),
-        surfaceVariant = Color(0xFFE7DFF2),
-        onSurfaceVariant = Color(0xFF4E4460),
-        inverseSurface = Color(0xFF322A40),
-        inverseOnSurface = Color(0xFFF4EFFA),
-        error = Color(0xFFB3261E),
-        onError = Color(0xFFFFFFFF),
-        errorContainer = Color(0xFFF9DEDC),
-        onErrorContainer = Color(0xFF601410),
-        outline = Color(0xFF7A6E90),
-        outlineVariant = Color(0xFFDCD3E8),
-        surfaceTint = Color.Transparent,
-    )
+    val CyberpunkLightColorScheme: ColorScheme =
+        lightColorScheme(
+            primary = Color(0xFF00697A),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFA8F0FA),
+            onPrimaryContainer = Color(0xFF00272E),
+            inversePrimary = NeonPrimary,
+            secondary = Color(0xFFA8135C),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFFFD6E7),
+            onSecondaryContainer = Color(0xFF3B0020),
+            tertiary = Color(0xFF1B6B33),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFB7F0C8),
+            onTertiaryContainer = Color(0xFF00210F),
+            background = Color(0xFFF4EFFA),
+            onBackground = Color(0xFF1C1626),
+            surface = Color(0xFFFBF8FF),
+            onSurface = Color(0xFF1C1626),
+            surfaceVariant = Color(0xFFE7DFF2),
+            onSurfaceVariant = Color(0xFF4E4460),
+            inverseSurface = Color(0xFF322A40),
+            inverseOnSurface = Color(0xFFF4EFFA),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF9DEDC),
+            onErrorContainer = Color(0xFF601410),
+            outline = Color(0xFF7A6E90),
+            outlineVariant = Color(0xFFDCD3E8),
+            surfaceTint = Color.Transparent,
+        )
 
     // =========================================================================
     // 哔哩粉 —— 暖玫瑰粉主色（浅色档为酒红，深色档为亮粉）
@@ -204,37 +205,38 @@ object SundaysPalette {
      * 第三色刻意用**暖琥珀**而非第二个粉：整套界面若只有一种色相，表格里「主色 / 第三色」
      * 两类状态标记会难以区分，暖琥珀在白底上压深到 `#8A5A00`（5.93:1）后仍可作文字色。
      */
-    val BiliPinkLightColorScheme: ColorScheme = lightColorScheme(
-        primary = Color(0xFFA81C4C),
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFFFD9E4),
-        onPrimaryContainer = Color(0xFF4A0019),
-        inversePrimary = Color(0xFFFFB0C8),
-        secondary = Color(0xFF8A5568),
-        onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFFF5DCE4),
-        onSecondaryContainer = Color(0xFF3B1220),
-        tertiary = Color(0xFF8A5A00),
-        onTertiary = Color(0xFFFFFFFF),
-        tertiaryContainer = Color(0xFFFFE0B2),
-        onTertiaryContainer = Color(0xFF2C1900),
-        background = Color(0xFFFFF7F9),
-        onBackground = Color(0xFF2B1A21),
-        surface = Color(0xFFFFFFFF),
-        onSurface = Color(0xFF2B1A21),
-        surfaceVariant = Color(0xFFFBE9EF),
-        onSurfaceVariant = Color(0xFF6B4C58),
-        inverseSurface = Color(0xFF35242C),
-        inverseOnSurface = Color(0xFFFFF7F9),
-        error = Color(0xFFB3261E),
-        onError = Color(0xFFFFFFFF),
-        errorContainer = Color(0xFFF9DEDC),
-        onErrorContainer = Color(0xFF601410),
-        outline = Color(0xFF9C7D88),
-        outlineVariant = Color(0xFFEFDCE3),
-        // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
-        surfaceTint = Color.Transparent,
-    )
+    val BiliPinkLightColorScheme: ColorScheme =
+        lightColorScheme(
+            primary = Color(0xFFA81C4C),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFFFD9E4),
+            onPrimaryContainer = Color(0xFF4A0019),
+            inversePrimary = Color(0xFFFFB0C8),
+            secondary = Color(0xFF8A5568),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFF5DCE4),
+            onSecondaryContainer = Color(0xFF3B1220),
+            tertiary = Color(0xFF8A5A00),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFFFE0B2),
+            onTertiaryContainer = Color(0xFF2C1900),
+            background = Color(0xFFFFF7F9),
+            onBackground = Color(0xFF2B1A21),
+            surface = Color(0xFFFFFFFF),
+            onSurface = Color(0xFF2B1A21),
+            surfaceVariant = Color(0xFFFBE9EF),
+            onSurfaceVariant = Color(0xFF6B4C58),
+            inverseSurface = Color(0xFF35242C),
+            inverseOnSurface = Color(0xFFFFF7F9),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF9DEDC),
+            onErrorContainer = Color(0xFF601410),
+            outline = Color(0xFF9C7D88),
+            outlineVariant = Color(0xFFEFDCE3),
+            // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
+            surfaceTint = Color.Transparent,
+        )
 
     /**
      * 哔哩粉 **深色**配色 —— 近黑暖李紫底 + 亮玫瑰粉主色。
@@ -244,37 +246,38 @@ object SundaysPalette {
      * 比浅色档同角色的 7.15:1 还高。也就是说这套主题的「粉」主要活在深色档，
      * 浅色档为了可读性只能退到酒红。
      */
-    val BiliPinkDarkColorScheme: ColorScheme = darkColorScheme(
-        primary = Color(0xFFFF93B6),
-        onPrimary = Color(0xFF3D0018),
-        primaryContainer = Color(0xFF6E1339),
-        onPrimaryContainer = Color(0xFFFFD9E5),
-        inversePrimary = Color(0xFFA81C4C),
-        secondary = Color(0xFFD5A8BB),
-        onSecondary = Color(0xFF34101F),
-        secondaryContainer = Color(0xFF4C2534),
-        onSecondaryContainer = Color(0xFFF2D6E1),
-        tertiary = Color(0xFFF0C070),
-        onTertiary = Color(0xFF3B2600),
-        tertiaryContainer = Color(0xFF5A3D00),
-        onTertiaryContainer = Color(0xFFFFE0B2),
-        background = Color(0xFF1C1015),
-        onBackground = Color(0xFFFCE9EF),
-        surface = Color(0xFF271820),
-        onSurface = Color(0xFFFCE9EF),
-        surfaceVariant = Color(0xFF38222C),
-        onSurfaceVariant = Color(0xFFD6B7C3),
-        inverseSurface = Color(0xFFFCE9EF),
-        inverseOnSurface = Color(0xFF1C1015),
-        error = Color(0xFFFF8A80),
-        onError = Color(0xFF4A0004),
-        errorContainer = Color(0xFF6B1F17),
-        onErrorContainer = Color(0xFFFFDAD5),
-        outline = Color(0xFF8C6C78),
-        outlineVariant = Color(0xFF4A303A),
-        // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
-        surfaceTint = Color.Transparent,
-    )
+    val BiliPinkDarkColorScheme: ColorScheme =
+        darkColorScheme(
+            primary = Color(0xFFFF93B6),
+            onPrimary = Color(0xFF3D0018),
+            primaryContainer = Color(0xFF6E1339),
+            onPrimaryContainer = Color(0xFFFFD9E5),
+            inversePrimary = Color(0xFFA81C4C),
+            secondary = Color(0xFFD5A8BB),
+            onSecondary = Color(0xFF34101F),
+            secondaryContainer = Color(0xFF4C2534),
+            onSecondaryContainer = Color(0xFFF2D6E1),
+            tertiary = Color(0xFFF0C070),
+            onTertiary = Color(0xFF3B2600),
+            tertiaryContainer = Color(0xFF5A3D00),
+            onTertiaryContainer = Color(0xFFFFE0B2),
+            background = Color(0xFF1C1015),
+            onBackground = Color(0xFFFCE9EF),
+            surface = Color(0xFF271820),
+            onSurface = Color(0xFFFCE9EF),
+            surfaceVariant = Color(0xFF38222C),
+            onSurfaceVariant = Color(0xFFD6B7C3),
+            inverseSurface = Color(0xFFFCE9EF),
+            inverseOnSurface = Color(0xFF1C1015),
+            error = Color(0xFFFF8A80),
+            onError = Color(0xFF4A0004),
+            errorContainer = Color(0xFF6B1F17),
+            onErrorContainer = Color(0xFFFFDAD5),
+            outline = Color(0xFF8C6C78),
+            outlineVariant = Color(0xFF4A303A),
+            // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
+            surfaceTint = Color.Transparent,
+        )
 
     // =========================================================================
     // Win2000 / WinXP —— 复古配色
@@ -302,37 +305,38 @@ object SundaysPalette {
      * 而不是悄悄退化成暗底。内容区 `surface` 取纯白（对应 Win2000 列表框的白色凹陷区），
      * 与银灰 `background` 形成经典的面/内容区分。
      */
-    val Win2000LightColorScheme: ColorScheme = lightColorScheme(
-        primary = Color(0xFF000080),
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFC5CBFF),
-        onPrimaryContainer = Color(0xFF000066),
-        inversePrimary = Color(0xFF8080FF),
-        secondary = Color(0xFF006B6B),
-        onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFFC4E4E4),
-        onSecondaryContainer = Color(0xFF00201F),
-        tertiary = Color(0xFF7B3F00),
-        onTertiary = Color(0xFFFFFFFF),
-        tertiaryContainer = Color(0xFFF0D8BE),
-        onTertiaryContainer = Color(0xFF2A1300),
-        background = Color(0xFFC0C0C0),
-        onBackground = Color(0xFF000000),
-        surface = Color(0xFFFFFFFF),
-        onSurface = Color(0xFF000000),
-        surfaceVariant = Color(0xFFD4D0C8),
-        onSurfaceVariant = Color(0xFF1A1A1A),
-        // inverseSurface 取 navy：Win2000 的实心填充（提示条 / 选中态）正是深蓝配白字。
-        inverseSurface = Color(0xFF000080),
-        inverseOnSurface = Color(0xFFFFFFFF),
-        error = Color(0xFFA00000),
-        onError = Color(0xFFFFFFFF),
-        errorContainer = Color(0xFFF0C8C8),
-        onErrorContainer = Color(0xFF3A0000),
-        outline = Color(0xFF808080),
-        outlineVariant = Color(0xFFA0A0A0),
-        surfaceTint = Color.Transparent,
-    )
+    val Win2000LightColorScheme: ColorScheme =
+        lightColorScheme(
+            primary = Color(0xFF000080),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFC5CBFF),
+            onPrimaryContainer = Color(0xFF000066),
+            inversePrimary = Color(0xFF8080FF),
+            secondary = Color(0xFF006B6B),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFC4E4E4),
+            onSecondaryContainer = Color(0xFF00201F),
+            tertiary = Color(0xFF7B3F00),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFF0D8BE),
+            onTertiaryContainer = Color(0xFF2A1300),
+            background = Color(0xFFC0C0C0),
+            onBackground = Color(0xFF000000),
+            surface = Color(0xFFFFFFFF),
+            onSurface = Color(0xFF000000),
+            surfaceVariant = Color(0xFFD4D0C8),
+            onSurfaceVariant = Color(0xFF1A1A1A),
+            // inverseSurface 取 navy：Win2000 的实心填充（提示条 / 选中态）正是深蓝配白字。
+            inverseSurface = Color(0xFF000080),
+            inverseOnSurface = Color(0xFFFFFFFF),
+            error = Color(0xFFA00000),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF0C8C8),
+            onErrorContainer = Color(0xFF3A0000),
+            outline = Color(0xFF808080),
+            outlineVariant = Color(0xFFA0A0A0),
+            surfaceTint = Color.Transparent,
+        )
 
     /**
      * Win2000 **深色**配色 —— 对应 Win2000 的黑色配色方案（银字黑底）。
@@ -344,36 +348,37 @@ object SundaysPalette {
      * 刻意避开原版的高饱和黄：作为会铺满表格单元格的 `primary`，纯黄在长时间盯屏下
      * 比霓虹青更累。银灰压黑底达 10.88:1，可读性不打折。
      */
-    val Win2000DarkColorScheme: ColorScheme = darkColorScheme(
-        primary = Color(0xFFC0C0C0),
-        onPrimary = Color(0xFF000000),
-        primaryContainer = Color(0xFF4A4A4A),
-        onPrimaryContainer = Color(0xFFE4E4E4),
-        inversePrimary = Color(0xFF4A4A4A),
-        secondary = Color(0xFF00B0B0),
-        onSecondary = Color(0xFF000000),
-        secondaryContainer = Color(0xFF004F4F),
-        onSecondaryContainer = Color(0xFFB8F0F0),
-        tertiary = Color(0xFFD0A030),
-        onTertiary = Color(0xFF000000),
-        tertiaryContainer = Color(0xFF5C4210),
-        onTertiaryContainer = Color(0xFFFFE0A8),
-        background = Color(0xFF0A0A0A),
-        onBackground = Color(0xFFFFFFFF),
-        surface = Color(0xFF1A1A1A),
-        onSurface = Color(0xFFFFFFFF),
-        surfaceVariant = Color(0xFF2E2E2E),
-        onSurfaceVariant = Color(0xFFA0A0A0),
-        inverseSurface = Color(0xFFE6E6E6),
-        inverseOnSurface = Color(0xFF0A0A0A),
-        error = Color(0xFFFF6B6B),
-        onError = Color(0xFF2A0000),
-        errorContainer = Color(0xFF5C1414),
-        onErrorContainer = Color(0xFFFFD2D2),
-        outline = Color(0xFF707070),
-        outlineVariant = Color(0xFF3C3C3C),
-        surfaceTint = Color.Transparent,
-    )
+    val Win2000DarkColorScheme: ColorScheme =
+        darkColorScheme(
+            primary = Color(0xFFC0C0C0),
+            onPrimary = Color(0xFF000000),
+            primaryContainer = Color(0xFF4A4A4A),
+            onPrimaryContainer = Color(0xFFE4E4E4),
+            inversePrimary = Color(0xFF4A4A4A),
+            secondary = Color(0xFF00B0B0),
+            onSecondary = Color(0xFF000000),
+            secondaryContainer = Color(0xFF004F4F),
+            onSecondaryContainer = Color(0xFFB8F0F0),
+            tertiary = Color(0xFFD0A030),
+            onTertiary = Color(0xFF000000),
+            tertiaryContainer = Color(0xFF5C4210),
+            onTertiaryContainer = Color(0xFFFFE0A8),
+            background = Color(0xFF0A0A0A),
+            onBackground = Color(0xFFFFFFFF),
+            surface = Color(0xFF1A1A1A),
+            onSurface = Color(0xFFFFFFFF),
+            surfaceVariant = Color(0xFF2E2E2E),
+            onSurfaceVariant = Color(0xFFA0A0A0),
+            inverseSurface = Color(0xFFE6E6E6),
+            inverseOnSurface = Color(0xFF0A0A0A),
+            error = Color(0xFFFF6B6B),
+            onError = Color(0xFF2A0000),
+            errorContainer = Color(0xFF5C1414),
+            onErrorContainer = Color(0xFFFFD2D2),
+            outline = Color(0xFF707070),
+            outlineVariant = Color(0xFF3C3C3C),
+            surfaceTint = Color.Transparent,
+        )
 
     /**
      * WinXP **浅色**配色 —— Luna 奶油底 `#ECE9D8` + 蓝灰 chrome。
@@ -386,36 +391,37 @@ object SundaysPalette {
      *
      * 次级 / 第三色取暗金与暗梅红：奶油底整体偏暖，用冷蓝做两个次级色会与主色糊在一起。
      */
-    val WinXpLightColorScheme: ColorScheme = lightColorScheme(
-        primary = Color(0xFF255EA1),
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFC4D8F5),
-        onPrimaryContainer = Color(0xFF0A2A5E),
-        inversePrimary = Color(0xFF7FA8E0),
-        secondary = Color(0xFF7A5C00),
-        onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFFF0E2B8),
-        onSecondaryContainer = Color(0xFF2A2000),
-        tertiary = Color(0xFF7B2D5E),
-        onTertiary = Color(0xFFFFFFFF),
-        tertiaryContainer = Color(0xFFF0CFE4),
-        onTertiaryContainer = Color(0xFF2C0A1F),
-        background = Color(0xFFECE9D8),
-        onBackground = Color(0xFF000000),
-        surface = Color(0xFFFFFFFF),
-        onSurface = Color(0xFF000000),
-        surfaceVariant = Color(0xFFDCD8C6),
-        onSurfaceVariant = Color(0xFF3A3830),
-        inverseSurface = Color(0xFF255EA1),
-        inverseOnSurface = Color(0xFFFFFFFF),
-        error = Color(0xFFA00000),
-        onError = Color(0xFFFFFFFF),
-        errorContainer = Color(0xFFF2C4C4),
-        onErrorContainer = Color(0xFF3A0000),
-        outline = Color(0xFF7A7A7A),
-        outlineVariant = Color(0xFFC0BCA8),
-        surfaceTint = Color.Transparent,
-    )
+    val WinXpLightColorScheme: ColorScheme =
+        lightColorScheme(
+            primary = Color(0xFF255EA1),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFC4D8F5),
+            onPrimaryContainer = Color(0xFF0A2A5E),
+            inversePrimary = Color(0xFF7FA8E0),
+            secondary = Color(0xFF7A5C00),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFF0E2B8),
+            onSecondaryContainer = Color(0xFF2A2000),
+            tertiary = Color(0xFF7B2D5E),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFF0CFE4),
+            onTertiaryContainer = Color(0xFF2C0A1F),
+            background = Color(0xFFECE9D8),
+            onBackground = Color(0xFF000000),
+            surface = Color(0xFFFFFFFF),
+            onSurface = Color(0xFF000000),
+            surfaceVariant = Color(0xFFDCD8C6),
+            onSurfaceVariant = Color(0xFF3A3830),
+            inverseSurface = Color(0xFF255EA1),
+            inverseOnSurface = Color(0xFFFFFFFF),
+            error = Color(0xFFA00000),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF2C4C4),
+            onErrorContainer = Color(0xFF3A0000),
+            outline = Color(0xFF7A7A7A),
+            outlineVariant = Color(0xFFC0BCA8),
+            surfaceTint = Color.Transparent,
+        )
 
     /**
      * WinXP **深色**配色 —— Luna Black 风格：深蓝灰底 + XP 蓝提亮。
@@ -427,71 +433,73 @@ object SundaysPalette {
      * 与浅色档一样，**不复用浅色档的色值**：XP 的 `#255EA1` 压在这个深底上只有
      * 2.72:1，属于典型的「深浅两版沿用同一组颜色」错误。
      */
-    val WinXpDarkColorScheme: ColorScheme = darkColorScheme(
-        primary = Color(0xFF4E9DE0),
-        onPrimary = Color(0xFF04121F),
-        primaryContainer = Color(0xFF1B4A7A),
-        onPrimaryContainer = Color(0xFFB8D9F5),
-        inversePrimary = Color(0xFF255EA1),
-        secondary = Color(0xFFD8B860),
-        onSecondary = Color(0xFF241A00),
-        secondaryContainer = Color(0xFF4A3A0F),
-        onSecondaryContainer = Color(0xFFFFE8B0),
-        tertiary = Color(0xFFD08CC0),
-        onTertiary = Color(0xFF2A0A22),
-        tertiaryContainer = Color(0xFF4A1B3C),
-        onTertiaryContainer = Color(0xFFFBD4EE),
-        background = Color(0xFF101820),
-        onBackground = Color(0xFFEDF1F7),
-        surface = Color(0xFF1B242E),
-        onSurface = Color(0xFFEDF1F7),
-        surfaceVariant = Color(0xFF2A3641),
-        onSurfaceVariant = Color(0xFFA8B4C0),
-        inverseSurface = Color(0xFFEDF1F7),
-        inverseOnSurface = Color(0xFF101820),
-        error = Color(0xFFFF8A80),
-        onError = Color(0xFF2A0603),
-        errorContainer = Color(0xFF5C1A14),
-        onErrorContainer = Color(0xFFFFDAD5),
-        outline = Color(0xFF66788A),
-        outlineVariant = Color(0xFF33404D),
-        surfaceTint = Color.Transparent,
-    )
+    val WinXpDarkColorScheme: ColorScheme =
+        darkColorScheme(
+            primary = Color(0xFF4E9DE0),
+            onPrimary = Color(0xFF04121F),
+            primaryContainer = Color(0xFF1B4A7A),
+            onPrimaryContainer = Color(0xFFB8D9F5),
+            inversePrimary = Color(0xFF255EA1),
+            secondary = Color(0xFFD8B860),
+            onSecondary = Color(0xFF241A00),
+            secondaryContainer = Color(0xFF4A3A0F),
+            onSecondaryContainer = Color(0xFFFFE8B0),
+            tertiary = Color(0xFFD08CC0),
+            onTertiary = Color(0xFF2A0A22),
+            tertiaryContainer = Color(0xFF4A1B3C),
+            onTertiaryContainer = Color(0xFFFBD4EE),
+            background = Color(0xFF101820),
+            onBackground = Color(0xFFEDF1F7),
+            surface = Color(0xFF1B242E),
+            onSurface = Color(0xFFEDF1F7),
+            surfaceVariant = Color(0xFF2A3641),
+            onSurfaceVariant = Color(0xFFA8B4C0),
+            inverseSurface = Color(0xFFEDF1F7),
+            inverseOnSurface = Color(0xFF101820),
+            error = Color(0xFFFF8A80),
+            onError = Color(0xFF2A0603),
+            errorContainer = Color(0xFF5C1A14),
+            onErrorContainer = Color(0xFFFFDAD5),
+            outline = Color(0xFF66788A),
+            outlineVariant = Color(0xFF33404D),
+            surfaceTint = Color.Transparent,
+        )
 
     /** 浅色配色 —— 灰蓝中性底 + 靛蓝主色，替代 Material3 出厂紫。 */
-    val LightColorScheme: ColorScheme = lightColorScheme(
-        primary = LightPrimary,
-        onPrimary = LightOnPrimary,
-        primaryContainer = LightPrimaryContainer,
-        onPrimaryContainer = LightOnPrimaryContainer,
-        inversePrimary = LightInversePrimary,
-        secondary = LightSecondary,
-        onSecondary = LightOnSecondary,
-        secondaryContainer = LightSecondaryContainer,
-        onSecondaryContainer = LightOnSecondaryContainer,
-        tertiary = LightTertiary,
-        onTertiary = LightOnTertiary,
-        tertiaryContainer = LightTertiaryContainer,
-        onTertiaryContainer = LightOnTertiaryContainer,
-        background = LightBackground,
-        onBackground = LightOnBackground,
-        surface = LightSurface,
-        onSurface = LightOnSurface,
-        surfaceVariant = LightSurfaceVariant,
-        onSurfaceVariant = LightOnSurfaceVariant,
-        inverseSurface = LightInverseSurface,
-        inverseOnSurface = LightInverseOnSurface,
-        error = LightError,
-        onError = LightOnError,
-        errorContainer = LightErrorContainer,
-        onErrorContainer = LightOnErrorContainer,
-        outline = LightOutline,
-        outlineVariant = LightOutlineVariant,
-        // surfaceTint = transparent：禁用 tonal 叠色。`Surface(tonalElevation = …)` 只在
-        // 背景色 **等于 surface** 时才叠 surfaceTint（见 ColorScheme.applyTonalElevation），
-        // 传透明色后即使某处仍留了 tonalElevation，视觉上也等同于纯色，不会糊出一层色偏。
-        surfaceTint = Color.Transparent,
-    )
+    val LightColorScheme: ColorScheme =
+        lightColorScheme(
+            primary = LightPrimary,
+            onPrimary = LightOnPrimary,
+            primaryContainer = LightPrimaryContainer,
+            onPrimaryContainer = LightOnPrimaryContainer,
+            inversePrimary = LightInversePrimary,
+            secondary = LightSecondary,
+            onSecondary = LightOnSecondary,
+            secondaryContainer = LightSecondaryContainer,
+            onSecondaryContainer = LightOnSecondaryContainer,
+            tertiary = LightTertiary,
+            onTertiary = LightOnTertiary,
+            tertiaryContainer = LightTertiaryContainer,
+            onTertiaryContainer = LightOnTertiaryContainer,
+            background = LightBackground,
+            onBackground = LightOnBackground,
+            surface = LightSurface,
+            onSurface = LightOnSurface,
+            surfaceVariant = LightSurfaceVariant,
+            onSurfaceVariant = LightOnSurfaceVariant,
+            inverseSurface = LightInverseSurface,
+            inverseOnSurface = LightInverseOnSurface,
+            error = LightError,
+            onError = LightOnError,
+            errorContainer = LightErrorContainer,
+            onErrorContainer = LightOnErrorContainer,
+            outline = LightOutline,
+            outlineVariant = LightOutlineVariant,
+            // surfaceTint = transparent：禁用 tonal 叠色。`Surface(tonalElevation = …)` 只在
+            // 背景色 **等于 surface** 时才叠 surfaceTint（见 ColorScheme.applyTonalElevation），
+            // 传透明色后即使某处仍留了 tonalElevation，视觉上也等同于纯色，不会糊出一层色偏。
+            surfaceTint = Color.Transparent,
+        )
 
     // =========================================================================
     // 深色 —— 蓝灰炭底 + 亮靛蓝主色
@@ -526,37 +534,38 @@ object SundaysPalette {
     private val DarkOutlineVariant = Color(0xFF333A48)
 
     /** 深色配色 —— 蓝灰炭底 + 亮靛蓝主色，与 [LightColorScheme] 角色对位。 */
-    val DarkColorScheme: ColorScheme = darkColorScheme(
-        primary = DarkPrimary,
-        onPrimary = DarkOnPrimary,
-        primaryContainer = DarkPrimaryContainer,
-        onPrimaryContainer = DarkOnPrimaryContainer,
-        inversePrimary = DarkInversePrimary,
-        secondary = DarkSecondary,
-        onSecondary = DarkOnSecondary,
-        secondaryContainer = DarkSecondaryContainer,
-        onSecondaryContainer = DarkOnSecondaryContainer,
-        tertiary = DarkTertiary,
-        onTertiary = DarkOnTertiary,
-        tertiaryContainer = DarkTertiaryContainer,
-        onTertiaryContainer = DarkOnTertiaryContainer,
-        background = DarkBackground,
-        onBackground = DarkOnBackground,
-        surface = DarkSurface,
-        onSurface = DarkOnSurface,
-        surfaceVariant = DarkSurfaceVariant,
-        onSurfaceVariant = DarkOnSurfaceVariant,
-        inverseSurface = DarkInverseSurface,
-        inverseOnSurface = DarkInverseOnSurface,
-        error = DarkError,
-        onError = DarkOnError,
-        errorContainer = DarkErrorContainer,
-        onErrorContainer = DarkOnErrorContainer,
-        outline = DarkOutline,
-        outlineVariant = DarkOutlineVariant,
-        // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
-        surfaceTint = Color.Transparent,
-    )
+    val DarkColorScheme: ColorScheme =
+        darkColorScheme(
+            primary = DarkPrimary,
+            onPrimary = DarkOnPrimary,
+            primaryContainer = DarkPrimaryContainer,
+            onPrimaryContainer = DarkOnPrimaryContainer,
+            inversePrimary = DarkInversePrimary,
+            secondary = DarkSecondary,
+            onSecondary = DarkOnSecondary,
+            secondaryContainer = DarkSecondaryContainer,
+            onSecondaryContainer = DarkOnSecondaryContainer,
+            tertiary = DarkTertiary,
+            onTertiary = DarkOnTertiary,
+            tertiaryContainer = DarkTertiaryContainer,
+            onTertiaryContainer = DarkOnTertiaryContainer,
+            background = DarkBackground,
+            onBackground = DarkOnBackground,
+            surface = DarkSurface,
+            onSurface = DarkOnSurface,
+            surfaceVariant = DarkSurfaceVariant,
+            onSurfaceVariant = DarkOnSurfaceVariant,
+            inverseSurface = DarkInverseSurface,
+            inverseOnSurface = DarkInverseOnSurface,
+            error = DarkError,
+            onError = DarkOnError,
+            errorContainer = DarkErrorContainer,
+            onErrorContainer = DarkOnErrorContainer,
+            outline = DarkOutline,
+            outlineVariant = DarkOutlineVariant,
+            // 见浅色方案同处说明：透明 surfaceTint = 禁用 tonal 叠色。
+            surfaceTint = Color.Transparent,
+        )
 
     // =========================================================================
     // 3D 斜面 —— 经典 Win 控件的辨识度来源，仅复古两套启用
@@ -569,48 +578,52 @@ object SundaysPalette {
     // =========================================================================
 
     /** Win2000 浅色档 —— 银灰面上的 2px 双线：外圈 ButtonShadow，内圈亮白 / 暗 `#404040`。 */
-    val Win2000LightBevel: BevelStyle = BevelStyle(
-        enabled = true,
-        outer = Color(0xFF7A7A7A),
-        light = Color(0xFFFFFFFF),
-        dark = Color(0xFF404040),
-        width = 1.dp,
-        doubleEdge = true,
-        bevelRadius = 0.dp,
-    )
+    val Win2000LightBevel: BevelStyle =
+        BevelStyle(
+            enabled = true,
+            outer = Color(0xFF7A7A7A),
+            light = Color(0xFFFFFFFF),
+            dark = Color(0xFF404040),
+            width = 1.dp,
+            doubleEdge = true,
+            bevelRadius = 0.dp,
+        )
 
     /** Win2000 深色档 —— 近黑面转为银边亮 / 纯黑暗，外圈收浅以免糊成一片。 */
-    val Win2000DarkBevel: BevelStyle = BevelStyle(
-        enabled = true,
-        outer = Color(0xFF5A5A5A),
-        light = Color(0xFFC0C0C0),
-        dark = Color(0xFF000000),
-        width = 1.dp,
-        doubleEdge = true,
-        bevelRadius = 0.dp,
-    )
+    val Win2000DarkBevel: BevelStyle =
+        BevelStyle(
+            enabled = true,
+            outer = Color(0xFF5A5A5A),
+            light = Color(0xFFC0C0C0),
+            dark = Color(0xFF000000),
+            width = 1.dp,
+            doubleEdge = true,
+            bevelRadius = 0.dp,
+        )
 
     /** WinXP 浅色档 —— Luna 是 1px 单线边，明暗差刻意收得很小（近乎平边）。 */
-    val WinXpLightBevel: BevelStyle = BevelStyle(
-        enabled = true,
-        outer = Color(0xFF8A9BA8),
-        light = Color(0xFFFDFDF8),
-        dark = Color(0xFF8296A8),
-        width = 1.dp,
-        doubleEdge = false,
-        bevelRadius = 3.dp,
-    )
+    val WinXpLightBevel: BevelStyle =
+        BevelStyle(
+            enabled = true,
+            outer = Color(0xFF8A9BA8),
+            light = Color(0xFFFDFDF8),
+            dark = Color(0xFF8296A8),
+            width = 1.dp,
+            doubleEdge = false,
+            bevelRadius = 3.dp,
+        )
 
     /** WinXP 深色档 —— 同为单线，暗边压到接近底色，靠亮边单独制造凸起感。 */
-    val WinXpDarkBevel: BevelStyle = BevelStyle(
-        enabled = true,
-        outer = Color(0xFF55677A),
-        light = Color(0xFFC8D4E0),
-        dark = Color(0xFF0A0A0A),
-        width = 1.dp,
-        doubleEdge = false,
-        bevelRadius = 3.dp,
-    )
+    val WinXpDarkBevel: BevelStyle =
+        BevelStyle(
+            enabled = true,
+            outer = Color(0xFF55677A),
+            light = Color(0xFFC8D4E0),
+            dark = Color(0xFF0A0A0A),
+            width = 1.dp,
+            doubleEdge = false,
+            bevelRadius = 3.dp,
+        )
 
     /**
      * 经典档的禁用态文字色。
@@ -618,8 +631,7 @@ object SundaysPalette {
      * 禁用的控件**不受 WCAG 1.4.3 约束**（该条明确排除 inactive 组件），所以这里允许
      * 低于 4.5:1 —— 经典 Win 的禁用文字就是比正常色淡一档。取 `outline` 一档即可。
      */
-    fun disabledInk(useDark: Boolean): Color =
-        if (useDark) Win2000DarkBevel.dark else LightOutline
+    fun disabledInk(useDark: Boolean): Color = if (useDark) Win2000DarkBevel.dark else LightOutline
 
     /** Win2000 浅色档的禁用文字色。 */
     val Win2000DisabledInk: Color get() = disabledInk(useDark = false)
@@ -647,60 +659,64 @@ object SundaysPalette {
     // =========================================================================
 
     /** Win2000 浅色档（底 `#D4D0C8`）—— 经典系统色。 */
-    val Win2000LightSyntax: SyntaxColors = SyntaxColors(
-        keyword = Color(0xFF000080),      // 10.41:1
-        builtin = Color(0xFF6B3FA0),     // 8.72:1
-        type = Color(0xFF2B5F5F),        // 4.70:1
-        string = Color(0xFF8B1A1A),      // 6.04:1
-        number = Color(0xFF1A5E28),      // 5.10:1
-        comment = Color(0xFF256B2B),     // 4.25:1
-        operator = Color(0xFF000000),    // 13.66:1
-        punctuation = Color(0xFF555555), // 4.85:1
-        identifier = Color(0xFF000000),  // 13.66:1
-        error = Color(0xFF9C0000),       // 6.36:1
-    )
+    val Win2000LightSyntax: SyntaxColors =
+        SyntaxColors(
+            keyword = Color(0xFF000080), // 10.41:1
+            builtin = Color(0xFF6B3FA0), // 8.72:1
+            type = Color(0xFF2B5F5F), // 4.70:1
+            string = Color(0xFF8B1A1A), // 6.04:1
+            number = Color(0xFF1A5E28), // 5.10:1
+            comment = Color(0xFF256B2B), // 4.25:1
+            operator = Color(0xFF000000), // 13.66:1
+            punctuation = Color(0xFF555555), // 4.85:1
+            identifier = Color(0xFF000000), // 13.66:1
+            error = Color(0xFF9C0000), // 6.36:1
+        )
 
     /** Win2000 深色档（底 `#2E2E2E`）—— 同色相的提亮版。 */
-    val Win2000DarkSyntax: SyntaxColors = SyntaxColors(
-        keyword = Color(0xFFA9C4F0),     // 7.66:1
-        builtin = Color(0xFFC0A8E8),     // 7.44:1
-        type = Color(0xFF7FD8D8),        // 8.22:1
-        string = Color(0xFFE8A0A0),     // 6.45:1
-        number = Color(0xFF8FE0A0),      // 8.62:1
-        comment = Color(0xFF7FC47F),     // 6.53:1
-        operator = Color(0xFFD0D0D0),    // 9.44:1
-        punctuation = Color(0xFFA8B4C0), // 6.44:1
-        identifier = Color(0xFFF0F0F0),  // 11.92:1
-        error = Color(0xFFFF8A80),       // 7.12:1
-    )
+    val Win2000DarkSyntax: SyntaxColors =
+        SyntaxColors(
+            keyword = Color(0xFFA9C4F0), // 7.66:1
+            builtin = Color(0xFFC0A8E8), // 7.44:1
+            type = Color(0xFF7FD8D8), // 8.22:1
+            string = Color(0xFFE8A0A0), // 6.45:1
+            number = Color(0xFF8FE0A0), // 8.62:1
+            comment = Color(0xFF7FC47F), // 6.53:1
+            operator = Color(0xFFD0D0D0), // 9.44:1
+            punctuation = Color(0xFFA8B4C0), // 6.44:1
+            identifier = Color(0xFFF0F0F0), // 11.92:1
+            error = Color(0xFFFF8A80), // 7.12:1
+        )
 
     /** WinXP 浅色档（底 `#DCD8C6`）—— 与 Win2000 同色相，略提亮以适配更亮的 Luna 底。 */
-    val WinXpLightSyntax: SyntaxColors = SyntaxColors(
-        keyword = Color(0xFF10307F),     // 11.19:1
-        builtin = Color(0xFF73489F),     // 9.35:1
-        type = Color(0xFF2B5F5F),        // 5.05:1
-        string = Color(0xFF8B1A1A),      // 6.49:1
-        number = Color(0xFF1A5E28),      // 5.49:1
-        comment = Color(0xFF256B2B),     // 4.56:1
-        operator = Color(0xFF000000),    // 14.68:1
-        punctuation = Color(0xFF555555), // 5.21:1
-        identifier = Color(0xFF000000),  // 14.68:1
-        error = Color(0xFF9C0000),       // 6.80:1
-    )
+    val WinXpLightSyntax: SyntaxColors =
+        SyntaxColors(
+            keyword = Color(0xFF10307F), // 11.19:1
+            builtin = Color(0xFF73489F), // 9.35:1
+            type = Color(0xFF2B5F5F), // 5.05:1
+            string = Color(0xFF8B1A1A), // 6.49:1
+            number = Color(0xFF1A5E28), // 5.49:1
+            comment = Color(0xFF256B2B), // 4.56:1
+            operator = Color(0xFF000000), // 14.68:1
+            punctuation = Color(0xFF555555), // 5.21:1
+            identifier = Color(0xFF000000), // 14.68:1
+            error = Color(0xFF9C0000), // 6.80:1
+        )
 
     /** WinXP 深色档（底 `#2A3641`）。 */
-    val WinXpDarkSyntax: SyntaxColors = SyntaxColors(
-        keyword = Color(0xFF8FC0F0),     // 6.44:1
-        builtin = Color(0xFFC7A6F0),     // 6.38:1
-        type = Color(0xFF6FD0D0),        // 6.82:1
-        string = Color(0xFFE89A9A),     // 5.59:1
-        number = Color(0xFF88DCA0),      // 7.51:1
-        comment = Color(0xFF78C078),     // 5.64:1
-        operator = Color(0xFFC8D4E0),    // 9.30:1
-        punctuation = Color(0xFFA0B0C0), // 5.56:1
-        identifier = Color(0xFFEDF1F7),  // 10.88:1
-        error = Color(0xFFFF9E94),       // 7.02:1
-    )
+    val WinXpDarkSyntax: SyntaxColors =
+        SyntaxColors(
+            keyword = Color(0xFF8FC0F0), // 6.44:1
+            builtin = Color(0xFFC7A6F0), // 6.38:1
+            type = Color(0xFF6FD0D0), // 6.82:1
+            string = Color(0xFFE89A9A), // 5.59:1
+            number = Color(0xFF88DCA0), // 7.51:1
+            comment = Color(0xFF78C078), // 5.64:1
+            operator = Color(0xFFC8D4E0), // 9.30:1
+            punctuation = Color(0xFFA0B0C0), // 5.56:1
+            identifier = Color(0xFFEDF1F7), // 10.88:1
+            error = Color(0xFFFF9E94), // 7.02:1
+        )
     // =========================================================================
     // 形状 —— 逐配色（复古两套用直角 / Luna 圆角，现代三套用紧凑圆角）
     // =========================================================================
@@ -719,13 +735,14 @@ object SundaysPalette {
      * 除 `large` 外的各档都收窄：M3 默认 `medium` 12dp 用在菜单 / 弹层上偏圆，收成 8dp；
      `large` 16dp 保持不变，因为弹窗（`AddConnectionDialog`）用大圆角在语义上是对的。
      */
-    val Shapes: Shapes = Shapes(
-        extraSmall = Corner2,
-        small = Corner4,
-        medium = Corner6,
-        large = Corner8,
-        extraLarge = Corner8,
-    )
+    val Shapes: Shapes =
+        Shapes(
+            extraSmall = Corner2,
+            small = Corner4,
+            medium = Corner6,
+            large = Corner8,
+            extraLarge = Corner8,
+        )
 
     /**
      * Win2000 形状阶梯 —— 全直角。
@@ -734,13 +751,14 @@ object SundaysPalette {
      * 一律 0 圆角。`large` / `extraLarge` 也压成直角 —— 经典 Win 的对话框同样是方角，
      * 只在这里留大圆角会让弹窗出戏。
      */
-    val Win2000Shapes: Shapes = Shapes(
-        extraSmall = Corner0,
-        small = Corner0,
-        medium = Corner0,
-        large = Corner0,
-        extraLarge = Corner0,
-    )
+    val Win2000Shapes: Shapes =
+        Shapes(
+            extraSmall = Corner0,
+            small = Corner0,
+            medium = Corner0,
+            large = Corner0,
+            extraLarge = Corner0,
+        )
 
     /**
      * WinXP 形状阶梯 —— Luna 的标志性圆角。
@@ -750,13 +768,14 @@ object SundaysPalette {
      * `small` 3dp 给按钮 / 输入框，`medium` 4dp 给 chip / 标签，`large` 5dp 给分组框与
      * 面板，`extraLarge` 8dp 留给对话框。
      */
-    val WinXpShapes: Shapes = Shapes(
-        extraSmall = Corner2,
-        small = Corner3,
-        medium = Corner4,
-        large = Corner5,
-        extraLarge = Corner8,
-    )
+    val WinXpShapes: Shapes =
+        Shapes(
+            extraSmall = Corner2,
+            small = Corner3,
+            medium = Corner4,
+            large = Corner5,
+            extraLarge = Corner8,
+        )
 
     /**
      * 按钮 / chip / 输入框的圆角 —— 显式传给 `Button` 等组件（它们不读 `MaterialTheme.shapes`）。
@@ -779,21 +798,21 @@ object SundaysPalette {
     // =========================================================================
 
     /** 桌面字号阶梯。`bodyMedium` 13sp / `bodySmall` 12sp，比 M3 默认各小 1sp。 */
-    val Typography: Typography = Typography(
-        titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium),
-        titleMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
-        titleSmall = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
-        bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-        bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
-        bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp),
-        labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
-        labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-        labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
-    )
+    val Typography: Typography =
+        Typography(
+            titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium),
+            titleMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+            titleSmall = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+            bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+            bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
+            bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp),
+            labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
+            labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
+            labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+        )
 
     /** 当前系统明暗对应的配色（跟随系统，不含用户偏好）。 */
     @Composable
     @ReadOnlyComposable
-    fun colorSchemeFor(darkTheme: Boolean): ColorScheme =
-        if (darkTheme) DarkColorScheme else LightColorScheme
+    fun colorSchemeFor(darkTheme: Boolean): ColorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 }

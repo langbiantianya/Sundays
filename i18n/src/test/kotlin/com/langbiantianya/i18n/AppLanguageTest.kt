@@ -21,7 +21,6 @@ import kotlin.test.assertTrue
  * 换成默认语言时用户更是无从察觉。都属于只有钉住断言才拦得住的回归。
  */
 class AppLanguageTest {
-
     // =========================================================================
     // 系统语言 → 应用语言
     // =========================================================================
@@ -178,7 +177,10 @@ class AppLanguageTest {
     fun `母语名两两不同`() {
         assertEquals(
             AppLanguage.entries.size,
-            AppLanguage.entries.map { it.nativeName }.toSet().size,
+            AppLanguage.entries
+                .map { it.nativeName }
+                .toSet()
+                .size,
             "母语名重复会让语言选择器里出现两项看起来一样的条目",
         )
     }

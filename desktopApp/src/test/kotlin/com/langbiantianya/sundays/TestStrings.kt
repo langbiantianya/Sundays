@@ -42,7 +42,6 @@ import com.langbiantianya.sundays.ui.ProvideStrings
  * 改这个常量等于一次性改掉所有 UI 测试的渲染语言，那正是我们要的显式性。
  */
 object TestStrings {
-
     /**
      * UI 测试统一使用的界面语言。
      *
@@ -57,7 +56,10 @@ object TestStrings {
     fun zh(key: StrKey): String = table[key]
 
     /** 取一条带占位符的界面文案。 */
-    fun zh(key: StrKey, vararg args: Any?): String = table.format(key, *args)
+    fun zh(
+        key: StrKey,
+        vararg args: Any?,
+    ): String = table.format(key, *args)
 
     /**
      * 取一条按数量选变体的界面文案。
@@ -70,17 +72,28 @@ object TestStrings {
      * 于是断言拿到的是`"查询结果 · {0} 行"` 而不是 `"查询结果 · 2 行"`，
      * 界面上当然找不到节点，报错还会指向「文案变了」而不是「调用方漏传参数」。
      */
-    fun zh(key: PluralStrKey, count: Int, vararg args: Any?): String = table.plural(key, count, *args)
+    fun zh(
+        key: PluralStrKey,
+        count: Int,
+        vararg args: Any?,
+    ): String = table.plural(key, count, *args)
 }
 
 /** 简写 —— `zh(StrKey.REFRESH)`。测试里读起来就是「简体中文的这条文案」。 */
 fun zh(key: StrKey): String = TestStrings.zh(key)
 
 /** 简写（带参）。 */
-fun zh(key: StrKey, vararg args: Any?): String = TestStrings.zh(key, *args)
+fun zh(
+    key: StrKey,
+    vararg args: Any?,
+): String = TestStrings.zh(key, *args)
 
 /** 简写（复数）。 */
-fun zh(key: PluralStrKey, count: Int, vararg args: Any?): String = TestStrings.zh(key, count, *args)
+fun zh(
+    key: PluralStrKey,
+    count: Int,
+    vararg args: Any?,
+): String = TestStrings.zh(key, count, *args)
 
 /**
  * 在 [TestStrings.LANGUAGE] 下渲染被测界面。

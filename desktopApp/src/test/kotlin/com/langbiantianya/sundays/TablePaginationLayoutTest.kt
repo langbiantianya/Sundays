@@ -8,9 +8,9 @@
 
 package com.langbiantianya.sundays
 
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -25,9 +25,9 @@ import com.langbiantianya.sundays.table.TABLE_PAGINATION_TAG
 import com.langbiantianya.sundays.table.TableColumn
 import com.langbiantianya.sundays.table.TableRow
 import com.langbiantianya.sundays.ui.SundaysTheme
+import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.Test
 
 /**
  * 分页底栏的**布局契约** —— 窄容器下不得把按钮标签压成竖排，更不得把按钮压没。
@@ -78,18 +78,17 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class TablePaginationLayoutTest {
-
-    private fun columns() = listOf(
-        TableColumn(key = "id", header = "ID"),
-        TableColumn(key = "status", header = "STATUS"),
-    )
+    private fun columns() =
+        listOf(
+            TableColumn(key = "id", header = "ID"),
+            TableColumn(key = "status", header = "STATUS"),
+        )
 
     /**
      * 250 行 / 每页 100 → 3 页。这样「首页」「上一页」禁用、「下一页」「末页」可用 ——
      * **禁用态按钮的文字宽度与可用态不同**，只有两者都在时才会暴露挤压问题。
      */
-    private fun manyRows(): List<TableRow> =
-        (1..250).map { i -> TableRow(id = i, cells = mapOf("id" to "$i", "status" to "row$i")) }
+    private fun manyRows(): List<TableRow> = (1..250).map { i -> TableRow(id = i, cells = mapOf("id" to "$i", "status" to "row$i")) }
 
     /** 在 [widthPx] 宽的测试窗口里渲染一张 3 页的表。 */
     private fun ComposeUiTest.renderTable() {
@@ -107,15 +106,16 @@ class TablePaginationLayoutTest {
         waitForIdle()
     }
 
-    private fun ComposeUiTest.barBounds() =
-        onNodeWithTag(TABLE_PAGINATION_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    private fun ComposeUiTest.barBounds() = onNodeWithTag(TABLE_PAGINATION_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 
     /** 底栏高度（dp）。语义边界给的是像素，按测试环境的 density 折算。 */
     private fun ComposeUiTest.barHeightDp(): Float = barBounds().height / density.density
 
     private fun ComposeUiTest.tableBodyWidthDp(): Float =
         onAllNodesWithTag(TABLE_BODY_TAG, useUnmergedTree = true)
-            .fetchSemanticsNodes().first().boundsInRoot.width / density.density
+            .fetchSemanticsNodes()
+            .first()
+            .boundsInRoot.width / density.density
 
     /**
      * 导航**按钮**（而不是按钮里的文字）的边界。
@@ -123,8 +123,7 @@ class TablePaginationLayoutTest {
      * 用合并树查询：M3 的 `Button` 自带 `mergeDescendants`，合并节点才是那颗可点击的
      * 按钮；未合并树拿到的是里面的 `Text`，量不到内边距。
      */
-    private fun ComposeUiTest.buttonBounds(label: String) =
-        onAllNodesWithText(label).fetchSemanticsNodes().single().boundsInRoot
+    private fun ComposeUiTest.buttonBounds(label: String) = onAllNodesWithText(label).fetchSemanticsNodes().single().boundsInRoot
 
     /**
      * 单行底栏的高度上限。
@@ -133,7 +132,7 @@ class TablePaginationLayoutTest {
      * 是为了不把断言绑死在某个主题的具体控件高度上 —— 只要「标签折成两行」
      * 就一定超过它（三行必然溢出得更明显）。
      */
-    private val SINGLE_LINE_LIMIT_DP = 72f
+    private val singleLineLimitDp = 72f
 
     /**
      * 紧凑档的判定阈值 —— **独立于生产代码写死**。
@@ -142,7 +141,7 @@ class TablePaginationLayoutTest {
      * 测试跟着变宽，两边一起漂移就再也发现不了。生产侧是
      * `PAGINATION_COMPACT_WIDTH`，这里只当作「这个宽度确实属于窄容器」的旁证。
      */
-    private val COMPACT_THRESHOLD_DP = 560f
+    private val compactThresholdDp = 560f
 
     /**
      * 单颗导航按钮的宽度下限。
@@ -150,7 +149,7 @@ class TablePaginationLayoutTest {
      * 三个汉字按 `bodySmall` 约 13dp/字 = 39dp，加 M3 出厂 2×24dp 内边距 = **87dp**。
      * 取 75dp（约自然宽的 86%）留出字体度量余量 —— 回归时实测塌到 48dp。
      */
-    private val MIN_NAV_BUTTON_WIDTH_DP = 75f
+    private val minNavButtonWidthDp = 75f
 
     @Test
     fun `the pagination bar stays on one line in the default window layout`() =
@@ -161,8 +160,8 @@ class TablePaginationLayoutTest {
             // 少了它，主题哪天不再填满窗口也会一路绿灯。
             val bodyWidthDp = tableBodyWidthDp()
             assertTrue(
-                bodyWidthDp < COMPACT_THRESHOLD_DP,
-                "窄容器没造出来：表体宽 ${bodyWidthDp}dp ≥ $COMPACT_THRESHOLD_DP dp，" +
+                bodyWidthDp < compactThresholdDp,
+                "窄容器没造出来：表体宽 ${bodyWidthDp}dp ≥ $compactThresholdDp dp，" +
                     "这条断言会退化成在宽容器上空跑",
             )
             assertTrue(
@@ -172,7 +171,7 @@ class TablePaginationLayoutTest {
 
             val heightDp = barHeightDp()
             assertTrue(
-                heightDp <= SINGLE_LINE_LIMIT_DP,
+                heightDp <= singleLineLimitDp,
                 "默认窗口（700dp）下分页底栏应保持单行，实际高度 ${heightDp}dp —— " +
                     "按钮标签被压成竖排了",
             )
@@ -186,15 +185,18 @@ class TablePaginationLayoutTest {
             // 紧凑档隐藏「首页 / 末页 / 共 N 条」：结果集通常几十页，首末页几乎不用；
             // 总条数在表头上下文里也能推知。牺牲描述、保留操作。
             assertEquals(
-                0, onAllNodesWithText(zh(StrKey.FIRST_PAGE)).fetchSemanticsNodes().size,
+                0,
+                onAllNodesWithText(zh(StrKey.FIRST_PAGE)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「首页」——宁可少两个低频按钮，也不要把标签压变形",
             )
             assertEquals(
-                0, onAllNodesWithText(zh(StrKey.LAST_PAGE)).fetchSemanticsNodes().size,
+                0,
+                onAllNodesWithText(zh(StrKey.LAST_PAGE)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「末页」",
             )
             assertEquals(
-                0, onAllNodesWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).fetchSemanticsNodes().size,
+                0,
+                onAllNodesWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).fetchSemanticsNodes().size,
                 "窄容器下应隐藏「共 N 条」",
             )
             // 翻页本身必须完好 —— 不能为了排版把真正在用的功能砍掉
@@ -223,8 +225,11 @@ class TablePaginationLayoutTest {
             val bar = barBounds()
             val prev = buttonBounds("上一页")
             val next = buttonBounds("下一页")
-            val pageNo = onAllNodesWithText("1 / 3", useUnmergedTree = true)
-                .fetchSemanticsNodes().single().boundsInRoot
+            val pageNo =
+                onAllNodesWithText("1 / 3", useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .single()
+                    .boundsInRoot
 
             for ((label, node) in listOf("上一页" to prev, "1 / 3" to pageNo, "下一页" to next)) {
                 assertTrue(
@@ -241,42 +246,45 @@ class TablePaginationLayoutTest {
             // 不等 = 右组被压缩了，且压缩只落在末尾那颗上。
             // 这条不需要任何魔法常数就能抓住回归。
             assertEquals(
-                prev.width, next.width, 0.5f,
+                prev.width,
+                next.width,
+                0.5f,
                 "「上一页」与「下一页」宽度应相等——不等说明右组被挤压了（$prev vs $next）",
             )
             // 兜底：单颗按钮的宽度下限。
             assertTrue(
-                prev.width >= MIN_NAV_BUTTON_WIDTH_DP,
-                "导航按钮被压到 ${prev.width}dp，低于下限 $MIN_NAV_BUTTON_WIDTH_DP dp —— " +
+                prev.width >= minNavButtonWidthDp,
+                "导航按钮被压到 ${prev.width}dp，低于下限 $minNavButtonWidthDp dp —— " +
                     "左组的 weight 失效了",
             )
 
             val heightDp = barHeightDp()
             assertTrue(
-                heightDp <= SINGLE_LINE_LIMIT_DP,
+                heightDp <= singleLineLimitDp,
                 "最坏布局下标签被压成竖排，底栏暴涨到 ${heightDp}dp —— " +
                     "某处标签的 maxLines/softWrap 兜底失效了",
             )
         }
 
     @Test
-    fun `wide containers keep every jump`() = runDesktopComposeUiTest(width = 1024, height = 400) {
-        renderTable()
+    fun `wide containers keep every jump`() =
+        runDesktopComposeUiTest(width = 1024, height = 400) {
+            renderTable()
 
-        onNodeWithText(zh(StrKey.FIRST_PAGE)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.PREV_PAGE)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsDisplayed()
-        onNodeWithText(zh(StrKey.LAST_PAGE)).assertIsDisplayed()
-        onNodeWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.FIRST_PAGE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.PREV_PAGE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.NEXT_PAGE)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.LAST_PAGE)).assertIsDisplayed()
+            onNodeWithText(zh(PluralStrKey.TOTAL_RECORDS, 250, 250)).assertIsDisplayed()
 
-        val bodyWidthDp = tableBodyWidthDp()
-        assertTrue(
-            bodyWidthDp >= COMPACT_THRESHOLD_DP,
-            "宽容器（1024dp 窗口）下主表区应远宽于紧凑阈值，实际 ${bodyWidthDp}dp",
-        )
-        assertTrue(
-            barHeightDp() <= SINGLE_LINE_LIMIT_DP,
-            "宽容器下底栏也应单行",
-        )
-    }
+            val bodyWidthDp = tableBodyWidthDp()
+            assertTrue(
+                bodyWidthDp >= compactThresholdDp,
+                "宽容器（1024dp 窗口）下主表区应远宽于紧凑阈值，实际 ${bodyWidthDp}dp",
+            )
+            assertTrue(
+                barHeightDp() <= singleLineLimitDp,
+                "宽容器下底栏也应单行",
+            )
+        }
 }

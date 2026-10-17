@@ -20,7 +20,6 @@ import kotlin.test.assertTrue
  * 显式 query 参数保留、以及持久化加载所依赖的 URL → 字段回解析。
  */
 class JdbcUrlTest {
-
     private fun config(
         dialect: DialectType,
         connectionType: ConnectionType = ConnectionType.CLIENT_SERVER,
@@ -43,16 +42,17 @@ class JdbcUrlTest {
 
     @Test
     fun `client server url carries credentials host port and database`() {
-        val url = buildJdbcUrl(
-            config(
-                dialect = DialectType.MYSQL,
-                host = "db.internal",
-                port = 3307,
-                database = "shop",
-                username = "root",
-                password = "s3cret",
+        val url =
+            buildJdbcUrl(
+                config(
+                    dialect = DialectType.MYSQL,
+                    host = "db.internal",
+                    port = 3307,
+                    database = "shop",
+                    username = "root",
+                    password = "s3cret",
+                ),
             )
-        )
 
         assertTrue(url.startsWith("jdbc:mysql://root:s3cret@db.internal:3307/shop"), "url=$url")
         // 无显式参数时补齐 MySQL 方言默认参数（与 MySQLDialect.buildJdbcUrl 一致）
@@ -61,16 +61,17 @@ class JdbcUrlTest {
 
     @Test
     fun `postgresql url carries no userinfo even when credentials are set`() {
-        val url = buildJdbcUrl(
-            config(
-                dialect = DialectType.POSTGRESQL,
-                host = "localhost",
-                port = 5432,
-                database = "app",
-                username = "postgres",
-                password = "666666",
+        val url =
+            buildJdbcUrl(
+                config(
+                    dialect = DialectType.POSTGRESQL,
+                    host = "localhost",
+                    port = 5432,
+                    database = "app",
+                    username = "postgres",
+                    password = "666666",
+                ),
             )
-        )
 
         // PG 驱动不认 URL 的 userinfo 段：实测 parseURL 会把 `postgres:666666@192.168.1.5`
         // 整段当成主机名（PGHOST），凭据一个都不认，最终 UnknownHostException。
@@ -81,19 +82,21 @@ class JdbcUrlTest {
 
     @Test
     fun `postgresql url has no query parameters`() {
-        val url = buildJdbcUrl(
-            config(dialect = DialectType.POSTGRESQL, host = "localhost", port = 5432, database = "app")
-        )
+        val url =
+            buildJdbcUrl(
+                config(dialect = DialectType.POSTGRESQL, host = "localhost", port = 5432, database = "app"),
+            )
 
         assertEquals("jdbc:postgresql://localhost:5432/app", url)
     }
 
     @Test
     fun `explicit query parameters replace dialect defaults`() {
-        val url = buildJdbcUrl(
-            config(dialect = DialectType.MYSQL, host = "localhost", port = 3306, database = "shop"),
-            extraQuery = "useSSL=true&connectTimeout=2000",
-        )
+        val url =
+            buildJdbcUrl(
+                config(dialect = DialectType.MYSQL, host = "localhost", port = 3306, database = "shop"),
+                extraQuery = "useSSL=true&connectTimeout=2000",
+            )
 
         assertEquals("jdbc:mysql://localhost:3306/shop?useSSL=true&connectTimeout=2000", url)
     }
@@ -113,7 +116,7 @@ class JdbcUrlTest {
                     dialect = DialectType.H2,
                     connectionType = ConnectionType.IN_MEMORY,
                     database = "testdb",
-                )
+                ),
             ),
         )
         assertEquals(
@@ -123,7 +126,7 @@ class JdbcUrlTest {
                     dialect = DialectType.H2,
                     connectionType = ConnectionType.FILE_BASED,
                     database = "/tmp/h2data",
-                )
+                ),
             ),
         )
         // H2 需要库名 —— 空库名折算不出 URL（向导据此拦住流程）
@@ -142,7 +145,7 @@ class JdbcUrlTest {
                     dialect = DialectType.DUCKDB,
                     connectionType = ConnectionType.EMBEDDED,
                     database = "/tmp/analytics.duckdb",
-                )
+                ),
             ),
         )
         assertEquals(
@@ -156,7 +159,7 @@ class JdbcUrlTest {
                     dialect = DialectType.SQLITE,
                     connectionType = ConnectionType.FILE_BASED,
                     database = "/tmp/app.db",
-                )
+                ),
             ),
         )
         assertEquals(
@@ -168,14 +171,15 @@ class JdbcUrlTest {
     @Test
     fun `editing the url box does not wipe credentials the url never mentioned`() {
         // PG 连接：用户填好了地址 + 凭据，URL 里本来就没有凭据
-        val filled = config(
-            dialect = DialectType.POSTGRESQL,
-            host = "192.168.1.5",
-            port = 5432,
-            database = "postgres",
-            username = "postgres",
-            password = "666666",
-        )
+        val filled =
+            config(
+                dialect = DialectType.POSTGRESQL,
+                host = "192.168.1.5",
+                port = 5432,
+                database = "postgres",
+                username = "postgres",
+                password = "666666",
+            )
 
         // 用户只在 URL 末尾补了个参数 —— 这是最平常的一次编辑
         val edited = filled.withParsedJdbcUrl("jdbc:postgresql://192.168.1.5:5432/postgres?sslmode=require")
@@ -217,14 +221,15 @@ class JdbcUrlTest {
     @Test
     fun `client server round trips every field through url and back`() {
         // MySQL：凭据本就在 URL 的 userinfo 段里，往返无损
-        val original = config(
-            dialect = DialectType.MYSQL,
-            host = "db.internal",
-            port = 3306,
-            database = "app",
-            username = "admin",
-            password = "pw",
-        )
+        val original =
+            config(
+                dialect = DialectType.MYSQL,
+                host = "db.internal",
+                port = 3306,
+                database = "app",
+                username = "admin",
+                password = "pw",
+            )
 
         val parts = parseJdbcUrl(buildJdbcUrl(original), DialectType.MYSQL)
 
@@ -242,14 +247,15 @@ class JdbcUrlTest {
         // PG 的 URL 不承载凭据（见 buildJdbcUrl），所以地址字段照常往返、
         // 凭据则「本就不在 URL 里」—— hasUserInfo 必须如实报告 false，
         // 否则调用方会拿空的 username 去覆盖用户填好的凭据。
-        val original = config(
-            dialect = DialectType.POSTGRESQL,
-            host = "db.internal",
-            port = 5433,
-            database = "app",
-            username = "admin",
-            password = "pw",
-        )
+        val original =
+            config(
+                dialect = DialectType.POSTGRESQL,
+                host = "db.internal",
+                port = 5433,
+                database = "app",
+                username = "admin",
+                password = "pw",
+            )
 
         val parts = parseJdbcUrl(buildJdbcUrl(original), DialectType.POSTGRESQL)
 
@@ -307,38 +313,42 @@ class JdbcUrlTest {
 
     @Test
     fun `embedded round trip recovers database and connection type`() {
-        val h2Mem = config(
-            dialect = DialectType.H2,
-            connectionType = ConnectionType.IN_MEMORY,
-            database = "testdb",
-        )
+        val h2Mem =
+            config(
+                dialect = DialectType.H2,
+                connectionType = ConnectionType.IN_MEMORY,
+                database = "testdb",
+            )
         val h2Parsed = parseJdbcUrl(buildJdbcUrl(h2Mem), DialectType.H2)
         assertEquals("testdb", h2Parsed.database)
         assertEquals(ConnectionType.IN_MEMORY, h2Parsed.connectionType)
 
-        val h2File = config(
-            dialect = DialectType.H2,
-            connectionType = ConnectionType.FILE_BASED,
-            database = "/tmp/h2data",
-        )
+        val h2File =
+            config(
+                dialect = DialectType.H2,
+                connectionType = ConnectionType.FILE_BASED,
+                database = "/tmp/h2data",
+            )
         val h2FileParsed = parseJdbcUrl(buildJdbcUrl(h2File), DialectType.H2)
         assertEquals("/tmp/h2data", h2FileParsed.database)
         assertEquals(ConnectionType.FILE_BASED, h2FileParsed.connectionType)
 
-        val duck = config(
-            dialect = DialectType.DUCKDB,
-            connectionType = ConnectionType.EMBEDDED,
-            database = "/tmp/analytics.duckdb",
-        )
+        val duck =
+            config(
+                dialect = DialectType.DUCKDB,
+                connectionType = ConnectionType.EMBEDDED,
+                database = "/tmp/analytics.duckdb",
+            )
         val duckParsed = parseJdbcUrl(buildJdbcUrl(duck), DialectType.DUCKDB)
         assertEquals("/tmp/analytics.duckdb", duckParsed.database)
         assertEquals(ConnectionType.EMBEDDED, duckParsed.connectionType)
 
-        val sqlite = config(
-            dialect = DialectType.SQLITE,
-            connectionType = ConnectionType.FILE_BASED,
-            database = "/tmp/app.db",
-        )
+        val sqlite =
+            config(
+                dialect = DialectType.SQLITE,
+                connectionType = ConnectionType.FILE_BASED,
+                database = "/tmp/app.db",
+            )
         val sqliteParsed = parseJdbcUrl(buildJdbcUrl(sqlite), DialectType.SQLITE)
         assertEquals("/tmp/app.db", sqliteParsed.database)
         assertEquals(ConnectionType.FILE_BASED, sqliteParsed.connectionType)
@@ -346,10 +356,11 @@ class JdbcUrlTest {
 
     @Test
     fun `parse keeps query parameters out of the database name`() {
-        val parts = parseJdbcUrl(
-            "jdbc:mysql://root@localhost:3306/shop?useSSL=false&serverTimezone=UTC",
-            DialectType.MYSQL,
-        )
+        val parts =
+            parseJdbcUrl(
+                "jdbc:mysql://root@localhost:3306/shop?useSSL=false&serverTimezone=UTC",
+                DialectType.MYSQL,
+            )
 
         assertEquals("shop", parts.database)
         assertEquals("localhost", parts.host)
@@ -398,11 +409,12 @@ class JdbcUrlTest {
 
     @Test
     fun `switching connection type rewrites the url shape`() {
-        val memory = config(
-            dialect = DialectType.H2,
-            connectionType = ConnectionType.IN_MEMORY,
-            database = "testdb",
-        )
+        val memory =
+            config(
+                dialect = DialectType.H2,
+                connectionType = ConnectionType.IN_MEMORY,
+                database = "testdb",
+            )
 
         val file = memory.withConnectionType(ConnectionType.FILE_BASED)
 

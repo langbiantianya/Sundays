@@ -24,7 +24,6 @@ import kotlin.test.assertTrue
  * 实际绑定测试在 [TcpIpcTransportIntegrationTest] / [UnixSocketIpcTransportIntegrationTest] 中。
  */
 class IpcTransportTest {
-
     @Test
     fun `TcpIpcTransport exposes tcp scheme and 50051 default`() {
         val t = TcpIpcTransport(IpcConfig(kind = IpcKind.TCP, tcpPort = 50051))
@@ -62,9 +61,10 @@ class IpcTransportTest {
 
     @Test
     fun `NamedPipeIpcTransport exposes pipe scheme but serverBuilder throws (grpc limitation)`() {
-        val t = NamedPipeIpcTransport(
-            IpcConfig(kind = IpcKind.PIPE, pipeName = TestIds.uniqueName("test"))
-        )
+        val t =
+            NamedPipeIpcTransport(
+                IpcConfig(kind = IpcKind.PIPE, pipeName = TestIds.uniqueName("test")),
+            )
         assertEquals("pipe", t.scheme())
         assertTrue(t.displayTarget().startsWith("pipe:"))
         t.prepare()

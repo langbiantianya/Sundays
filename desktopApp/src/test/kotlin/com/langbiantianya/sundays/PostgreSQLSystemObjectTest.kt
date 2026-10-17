@@ -83,7 +83,6 @@ import kotlin.test.assertTrue
  * 不可达时按 [DialectSmokeTest] 的约定 `assumeTrue` 显式 skip，报告里留一条 skipped。
  */
 class PostgreSQLSystemObjectTest {
-
     companion object {
         /** 复用冒烟测试的固定库，不再多留一个。 */
         private const val DB = "sundays_smoke"
@@ -121,12 +120,20 @@ class PostgreSQLSystemObjectTest {
          * 只列**确实会在 `information_schema.tables` 里以 BASE TABLE 出现**的那些，
          * 否则名单里混进 `pg_aios` 这种实际是 `VIEW` 的对象，断言语义就含混了。
          */
-        private val KNOWN_SYSTEM_TABLES = listOf(
-            "pg_class", "pg_attribute", "pg_type", "pg_index", "pg_constraint",
-            "pg_aggregate", "pg_namespace", "pg_proc", "pg_settings",
-        )
+        private val KNOWN_SYSTEM_TABLES =
+            listOf(
+                "pg_class",
+                "pg_attribute",
+                "pg_type",
+                "pg_index",
+                "pg_constraint",
+                "pg_aggregate",
+                "pg_namespace",
+                "pg_proc",
+                "pg_settings",
+            )
 
-        /**
+        /*
          * 为什么**没有**一条「information_schema 的表不进列表」的断言。
          *
          * 写过，删了 —— 它是一条**永远绿、什么都验不到**的用例，比没有测试更糟：
@@ -174,7 +181,11 @@ class PostgreSQLSystemObjectTest {
 
     @After
     fun tearDown() {
-        try { engine.close() } catch (e: Exception) { println("[PG-SYS] engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("[PG-SYS] engine.close 抛了：$e")
+        }
         dropOwnSchemas()
         System.setProperty("user.home", originalHome)
         tempDir.deleteRecursively()
@@ -220,7 +231,8 @@ class PostgreSQLSystemObjectTest {
 
         val leaked = names.filter { it in KNOWN_SYSTEM_TABLES.map(String::lowercase) }
         assertEquals(
-            emptyList(), leaked,
+            emptyList(),
+            leaked,
             "⚠️ 用户表的列表里混进了 PG 系统目录表 —— 展开任意业务库都会被 60 多行系统表淹没",
         )
 
@@ -286,7 +298,8 @@ class PostgreSQLSystemObjectTest {
                 implicit.filter { it == OFF_PATH_TABLE.lowercase() },
         )
         assertEquals(
-            listOf(OFF_PATH_TABLE.lowercase()), explicit,
+            listOf(OFF_PATH_TABLE.lowercase()),
+            explicit,
             "显式点名 $OFF_PATH_SCHEMA 时必须能列到它的表（且只有它）",
         )
     }
@@ -322,20 +335,23 @@ class PostgreSQLSystemObjectTest {
      */
     @Test
     fun `schema 列表不含系统 schema`() {
-        val resp: Response = runBlocking {
-            engine.invoke(engineConfig()) {
-                category = Category.SCHEMA
-                action = Action.LIST
-                schemaRequest = schemaRequest {
-                    // ⚠️ `level` 必须给 `"schema"`：默认是 `"database"`，那样拿到的是库列表，
-                    // 这条用例会**永远绿**（库列表里本来就没有 pg_catalog），等于什么都没验。
-                    list = schemaListRequest {
-                        level = "schema"
-                        database = DB
-                    }
+        val resp: Response =
+            runBlocking {
+                engine.invoke(engineConfig()) {
+                    category = Category.SCHEMA
+                    action = Action.LIST
+                    schemaRequest =
+                        schemaRequest {
+                            // ⚠️ `level` 必须给 `"schema"`：默认是 `"database"`，那样拿到的是库列表，
+                            // 这条用例会**永远绿**（库列表里本来就没有 pg_catalog），等于什么都没验。
+                            list =
+                                schemaListRequest {
+                                    level = "schema"
+                                    database = DB
+                                }
+                        }
                 }
             }
-        }
         assertTrue(resp.success, "SCHEMA.LIST 失败：${resp.error}")
 
         // `SchemaListResponse.items` 是 `repeated string`（库名或 schema 名），
@@ -355,17 +371,20 @@ class PostgreSQLSystemObjectTest {
     }
 
     private fun listTables(schema: String): List<String> {
-        val resp: Response = runBlocking {
-            engine.invoke(engineConfig()) {
-                category = Category.TABLE
-                action = Action.LIST
-                tableRequest = tableRequest {
-                    list = tableListRequest { this.schema = schema }
+        val resp: Response =
+            runBlocking {
+                engine.invoke(engineConfig()) {
+                    category = Category.TABLE
+                    action = Action.LIST
+                    tableRequest =
+                        tableRequest {
+                            list = tableListRequest { this.schema = schema }
+                        }
                 }
             }
-        }
         assertTrue(resp.success, "TABLE.LIST(schema=\"$schema\") 失败：${resp.error}")
-        return resp.table.list.itemsList.map { it.name }
+        return resp.table.list.itemsList
+            .map { it.name }
     }
 
     /**
@@ -388,11 +407,12 @@ class PostgreSQLSystemObjectTest {
      *
      * `probe_hidden` **故意不放进来** —— 它是 [不在搜索路径里的 schema 只在显式点名时可见] 的判据。
      */
-    private fun engineConfig() = connectionConfig {
-        driver = baseConn.dialect.engineDriverName
-        jdbcUrl = "${baseConn.jdbcUrl}?currentSchema=public,$ON_PATH_SCHEMA"
-        user = baseConn.username
-        password = baseConn.password
-        database = DB
-    }
+    private fun engineConfig() =
+        connectionConfig {
+            driver = baseConn.dialect.engineDriverName
+            jdbcUrl = "${baseConn.jdbcUrl}?currentSchema=public,$ON_PATH_SCHEMA"
+            user = baseConn.username
+            password = baseConn.password
+            database = DB
+        }
 }

@@ -123,32 +123,34 @@ data class SyntaxColors(
 )
 
 /** [SyntaxColors] -> `SyntaxHighlighter` 需要的 `Map<TokenType, Color>`。 */
-fun SyntaxColors.asTokenColors(): Map<TokenType, Color> = mapOf(
-    TokenType.KEYWORD to keyword,
-    TokenType.BUILTIN to builtin,
-    TokenType.TYPE to type,
-    TokenType.STRING to string,
-    TokenType.NUMBER to number,
-    TokenType.COMMENT to comment,
-    TokenType.OPERATOR to operator,
-    TokenType.PUNCTUATION to punctuation,
-    TokenType.IDENTIFIER to identifier,
-    TokenType.ERROR to error,
-)
+fun SyntaxColors.asTokenColors(): Map<TokenType, Color> =
+    mapOf(
+        TokenType.KEYWORD to keyword,
+        TokenType.BUILTIN to builtin,
+        TokenType.TYPE to type,
+        TokenType.STRING to string,
+        TokenType.NUMBER to number,
+        TokenType.COMMENT to comment,
+        TokenType.OPERATOR to operator,
+        TokenType.PUNCTUATION to punctuation,
+        TokenType.IDENTIFIER to identifier,
+        TokenType.ERROR to error,
+    )
 
 /** `Map<TokenType, Color>` -> [SyntaxColors]（把既有的 VS / Darcula 配色并入 token）。 */
-fun Map<TokenType, Color>.toSyntaxColors(): SyntaxColors = SyntaxColors(
-    keyword = this[TokenType.KEYWORD] ?: Color.Unspecified,
-    builtin = this[TokenType.BUILTIN] ?: Color.Unspecified,
-    type = this[TokenType.TYPE] ?: Color.Unspecified,
-    string = this[TokenType.STRING] ?: Color.Unspecified,
-    number = this[TokenType.NUMBER] ?: Color.Unspecified,
-    comment = this[TokenType.COMMENT] ?: Color.Unspecified,
-    operator = this[TokenType.OPERATOR] ?: Color.Unspecified,
-    punctuation = this[TokenType.PUNCTUATION] ?: Color.Unspecified,
-    identifier = this[TokenType.IDENTIFIER] ?: Color.Unspecified,
-    error = this[TokenType.ERROR] ?: Color.Unspecified,
-)
+fun Map<TokenType, Color>.toSyntaxColors(): SyntaxColors =
+    SyntaxColors(
+        keyword = this[TokenType.KEYWORD] ?: Color.Unspecified,
+        builtin = this[TokenType.BUILTIN] ?: Color.Unspecified,
+        type = this[TokenType.TYPE] ?: Color.Unspecified,
+        string = this[TokenType.STRING] ?: Color.Unspecified,
+        number = this[TokenType.NUMBER] ?: Color.Unspecified,
+        comment = this[TokenType.COMMENT] ?: Color.Unspecified,
+        operator = this[TokenType.OPERATOR] ?: Color.Unspecified,
+        punctuation = this[TokenType.PUNCTUATION] ?: Color.Unspecified,
+        identifier = this[TokenType.IDENTIFIER] ?: Color.Unspecified,
+        error = this[TokenType.ERROR] ?: Color.Unspecified,
+    )
 
 // ============================================================================
 // 主题 token —— 界面层唯一的「外观真相来源」
@@ -198,7 +200,6 @@ data class UiThemeTokens(
     val panelBorder: PanelBorder,
     val zebraRows: Boolean,
     val disabledInk: Color,
-
     /** 编辑器语法高亮配色（逐明暗）。 */
     val syntax: SyntaxColors,
 ) {
@@ -212,20 +213,21 @@ data class UiThemeTokens(
          * [disabledInk] 留空：现代主题的禁用态由 M3 的 `ButtonDefaults` 自己算，
          * 不需要 token 介入，否则会改变现有观感。
          */
-        val MODERN: UiThemeTokens = UiThemeTokens(
-            chrome = ChromeMode.MODERN,
-            bevel = BevelStyle.NONE,
-            buttonFace = ButtonFace.PRIMARY,
-            fieldFace = FieldFace.SURFACE,
-            selection = SelectionMode.TINTED,
-            divider = DividerMode.FLAT,
-            panelBorder = PanelBorder.LINE,
-            zebraRows = true,
-            disabledInk = Color.Unspecified,
-            // 现代档的语法色不取这里的值：CodeEditorTheme.themed() 走 VS / Darcula 自有配色。
-            // 此处只放一份占位，使「每套主题都有完整 token」这条契约成立。
-            syntax = SyntaxHighlighter.DefaultDarkColors.toSyntaxColors(),
-        )
+        val MODERN: UiThemeTokens =
+            UiThemeTokens(
+                chrome = ChromeMode.MODERN,
+                bevel = BevelStyle.NONE,
+                buttonFace = ButtonFace.PRIMARY,
+                fieldFace = FieldFace.SURFACE,
+                selection = SelectionMode.TINTED,
+                divider = DividerMode.FLAT,
+                panelBorder = PanelBorder.LINE,
+                zebraRows = true,
+                disabledInk = Color.Unspecified,
+                // 现代档的语法色不取这里的值：CodeEditorTheme.themed() 走 VS / Darcula 自有配色。
+                // 此处只放一份占位，使「每套主题都有完整 token」这条契约成立。
+                syntax = SyntaxHighlighter.DefaultDarkColors.toSyntaxColors(),
+            )
     }
 }
 
@@ -242,7 +244,8 @@ val LocalBevelStyle = staticCompositionLocalOf { BevelStyle.NONE }
 
 /** 当前是否经典 Win 造型。 */
 val isClassicChrome: Boolean
-    @Composable @ReadOnlyComposable get() = LocalUiTokens.current.isClassic
+    @Composable @ReadOnlyComposable
+    get() = LocalUiTokens.current.isClassic
 
 /** 当前生效的配色主题 —— 供不在 `MaterialTheme` 体系内的取值点使用（见 `ThemePalette`）。 */
 val LocalPalette = staticCompositionLocalOf { ThemePalette.BLUE_GRAY }
@@ -280,7 +283,8 @@ val LocalDarkMode = staticCompositionLocalOf { false }
  * 读它而不是读 `MaterialTheme.colorScheme` 的理由见 [LocalDarkMode]。
  */
 val isDarkMode: Boolean
-    @Composable @ReadOnlyComposable get() = LocalDarkMode.current
+    @Composable @ReadOnlyComposable
+    get() = LocalDarkMode.current
 
 // ============================================================================
 // 3D 斜面
@@ -329,13 +333,14 @@ data class BevelStyle(
 ) {
     companion object {
         /** 不画斜面 —— 现代三套配色用它。 */
-        val NONE: BevelStyle = BevelStyle(
-            enabled = false,
-            outer = Color.Transparent,
-            light = Color.Transparent,
-            dark = Color.Transparent,
-            width = 0.dp,
-        )
+        val NONE: BevelStyle =
+            BevelStyle(
+                enabled = false,
+                outer = Color.Transparent,
+                light = Color.Transparent,
+                dark = Color.Transparent,
+                width = 0.dp,
+            )
     }
 }
 
@@ -378,8 +383,10 @@ fun Modifier.uiBevel(
 
 /** [uiBevel] 的别名，保留旧名以便对照阅读。 */
 @Composable
-fun Modifier.winBevel(raised: Boolean = true, cornerRadius: Dp? = null): Modifier =
-    this.uiBevel(raised, cornerRadius)
+fun Modifier.winBevel(
+    raised: Boolean = true,
+    cornerRadius: Dp? = null,
+): Modifier = this.uiBevel(raised, cornerRadius)
 
 /** 画一圈「左上用 [light]、右下用 [dark]」的边线。 */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBevelRing(
@@ -395,7 +402,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBevelRing(
     val bottom = size.height - inset
     if (right - left <= 0f || bottom - top <= 0f) return
 
-    fun edge(sx: Float, sy: Float, ex: Float, ey: Float, color: Color) {
+    fun edge(
+        sx: Float,
+        sy: Float,
+        ex: Float,
+        ey: Float,
+        color: Color,
+    ) {
         if (sx != ex || sy != ey) {
             drawLine(color, Offset(sx, sy), Offset(ex, ey), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Butt)
         }
@@ -414,8 +427,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBevelRing(
 // ============================================================================
 
 /** 圆角的纯逻辑核心，可在普通单元测试里验证。 */
-fun shapeFor(tokens: UiThemeTokens, corner: Dp): Shape =
-    if (tokens.isClassic) RoundedCornerShape(tokens.bevel.bevelRadius) else RoundedCornerShape(corner)
+fun shapeFor(
+    tokens: UiThemeTokens,
+    corner: Dp,
+): Shape = if (tokens.isClassic) RoundedCornerShape(tokens.bevel.bevelRadius) else RoundedCornerShape(corner)
 
 /**
  * 界面圆角的单一入口。
@@ -454,13 +469,18 @@ fun selectionColorsFor(
 /** 选中态底色。 [unselected] 是各调用点原本的未选中底色，不传则取 `surface`。 */
 @Composable
 @ReadOnlyComposable
-fun selectionContainerColor(selected: Boolean, unselected: Color = Color.Unspecified): Color =
-    selectionColorsFor(LocalUiTokens.current, MaterialTheme.colorScheme, selected, unselected).first
+fun selectionContainerColor(
+    selected: Boolean,
+    unselected: Color = Color.Unspecified,
+): Color = selectionColorsFor(LocalUiTokens.current, MaterialTheme.colorScheme, selected, unselected).first
 
 /** 选中态文字色。 [unselected] 是各调用点原本的未选中文字色，不传则取 `onSurface`。 */
 @Composable
 @ReadOnlyComposable
-fun selectionContentColor(selected: Boolean, unselected: Color = Color.Unspecified): Color {
+fun selectionContentColor(
+    selected: Boolean,
+    unselected: Color = Color.Unspecified,
+): Color {
     val tokens = LocalUiTokens.current
     val scheme = MaterialTheme.colorScheme
     if (!selected) return if (unselected == Color.Unspecified) scheme.onSurface else unselected
@@ -515,8 +535,7 @@ fun zebraRowsEnabled(): Boolean = LocalUiTokens.current.zebraRows
 /** 禁用态文字色；token 未指定时（现代档）返回 `null` 交回 M3 自己算。 */
 @Composable
 @ReadOnlyComposable
-fun disabledInkOrNull(): Color? =
-    LocalUiTokens.current.disabledInk.takeIf { it != Color.Unspecified }
+fun disabledInkOrNull(): Color? = LocalUiTokens.current.disabledInk.takeIf { it != Color.Unspecified }
 
 /** 标签页条的底色：经典档贴窗口面（银灰 / 奶油），现代档贴 `surface`。 */
 @Composable
@@ -536,7 +555,10 @@ fun tabStripContainerColor(): Color {
  *   —— 经典档无法从 `ColorScheme` 拿到恰好合适的高光色，用面色的反色最稳。
  */
 @Composable
-fun WinDivider(modifier: Modifier = Modifier, color: Color = Color.Unspecified) {
+fun WinDivider(
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+) {
     val tokens = LocalUiTokens.current
     if (tokens.divider == DividerMode.FLAT) {
         // 未指定颜色时完全沿用 M3 默认（该版本没有 HorizontalDividerDefaults，
@@ -558,15 +580,16 @@ fun WinDivider(modifier: Modifier = Modifier, color: Color = Color.Unspecified) 
     // 高光角色值（Win2000 深色 `#C0C0C0` / WinXP 深色 `#C8D4E0`），一直没人用它。
     val light = LocalBevelStyle.current.light
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(2.dp)
-            .drawWithContent {
-                drawContent()
-                val stroke = 1.dp.toPx()
-                drawLine(dark, Offset(0f, stroke / 2f), Offset(size.width, stroke / 2f), strokeWidth = stroke)
-                drawLine(light, Offset(0f, stroke * 1.5f), Offset(size.width, stroke * 1.5f), strokeWidth = stroke)
-            },
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .drawWithContent {
+                    drawContent()
+                    val stroke = 1.dp.toPx()
+                    drawLine(dark, Offset(0f, stroke / 2f), Offset(size.width, stroke / 2f), strokeWidth = stroke)
+                    drawLine(light, Offset(0f, stroke * 1.5f), Offset(size.width, stroke * 1.5f), strokeWidth = stroke)
+                },
     )
 }
 
@@ -579,4 +602,3 @@ fun syntaxColors(): SyntaxColors = LocalUiTokens.current.syntax
 @Composable
 @ReadOnlyComposable
 fun editorFaceColor(): Color = fieldFaceColor()
-

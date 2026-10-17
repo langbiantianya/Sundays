@@ -8,10 +8,10 @@
 
 package com.langbiantianya.handlers
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import java.io.File
 
 /**
  * 造数沙箱的**宿主函数契约测试**。
@@ -41,28 +41,48 @@ import java.io.File
  * 2. `shared` 的 `GenerateHelpers`（补全清单 + `sandboxDisabled`）
  */
 class GenerateSandboxContractTest {
-
     /**
      * 宿主函数名 —— 必须与 `shared` 的 `GenerateHelpers.names` 完全一致。
      *
      * 这里只能**复制**一份：`shared` 是 KMP 模块，`:engine` 是纯 JVM 模块，
      * 依赖方向不允许反向引用。复制是模块边界的必然代价，靠本测试兜住。
      */
-    private val expectedHelpers = setOf(
-        "insert", "lastId",
-        "random_int", "random_float", "random_string",
-        "random_date", "random_datetime", "random_time",
-        "random_email", "random_phone", "random_name",
-        "random_enum", "random_uuid",
-    )
+    private val expectedHelpers =
+        setOf(
+            "insert",
+            "lastId",
+            "random_int",
+            "random_float",
+            "random_string",
+            "random_date",
+            "random_datetime",
+            "random_time",
+            "random_email",
+            "random_phone",
+            "random_name",
+            "random_enum",
+            "random_uuid",
+        )
 
     /** 沙箱置 nil 的入口 —— 必须与 `shared` 的 `GenerateHelpers.sandboxDisabled` 一致。 */
-    private val expectedDisabled = setOf(
-        "os", "io", "debug", "package", "require",
-        "loadfile", "dofile", "loadstring", "load",
-        "rawget", "rawset", "rawequal",
-        "setfenv", "getfenv", "newproxy",
-    )
+    private val expectedDisabled =
+        setOf(
+            "os",
+            "io",
+            "debug",
+            "package",
+            "require",
+            "loadfile",
+            "dofile",
+            "loadstring",
+            "load",
+            "rawget",
+            "rawset",
+            "rawequal",
+            "setfenv",
+            "getfenv",
+            "newproxy",
+        )
 
     private val handlerSource: String by lazy {
         // Gradle 跑测试时工作目录是模块根（`engine/`），路径因此是稳定的
@@ -73,12 +93,15 @@ class GenerateSandboxContractTest {
 
     @Test
     fun `registered host helpers match the ui completion contract`() {
-        val registered = Regex("""setGlobal\("([^"]+)"\)""").findAll(handlerSource)
-            .map { it.groupValues[1] }
-            .toSet()
+        val registered =
+            Regex("""setGlobal\("([^"]+)"\)""")
+                .findAll(handlerSource)
+                .map { it.groupValues[1] }
+                .toSet()
 
         assertEquals(
-            expectedHelpers, registered,
+            expectedHelpers,
+            registered,
             """
             造数沙箱的宿主函数与 UI 补全清单不一致。
             引擎侧：`GenerateHandler.registerHelpers`
@@ -92,14 +115,19 @@ class GenerateSandboxContractTest {
     fun `sandbox disabled entries match the documented contract`() {
         // applySandbox 里的名字是 listOf(...) 的**参数变量**（L.setGlobal(name)），
         // 所以取整个函数体里的字符串字面量，而不是 setGlobal 的实参。
-        val body = handlerSource.substringAfter("private fun applySandbox")
-            .substringBefore("private fun readLuaTable")
-        val disabled = Regex("""\"([A-Za-z_][A-Za-z0-9_]*)\"""").findAll(body)
-            .map { it.groupValues[1] }
-            .toSet()
+        val body =
+            handlerSource
+                .substringAfter("private fun applySandbox")
+                .substringBefore("private fun readLuaTable")
+        val disabled =
+            Regex("""\"([A-Za-z_][A-Za-z0-9_]*)\"""")
+                .findAll(body)
+                .map { it.groupValues[1] }
+                .toSet()
 
         assertEquals(
-            expectedDisabled, disabled,
+            expectedDisabled,
+            disabled,
             "沙箱禁用清单与 UI 侧记录的契约不一致（GenerateHelpers.sandboxDisabled）",
         )
     }

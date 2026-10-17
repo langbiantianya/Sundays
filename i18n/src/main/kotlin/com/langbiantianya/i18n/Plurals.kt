@@ -12,8 +12,8 @@ import com.langbiantianya.i18n.tables.pluralsDe
 import com.langbiantianya.i18n.tables.pluralsEn
 import com.langbiantianya.i18n.tables.pluralsJa
 import com.langbiantianya.i18n.tables.pluralsRu
-import com.langbiantianya.i18n.tables.pluralsZhHant
 import com.langbiantianya.i18n.tables.pluralsZhHans
+import com.langbiantianya.i18n.tables.pluralsZhHant
 
 /**
  * 复数文案表的语言分派 —— 结构与 [Texts] 相同。
@@ -22,7 +22,6 @@ import com.langbiantianya.i18n.tables.pluralsZhHans
  * 要按数量给出几种写法（俄语三种、英语德语两种、中日一种）。
  */
 internal object Plurals {
-
     fun forLanguage(language: AppLanguage): Map<PluralStrKey, Map<PluralForm, String>> =
         when (language) {
             AppLanguage.ZH_HANS -> pluralsZhHans

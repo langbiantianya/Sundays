@@ -48,9 +48,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
-/**
+/*
  * 数据库函数/存储过程（Routine）管理 Handler。
  */
+
 /**
  * 函数 / 存储过程 / 触发器 Handler —— `FUNCTION` category 的 8 个 action。
  *
@@ -67,170 +68,224 @@ import kotlinx.serialization.json.buildJsonObject
  * 用户写什么就执行什么，语法错误由数据库自己报错（[validate] 则把它翻译成 `valid=false`）。
  */
 object FunctionHandler {
-
     /**
      * LIST —— 列出 schema 下的 FUNCTION / PROCEDURE / TRIGGER。
      *
      * `description` 与 `trigger_table` 对非触发器条目留空字符串（不是 null），
      * 因为 proto3 标量没有 presence，调用方按空串判断即可。
      */
-    suspend fun list(config: ConnectionConfig, req: FunctionListRequest): FunctionListResponse = withContext(Dispatchers.IO) {
-        val schema = req.schema
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
+    suspend fun list(
+        config: ConnectionConfig,
+        req: FunctionListRequest,
+    ): FunctionListResponse =
+        withContext(Dispatchers.IO) {
+            val schema = req.schema
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            val routines = dialect.listRoutines(conn, schema)
-            functionListResponse {
-                routines.forEach { row ->
-                    this.items += functionListItem {
-                        name = row["name"] ?: ""
-                        routineType = row["routine_type"] ?: ""
-                        returnType = row["return_type"] ?: ""
-                        language = row["language"] ?: ""
-                        securityDefiner = row["security_definer"] ?: ""
-                        volatility = row["volatility"] ?: ""
-                        argCount = row["arg_count"] ?: ""
-                        argNames = row["arg_names"] ?: ""
-                        this.schema = row["schema"] ?: ""
-                        description = row["description"] ?: ""
-                        triggerTable = row["trigger_table"] ?: ""
+            return@withContext connection.use { conn ->
+                val routines = dialect.listRoutines(conn, schema)
+                functionListResponse {
+                    routines.forEach { row ->
+                        this.items +=
+                            functionListItem {
+                                name = row["name"] ?: ""
+                                routineType = row["routine_type"] ?: ""
+                                returnType = row["return_type"] ?: ""
+                                language = row["language"] ?: ""
+                                securityDefiner = row["security_definer"] ?: ""
+                                volatility = row["volatility"] ?: ""
+                                argCount = row["arg_count"] ?: ""
+                                argNames = row["arg_names"] ?: ""
+                                this.schema = row["schema"] ?: ""
+                                description = row["description"] ?: ""
+                                triggerTable = row["trigger_table"] ?: ""
+                            }
                     }
                 }
             }
         }
-    }
 
-    suspend fun info(config: ConnectionConfig, req: FunctionInfoRequest): FunctionInfoResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
-        val schema = req.schema
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
+    suspend fun info(
+        config: ConnectionConfig,
+        req: FunctionInfoRequest,
+    ): FunctionInfoResponse =
+        withContext(Dispatchers.IO) {
+            if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+            val schema = req.schema
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            val info = dialect.getRoutineInfo(conn, req.name, schema)
-            // info shape is genuinely dialect-specific (e.g. TRIGGER has different fields),
-            // so we keep packing as Value here.
-            val obj = buildJsonObject {
-                info.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
-            }
-            functionInfoResponse { this.info = PayloadAdapter.toValue(obj) }
-        }
-    }
-
-    suspend fun getDDL(config: ConnectionConfig, req: FunctionGetDdlRequest): FunctionGetDdlResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
-        val schema = req.schema
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
-
-        return@withContext connection.use { conn ->
-            functionGetDdlResponse { ddl = dialect.getRoutineDDL(conn, req.name, schema) }
-        }
-    }
-
-    suspend fun create(config: ConnectionConfig, req: FunctionCreateRequest): FunctionCreateResponse = withContext(Dispatchers.IO) {
-        if (req.ddl.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_DDL))
-
-        val connection = PoolManager.getConnection(config, "")
-        val dialect = DialectLoader.getDialect(config.driver)
-
-        return@withContext connection.use { conn ->
-            dialect.createRoutine(conn, req.ddl)
-            functionCreateResponse {
-                success = true
-                message = Msg.text(StrKey.ROUTINE_CREATED)
+            return@withContext connection.use { conn ->
+                val info = dialect.getRoutineInfo(conn, req.name, schema)
+                // info shape is genuinely dialect-specific (e.g. TRIGGER has different fields),
+                // so we keep packing as Value here.
+                val obj =
+                    buildJsonObject {
+                        info.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
+                    }
+                functionInfoResponse { this.info = PayloadAdapter.toValue(obj) }
             }
         }
-    }
 
-    suspend fun delete(config: ConnectionConfig, req: FunctionDeleteRequest): FunctionDeleteResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
-        if (req.routineType.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_ROUTINE_TYPE))
-        val schema = req.schema
+    suspend fun getDDL(
+        config: ConnectionConfig,
+        req: FunctionGetDdlRequest,
+    ): FunctionGetDdlResponse =
+        withContext(Dispatchers.IO) {
+            if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+            val schema = req.schema
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
-
-        return@withContext connection.use { conn ->
-            dialect.dropRoutine(conn, req.name, req.routineType, schema, req.ifExists, req.cascade)
-            functionDeleteResponse {
-                success = true
-                message = Msg.text(StrKey.ROUTINE_DROPPED)
-                name = req.name
-                routineType = req.routineType
+            return@withContext connection.use { conn ->
+                functionGetDdlResponse { ddl = dialect.getRoutineDDL(conn, req.name, schema) }
             }
         }
-    }
 
-    suspend fun call(config: ConnectionConfig, req: FunctionCallRequest): FunctionCallResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
-        if (req.routineType.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_ROUTINE_TYPE))
-        val schema = req.schema
-        val args = req.argsList
+    suspend fun create(
+        config: ConnectionConfig,
+        req: FunctionCreateRequest,
+    ): FunctionCreateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.ddl.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_DDL))
 
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config, "")
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            val result = dialect.callRoutine(conn, req.name, req.routineType, schema, args)
-            // callRoutine result shape is genuinely dialect-specific (FUNCTION returns single value,
-            // PROCEDURE returns update_count, etc.) — keep Value packing.
-            val obj = buildJsonObject {
-                result.forEach { (key, value) ->
-                    put(key, value.toJsonElement())
+            return@withContext connection.use { conn ->
+                dialect.createRoutine(conn, req.ddl)
+                functionCreateResponse {
+                    success = true
+                    message = Msg.text(StrKey.ROUTINE_CREATED)
                 }
             }
-            functionCallResponse { this.result = PayloadAdapter.toValue(obj) }
         }
-    }
 
-    private fun Any?.toJsonElement(): JsonElement = when (this) {
-        null -> JsonNull
-        is String -> JsonPrimitive(this)
-        is Number -> JsonPrimitive(this)
-        is Boolean -> JsonPrimitive(this)
-        is Map<*, *> -> {
-            @Suppress("UNCHECKED_CAST")
-            val m = this as Map<String, Any?>
-            buildJsonObject { m.forEach { (k, v) -> put(k, v.toJsonElement()) } }
+    suspend fun delete(
+        config: ConnectionConfig,
+        req: FunctionDeleteRequest,
+    ): FunctionDeleteResponse =
+        withContext(Dispatchers.IO) {
+            if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+            if (req.routineType.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_ROUTINE_TYPE))
+            val schema = req.schema
+
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
+
+            return@withContext connection.use { conn ->
+                dialect.dropRoutine(conn, req.name, req.routineType, schema, req.ifExists, req.cascade)
+                functionDeleteResponse {
+                    success = true
+                    message = Msg.text(StrKey.ROUTINE_DROPPED)
+                    name = req.name
+                    routineType = req.routineType
+                }
+            }
         }
-        is List<*> -> buildJsonArray { (this@toJsonElement as List<*>).forEach { add(it?.toJsonElement() ?: JsonNull) } }
-        else -> JsonPrimitive(this.toString())
-    }
 
-    suspend fun debug(config: ConnectionConfig, req: FunctionDebugRequest): FunctionDebugResponse = withContext(Dispatchers.IO) {
-        if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
-        val schema = req.schema
+    suspend fun call(
+        config: ConnectionConfig,
+        req: FunctionCallRequest,
+    ): FunctionCallResponse =
+        withContext(Dispatchers.IO) {
+            if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+            if (req.routineType.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_ROUTINE_TYPE))
+            val schema = req.schema
+            val args = req.argsList
 
-        val connection = PoolManager.getConnection(config, schema)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            val debugInfo = dialect.debugRoutine(conn, req.name, schema)
-            functionDebugResponse {
-                debugInfo.forEach { row ->
-                    this.items += functionDebugItem {
-                        type = row["type"] ?: ""
-                        output = row["output"] ?: ""
+            return@withContext connection.use { conn ->
+                val result = dialect.callRoutine(conn, req.name, req.routineType, schema, args)
+                // callRoutine result shape is genuinely dialect-specific (FUNCTION returns single value,
+                // PROCEDURE returns update_count, etc.) — keep Value packing.
+                val obj =
+                    buildJsonObject {
+                        result.forEach { (key, value) ->
+                            put(key, value.toJsonElement())
+                        }
+                    }
+                functionCallResponse { this.result = PayloadAdapter.toValue(obj) }
+            }
+        }
+
+    private fun Any?.toJsonElement(): JsonElement =
+        when (this) {
+            null -> {
+                JsonNull
+            }
+
+            is String -> {
+                JsonPrimitive(this)
+            }
+
+            is Number -> {
+                JsonPrimitive(this)
+            }
+
+            is Boolean -> {
+                JsonPrimitive(this)
+            }
+
+            is Map<*, *> -> {
+                @Suppress("UNCHECKED_CAST")
+                val m = this as Map<String, Any?>
+                buildJsonObject { m.forEach { (k, v) -> put(k, v.toJsonElement()) } }
+            }
+
+            is List<*> -> {
+                buildJsonArray { (this@toJsonElement as List<*>).forEach { add(it?.toJsonElement() ?: JsonNull) } }
+            }
+
+            else -> {
+                JsonPrimitive(this.toString())
+            }
+        }
+
+    suspend fun debug(
+        config: ConnectionConfig,
+        req: FunctionDebugRequest,
+    ): FunctionDebugResponse =
+        withContext(Dispatchers.IO) {
+            if (req.name.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_NAME))
+            val schema = req.schema
+
+            val connection = PoolManager.getConnection(config, schema)
+            val dialect = DialectLoader.getDialect(config.driver)
+
+            return@withContext connection.use { conn ->
+                val debugInfo = dialect.debugRoutine(conn, req.name, schema)
+                functionDebugResponse {
+                    debugInfo.forEach { row ->
+                        this.items +=
+                            functionDebugItem {
+                                type = row["type"] ?: ""
+                                output = row["output"] ?: ""
+                            }
                     }
                 }
             }
         }
-    }
 
-    suspend fun validate(config: ConnectionConfig, req: FunctionValidateRequest): FunctionValidateResponse = withContext(Dispatchers.IO) {
-        if (req.ddl.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_DDL))
+    suspend fun validate(
+        config: ConnectionConfig,
+        req: FunctionValidateRequest,
+    ): FunctionValidateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.ddl.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_DDL))
 
-        val connection = PoolManager.getConnection(config, "")
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config, "")
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            dialect.validateRoutineDDL(conn, req.ddl)
-            functionValidateResponse {
-                valid = true
-                message = Msg.text(StrKey.DDL_VALIDATED)
+            return@withContext connection.use { conn ->
+                dialect.validateRoutineDDL(conn, req.ddl)
+                functionValidateResponse {
+                    valid = true
+                    message = Msg.text(StrKey.DDL_VALIDATED)
+                }
             }
         }
-    }
 }

@@ -17,9 +17,9 @@ import com.langbiantianya.grpc.Request
 import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.SystemTestConnectionResponse
 import com.langbiantianya.grpc.response
-import com.langbiantianya.grpc.withLanguageTag
 import com.langbiantianya.grpc.systemRequest
 import com.langbiantianya.grpc.systemTestConnectionResponse
+import com.langbiantianya.grpc.withLanguageTag
 import com.langbiantianya.i18n.LanguageScope
 import io.grpc.ManagedChannel
 import io.grpc.StatusException
@@ -60,7 +60,6 @@ class GrpcEngineClient private constructor(
     private val config: GrpcClientConfig,
     private val ownsChannel: Boolean,
 ) : EngineClient {
-
     private val logger = LoggerFactory.getLogger(GrpcEngineClient::class.java)
     private val stub = IdbEngineGrpcKt.IdbEngineCoroutineStub(channel)
     private val closed = AtomicBoolean(false)
@@ -71,24 +70,26 @@ class GrpcEngineClient private constructor(
      * 每次 [handle] 对应一次新的 RPC 调用（stub 的 Flow 在 collect 时才真正建链），
      * 因此像同进程实现一样可以反复调用；取消 collect 会取消底层 RPC。
      */
-    override fun handle(request: Request): Flow<Response> = flow {
-        // 盖上当前界面语言再发 —— gRPC 模式下引擎是**独立进程**，ThreadLocal 跨不过去，
-        // 语言只能走 `Request.options.language`（proto 字段 4）。详见 `RequestLanguage.kt`。
-        stub.handle(request.withLanguageTag(LanguageScope.currentLanguage().persistedValue()))
-            .collect { emit(it) }
-    }.catch { e ->
-        // 传输层故障 → 与 RequestDispatcher 相同的错误帧约定
-        if (e is StatusException || e is StatusRuntimeException) {
-            logger.error("gRPC transport error for ${request.id} ${request.category}/${request.action}: ${e.message}")
-        }
-        emit(
-            response {
-                id = request.id
-                success = false
-                error = e.message ?: e.javaClass.simpleName
+    override fun handle(request: Request): Flow<Response> =
+        flow {
+            // 盖上当前界面语言再发 —— gRPC 模式下引擎是**独立进程**，ThreadLocal 跨不过去，
+            // 语言只能走 `Request.options.language`（proto 字段 4）。详见 `RequestLanguage.kt`。
+            stub
+                .handle(request.withLanguageTag(LanguageScope.currentLanguage().persistedValue()))
+                .collect { emit(it) }
+        }.catch { e ->
+            // 传输层故障 → 与 RequestDispatcher 相同的错误帧约定
+            if (e is StatusException || e is StatusRuntimeException) {
+                logger.error("gRPC transport error for ${request.id} ${request.category}/${request.action}: ${e.message}")
             }
-        )
-    }
+            emit(
+                response {
+                    id = request.id
+                    success = false
+                    error = e.message ?: e.javaClass.simpleName
+                },
+            )
+        }
 
     /**
      * 连接测试 —— 经 `SYSTEM.TEST_CONNECTION` 路由到引擎端的 `SystemHandler.testConnection`。
@@ -97,11 +98,12 @@ class GrpcEngineClient private constructor(
      * 因此**远程连接初始化**也走同一条路径，语义与同进程实现一致。
      */
     override suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse {
-        val resp = invoke(config) {
-            category = Category.SYSTEM
-            action = Action.TEST_CONNECTION
-            systemRequest = systemRequest {}
-        }
+        val resp =
+            invoke(config) {
+                category = Category.SYSTEM
+                action = Action.TEST_CONNECTION
+                systemRequest = systemRequest {}
+            }
         // 传输层失败时 invoke 返回的是错误帧（无 system 负载）—— 转成 ok=false 的响应而非抛异常，
         // 与 SystemHandler.testConnection 自身的 catch 分支保持同一种失败形态。
         if (resp.hasSystem() && resp.system.hasTestConnection()) {
@@ -120,18 +122,19 @@ class GrpcEngineClient private constructor(
      * `DISCONNECT` 被加入协议的原因（否则远程调用方无法释放连接池）。
      */
     override suspend fun disconnect(config: ConnectionConfig): Boolean {
-        val resp = invoke(config) {
-            category = Category.SYSTEM
-            action = Action.DISCONNECT
-            systemRequest = systemRequest {}
-        }
+        val resp =
+            invoke(config) {
+                category = Category.SYSTEM
+                action = Action.DISCONNECT
+                systemRequest = systemRequest {}
+            }
         return resp.hasSystem() &&
             resp.system.hasDisconnect() &&
             resp.system.disconnect.closed
     }
 
     /**
-     * 关闭 channel —— 幂等。先 `shutdown()` 优雅等待 [shutdownTimeoutMillis]，
+     * 关闭 channel —— 幂等。先 `shutdown()` 优雅等待 [SHUTDOWN_TIMEOUT_MILLIS]，
      * 未完成则 `shutdownNow()` 强制中断。
      */
     override fun close() {
@@ -139,8 +142,8 @@ class GrpcEngineClient private constructor(
         if (ownsChannel) {
             channel.shutdown()
             try {
-                if (!channel.awaitTermination(shutdownTimeoutMillis, TimeUnit.MILLISECONDS)) {
-                    logger.warn("gRPC channel did not terminate within {}ms, forcing shutdown", shutdownTimeoutMillis)
+                if (!channel.awaitTermination(SHUTDOWN_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    logger.warn("gRPC channel did not terminate within {}ms, forcing shutdown", SHUTDOWN_TIMEOUT_MILLIS)
                     channel.shutdownNow()
                 }
             } catch (e: InterruptedException) {
@@ -152,7 +155,7 @@ class GrpcEngineClient private constructor(
     }
 
     companion object {
-        private const val shutdownTimeoutMillis = 3000L
+        private const val SHUTDOWN_TIMEOUT_MILLIS = 3000L
 
         /**
          * 连接指定端点上的引擎进程。
@@ -172,7 +175,6 @@ class GrpcEngineClient private constructor(
          * 包装**外部**已建好的 channel（例如复用共享连接、或在测试中注入 in-process channel）。
          * [close] 只做 channel 的优雅关闭，**不**回收外部 EventLoopGroup 的归属方。
          */
-        fun wrap(channel: ManagedChannel): GrpcEngineClient =
-            GrpcEngineClient(channel, GrpcClientConfig.DEFAULT, ownsChannel = true)
+        fun wrap(channel: ManagedChannel): GrpcEngineClient = GrpcEngineClient(channel, GrpcClientConfig.DEFAULT, ownsChannel = true)
     }
 }

@@ -36,7 +36,6 @@ package com.langbiantianya.engine
  * 但**引号内为空的语句会被保留**（例如脚本就是单个 `';'`），因为丢弃它等于改变程序语义。
  */
 object SqlScriptSplitter {
-
     /**
      * 将脚本切分为顶层语句列表，逐条 trim 并丢弃空片段。
      */
@@ -55,24 +54,28 @@ object SqlScriptSplitter {
                     current.append(script, i, end)
                     i = end
                 }
+
                 // 双引号标识符
                 c == '"' -> {
                     val end = consumeQuoted(script, i, '"')
                     current.append(script, i, end)
                     i = end
                 }
+
                 // 行注释 -- ...，至行尾；文本原样保留（MySQL 的 /*! */ 可执行注释等不能被丢弃）
                 c == '-' && i + 1 < n && script[i + 1] == '-' -> {
                     val end = skipToLineEnd(script, i + 2)
                     current.append(script, i, end)
                     i = end
                 }
+
                 // 行注释 # ...，MySQL 风格，至行尾
                 c == '#' -> {
                     val end = skipToLineEnd(script, i + 1)
                     current.append(script, i, end)
                     i = end
                 }
+
                 // 块注释 /* ... */，可跨行
                 c == '/' && i + 1 < n && script[i + 1] == '*' -> {
                     val close = script.indexOf("*/", i + 2)
@@ -81,12 +84,14 @@ object SqlScriptSplitter {
                     current.append(script, i, end)
                     i = end
                 }
+
                 // 反引号标识符
                 c == '`' -> {
                     val end = consumeQuoted(script, i, '`')
                     current.append(script, i, end)
                     i = end
                 }
+
                 c == '$' -> {
                     val tagEnd = dollarTagEnd(script, i)
                     if (tagEnd < 0) {
@@ -107,11 +112,13 @@ object SqlScriptSplitter {
                         }
                     }
                 }
+
                 c == ';' -> {
                     statements.addIfNotBlank(current)
                     current.setLength(0)
                     i++
                 }
+
                 else -> {
                     current.append(c)
                     i++
@@ -130,7 +137,10 @@ object SqlScriptSplitter {
     fun isSingleStatement(script: String): Boolean = split(script).size <= 1
 
     /** 跳过行注释，返回行尾之后（不含换行本身）的下标。 */
-    private fun skipToLineEnd(script: String, from: Int): Int {
+    private fun skipToLineEnd(
+        script: String,
+        from: Int,
+    ): Int {
         var i = from
         val n = script.length
         while (i < n && script[i] != '\n' && script[i] != '\r') i++
@@ -142,7 +152,11 @@ object SqlScriptSplitter {
      * 支持连续两个同种引号（`''` / `""` / `` `` ``）作为转义，以及反斜杠转义。
      * 返回片段结束后的下标（未闭合时返回输入长度）。
      */
-    private fun consumeQuoted(script: String, start: Int, quote: Char): Int {
+    private fun consumeQuoted(
+        script: String,
+        start: Int,
+        quote: Char,
+    ): Int {
         val n = script.length
         var i = start + 1
         while (i < n) {
@@ -167,15 +181,24 @@ object SqlScriptSplitter {
      * 判断 `start` 处是否为 dollar-quote 起始，返回其结束下标（含闭合的 `$`）；
      * 若不是合法起始则返回 -1。
      */
-    private fun dollarTagEnd(script: String, start: Int): Int {
+    private fun dollarTagEnd(
+        script: String,
+        start: Int,
+    ): Int {
         val n = script.length
         var i = start + 1
         while (i < n) {
             val c = script[i]
             if (c == '$') return i
             // tag 只能是 [A-Za-z_][A-Za-z0-9_]*，否则视为普通字符（例如 $1）
-            val ok = c == '_' || c.isLetter() && c.code < 128 ||
-                (i > start + 1 && c.isDigit() && c.code < 128)
+            //
+            // 括号是刻意加的：`&&` 的优先级高于 `||`，不括起来的话
+            // 读作 `c == '_' || (c.isLetter() && c.code < 128) || ...`，
+            // 恰好就是想要的语义，但源码里混用 && 和 || 不加括号读起来要停一下，
+            // 很容易在后续改动里被误读成另一种分组。写死括号省掉这份心算。
+            val ok =
+                c == '_' || (c.isLetter() && c.code < 128) ||
+                    (i > start + 1 && c.isDigit() && c.code < 128)
             if (!ok) return -1
             i++
         }

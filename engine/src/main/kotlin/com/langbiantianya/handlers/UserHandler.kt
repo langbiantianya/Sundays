@@ -53,38 +53,41 @@ import kotlinx.serialization.json.JsonPrimitive
  * 因此这两处刻意保留 Value 打包。其余 action 全部 typed。
  */
 object UserHandler {
-
     /**
      * LIST —— 见类 KDoc 的双语义约定。
      *
      * `host` 留空按 `%` 处理：MySQL 的账号是 `(user, host)` 二元组，不指定 host
      * 就取「任意主机」，与 `SHOW GRANTS FOR 'dev'@'%'` 的语义一致。
      */
-    suspend fun list(config: ConnectionConfig, req: UserListRequest): UserListResponse = withContext(Dispatchers.IO) {
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
+    suspend fun list(
+        config: ConnectionConfig,
+        req: UserListRequest,
+    ): UserListResponse =
+        withContext(Dispatchers.IO) {
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            userListResponse {
-                if (req.user.isNotBlank()) {
-                    val targetHost = req.host.ifBlank { "%" }
-                    val privileges = dialect.listPrivileges(conn, req.user, targetHost)
-                    // Privileges shape varies by dialect (MySQL raw SHOW GRANTS text vs PG/H2 structured
-                    // {schema, table, privilege}). Keep Value packing — genuinely dialect-specific.
-                    privileges.forEach { row ->
-                        val obj = JsonObject(row.mapValues { (_, v) -> JsonPrimitive(v) })
-                        this.items += PayloadAdapter.toValue(obj)
-                    }
-                } else {
-                    val users = dialect.listUsers(conn)
-                    users.forEach { row ->
-                        val obj = JsonObject(row.mapValues { (_, v) -> JsonPrimitive(v) })
-                        this.items += PayloadAdapter.toValue(obj)
+            return@withContext connection.use { conn ->
+                userListResponse {
+                    if (req.user.isNotBlank()) {
+                        val targetHost = req.host.ifBlank { "%" }
+                        val privileges = dialect.listPrivileges(conn, req.user, targetHost)
+                        // Privileges shape varies by dialect (MySQL raw SHOW GRANTS text vs PG/H2 structured
+                        // {schema, table, privilege}). Keep Value packing — genuinely dialect-specific.
+                        privileges.forEach { row ->
+                            val obj = JsonObject(row.mapValues { (_, v) -> JsonPrimitive(v) })
+                            this.items += PayloadAdapter.toValue(obj)
+                        }
+                    } else {
+                        val users = dialect.listUsers(conn)
+                        users.forEach { row ->
+                            val obj = JsonObject(row.mapValues { (_, v) -> JsonPrimitive(v) })
+                            this.items += PayloadAdapter.toValue(obj)
+                        }
                     }
                 }
             }
         }
-    }
 
     /**
      * GRANTS —— 聚合成**表级**的授权清单（`schema` / `table` / `privileges`）。
@@ -93,26 +96,31 @@ object UserHandler {
      * `UserGrantItem[]`；`privileges` 字段同时接受方言给的 `privileges` 与 `privilege`，
      * 拼写差异由这一行吸收。
      */
-    suspend fun listAllGrants(config: ConnectionConfig, req: UserGrantsRequest): UserGrantsResponse = withContext(Dispatchers.IO) {
-        if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
-        val host = req.host.ifBlank { "%" }
+    suspend fun listAllGrants(
+        config: ConnectionConfig,
+        req: UserGrantsRequest,
+    ): UserGrantsResponse =
+        withContext(Dispatchers.IO) {
+            if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
+            val host = req.host.ifBlank { "%" }
 
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            val grants = dialect.listAllGrants(conn, req.user, host)
-            userGrantsResponse {
-                grants.forEach { row ->
-                    this.items += userGrantItem {
-                        schema = row["schema"] ?: ""
-                        table = row["table"] ?: ""
-                        privilege = row["privileges"] ?: row["privilege"] ?: ""
+            return@withContext connection.use { conn ->
+                val grants = dialect.listAllGrants(conn, req.user, host)
+                userGrantsResponse {
+                    grants.forEach { row ->
+                        this.items +=
+                            userGrantItem {
+                                schema = row["schema"] ?: ""
+                                table = row["table"] ?: ""
+                                privilege = row["privileges"] ?: row["privilege"] ?: ""
+                            }
                     }
                 }
             }
         }
-    }
 
     /**
      * CREATE —— `user` + `password` 都必填（`host` 默认 `%`）。
@@ -120,33 +128,41 @@ object UserHandler {
      * **不支持用户体系的方言**（SQLite / DuckDB）在这里抛
      * `UnsupportedOperationException`，由方言自己声明「我不会」，引擎不做兜底。
      */
-    suspend fun create(config: ConnectionConfig, req: UserCreateRequest): UserCreateResponse = withContext(Dispatchers.IO) {
-        if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
-        if (req.password.isBlank()) throw IllegalArgumentException("Missing 'password'")
-        val host = req.host.ifBlank { "%" }
+    suspend fun create(
+        config: ConnectionConfig,
+        req: UserCreateRequest,
+    ): UserCreateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
+            if (req.password.isBlank()) throw IllegalArgumentException("Missing 'password'")
+            val host = req.host.ifBlank { "%" }
 
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            dialect.createUser(conn, req.user, req.password, host)
-            userCreateResponse { created = req.user }
+            return@withContext connection.use { conn ->
+                dialect.createUser(conn, req.user, req.password, host)
+                userCreateResponse { created = req.user }
+            }
         }
-    }
 
     /** DELETE —— `user` 必填，`host` 默认 `%`。不静默吞「用户不存在」。 */
-    suspend fun delete(config: ConnectionConfig, req: UserDeleteRequest): UserDeleteResponse = withContext(Dispatchers.IO) {
-        if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
-        val host = req.host.ifBlank { "%" }
+    suspend fun delete(
+        config: ConnectionConfig,
+        req: UserDeleteRequest,
+    ): UserDeleteResponse =
+        withContext(Dispatchers.IO) {
+            if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
+            val host = req.host.ifBlank { "%" }
 
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        return@withContext connection.use { conn ->
-            dialect.deleteUser(conn, req.user, host)
-            userDeleteResponse { deleted = req.user }
+            return@withContext connection.use { conn ->
+                dialect.deleteUser(conn, req.user, host)
+                userDeleteResponse { deleted = req.user }
+            }
         }
-    }
 
     /**
      * UPDATE —— 改密码 / 授权 / 收权三合一（见类 KDoc 的双语义约定）。
@@ -157,37 +173,41 @@ object UserHandler {
      * **判据是「password 非空 **且** privileges 为空」**，两个条件缺一不可：
      * 只看 password 会把「同时改密码并授权」的请求悄悄降级成只改密码。
      */
-    suspend fun updatePrivileges(config: ConnectionConfig, req: UserUpdateRequest): UserUpdateResponse = withContext(Dispatchers.IO) {
-        if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
+    suspend fun updatePrivileges(
+        config: ConnectionConfig,
+        req: UserUpdateRequest,
+    ): UserUpdateResponse =
+        withContext(Dispatchers.IO) {
+            if (req.user.isBlank()) throw IllegalArgumentException("Missing 'user'")
 
-        val connection = PoolManager.getConnection(config)
-        val dialect = DialectLoader.getDialect(config.driver)
+            val connection = PoolManager.getConnection(config)
+            val dialect = DialectLoader.getDialect(config.driver)
 
-        // 当 password 非空且 privileges 为空时走密码修改路径；否则走权限授予/回收
-        val hasPrivileges = req.privilegesList.isNotEmpty()
-        return@withContext connection.use { conn ->
-            if (req.password.isNotBlank() && !hasPrivileges) {
-                val host = req.host.ifBlank { "%" }
-                dialect.updatePassword(conn, req.user, req.password, host)
-                userUpdateResponse {
-                    user = req.user
-                    action = "password_changed"
-                }
-            } else {
-                if (req.schema.isBlank()) throw IllegalArgumentException("Missing 'schema'")
-                val isGrant = req.isGrant
-                val tableName = req.tableName.ifBlank { null }
-                val withGrantOption = req.withGrantOption
+            // 当 password 非空且 privileges 为空时走密码修改路径；否则走权限授予/回收
+            val hasPrivileges = req.privilegesList.isNotEmpty()
+            return@withContext connection.use { conn ->
+                if (req.password.isNotBlank() && !hasPrivileges) {
+                    val host = req.host.ifBlank { "%" }
+                    dialect.updatePassword(conn, req.user, req.password, host)
+                    userUpdateResponse {
+                        user = req.user
+                        action = "password_changed"
+                    }
+                } else {
+                    if (req.schema.isBlank()) throw IllegalArgumentException("Missing 'schema'")
+                    val isGrant = req.isGrant
+                    val tableName = req.tableName.ifBlank { null }
+                    val withGrantOption = req.withGrantOption
 
-                dialect.updatePrivileges(conn, req.user, req.schema, req.privilegesList, isGrant, tableName, withGrantOption)
-                userUpdateResponse {
-                    user = req.user
-                    schema = req.schema
-                    action = if (isGrant) "granted" else "revoked"
-                    if (tableName != null) table = tableName
-                    if (withGrantOption) this.withGrantOption = true
+                    dialect.updatePrivileges(conn, req.user, req.schema, req.privilegesList, isGrant, tableName, withGrantOption)
+                    userUpdateResponse {
+                        user = req.user
+                        schema = req.schema
+                        action = if (isGrant) "granted" else "revoked"
+                        if (tableName != null) table = tableName
+                        if (withGrantOption) this.withGrantOption = true
+                    }
                 }
             }
         }
-    }
 }

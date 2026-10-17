@@ -8,13 +8,13 @@
 
 package com.langbiantianya.sundays.connection
 
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import java.nio.file.Files
-import java.nio.file.Path
 
 /**
  * 连接配置持久化测试 —— 落盘只有 `jdbcUrl` + 凭据，其余字段必须在加载时重建；
@@ -23,7 +23,6 @@ import java.nio.file.Path
  * `user.home` 指向临时目录，读写的是测试自己的 `connection.json`。
  */
 class ConnectionStorageTest {
-
     private lateinit var tempHome: Path
     private lateinit var originalHome: String
 
@@ -46,20 +45,22 @@ class ConnectionStorageTest {
 
     @Test
     fun `round trip restores embedded fields from the url`() {
-        val sqlite = ConnectionConfig(
-            id = "c1",
-            name = "本地 SQLite",
-            dialect = DialectType.SQLITE,
-            connectionType = ConnectionType.FILE_BASED,
-            database = "/tmp/app.db",
-        ).withUrl()
-        val h2 = ConnectionConfig(
-            id = "c2",
-            name = "内存 H2",
-            dialect = DialectType.H2,
-            connectionType = ConnectionType.IN_MEMORY,
-            database = "testdb",
-        ).withUrl()
+        val sqlite =
+            ConnectionConfig(
+                id = "c1",
+                name = "本地 SQLite",
+                dialect = DialectType.SQLITE,
+                connectionType = ConnectionType.FILE_BASED,
+                database = "/tmp/app.db",
+            ).withUrl()
+        val h2 =
+            ConnectionConfig(
+                id = "c2",
+                name = "内存 H2",
+                dialect = DialectType.H2,
+                connectionType = ConnectionType.IN_MEMORY,
+                database = "testdb",
+            ).withUrl()
 
         ConnectionStorage.save(ConnectionList(connections = listOf(sqlite, h2)))
         val loaded = ConnectionStorage.load().connections.associateBy { it.id }
@@ -77,16 +78,17 @@ class ConnectionStorageTest {
 
     @Test
     fun `upsert and delete keep the file consistent`() {
-        val mysql = ConnectionConfig(
-            id = "m1",
-            name = "本地 MySQL",
-            dialect = DialectType.MYSQL,
-            host = "localhost",
-            port = 3306,
-            database = "shop",
-            username = "root",
-            jdbcUrl = "jdbc:mysql://root@localhost:3306/shop?useSSL=false",
-        )
+        val mysql =
+            ConnectionConfig(
+                id = "m1",
+                name = "本地 MySQL",
+                dialect = DialectType.MYSQL,
+                host = "localhost",
+                port = 3306,
+                database = "shop",
+                username = "root",
+                jdbcUrl = "jdbc:mysql://root@localhost:3306/shop?useSSL=false",
+            )
         ConnectionStorage.upsert(mysql)
         assertEquals(1, ConnectionStorage.load().connections.size)
 
@@ -101,7 +103,8 @@ class ConnectionStorageTest {
 
     @Test
     fun `v1 file without jdbcUrl is migrated using its derived fields`() {
-        val legacy = """
+        val legacy =
+            """
             {
               "connections": [
                 {
@@ -122,7 +125,7 @@ class ConnectionStorageTest {
               ],
               "version": 1
             }
-        """.trimIndent()
+            """.trimIndent()
         val file = configFile()
         Files.createDirectories(file.parent)
         Files.writeString(file, legacy)
@@ -154,7 +157,8 @@ class ConnectionStorageTest {
      */
     @Test
     fun `legacy postgresql url is normalized on load without losing credentials`() {
-        val legacy = """
+        val legacy =
+            """
             {
               "connections": [
                 {
@@ -170,7 +174,7 @@ class ConnectionStorageTest {
               ],
               "version": 2
             }
-        """.trimIndent()
+            """.trimIndent()
         val file = configFile()
         Files.createDirectories(file.parent)
         Files.writeString(file, legacy)
@@ -194,17 +198,18 @@ class ConnectionStorageTest {
     /** 新建 PG 连接时 URL 就不带 userinfo —— 落盘形状与内存一致。 */
     @Test
     fun `newly saved postgresql connection stores a credential free url`() {
-        val pg = ConnectionConfig(
-            id = "pg2",
-            name = "新 PG",
-            dialect = DialectType.POSTGRESQL,
-            connectionType = ConnectionType.CLIENT_SERVER,
-            host = "192.168.1.5",
-            port = 5432,
-            database = "postgres",
-            username = "postgres",
-            password = "666666",
-        ).withUrl()
+        val pg =
+            ConnectionConfig(
+                id = "pg2",
+                name = "新 PG",
+                dialect = DialectType.POSTGRESQL,
+                connectionType = ConnectionType.CLIENT_SERVER,
+                host = "192.168.1.5",
+                port = 5432,
+                database = "postgres",
+                username = "postgres",
+                password = "666666",
+            ).withUrl()
 
         assertEquals("jdbc:postgresql://192.168.1.5:5432/postgres", pg.jdbcUrl)
 

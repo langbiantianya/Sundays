@@ -57,14 +57,15 @@ import androidx.compose.ui.unit.dp
 fun Modifier.focusRing(
     color: Color? = null,
     width: Dp = 2.dp,
-): Modifier = composed {
-    val ringColor = color ?: MaterialTheme.colorScheme.primary
-    var focused by remember { mutableStateOf(false) }
-    this
-        .padding(width)
-        .onFocusChanged { focused = it.isFocused }
-        .drawWithContent {
-            drawContent()
-            if (focused) drawRect(color = ringColor, style = Stroke(width = width.toPx()))
-        }
-}
+): Modifier =
+    composed {
+        val ringColor = color ?: MaterialTheme.colorScheme.primary
+        var focused by remember { mutableStateOf(false) }
+        this
+            .padding(width)
+            .onFocusChanged { focused = it.isFocused }
+            .drawWithContent {
+                drawContent()
+                if (focused) drawRect(color = ringColor, style = Stroke(width = width.toPx()))
+            }
+    }

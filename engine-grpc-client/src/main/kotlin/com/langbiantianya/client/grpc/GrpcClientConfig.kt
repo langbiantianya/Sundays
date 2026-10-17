@@ -18,8 +18,8 @@ import io.grpc.netty.shaded.io.netty.channel.epoll.EpollDomainSocketChannel
 import io.grpc.netty.shaded.io.netty.channel.epoll.EpollEventLoopGroup
 import io.grpc.netty.shaded.io.netty.channel.epoll.EpollSocketChannel
 import io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoopGroup
-import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel
 import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioDomainSocketChannel
+import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress
 import org.slf4j.LoggerFactory
 import java.util.concurrent.TimeUnit
@@ -69,11 +69,12 @@ data class GrpcClientConfig(
         private set
 
     /** 日志与错误信息中显示的端点。 */
-    fun target(): String = when (kind) {
-        GrpcTransportKind.TCP -> "$host:$port"
-        GrpcTransportKind.UNIX -> udsPath
-        GrpcTransportKind.PIPE -> pipeName
-    }
+    fun target(): String =
+        when (kind) {
+            GrpcTransportKind.TCP -> "$host:$port"
+            GrpcTransportKind.UNIX -> udsPath
+            GrpcTransportKind.PIPE -> pipeName
+        }
 
     /**
      * 创建 channel builder（尚未 `build()`）。同一实例只应调用一次。
@@ -81,32 +82,35 @@ data class GrpcClientConfig(
      * Linux 上优先 epoll（native 加速），否则回退 NIO —— 与服务端
      * `UnixSocketIpcTransport` 的降级策略保持一致。
      */
-    fun channelBuilder(): ManagedChannelBuilder<*> = when (kind) {
-        GrpcTransportKind.TCP -> {
-            val group = newEventLoopGroup("tcp")
-            clientEventLoopGroup = group
-            NettyChannelBuilder.forAddress(host, port)
-                .channelType(
-                    if (Epoll.isAvailable()) EpollSocketChannel::class.java else NioSocketChannel::class.java
-                )
-                .eventLoopGroup(group)
-                .usePlaintext()
-        }
+    fun channelBuilder(): ManagedChannelBuilder<*> =
+        when (kind) {
+            GrpcTransportKind.TCP -> {
+                val group = newEventLoopGroup("tcp")
+                clientEventLoopGroup = group
+                NettyChannelBuilder
+                    .forAddress(host, port)
+                    .channelType(
+                        if (Epoll.isAvailable()) EpollSocketChannel::class.java else NioSocketChannel::class.java,
+                    ).eventLoopGroup(group)
+                    .usePlaintext()
+            }
 
-        GrpcTransportKind.UNIX -> {
-            val group = newEventLoopGroup("uds")
-            clientEventLoopGroup = group
-            NettyChannelBuilder.forAddress(DomainSocketAddress(udsPath))
-                .channelType(
-                    if (Epoll.isAvailable()) EpollDomainSocketChannel::class.java else NioDomainSocketChannel::class.java
-                )
-                .eventLoopGroup(group)
-                .usePlaintext()
-        }
+            GrpcTransportKind.UNIX -> {
+                val group = newEventLoopGroup("uds")
+                clientEventLoopGroup = group
+                NettyChannelBuilder
+                    .forAddress(DomainSocketAddress(udsPath))
+                    .channelType(
+                        if (Epoll.isAvailable()) EpollDomainSocketChannel::class.java else NioDomainSocketChannel::class.java,
+                    ).eventLoopGroup(group)
+                    .usePlaintext()
+            }
 
-        // gRPC-Java 通过 URI scheme 原生识别 `pipe:<name>`，无需 native 依赖
-        GrpcTransportKind.PIPE -> Grpc.newChannelBuilder("pipe:$pipeName", InsecureChannelCredentials.create())
-    }
+            // gRPC-Java 通过 URI scheme 原生识别 `pipe:<name>`，无需 native 依赖
+            GrpcTransportKind.PIPE -> {
+                Grpc.newChannelBuilder("pipe:$pipeName", InsecureChannelCredentials.create())
+            }
+        }
 
     private fun newEventLoopGroup(transport: String): EventLoopGroup =
         if (Epoll.isAvailable()) {
@@ -135,22 +139,32 @@ data class GrpcClientConfig(
             val target = raw.trim()
             require(target.isNotEmpty()) { "Empty engine target" }
             return when {
-                target.startsWith("pipe:") -> GrpcClientConfig(
-                    kind = GrpcTransportKind.PIPE,
-                    pipeName = target.removePrefix("pipe:"),
-                )
+                target.startsWith("pipe:") -> {
+                    GrpcClientConfig(
+                        kind = GrpcTransportKind.PIPE,
+                        pipeName = target.removePrefix("pipe:"),
+                    )
+                }
 
-                target.startsWith("unix:") -> parseUnix(target)
+                target.startsWith("unix:") -> {
+                    parseUnix(target)
+                }
 
-                target.startsWith("tcp://") -> parseTcp(target.removePrefix("tcp://"))
+                target.startsWith("tcp://") -> {
+                    parseTcp(target.removePrefix("tcp://"))
+                }
 
                 // 裸 `host:port`（含 IPv6 字面量 `[::1]:50051`）
-                target.contains(':') -> parseTcp(target)
+                target.contains(':') -> {
+                    parseTcp(target)
+                }
 
-                else -> throw IllegalArgumentException(
-                    "Unsupported engine target: '$raw' " +
-                        "(expected host:port, tcp://host:port, unix://<path> or pipe:<name>)"
-                )
+                else -> {
+                    throw IllegalArgumentException(
+                        "Unsupported engine target: '$raw' " +
+                            "(expected host:port, tcp://host:port, unix://<path> or pipe:<name>)",
+                    )
+                }
             }
         }
 
@@ -168,15 +182,16 @@ data class GrpcClientConfig(
         }
 
         private fun parseTcp(authority: String): GrpcClientConfig {
-            val (h, p) = if (authority.startsWith("[")) {
-                val end = authority.indexOf(']')
-                require(end > 0) { "Malformed IPv6 authority: '$authority'" }
-                authority.substring(1, end) to authority.substring(end + 1).removePrefix(":")
-            } else {
-                val idx = authority.lastIndexOf(':')
-                require(idx > 0) { "Malformed authority: '$authority' (expected host:port)" }
-                authority.substring(0, idx) to authority.substring(idx + 1)
-            }
+            val (h, p) =
+                if (authority.startsWith("[")) {
+                    val end = authority.indexOf(']')
+                    require(end > 0) { "Malformed IPv6 authority: '$authority'" }
+                    authority.substring(1, end) to authority.substring(end + 1).removePrefix(":")
+                } else {
+                    val idx = authority.lastIndexOf(':')
+                    require(idx > 0) { "Malformed authority: '$authority' (expected host:port)" }
+                    authority.substring(0, idx) to authority.substring(idx + 1)
+                }
             val port = p.toIntOrNull() ?: throw IllegalArgumentException("Invalid port in engine target: '$p'")
             return GrpcClientConfig(kind = GrpcTransportKind.TCP, host = h, port = port)
         }

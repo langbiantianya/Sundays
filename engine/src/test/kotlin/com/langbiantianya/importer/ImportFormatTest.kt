@@ -17,7 +17,6 @@ import kotlin.test.assertTrue
  * ImportFormat.parse 单元测试。
  */
 class ImportFormatTest {
-
     @Test
     fun `parses the canonical names`() {
         assertEquals(ImportFormat.CSV, ImportFormat.parse("CSV"))

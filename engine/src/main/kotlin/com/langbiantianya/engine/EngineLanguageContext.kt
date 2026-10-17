@@ -10,9 +10,9 @@ package com.langbiantianya.engine
 
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.LanguageScope
+import kotlinx.coroutines.ThreadContextElement
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
-import kotlinx.coroutines.ThreadContextElement
 
 /**
  * 把「当前请求用哪种语言」**随协程一起搬**的适配器。
@@ -38,10 +38,10 @@ import kotlinx.coroutines.ThreadContextElement
  * 的情形（进程启动时由 Direct 模式界面设过一次）就被抹掉了。
  * 故 [updateThreadContext] 返回旧值、[restoreThreadContext] 原样还回去。
  */
-internal class EngineLanguageContext(private val language: AppLanguage) :
-    ThreadContextElement<AppLanguage?>,
-    AbstractCoroutineContextElement(Key) {
-
+internal class EngineLanguageContext(
+    private val language: AppLanguage,
+) : AbstractCoroutineContextElement(Key),
+    ThreadContextElement<AppLanguage?> {
     companion object Key : CoroutineContext.Key<EngineLanguageContext>
 
     override fun updateThreadContext(context: CoroutineContext): AppLanguage? {
@@ -50,7 +50,10 @@ internal class EngineLanguageContext(private val language: AppLanguage) :
         return previous
     }
 
-    override fun restoreThreadContext(context: CoroutineContext, oldState: AppLanguage?) {
+    override fun restoreThreadContext(
+        context: CoroutineContext,
+        oldState: AppLanguage?,
+    ) {
         if (oldState == null) LanguageScope.clear() else LanguageScope.setCurrentLanguage(oldState)
     }
 }

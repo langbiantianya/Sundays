@@ -50,8 +50,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * [rows] 与 [CsvReader.rows] 一致是单遍的：第二次调用抛 [IllegalStateException]。
  */
-class JsonLinesReader(source: Reader) : ImportSource {
-
+class JsonLinesReader(
+    source: Reader,
+) : ImportSource {
     private val reader: BufferedReader =
         if (source is BufferedReader) source else BufferedReader(source)
 
@@ -82,7 +83,6 @@ class JsonLinesReader(source: Reader) : ImportSource {
     }
 
     private inner class RowIterator : Iterator<Map<String, String>> {
-
         private var pending: JsonObject? = firstObject
         private var next: Map<String, String>? = null
         private var computed = false
@@ -126,23 +126,27 @@ class JsonLinesReader(source: Reader) : ImportSource {
         }
     }
 
-    private fun parseObject(line: String, lineNo: Int): JsonObject {
-        val element: JsonElement = try {
-            json.parseToJsonElement(line)
-        } catch (e: SerializationException) {
-            throw IllegalStateException(
-                Msg.format(
-                    StrKey.JSONL_INVALID_JSON,
-                    lineNo,
-                    e.message ?: e::class.simpleName,
-                    line.snippet()
-                ),
-                e
-            )
-        }
+    private fun parseObject(
+        line: String,
+        lineNo: Int,
+    ): JsonObject {
+        val element: JsonElement =
+            try {
+                json.parseToJsonElement(line)
+            } catch (e: SerializationException) {
+                throw IllegalStateException(
+                    Msg.format(
+                        StrKey.JSONL_INVALID_JSON,
+                        lineNo,
+                        e.message ?: e::class.simpleName,
+                        line.snippet(),
+                    ),
+                    e,
+                )
+            }
         if (element !is JsonObject) {
             throw IllegalStateException(
-                Msg.format(StrKey.JSONL_NOT_OBJECT, lineNo, element.typeLabel(), line.snippet())
+                Msg.format(StrKey.JSONL_NOT_OBJECT, lineNo, element.typeLabel(), line.snippet()),
             )
         }
         return element
@@ -156,24 +160,27 @@ class JsonLinesReader(source: Reader) : ImportSource {
         return row
     }
 
-    private fun JsonElement.toCell(): String = when (this) {
-        // JsonNull 也是 JsonPrimitive，必须先判它，否则会渲染成字面量 "null"
-        is JsonNull -> ""
-        is JsonPrimitive -> content
-        // 对象 / 数组：紧凑 JSON 文本，保证不丢结构信息
-        is JsonObject, is JsonArray -> toString()
-    }
+    private fun JsonElement.toCell(): String =
+        when (this) {
+            // JsonNull 也是 JsonPrimitive，必须先判它，否则会渲染成字面量 "null"
+            is JsonNull -> ""
 
-    private fun JsonElement.typeLabel(): String = when (this) {
-        is JsonNull -> "null"
-        is JsonPrimitive -> if (isString) Msg.text(StrKey.JSON_TYPE_STRING) else Msg.text(StrKey.JSON_TYPE_SCALAR)
-        is JsonObject -> "对象"
-        is JsonArray -> Msg.text(StrKey.ARRAY)
-    }
+            is JsonPrimitive -> content
+
+            // 对象 / 数组：紧凑 JSON 文本，保证不丢结构信息
+            is JsonObject, is JsonArray -> toString()
+        }
+
+    private fun JsonElement.typeLabel(): String =
+        when (this) {
+            is JsonNull -> "null"
+            is JsonPrimitive -> if (isString) Msg.text(StrKey.JSON_TYPE_STRING) else Msg.text(StrKey.JSON_TYPE_SCALAR)
+            is JsonObject -> "对象"
+            is JsonArray -> Msg.text(StrKey.ARRAY)
+        }
 
     /** 报错时只带有限长度的内容，避免超长单行把日志刷爆 */
-    private fun String.snippet(): String =
-        if (length <= 120) this else take(120) + "…"
+    private fun String.snippet(): String = if (length <= 120) this else take(120) + "…"
 
     private companion object {
         val json = Json

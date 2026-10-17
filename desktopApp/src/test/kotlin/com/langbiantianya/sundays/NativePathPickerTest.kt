@@ -38,7 +38,6 @@ import kotlin.test.assertTrue
  * 由调用方保留「手动输入路径」那条路。
  */
 class NativePathPickerTest {
-
     /**
      * 只有**无头**环境才能跑这两条。
      *
@@ -57,9 +56,10 @@ class NativePathPickerTest {
     fun `pickFile never throws when the system dialog is unavailable`() {
         requireHeadless()
         // 无头环境下 AWT 直接抛；这里只关心「抛没抛出去到调用方」
-        val result = runCatching {
-            runBlocking { NativePathPicker.pickFile(System.getProperty("java.io.tmpdir") ?: ".", "x.csv") }
-        }
+        val result =
+            runCatching {
+                runBlocking { NativePathPicker.pickFile(System.getProperty("java.io.tmpdir") ?: ".", "x.csv") }
+            }
         assertTrue(
             result.isSuccess,
             "系统对话框不可用时不能把异常甩给调用方：${result.exceptionOrNull()}",
@@ -74,9 +74,10 @@ class NativePathPickerTest {
     @Test
     fun `pickDirectory never throws either`() {
         requireHeadless()
-        val result = runCatching {
-            runBlocking { NativePathPicker.pickDirectory(System.getProperty("java.io.tmpdir") ?: ".") }
-        }
+        val result =
+            runCatching {
+                runBlocking { NativePathPicker.pickDirectory(System.getProperty("java.io.tmpdir") ?: ".") }
+            }
         assertTrue(result.isSuccess, "目录选择器同样必须兜住：${result.exceptionOrNull()}")
         result.getOrNull()?.let { picked ->
             assertTrue(picked.dir.isNotBlank(), "目录不能是空串")

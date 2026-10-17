@@ -27,9 +27,12 @@ import kotlin.test.assertTrue
  * 坏条目处放弃其后所有插件。守卫必须落在 `hasNext()` / `next()` 两次调用上。
  */
 class BrokenPluginResilienceTest {
-
     /** 造一个 `META-INF/services` 指向不存在类的坏插件 JAR。 */
-    private fun brokenJar(dir: File, serviceFile: String, missingClass: String): File {
+    private fun brokenJar(
+        dir: File,
+        serviceFile: String,
+        missingClass: String,
+    ): File {
         dir.mkdirs()
         val jar = File(dir, "broken-${serviceFile.substringAfterLast('.')}.jar")
         JarOutputStream(jar.outputStream()).use { out ->

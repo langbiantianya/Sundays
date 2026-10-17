@@ -14,8 +14,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 
-/**
- * 紧凑模式 —— 与 [ThemePalette]（色相）、[ThemeMode]（明暗）**正交的第三个轴：尺度**。
+/*
+ * 紧凑模式 —— 与 `ThemePalette`（色相）、`ThemeMode`（明暗）**正交的第三个轴：尺度**。
  *
  * ## 要解决的问题
  *
@@ -43,8 +43,8 @@ import androidx.compose.ui.unit.Density
  *
  * | | 缩放 | 覆盖的东西 |
  * |---|---|---|
- * | [COMPACT_UI_SCALE] | 0.85 | 控件几何：最小高度 / 内边距 / 间距 / 圆角 / 图标 / 描边 |
- * | [COMPACT_TEXT_SCALE] | 0.92 | 字号与行高（`SundaysPalette.Typography` 的 sp） |
+ * | `COMPACT_UI_SCALE` | 0.85 | 控件几何：最小高度 / 内边距 / 间距 / 圆角 / 图标 / 描边 |
+ * | `COMPACT_TEXT_SCALE` | 0.92 | 字号与行高（`SundaysPalette.Typography` 的 sp） |
  *
  * 字号只降 8% 而控件降 15%：桌面上的可读性底线比「再多塞一行」重要，真嫌字大应当调
  * 系统的显示缩放，而不是让一个全局开关顺带把字也改小。
@@ -81,7 +81,8 @@ val LocalCompactMode = staticCompositionLocalOf { false }
 
 /** 当前是否处于紧凑档。 */
 val isCompactMode: Boolean
-    @Composable @ReadOnlyComposable get() = LocalCompactMode.current
+    @Composable @ReadOnlyComposable
+    get() = LocalCompactMode.current
 
 /**
  * 把 [base] 缩放到紧凑档；[compact] 为 `false` 时**原样返回** [base]。
@@ -92,15 +93,19 @@ val isCompactMode: Boolean
  * ⚠️ 传入的必须是**平台真实** density。已经有别的覆盖层（如未来接入的
  * `LocalDensity provides` 包装）时，本函数拿到的应是链上最外层已生效的值。
  */
-fun compactDensity(base: Density, compact: Boolean): Density = if (!compact) {
-    base
-} else {
-    Density(
-        density = base.density * COMPACT_UI_SCALE,
-        // 抵消 density 缩放对 sp 的连带影响，再乘上文本档位自身的缩放 —— 见文件头恒等式
-        fontScale = base.fontScale * COMPACT_TEXT_SCALE / COMPACT_UI_SCALE,
-    )
-}
+fun compactDensity(
+    base: Density,
+    compact: Boolean,
+): Density =
+    if (!compact) {
+        base
+    } else {
+        Density(
+            density = base.density * COMPACT_UI_SCALE,
+            // 抵消 density 缩放对 sp 的连带影响，再乘上文本档位自身的缩放 —— 见文件头恒等式
+            fontScale = base.fontScale * COMPACT_TEXT_SCALE / COMPACT_UI_SCALE,
+        )
+    }
 
 /** [compactDensity] 的组合版：取当前 [LocalDensity] 为基准，注入缩放后的 [Density]。 */
 @Composable

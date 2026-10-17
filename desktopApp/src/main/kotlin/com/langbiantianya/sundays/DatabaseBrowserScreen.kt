@@ -8,104 +8,100 @@
 
 package com.langbiantianya.sundays
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.shadow
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.Icons
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import com.langbiantianya.sundays.ui.WinMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import com.langbiantianya.i18n.Msg
-import com.langbiantianya.i18n.PluralStrKey
-import com.langbiantianya.i18n.StrKey
-import com.langbiantianya.sundays.ui.plural
-import com.langbiantianya.sundays.ui.str
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.RadioButton
-import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -117,24 +113,22 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.google.protobuf.Value as ProtoValue
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
@@ -142,31 +136,34 @@ import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.grpc.dataGenerateRequest
 import com.langbiantianya.grpc.dataListRequest
 import com.langbiantianya.grpc.dataRequest
+import com.langbiantianya.grpc.foreignKeyListRequest
+import com.langbiantianya.grpc.foreignKeyRequest
+import com.langbiantianya.grpc.functionListRequest
+import com.langbiantianya.grpc.functionRequest
 import com.langbiantianya.grpc.generateTable
+import com.langbiantianya.grpc.indexListRequest
+import com.langbiantianya.grpc.indexRequest
 import com.langbiantianya.grpc.request
 import com.langbiantianya.grpc.schemaListRequest
 import com.langbiantianya.grpc.schemaRequest
 import com.langbiantianya.grpc.sqlExecuteRequest
 import com.langbiantianya.grpc.sqlRequest
-import com.langbiantianya.grpc.foreignKeyListRequest
-import com.langbiantianya.grpc.foreignKeyRequest
-import com.langbiantianya.grpc.functionListRequest
-import com.langbiantianya.grpc.functionRequest
-import com.langbiantianya.grpc.indexListRequest
-import com.langbiantianya.grpc.indexRequest
-import com.langbiantianya.grpc.triggerListRequest
-import com.langbiantianya.grpc.triggerRequest
-import com.langbiantianya.grpc.viewListRequest
-import com.langbiantianya.grpc.viewRequest
 import com.langbiantianya.grpc.systemRequest
 import com.langbiantianya.grpc.tableColumnListRequest
 import com.langbiantianya.grpc.tableGetDdlRequest
 import com.langbiantianya.grpc.tableListRequest
 import com.langbiantianya.grpc.tableRequest
+import com.langbiantianya.grpc.triggerListRequest
+import com.langbiantianya.grpc.triggerRequest
+import com.langbiantianya.grpc.viewListRequest
+import com.langbiantianya.grpc.viewRequest
+import com.langbiantianya.i18n.Msg
+import com.langbiantianya.i18n.PluralStrKey
+import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
-import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.ConnectionStatus
+import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.SqlIdentifier
 import com.langbiantianya.sundays.editor.CompletionItem
 import com.langbiantianya.sundays.editor.CompletionKind
@@ -184,29 +181,30 @@ import com.langbiantianya.sundays.table.TableRow
 import com.langbiantianya.sundays.ui.DragHandle
 import com.langbiantianya.sundays.ui.SettingsEntryButton
 import com.langbiantianya.sundays.ui.SundaysPalette
-import com.langbiantianya.sundays.ui.focusRing
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
-import com.langbiantianya.sundays.ui.menuShape
+import com.langbiantianya.sundays.ui.WinIconButton
+import com.langbiantianya.sundays.ui.WinMenuItem
+import com.langbiantianya.sundays.ui.WinOutlinedButton
 import com.langbiantianya.sundays.ui.WinProgressIndicator
 import com.langbiantianya.sundays.ui.WinTextButton
 import com.langbiantianya.sundays.ui.WinTextField
-import com.langbiantianya.sundays.ui.tabStripContainerColor
-import com.langbiantianya.sundays.ui.WinIconButton
-import com.langbiantianya.sundays.ui.WinOutlinedButton
+import com.langbiantianya.sundays.ui.focusRing
+import com.langbiantianya.sundays.ui.menuShape
 import com.langbiantianya.sundays.ui.onRightClick
+import com.langbiantianya.sundays.ui.plural
+import com.langbiantianya.sundays.ui.str
+import com.langbiantianya.sundays.ui.tabStripContainerColor
 import com.langbiantianya.sundays.ui.winShape
-import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.ui.draw.clip
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Done
-import java.io.File
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
+import java.util.UUID
+import kotlin.math.roundToInt
+import com.google.protobuf.Value as ProtoValue
 
 /**
  * 数据库浏览屏幕 —— 第二屏；**多 sheet**：每个已建连接的数据库浏览会话是一个 sheet，
@@ -444,13 +442,14 @@ fun DatabaseBrowserScreen(
                 memory = memory,
                 onDismiss = { memoryDetailOpen = false },
                 onHoverChange = { memoryPanelHovered = it },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    // 底部留出「状态栏 + 其上方那条分割线」的高度，面板正好贴在它上沿
-                    .padding(
-                        end = 10.dp,
-                        bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
-                    ),
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        // 底部留出「状态栏 + 其上方那条分割线」的高度，面板正好贴在它上沿
+                        .padding(
+                            end = 10.dp,
+                            bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
+                        ),
             )
         }
 
@@ -461,12 +460,13 @@ fun DatabaseBrowserScreen(
             val density = LocalDensity.current
             NotificationCenterPanel(
                 center = notificationCenter,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 10.dp,
-                        bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
-                    ),
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 10.dp,
+                            bottom = with(density) { (barHeight.intValue + 1.dp.roundToPx()).toDp() },
+                        ),
             )
         }
     }
@@ -566,18 +566,22 @@ internal const val TABLE_CLEAR_BTN_TAG = "tableClearBtn"
 
 /** sheet 标签与其关闭按钮 —— 名字会重复（同名连接可开多个 sheet），所以按 id 定位。 */
 internal fun sheetTabTag(connectionId: String) = "sheetTab_$connectionId"
+
 internal fun sheetTabCloseTag(connectionId: String) = "sheetTabClose_$connectionId"
 
 /** 工作台切换按钮按 pane 定位。 */
-internal fun paneToggleTag(pane: BrowserPane): String = when (pane) {
-    BrowserPane.TABLE -> "paneToggleTable"
-    BrowserPane.SQL -> PANE_TOGGLE_SQL_TAG
-    BrowserPane.GENERATE -> PANE_TOGGLE_GENERATE_TAG
-}
+internal fun paneToggleTag(pane: BrowserPane): String =
+    when (pane) {
+        BrowserPane.TABLE -> "paneToggleTable"
+        BrowserPane.SQL -> PANE_TOGGLE_SQL_TAG
+        BrowserPane.GENERATE -> PANE_TOGGLE_GENERATE_TAG
+    }
 
 /** 库节点 / 表叶子 / 表的「索引·外键」展开箭头。 */
 internal fun schemaDbNodeTag(database: String) = "schemaDb_$database"
+
 internal fun schemaTableLeafTag(table: String) = "schemaTable_$table"
+
 internal fun schemaTableObjectsTag(table: String) = "schemaTableObjects_$table"
 
 /**
@@ -635,7 +639,6 @@ internal const val TREE_MENU_COPY_DDL_TAG = "treeMenuCopyDdl"
  */
 @Stable
 class TreeContextMenuState {
-
     /** 被右键的节点；`null` = 菜单关闭。 */
     var target: DatabaseBrowserState.TreeTarget? by mutableStateOf(null)
         private set
@@ -691,8 +694,7 @@ private fun Modifier.trackNodeCoordinates(
 ): Modifier = this.onGloballyPositioned { coords.value = it }
 
 @Composable
-private fun rememberTreeContextMenuState(): TreeContextMenuState =
-    remember { TreeContextMenuState() }
+private fun rememberTreeContextMenuState(): TreeContextMenuState = remember { TreeContextMenuState() }
 
 /** 排序预设菜单项按序号定位（菜单项不获取焦点，没有别的办法）。 */
 internal fun tableOrderMenuItemTag(index: Int) = "tableOrderItem_$index"
@@ -733,18 +735,20 @@ private fun SheetTabRow(
     onOpenSettings: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 「＋添加连接」按钮：固定在最左，独立于 sheet 标签条；
         // 点击后由调用方弹出 AddConnectionDialog。
         WinIconButton(
             onClick = onAdd,
-            modifier = Modifier
-                .padding(horizontal = 4.dp)
-                .testTag(SHEET_ADD_BTN_TAG),
+            modifier =
+                Modifier
+                    .padding(horizontal = 4.dp)
+                    .testTag(SHEET_ADD_BTN_TAG),
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
@@ -779,10 +783,11 @@ private fun SheetTabRow(
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = str(StrKey.CLOSE_SHEET),
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .testTag(sheetTabCloseTag(sheet.connection.id))
-                                    .clickable { onClose(sheet.connection.id) },
+                                modifier =
+                                    Modifier
+                                        .size(16.dp)
+                                        .testTag(sheetTabCloseTag(sheet.connection.id))
+                                        .clickable { onClose(sheet.connection.id) },
                             )
                         }
                     },
@@ -806,16 +811,18 @@ private fun EmptySheetsHint(
         // 空态下没有标签条也没有工具栏，设置入口若不单独放一个就会彻底消失 ——
         // 而空态恰恰是用户第一次打开应用最可能停留的地方。
         Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(4.dp),
+            modifier =
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp),
         ) {
             SettingsEntryButton(onClick = onOpenSettings)
         }
         Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(24.dp),
+            modifier =
+                Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -894,34 +901,39 @@ private fun EngineMemoryStatusBar(
     // 悬停态同时喂给屏级：关闭判定要的是「状态栏**或**面板都不在指针下」
     LaunchedEffect(hovered) { onHoverChange(hovered) }
     val highlighted = hovered || detailOpen
-    val ink = if (highlighted) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val ink =
+        if (highlighted) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
 
     // 外层铺满、**内容收缩并右对齐**：底部只占内容那么宽，悬停高亮也只覆盖内容本身。
     // 铺满整行的话，那是一条横贯窗口的色带，视觉上比内存数字本身还重 ——
     // 而且会让「可点区域」大到能在离内容很远的地方误触。
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         Row(
-            modifier = Modifier
-                .onSizeChanged { onMeasuredHeight(it.height) }
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onToggleDetail,
-                )
-                .pointerHoverIcon(PointerIcon.Hand)
-                // 4~6dp：再薄就在高 DPI 屏上只剩一条抗锯齿的糊边
-                .padding(horizontal = 10.dp, vertical = 4.dp)
-                // 底色放在 padding **之后**：高亮才是一个包住内边距的完整小块，
-                // 而不是只染了文字那一截
-                .background(
-                    color = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
-                    else MaterialTheme.colorScheme.surface,
-                    shape = winShape(4.dp),
-                ),
+            modifier =
+                Modifier
+                    .onSizeChanged { onMeasuredHeight(it.height) }
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onToggleDetail,
+                    ).pointerHoverIcon(PointerIcon.Hand)
+                    // 4~6dp：再薄就在高 DPI 屏上只剩一条抗锯齿的糊边
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    // 底色放在 padding **之后**：高亮才是一个包住内边距的完整小块，
+                    // 而不是只染了文字那一截
+                    .background(
+                        color =
+                            if (highlighted) {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                        shape = winShape(4.dp),
+                    ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.End,
         ) {
@@ -933,27 +945,30 @@ private fun EngineMemoryStatusBar(
             Spacer(Modifier.width(6.dp))
             // 轨道 + 填充两段 Box，不用 Canvas —— 圆角交给 winShape，与全应用的容器写法一致
             Box(
-                modifier = Modifier
-                    .width(MEMORY_BAR_WIDTH)
-                    .height(5.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, winShape(2.dp)),
+                modifier =
+                    Modifier
+                        .width(MEMORY_BAR_WIDTH)
+                        .height(5.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, winShape(2.dp)),
             ) {
                 if (memory != null) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(memory.ratio)
-                            .background(memoryFillColor(memory.ratio), winShape(2.dp)),
+                        modifier =
+                            Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(memory.ratio)
+                                .background(memoryFillColor(memory.ratio), winShape(2.dp)),
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
             Text(
-                text = if (memory == null) {
-                    "— / —"
-                } else {
-                    "${formatHeapBytes(memory.usedBytes)} / ${formatHeapBytes(memory.maxBytes)}"
-                },
+                text =
+                    if (memory == null) {
+                        "— / —"
+                    } else {
+                        "${formatHeapBytes(memory.usedBytes)} / ${formatHeapBytes(memory.maxBytes)}"
+                    },
                 style = MaterialTheme.typography.labelSmall,
                 color = ink,
             )
@@ -971,15 +986,16 @@ private fun NotificationBell(
     onToggle: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .clip(winShape(4.dp))
-            .background(
-                if (open) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-            )
-            .clickable(onClickLabel = if (open) str(StrKey.CLOSE_NOTIFICATION_CENTER) else str(StrKey.OPEN_NOTIFICATION_CENTER),
-            onClick = onToggle,)
-            .testTag(NOTIFICATION_BELL_TAG)
-            .padding(horizontal = 8.dp, vertical = 1.dp),
+        modifier =
+            Modifier
+                .clip(winShape(4.dp))
+                .background(
+                    if (open) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+                ).clickable(
+                    onClickLabel = if (open) str(StrKey.CLOSE_NOTIFICATION_CENTER) else str(StrKey.OPEN_NOTIFICATION_CENTER),
+                    onClick = onToggle,
+                ).testTag(NOTIFICATION_BELL_TAG)
+                .padding(horizontal = 8.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -1033,12 +1049,13 @@ private fun NotificationCenterPanel(
                 Spacer(Modifier.width(8.dp))
                 val errors = center.notifications.count { it.severity == AppNotification.Severity.ERROR }
                 Text(
-                    text = buildString {
-                        append(plural(PluralStrKey.NOTIFICATIONS_COUNT, center.notifications.size, center.notifications.size))
-                        if (errors > 0) {
-                            append(plural(PluralStrKey.NOTIFICATIONS_FAILED_COUNT, errors, errors))
-                        }
-                    },
+                    text =
+                        buildString {
+                            append(plural(PluralStrKey.NOTIFICATIONS_COUNT, center.notifications.size, center.notifications.size))
+                            if (errors > 0) {
+                                append(plural(PluralStrKey.NOTIFICATIONS_FAILED_COUNT, errors, errors))
+                            }
+                        },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1086,16 +1103,18 @@ private fun NotificationCenterPanel(
 private fun NotificationRow(n: AppNotification) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Icon(
-            imageVector = when (n.severity) {
-                AppNotification.Severity.SUCCESS -> Icons.Filled.Check
-                AppNotification.Severity.ERROR -> Icons.Filled.Close
-                AppNotification.Severity.INFO -> Icons.Filled.Refresh
-            },
+            imageVector =
+                when (n.severity) {
+                    AppNotification.Severity.SUCCESS -> Icons.Filled.Check
+                    AppNotification.Severity.ERROR -> Icons.Filled.Close
+                    AppNotification.Severity.INFO -> Icons.Filled.Refresh
+                },
             contentDescription = null,
-            tint = when (n.severity) {
-                AppNotification.Severity.SUCCESS -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.error
-            },
+            tint =
+                when (n.severity) {
+                    AppNotification.Severity.SUCCESS -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                },
             modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(8.dp))
@@ -1127,13 +1146,20 @@ private fun NotificationRow(n: AppNotification) {
  * 通知是「最近发生过的事」，跨天的那几条看一眼就知道是昨天的事就够了。
  */
 internal fun formatNotificationTime(ts: Long): String {
-    val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+    val cal =
+        java.util.Calendar
+            .getInstance()
+            .apply { timeInMillis = ts }
+
     fun p(v: Int) = "%02d".format(v)
     val hm = "${p(cal.get(java.util.Calendar.HOUR_OF_DAY))}:${p(cal.get(java.util.Calendar.MINUTE))}"
     val today = java.util.Calendar.getInstance()
-    val sameDay = cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
-        cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
-    return if (sameDay) hm else {
+    val sameDay =
+        cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+            cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+    return if (sameDay) {
+        hm
+    } else {
         "${p(cal.get(java.util.Calendar.MONTH) + 1)}-${p(cal.get(java.util.Calendar.DAY_OF_MONTH))} $hm"
     }
 }
@@ -1144,7 +1170,11 @@ internal fun formatNotificationTime(ts: Long): String {
  * @property key **唯一且稳定**的来源标识。推送与遗忘两边都用它 ——
  *   两边算得不一样，去重就会失效（第一版正是栽在这里）。
  */
-internal data class ErrorSource(val key: String, val title: String, val detail: String)
+internal data class ErrorSource(
+    val key: String,
+    val title: String,
+    val detail: String,
+)
 
 /**
  * 把「当前所有 sheet 的所有报错」收成一份来源清单。
@@ -1163,53 +1193,57 @@ internal data class ErrorSource(val key: String, val title: String, val detail: 
  * **去重完全失效**，真窗口上表现为「同一个错误连点三次 → 徽标 2」。
  * 有了这个函数，同一份 key 既能被屏用，也能被测试直接验。
  */
-internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSource> = buildList {
-    // key = **结构标识 + 错误文本的哈希**。
-    //
-    // ⚠️ 少了后半段就会漏报：同一个 SQL sheet 里 `Table 'a' doesn't exist`
-    // 变成 `Table 'b' doesn't exist` 时结构标识没变 → 去重命中 → 用户看到的
-    // 还是上一次的错误，而界面上早就换了。
-    //
-    // 用哈希而不是原文：key 会进内存集合，原文可能有几百字、还带换行。
-    // 哈希冲突的风险可以忽略 —— 这里是「同源同文才算同一次」的去重，
-    // 不是安全校验；真撞上了表现是少报一次通知，不会误报或报错。
-    fun keyOf(where: String, detail: String) = "$where#${detail.hashCode()}"
+internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSource> =
+    buildList {
+        // key = **结构标识 + 错误文本的哈希**。
+        //
+        // ⚠️ 少了后半段就会漏报：同一个 SQL sheet 里 `Table 'a' doesn't exist`
+        // 变成 `Table 'b' doesn't exist` 时结构标识没变 → 去重命中 → 用户看到的
+        // 还是上一次的错误，而界面上早就换了。
+        //
+        // 用哈希而不是原文：key 会进内存集合，原文可能有几百字、还带换行。
+        // 哈希冲突的风险可以忽略 —— 这里是「同源同文才算同一次」的去重，
+        // 不是安全校验；真撞上了表现是少报一次通知，不会误报或报错。
+        fun keyOf(
+            where: String,
+            detail: String,
+        ) = "$where#${detail.hashCode()}"
 
-    sheets.forEach { s ->
-        val b = s.browser
-        if (s.status.state == ConnectionState.FAILED && s.status.message.isNotBlank()) {
-            add(
-                ErrorSource(
-                    keyOf("conn:" + s.connection.id, s.status.message),
-                    Msg.format(StrKey.CONNECT_FAILED_PREFIX, s.connection.name),
-                    s.status.message,
-                ),
-            )
-        }
-        b.errorMessage?.takeIf { it.isNotBlank() }?.let {
-            add(ErrorSource(keyOf("dbs:" + s.connection.id, it), Msg.text(StrKey.LOAD_DATABASES_FAILED), it))
-        }
-        b.generateError?.takeIf { it.isNotBlank() }?.let {
-            add(ErrorSource(keyOf("gen:" + s.connection.id, it), Msg.text(StrKey.GENERATE_FAILED), it))
-        }
-        b.tabs.forEach { t ->
-            t.error?.takeIf { it.isNotBlank() }?.let {
+        sheets.forEach { s ->
+            val b = s.browser
+            if (s.status.state == ConnectionState.FAILED && s.status.message.isNotBlank()) {
                 add(
                     ErrorSource(
-                        keyOf("tab:" + t.key, it),
-                        Msg.format(StrKey.READ_TABLE_FAILED, t.tableName),
-                        it,
+                        keyOf("conn:" + s.connection.id, s.status.message),
+                        Msg.format(StrKey.CONNECT_FAILED_PREFIX, s.connection.name),
+                        s.status.message,
                     ),
                 )
             }
-        }
-        b.sqlSheets.forEach { q ->
-            q.error?.takeIf { it.isNotBlank() }?.let {
-                add(ErrorSource(keyOf("sql:" + s.connection.id + ":" + q.title, it), Msg.text(StrKey.SQL_EXECUTION_FAILED), it))
+            b.errorMessage?.takeIf { it.isNotBlank() }?.let {
+                add(ErrorSource(keyOf("dbs:" + s.connection.id, it), Msg.text(StrKey.LOAD_DATABASES_FAILED), it))
+            }
+            b.generateError?.takeIf { it.isNotBlank() }?.let {
+                add(ErrorSource(keyOf("gen:" + s.connection.id, it), Msg.text(StrKey.GENERATE_FAILED), it))
+            }
+            b.tabs.forEach { t ->
+                t.error?.takeIf { it.isNotBlank() }?.let {
+                    add(
+                        ErrorSource(
+                            keyOf("tab:" + t.key, it),
+                            Msg.format(StrKey.READ_TABLE_FAILED, t.tableName),
+                            it,
+                        ),
+                    )
+                }
+            }
+            b.sqlSheets.forEach { q ->
+                q.error?.takeIf { it.isNotBlank() }?.let {
+                    add(ErrorSource(keyOf("sql:" + s.connection.id + ":" + q.title, it), Msg.text(StrKey.SQL_EXECUTION_FAILED), it))
+                }
             }
         }
     }
-}
 
 /** 通知中心入口按钮的 UI 测试 tag。 */
 internal const val NOTIFICATION_BELL_TAG = "notificationBell"
@@ -1287,9 +1321,10 @@ private fun EngineMemoryDetailPanel(
         // 不用它的话 Column 会一路撑到父级最大宽度，面板变成一条横贯窗口的色带。
         // 分组线仍是 WinDivider —— 它收到空 modifier 时不填满，在本布局里正好横跨内容宽度。
         Column(
-            modifier = Modifier
-                .width(IntrinsicSize.Max)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier =
+                Modifier
+                    .width(IntrinsicSize.Max)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = str(StrKey.JVM_MEMORY), style = MaterialTheme.typography.titleSmall)
@@ -1362,7 +1397,10 @@ private fun Modifier.reportsHover(onHoverChange: (Boolean) -> Unit): Modifier =
  * 标签与取值的呈现完全一致。
  */
 @Composable
-private fun MemoryInfoRow(label: String, value: String?) {
+private fun MemoryInfoRow(
+    label: String,
+    value: String?,
+) {
     Row(
         modifier = Modifier.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1391,8 +1429,11 @@ private fun MemoryInfoRow(label: String, value: String?) {
  */
 @Composable
 private fun memoryFillColor(ratio: Float): Color =
-    if (ratio >= MEMORY_ALERT_RATIO) MaterialTheme.colorScheme.error
-    else MaterialTheme.colorScheme.primary
+    if (ratio >= MEMORY_ALERT_RATIO) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
 
 /**
  * 堆字节数 → 紧凑可读（`512M` / `2.0G`），**不带小数位与空格**。
@@ -1401,17 +1442,30 @@ private fun memoryFillColor(ratio: Float): Color =
  * 逐行对照精确数值的，宽度不敏感；这里只有 5dp 高、且右边还跟着一个「/ 上限」，
  * 必须省掉小数点和单位里的空格才不至于把状态栏撑宽。两处不是重复，是两种呈现密度。
  */
-internal fun formatHeapBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> {
-        val gb = bytes / (1024.0 * 1024 * 1024)
-        // 一位小数，但「2.0G」这种整值就退成「2G」—— 少一个字符是一个
-        if (gb % 1.0 == 0.0) "${gb.toInt()}G" else "%.1fG".format(gb)
+internal fun formatHeapBytes(bytes: Long): String =
+    when {
+        bytes >= 1024L * 1024 * 1024 -> {
+            val gb = bytes / (1024.0 * 1024 * 1024)
+            // 一位小数，但「2.0G」这种整值就退成「2G」—— 少一个字符是一个
+            if (gb % 1.0 == 0.0) "${gb.toInt()}G" else "%.1fG".format(gb)
+        }
+
+        bytes >= 1024L * 1024 -> {
+            "${bytes / (1024L * 1024)}M"
+        }
+
+        bytes >= 1024L -> {
+            "${bytes / 1024L}K"
+        }
+
+        bytes < 0 -> {
+            "—"
+        }
+
+        else -> {
+            "${bytes}B"
+        }
     }
-    bytes >= 1024L * 1024 -> "${bytes / (1024L * 1024)}M"
-    bytes >= 1024L -> "${bytes / 1024L}K"
-    bytes < 0 -> "—"
-    else -> "${bytes}B"
-}
 
 /** 堆占用轮询间隔（毫秒）。2 秒：肉眼能看出趋势，又不至于每秒打一次引擎。 */
 private const val MEMORY_POLL_MILLIS = 2_000L
@@ -1433,18 +1487,19 @@ internal const val MEMORY_DETAIL_PANEL_TAG = "engineMemoryDetailPanel"
 /** 占用率到这个值就把进度条染成 `error`。 */
 private const val MEMORY_ALERT_RATIO = 0.85f
 
-/**
+/*
  * BrowserToolBar —— sheet 标签条之上的工具栏，操作当前激活 sheet 的右栏内容。
  *
  * 两个工作台入口：**「SQL 工作台」** 与 **「造数工作台」**。当前正处在某个工作台时，
  * 该按钮变为「返回表预览」（点它回到表预览）；从另一个工作台切过来时直接进入目标工作台。
- * 状态由 [DatabaseBrowserState.activePane] 持有，每 sheet 独立 —— 切换不清空任何工作台状态。
+ * 状态由 `DatabaseBrowserState.activePane` 持有，每 sheet 独立 —— 切换不清空任何工作台状态。
  * 未连接时禁用（两个工作台的执行都必须依赖已建立的连接池）。
  *
  * 右侧的**「任务」入口**不属于任何 pane —— 导出/导入这类后台任务跨 pane 存在，
  * 「后台运行」的语义恰恰是「我先干别的，回头再看它」，所以这个入口必须在任何 pane 都看得见。
  * 徽标上的数字只数**运行中**的任务：已完成的留在面板里，不该在工具栏上一直占位。
  */
+
 /**
  * 任务面板 —— 后台任务列表。
  *
@@ -1485,12 +1540,13 @@ private fun BackgroundTaskPanel(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = plural(
-            PluralStrKey.BACKGROUND_TASKS_PROGRESS,
-            tasks.count { it.isRunning },
-            tasks.count { it.isRunning },
-            tasks.size,
-        ),
+                    text =
+                        plural(
+                            PluralStrKey.BACKGROUND_TASKS_PROGRESS,
+                            tasks.count { it.isRunning },
+                            tasks.count { it.isRunning },
+                            tasks.size,
+                        ),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1530,22 +1586,27 @@ private fun BackgroundTaskRow(task: DatabaseBrowserState.BackgroundTask) {
     ) {
         // 状态图标：运行中用进度圈（它在动，一眼看出「还在跑」）；收口后换成静态图标
         when (task.status) {
-            DatabaseBrowserState.BackgroundTask.Status.RUNNING ->
+            DatabaseBrowserState.BackgroundTask.Status.RUNNING -> {
                 WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-            DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED ->
+            }
+
+            DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED -> {
                 Icon(
                     Icons.Filled.Check,
                     contentDescription = str(StrKey.DONE),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp),
                 )
-            DatabaseBrowserState.BackgroundTask.Status.FAILED ->
+            }
+
+            DatabaseBrowserState.BackgroundTask.Status.FAILED -> {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = str(StrKey.FAILED),
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(14.dp),
                 )
+            }
         }
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -1567,11 +1628,12 @@ private fun BackgroundTaskRow(task: DatabaseBrowserState.BackgroundTask) {
             Text(
                 text = task.statusLine,
                 style = MaterialTheme.typography.bodySmall,
-                color = when (task.status) {
-                    DatabaseBrowserState.BackgroundTask.Status.RUNNING -> MaterialTheme.colorScheme.primary
-                    DatabaseBrowserState.BackgroundTask.Status.FAILED -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                color =
+                    when (task.status) {
+                        DatabaseBrowserState.BackgroundTask.Status.RUNNING -> MaterialTheme.colorScheme.primary
+                        DatabaseBrowserState.BackgroundTask.Status.FAILED -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1604,9 +1666,10 @@ private fun BrowserToolBar(
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -1637,14 +1700,15 @@ private fun BrowserToolBar(
             WinButton(
                 onClick = onToggleTaskPanel,
                 shape = SundaysPalette.buttonShape,
-                colors = if (taskPanelOpen) {
-                    ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                } else {
-                    ButtonDefaults.buttonColors()
-                },
+                colors =
+                    if (taskPanelOpen) {
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
                 modifier = Modifier.testTag(TASK_PANEL_BTN_TAG),
             ) {
                 Icon(
@@ -1687,14 +1751,15 @@ private fun PaneToggleButton(
         // 复古两套下由 WinButton 把斜面翻转为凹陷；现代主题仍用 primary 填充表达激活态
         selected = isActive,
         modifier = Modifier.testTag(paneToggleTag(pane)),
-        colors = if (isActive) {
-            ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            )
-        } else {
-            ButtonDefaults.outlinedButtonColors()
-        },
+        colors =
+            if (isActive) {
+                ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else {
+                ButtonDefaults.outlinedButtonColors()
+            },
     ) {
         Icon(
             imageVector = if (isActive) Icons.Filled.TableChart else icon,
@@ -1772,9 +1837,10 @@ private fun ActiveSheetContent(
                     state = sheet.browser,
                     connected = sheet.status.state == ConnectionState.CONNECTED,
                     onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
-                    modifier = Modifier
-                        .width(schemaPanelWidth)
-                        .fillMaxHeight(),
+                    modifier =
+                        Modifier
+                            .width(schemaPanelWidth)
+                            .fillMaxHeight(),
                 )
                 DragHandle(
                     width = schemaPanelWidth,
@@ -1788,29 +1854,40 @@ private fun ActiveSheetContent(
                     modifier = Modifier.testTag(SCHEMA_DRAG_HANDLE_TAG),
                 )
                 when (sheet.browser.activePane) {
-                    BrowserPane.TABLE -> PreviewTabArea(
-                        state = sheet.browser,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    )
-                    BrowserPane.SQL -> SqlWorkbenchPane(
-                        state = sheet.browser,
-                        connected = sheet.status.state == ConnectionState.CONNECTED,
-                        schema = sheet.browser.currentSchema(),
-                        dialect = sheet.browser.sqlDialectProfile(),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    )
-                    BrowserPane.GENERATE -> GenerateWorkbenchPane(
-                        state = sheet.browser,
-                        connected = sheet.status.state == ConnectionState.CONNECTED,
-                        schema = sheet.browser.currentSchema(),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    )
+                    BrowserPane.TABLE -> {
+                        PreviewTabArea(
+                            state = sheet.browser,
+                            modifier =
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                        )
+                    }
+
+                    BrowserPane.SQL -> {
+                        SqlWorkbenchPane(
+                            state = sheet.browser,
+                            connected = sheet.status.state == ConnectionState.CONNECTED,
+                            schema = sheet.browser.currentSchema(),
+                            dialect = sheet.browser.sqlDialectProfile(),
+                            modifier =
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                        )
+                    }
+
+                    BrowserPane.GENERATE -> {
+                        GenerateWorkbenchPane(
+                            state = sheet.browser,
+                            connected = sheet.status.state == ConnectionState.CONNECTED,
+                            schema = sheet.browser.currentSchema(),
+                            modifier =
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                        )
+                    }
                 }
             }
         }
@@ -1821,13 +1898,17 @@ private fun ActiveSheetContent(
  * 连接状态点 —— sheet 标签上展示引擎会话状态的小色点。
  */
 @Composable
-internal fun ConnectionStatusDot(state: ConnectionState, dotSize: androidx.compose.ui.unit.Dp) {
-    val color = when (state) {
-        ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
-        ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
-        ConnectionState.FAILED -> MaterialTheme.colorScheme.error
-        ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
-    }
+internal fun ConnectionStatusDot(
+    state: ConnectionState,
+    dotSize: androidx.compose.ui.unit.Dp,
+) {
+    val color =
+        when (state) {
+            ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+            ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+            ConnectionState.FAILED -> MaterialTheme.colorScheme.error
+            ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline
+        }
     Canvas(modifier = Modifier.size(dotSize)) {
         drawCircle(color = color)
     }
@@ -1849,12 +1930,16 @@ internal fun ConnectionStatusDot(state: ConnectionState, dotSize: androidx.compo
  * 固定高度 + 纵向滚动是这里唯一诚实的选择（详见 `EmptyHint` 的 KDoc）。
  */
 @Composable
-private fun ConnectionFailureBanner(message: String, onRetry: () -> Unit) {
+private fun ConnectionFailureBanner(
+    message: String,
+    onRetry: () -> Unit,
+) {
     Surface(color = MaterialTheme.colorScheme.errorContainer) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 标签「连接失败」不省略号截断 —— 它是这句横幅在语义上的主语
@@ -1919,14 +2004,16 @@ private fun SchemaTreePanel(
         // Popup 的 parent 就是这个 Column，而 `Popup.offset` 相对 parent ——
         // 所以菜单要把 root 坐标换算成面板内坐标，就靠这里上报的 origin。
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .onGloballyPositioned { treeMenu.updateHostOrigin(it.positionInRoot()) },
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { treeMenu.updateHostOrigin(it.positionInRoot()) },
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -1940,19 +2027,31 @@ private fun SchemaTreePanel(
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             when {
-                !connected -> EmptyHint(
-                    title = str(StrKey.NOT_CONNECTED),
-                    description = str(StrKey.NOT_CONNECTED_HINT),
-                )
-                state.loadingDatabases -> EmptyHint(title = str(StrKey.LOADING_DATABASES), description = null)
-                state.errorMessage != null -> EmptyHint(
-                    title = str(StrKey.LOAD_FAILED),
-                    description = state.errorMessage,
-                )
-                state.databases.isEmpty() -> EmptyHint(
-                    title = str(StrKey.NO_DATABASES),
-                    description = str(StrKey.NO_DATABASES_HINT),
-                )
+                !connected -> {
+                    EmptyHint(
+                        title = str(StrKey.NOT_CONNECTED),
+                        description = str(StrKey.NOT_CONNECTED_HINT),
+                    )
+                }
+
+                state.loadingDatabases -> {
+                    EmptyHint(title = str(StrKey.LOADING_DATABASES), description = null)
+                }
+
+                state.errorMessage != null -> {
+                    EmptyHint(
+                        title = str(StrKey.LOAD_FAILED),
+                        description = state.errorMessage,
+                    )
+                }
+
+                state.databases.isEmpty() -> {
+                    EmptyHint(
+                        title = str(StrKey.NO_DATABASES),
+                        description = str(StrKey.NO_DATABASES_HINT),
+                    )
+                }
+
                 else -> {
                     LazyColumn(
                         state = listState,
@@ -2012,7 +2111,11 @@ private fun TreeContextMenu(
      * [TreeContextMenuUiTest.clickMenuItem] 的「菜单关闭」那一步被钉住。
      */
     @Composable
-    fun item(tag: String, label: String, action: () -> Unit) {
+    fun item(
+        tag: String,
+        label: String,
+        action: () -> Unit,
+    ) {
         WinMenuItem(
             modifier = Modifier.testTag(tag),
             text = { Text(label) },
@@ -2034,10 +2137,12 @@ private fun TreeContextMenu(
     val windowSize = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
     val minWidthPx = with(density) { MENU_MIN_WIDTH.toPx() }
     val menuHeightPx = with(density) { MENU_ESTIMATED_HEIGHT.toPx() }
-    val clampedX = menu.offsetInRoot.x
-        .coerceIn(0f, (windowSize.width - minWidthPx).coerceAtLeast(0f))
-    val clampedY = menu.offsetInRoot.y
-        .coerceIn(0f, (windowSize.height - menuHeightPx).coerceAtLeast(0f))
+    val clampedX =
+        menu.offsetInRoot.x
+            .coerceIn(0f, (windowSize.width - minWidthPx).coerceAtLeast(0f))
+    val clampedY =
+        menu.offsetInRoot.y
+            .coerceIn(0f, (windowSize.height - menuHeightPx).coerceAtLeast(0f))
 
     Popup(
         // ⚠️ 为什么不用 `DropdownMenu` —— 见 [TreeContextMenuState] 的 KDoc。
@@ -2054,35 +2159,37 @@ private fun TreeContextMenu(
         // 这正是真窗口走查时抓到的现象（点空白处后右键 postgres，弹出的仍是 biz_user 的菜单）。
         onDismissRequest = { menu.dismiss() },
         properties = PopupProperties(focusable = true, dismissOnBackPress = true),
-        offset = IntOffset(
-            x = (clampedX - menu.hostOrigin.x).roundToInt(),
-            y = (clampedY - menu.hostOrigin.y).roundToInt(),
-        ),
+        offset =
+            IntOffset(
+                x = (clampedX - menu.hostOrigin.x).roundToInt(),
+                y = (clampedY - menu.hostOrigin.y).roundToInt(),
+            ),
     ) {
         Column(
-            modifier = Modifier
-                // IntrinsicSize.Max：让菜单项的 fillMaxWidth 有意义 —— 宽度取内容最宽的那项，
-                // 而不是一个撑满屏幕的巨宽菜单。
-                .width(IntrinsicSize.Max)
-                // ⚠️ **`shadow` 必须在 `background` 之前**，顺序反了会同时坏掉两件事：
-                //
-                // `Modifier.shadow` 造的是 graphicsLayer，**只包含它链上后续的内容**。
-                // 写成 `.background(shape).border(shape).shadow(shape)` 时：
-                //   1. 圆角背景与边框落在 layer **之外** → 阴影的轮廓按 layer **内**的
-                //      菜单项矩形生成，于是「圆角菜单 + 直角阴影」对不上；
-                //   2. layer 的 `clip`（默认 elevation > 0 时为 true）裁不到
-                //      layer 外的背景，菜单项自己那层不透明背景也照原样画 →
-                //      菜单里出现一块**直角的内嵌方块**。
-                //
-                // 真窗口实测（修复前截图）：菜单项背景 `#211F26`(surfaceContainer)
-                // 呈直角，容器边框却是圆角，右侧还挂一条 `#1D1B21` 的阴影带。
-                //
-                // Material 自己的 `Modifier.surface` 也是这个顺序
-                // （`shadow(...).background(color, shape)`）—— 不是巧合。
-                .shadow(8.dp, menuShape())
-                .background(scheme.surfaceContainer, menuShape())
-                .border(1.dp, scheme.outlineVariant, menuShape())
-                .padding(vertical = 4.dp),
+            modifier =
+                Modifier
+                    // IntrinsicSize.Max：让菜单项的 fillMaxWidth 有意义 —— 宽度取内容最宽的那项，
+                    // 而不是一个撑满屏幕的巨宽菜单。
+                    .width(IntrinsicSize.Max)
+                    // ⚠️ **`shadow` 必须在 `background` 之前**，顺序反了会同时坏掉两件事：
+                    //
+                    // `Modifier.shadow` 造的是 graphicsLayer，**只包含它链上后续的内容**。
+                    // 写成 `.background(shape).border(shape).shadow(shape)` 时：
+                    //   1. 圆角背景与边框落在 layer **之外** → 阴影的轮廓按 layer **内**的
+                    //      菜单项矩形生成，于是「圆角菜单 + 直角阴影」对不上；
+                    //   2. layer 的 `clip`（默认 elevation > 0 时为 true）裁不到
+                    //      layer 外的背景，菜单项自己那层不透明背景也照原样画 →
+                    //      菜单里出现一块**直角的内嵌方块**。
+                    //
+                    // 真窗口实测（修复前截图）：菜单项背景 `#211F26`(surfaceContainer)
+                    // 呈直角，容器边框却是圆角，右侧还挂一条 `#1D1B21` 的阴影带。
+                    //
+                    // Material 自己的 `Modifier.surface` 也是这个顺序
+                    // （`shadow(...).background(color, shape)`）—— 不是巧合。
+                    .shadow(8.dp, menuShape())
+                    .background(scheme.surfaceContainer, menuShape())
+                    .border(1.dp, scheme.outlineVariant, menuShape())
+                    .padding(vertical = 4.dp),
         ) {
             item(TREE_MENU_COPY_NAME_TAG, str(StrKey.COPY_NAME)) { state.copyTreeText(target, quoted = false) }
             item(
@@ -2134,26 +2241,26 @@ private fun DatabaseNode(
 
     Column {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .trackNodeCoordinates(nodeCoords)
-                .focusRing()
-                .onRightClick { offset ->
-                    menu.show(
-                        offset,
-                        // 当场读 `positionInRoot()` 而不是读缓存的 Offset：
-                        // 展开 / 滚动之后缓存值可能已经过期，而 `LayoutCoordinates`
-                        // 是个活对象，此刻读到的就是**此刻**的位置。
-                        nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                        DatabaseBrowserState.TreeTarget(
-                            database = name,
-                            schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
-                        ),
-                    )
-                }
-                .clickable { state.toggleDatabase(name) }
-                .testTag(schemaDbNodeTag(name))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .trackNodeCoordinates(nodeCoords)
+                    .focusRing()
+                    .onRightClick { offset ->
+                        menu.show(
+                            offset,
+                            // 当场读 `positionInRoot()` 而不是读缓存的 Offset：
+                            // 展开 / 滚动之后缓存值可能已经过期，而 `LayoutCoordinates`
+                            // 是个活对象，此刻读到的就是**此刻**的位置。
+                            nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
+                            DatabaseBrowserState.TreeTarget(
+                                database = name,
+                                schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
+                            ),
+                        )
+                    }.clickable { state.toggleDatabase(name) }
+                    .testTag(schemaDbNodeTag(name))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -2181,24 +2288,33 @@ private fun DatabaseNode(
         }
         if (expanded) {
             when {
-                error != null -> Text(
-                    text = str(StrKey.TREE_LOAD_FAILED, error),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                )
-                tables == null -> Text(
-                    text = str(StrKey.TREE_LOADING),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                )
-                tables.isEmpty() -> Text(
-                    text = str(StrKey.TREE_EMPTY),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                )
+                error != null -> {
+                    Text(
+                        text = str(StrKey.TREE_LOAD_FAILED, error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
+                    )
+                }
+
+                tables == null -> {
+                    Text(
+                        text = str(StrKey.TREE_LOADING),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
+                    )
+                }
+
+                tables.isEmpty() -> {
+                    Text(
+                        text = str(StrKey.TREE_EMPTY),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
+                    )
+                }
+
                 else -> {
                     tables.forEach { tbl ->
                         val slot = "$name::$tbl"
@@ -2216,13 +2332,18 @@ private fun DatabaseNode(
                             columns = state.columnsOf(name, tbl),
                             // 展开后、字段还没回来之前也算「加载中」——
                             // 否则那一瞬间会渲染成「(无)」，看起来像这张表没有字段。
-                            columnsLoading = state.isTableObjectLoading(name, tbl) ||
-                                (state.columnsOf(name, tbl) == null && slot in state.expandedTableObjects),
+                            columnsLoading =
+                                state.isTableObjectLoading(name, tbl) ||
+                                    (state.columnsOf(name, tbl) == null && slot in state.expandedTableObjects),
                             columnsError = state.tableObjectError["$slot::${DatabaseBrowserState.TableObjectKind.COLUMNS.name}"],
-                            indexNames = state.tableObjects[slot]
-                                ?.get(DatabaseBrowserState.TableObjectKind.INDEX).orEmpty(),
-                            foreignKeyNames = state.tableObjects[slot]
-                                ?.get(DatabaseBrowserState.TableObjectKind.FOREIGN_KEY).orEmpty(),
+                            indexNames =
+                                state.tableObjects[slot]
+                                    ?.get(DatabaseBrowserState.TableObjectKind.INDEX)
+                                    .orEmpty(),
+                            foreignKeyNames =
+                                state.tableObjects[slot]
+                                    ?.get(DatabaseBrowserState.TableObjectKind.FOREIGN_KEY)
+                                    .orEmpty(),
                         )
                     }
                     // 库级对象（视图 / 触发器 / 过程·函数）排在表之后。
@@ -2277,11 +2398,15 @@ private fun DatabaseNode(
 
 /** 对象分组下的一行：`标签: 名字1, 名字2 …`。空列表显示「(无)」。 */
 @Composable
-private fun ObjectGroupRow(label: String, items: List<String>) {
+private fun ObjectGroupRow(
+    label: String,
+    items: List<String>,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
@@ -2344,41 +2469,40 @@ private fun TableLeaf(
 
     Column {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .trackNodeCoordinates(nodeCoords)
-                .focusRing()
-                // 右键与左键**不冲突**，两者互不干扰：`clickable` 的 tap 检测只认主键，
-                // 右键是次键（`isSecondaryPressed`），压根不满足 tap 条件。
-                // 试过把 `onRightClick` 挪到 `clickable` **之后**（曾以为 `consume()`
-                // 会串味），实测两轮 UI 测试都没红 —— 顺序在这里**无关**，
-                // 但保留当前写法是因为它读起来就是「先识别手势、再挂动作」。
-                .then(
-                    if (menu != null) {
-                        Modifier.onRightClick { offset ->
-                            menu.show(
-                                offset,
-                                nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                                DatabaseBrowserState.TreeTarget(
-                                    database = database,
-                                    schema = schema,
-                                    table = tableName,
-                                ),
-                            )
-                        }
-                    } else {
-                        // 预览里没有右键菜单的用法（传 null 的调用点不期待菜单出现）。
-                        // 挂一个空 Modifier 而不是硬传 —— 见 [TableLeaf.menu] 的 KDoc。
-                        Modifier
-                    }
-                )
-                .clickable(
-                    onClickLabel = str(StrKey.OPEN_TABLE, tableName),
-                    role = Role.Button,
-                    onClick = onOpen,
-                )
-                .testTag(schemaTableLeafTag(tableName))
-                .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .trackNodeCoordinates(nodeCoords)
+                    .focusRing()
+                    // 右键与左键**不冲突**，两者互不干扰：`clickable` 的 tap 检测只认主键，
+                    // 右键是次键（`isSecondaryPressed`），压根不满足 tap 条件。
+                    // 试过把 `onRightClick` 挪到 `clickable` **之后**（曾以为 `consume()`
+                    // 会串味），实测两轮 UI 测试都没红 —— 顺序在这里**无关**，
+                    // 但保留当前写法是因为它读起来就是「先识别手势、再挂动作」。
+                    .then(
+                        if (menu != null) {
+                            Modifier.onRightClick { offset ->
+                                menu.show(
+                                    offset,
+                                    nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
+                                    DatabaseBrowserState.TreeTarget(
+                                        database = database,
+                                        schema = schema,
+                                        table = tableName,
+                                    ),
+                                )
+                            }
+                        } else {
+                            // 预览里没有右键菜单的用法（传 null 的调用点不期待菜单出现）。
+                            // 挂一个空 Modifier 而不是硬传 —— 见 [TableLeaf.menu] 的 KDoc。
+                            Modifier
+                        },
+                    ).clickable(
+                        onClickLabel = str(StrKey.OPEN_TABLE, tableName),
+                        role = Role.Button,
+                        onClick = onOpen,
+                    ).testTag(schemaTableLeafTag(tableName))
+                    .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onToggleObjects != null) {
@@ -2390,15 +2514,17 @@ private fun TableLeaf(
                 // 「展开 orders 的索引与外键」，展开后冒出几十个字段却毫无预期。
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
-                    contentDescription = if (expanded) {
-                        str(StrKey.COLLAPSE_TABLE_DETAIL, tableName)
-                    } else {
-                        str(StrKey.EXPAND_TABLE_DETAIL, tableName)
-                    },
-                    modifier = Modifier
-                        .size(16.dp)
-                        .testTag(schemaTableObjectsTag(tableName))
-                        .clickable { onToggleObjects() },
+                    contentDescription =
+                        if (expanded) {
+                            str(StrKey.COLLAPSE_TABLE_DETAIL, tableName)
+                        } else {
+                            str(StrKey.EXPAND_TABLE_DETAIL, tableName)
+                        },
+                    modifier =
+                        Modifier
+                            .size(16.dp)
+                            .testTag(schemaTableObjectsTag(tableName))
+                            .clickable { onToggleObjects() },
                 )
                 Spacer(Modifier.width(2.dp))
             } else {
@@ -2429,11 +2555,12 @@ private fun TableLeaf(
                     error = columnsError,
                     menu = menu,
                     onCopyColumn = onCopyColumn,
-                    target = DatabaseBrowserState.TreeTarget(
-                        database = database,
-                        schema = schema,
-                        table = tableName,
-                    ),
+                    target =
+                        DatabaseBrowserState.TreeTarget(
+                            database = database,
+                            schema = schema,
+                            table = tableName,
+                        ),
                 )
                 ObjectGroupRow(str(StrKey.INDEX), indexNames)
                 ObjectGroupRow(str(StrKey.FOREIGN_KEY), foreignKeyNames)
@@ -2483,28 +2610,39 @@ private fun ColumnRowGroup(
             }
         }
         when {
-            error != null -> Text(
-                text = error,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 12.dp, top = 1.dp),
-            )
+            error != null -> {
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 12.dp, top = 1.dp),
+                )
+            }
+
             // 加载中也显示「(无)」的话，用户会以为这张表没有字段，而那只是一瞬间的假象。
-            loading -> Unit
-            columns.isNullOrEmpty() -> Text(
-                text = str(StrKey.NONE_PAREN),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, top = 1.dp),
-            )
-            else -> Column(modifier = Modifier.padding(start = 12.dp)) {
-                columns.forEach { col ->
-                    ColumnRow(
-                        col = col,
-                        menu = menu,
-                        onCopyColumn = onCopyColumn,
-                        target = target?.copy(column = col.name),
-                    )
+            loading -> {
+                Unit
+            }
+
+            columns.isNullOrEmpty() -> {
+                Text(
+                    text = str(StrKey.NONE_PAREN),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, top = 1.dp),
+                )
+            }
+
+            else -> {
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    columns.forEach { col ->
+                        ColumnRow(
+                            col = col,
+                            menu = menu,
+                            onCopyColumn = onCopyColumn,
+                            target = target?.copy(column = col.name),
+                        )
+                    }
                 }
             }
         }
@@ -2549,48 +2687,48 @@ private fun ColumnRow(
     val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .trackNodeCoordinates(nodeCoords)
-            .focusRing()
-            .then(
-                if (menu != null && target != null) {
-                    Modifier.onRightClick { offset ->
-                        menu.show(
-                            offset,
-                            nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                            target,
-                        )
-                    }
-                } else {
-                    Modifier
-                }
-            )
-            .then(
-                if (onCopyColumn != null && target != null) {
-                    Modifier.clickable(
-                        // 语义动作名：读屏用户听到的是「复制字段 USERNAME」而不是「按钮」
-                        onClickLabel = str(StrKey.COPY_COLUMN, col.name),
-                        role = Role.Button,
-                    ) { onCopyColumn(target) }
-                } else {
-                    Modifier
-                }
-            )
-            // ⚠️ tag 挂在**整行**而不是列名文本上，且这与 [TableLeaf] 一致
-            //（clickable 与 testTag 都在 Row 上）：
-            //
-            // 字段行加上 `clickable` 之后**语义会被合并**（clickable 默认
-            // `mergeDescendants = true`），原先挂在列名 `Text` 上的 tag 被吸收进 Row ——
-            // 合并后的语义树里再也查不到它，而未合并的树里还在，于是测试报的是
-            // 「could not find any node … However, the unmerged tree contains '1' node
-            // that matches」，极难看出真实原因（这次真踩过）。
-            //
-            // 挂整行对测试只会更好：`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，
-            // 正是 [ColumnRow] 上那个 `onRightClick` 挂在的地方；而 tag 名本身就含列名，
-            // 命中哪一行不存在歧义。
-            .testTag(schemaColumnTag(col.name))
-            .padding(top = 1.dp, bottom = 1.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .trackNodeCoordinates(nodeCoords)
+                .focusRing()
+                .then(
+                    if (menu != null && target != null) {
+                        Modifier.onRightClick { offset ->
+                            menu.show(
+                                offset,
+                                nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
+                                target,
+                            )
+                        }
+                    } else {
+                        Modifier
+                    },
+                ).then(
+                    if (onCopyColumn != null && target != null) {
+                        Modifier.clickable(
+                            // 语义动作名：读屏用户听到的是「复制字段 USERNAME」而不是「按钮」
+                            onClickLabel = str(StrKey.COPY_COLUMN, col.name),
+                            role = Role.Button,
+                        ) { onCopyColumn(target) }
+                    } else {
+                        Modifier
+                    },
+                )
+                // ⚠️ tag 挂在**整行**而不是列名文本上，且这与 [TableLeaf] 一致
+                // （clickable 与 testTag 都在 Row 上）：
+                //
+                // 字段行加上 `clickable` 之后**语义会被合并**（clickable 默认
+                // `mergeDescendants = true`），原先挂在列名 `Text` 上的 tag 被吸收进 Row ——
+                // 合并后的语义树里再也查不到它，而未合并的树里还在，于是测试报的是
+                // 「could not find any node … However, the unmerged tree contains '1' node
+                // that matches」，极难看出真实原因（这次真踩过）。
+                //
+                // 挂整行对测试只会更好：`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，
+                // 正是 [ColumnRow] 上那个 `onRightClick` 挂在的地方；而 tag 名本身就含列名，
+                // 命中哪一行不存在歧义。
+                .testTag(schemaColumnTag(col.name))
+                .padding(top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -2663,9 +2801,10 @@ private fun EmptyHint(
     centerContent: Boolean = true,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -2673,11 +2812,12 @@ private fun EmptyHint(
             contentAlignment = if (centerContent) Alignment.Center else Alignment.TopCenter,
         ) {
             Column(
-                modifier = Modifier
-                    // fillMaxWidth 在**内**层：宽度必须占满，否则长单词（无空格的 SQL 片段 /
-                    // 堆栈行）会按固有宽度撑出去、反而触发外层的横向裁切。
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                modifier =
+                    Modifier
+                        // fillMaxWidth 在**内**层：宽度必须占满，否则长单词（无空格的 SQL 片段 /
+                        // 堆栈行）会按固有宽度撑出去、反而触发外层的横向裁切。
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
@@ -2742,19 +2882,21 @@ private fun PreviewTabArea(
                         onDismiss = { exportSql = null },
                         onConfirm = { fmt, sql, dir, name, tbl ->
                             exportSql = null
-                            trackedTaskId = state.startExport(sql, fmt, dir, name, tbl) { result ->
-                                // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
-                                // 后者会把表格换成「读取失败」面板，导出成功不该长那样
-                                // 回调跑在引擎协程里、已经离开了组合作用域，所以这里取文案走 `Msg` 而不是 `str`
-                                val notice = result.fold(
-                                    onSuccess = { Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, it.rowsWritten.toInt(), it.rowsWritten, it.file) },
-                                    onFailure = { Msg.format(StrKey.EXPORT_FAILED_WITH_REASON, it.message) },
-                                )
-                                current.notice = notice
-                                // 严重级别与文案分开写：渲染方据 [TablePreviewTab.noticeIsError]
-                                // 上色，不去解析 notice 的文字。
-                                current.noticeIsError = result.isFailure
-                            }
+                            trackedTaskId =
+                                state.startExport(sql, fmt, dir, name, tbl) { result ->
+                                    // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
+                                    // 后者会把表格换成「读取失败」面板，导出成功不该长那样
+                                    // 回调跑在引擎协程里、已经离开了组合作用域，所以这里取文案走 `Msg` 而不是 `str`
+                                    val notice =
+                                        result.fold(
+                                            onSuccess = { Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, it.rowsWritten.toInt(), it.rowsWritten, it.file) },
+                                            onFailure = { Msg.format(StrKey.EXPORT_FAILED_WITH_REASON, it.message) },
+                                        )
+                                    current.notice = notice
+                                    // 严重级别与文案分开写：渲染方据 [TablePreviewTab.noticeIsError]
+                                    // 上色，不去解析 notice 的文字。
+                                    current.noticeIsError = result.isFailure
+                                }
                         },
                     )
                 }
@@ -2780,16 +2922,17 @@ private fun PreviewTabArea(
                     // 它依赖引擎回传主键列名，而 `DATA.LIST` 目前不回（见该函数 KDoc）。
                     // 失败文案写回 tab.error：错误条已经在预览顶部，位置现成，
                     // 不必为此再引入一个弹窗。
-                    onCellEdit = if (state.isTableEditable(current)) {
-                        { edit ->
-                            scope.launch {
-                                val err = state.updateCell(current, edit)
-                                if (err != null) current.error = err
+                    onCellEdit =
+                        if (state.isTableEditable(current)) {
+                            { edit ->
+                                scope.launch {
+                                    val err = state.updateCell(current, edit)
+                                    if (err != null) current.error = err
+                                }
                             }
-                        }
-                    } else {
-                        null
-                    },
+                        } else {
+                            null
+                        },
                     // 与 onCellEdit 同源但**独立**传：行级「选中行」的 clickable 只在
                     // 真能编辑时才让位，否则只读浏览会整行点不动。
                     cellEditable = state.isTableEditable(current),
@@ -2829,9 +2972,10 @@ private fun TabStrip(
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = str(StrKey.CLOSE_TAB),
-                            modifier = Modifier
-                                .size(16.dp)
-                                .clickable { onClose(index) },
+                            modifier =
+                                Modifier
+                                    .size(16.dp)
+                                    .clickable { onClose(index) },
                         )
                     }
                 },
@@ -2868,9 +3012,10 @@ private fun TableFilterBar(
     var filterOpen by remember(tab) { mutableStateOf(tab.whereClause.isNotBlank()) }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
@@ -2878,9 +3023,10 @@ private fun TableFilterBar(
             onValueChange = { searchDraft = it },
             label = { Text(str(StrKey.SEARCH)) },
             singleLine = true,
-            modifier = Modifier
-                .width(200.dp)
-                .testTag(TABLE_SEARCH_FIELD_TAG),
+            modifier =
+                Modifier
+                    .width(200.dp)
+                    .testTag(TABLE_SEARCH_FIELD_TAG),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearchChange(searchDraft) }),
         )
@@ -2966,10 +3112,11 @@ private fun TableFilterBar(
             onValueChange = { whereDraft = it },
             label = { Text(str(StrKey.WHERE_CONDITION_HINT)) },
             singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp)
-                .testTag(TABLE_FILTER_FIELD_TAG),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                    .testTag(TABLE_FILTER_FIELD_TAG),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onFilterChange(whereDraft) }),
         )
@@ -2983,8 +3130,10 @@ private fun TableFilterBar(
             Text(
                 // 错误一定要就地显示：引擎回的 `ORA-00933` 之类不在这里，
                 // 用户只会看到「刷新后表格空了」，完全无从判断是自己写错了还是引擎挂了
-                text = tab.error?.takeIf { it.isNotBlank() && whereDraft != tab.whereClause }
-                    ?.let { str(StrKey.INVALID_CONDITION, it) } ?: "",
+                text =
+                    tab.error
+                        ?.takeIf { it.isNotBlank() && whereDraft != tab.whereClause }
+                        ?.let { str(StrKey.INVALID_CONDITION, it) } ?: "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 maxLines = 1,
@@ -2996,11 +3145,12 @@ private fun TableFilterBar(
 }
 
 /** 排序预设 —— `(标签, ORDER BY 子句)`。空子句表示「不排序」。 */
-private val ORDER_PRESETS: List<Pair<String, String>> = listOf(
-    Msg.text(StrKey.NO_SORT) to "",
-    Msg.text(StrKey.SORT_FIRST_COL_ASC) to "1 ASC",
-    Msg.text(StrKey.SORT_FIRST_COL_DESC) to "1 DESC",
-)
+private val ORDER_PRESETS: List<Pair<String, String>> =
+    listOf(
+        Msg.text(StrKey.NO_SORT) to "",
+        Msg.text(StrKey.SORT_FIRST_COL_ASC) to "1 ASC",
+        Msg.text(StrKey.SORT_FIRST_COL_DESC) to "1 DESC",
+    )
 
 /**
  * 危险写操作的确认框。
@@ -3022,8 +3172,9 @@ private fun DangerousSqlConfirmDialog(
         text = {
             Column {
                 Text(
-                    text = plural(PluralStrKey.DANGEROUS_SUMMARY, findings.size, findings.size) +
-                        str(StrKey.DANGEROUS_NO_UNDO),
+                    text =
+                        plural(PluralStrKey.DANGEROUS_SUMMARY, findings.size, findings.size) +
+                            str(StrKey.DANGEROUS_NO_UNDO),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -3043,10 +3194,11 @@ private fun DangerousSqlConfirmDialog(
             WinButton(
                 onClick = onConfirm,
                 shape = SundaysPalette.buttonShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
                 modifier = Modifier.testTag(DANGEROUS_CONFIRM_BTN_TAG),
             ) { Text(str(StrKey.EXECUTE_ANYWAY)) }
         },
@@ -3089,11 +3241,15 @@ internal const val SQL_EXPORT_BTN_TAG = "sqlExportBtn"
  * 就把它们剔掉，用户不会因为点了个「导出」而改动了数据。
  */
 internal fun exportStatementsFor(script: String): List<String> =
-    com.langbiantianya.engine.SqlScriptSplitter.split(script)
+    com.langbiantianya.engine.SqlScriptSplitter
+        .split(script)
         .filter { it.isNotBlank() && DangerousSql.isReadOnlyQuery(it) }
 
 /** SQL 工作台「导出」的进度（多语句时用来显示「第 k/N 条」）。 */
-internal data class SqlExportProgress(val done: Int, val total: Int)
+internal data class SqlExportProgress(
+    val done: Int,
+    val total: Int,
+)
 
 /**
  * 多语句导出时给第 [index] 条语句生成文件名。
@@ -3109,7 +3265,11 @@ internal data class SqlExportProgress(val done: Int, val total: Int)
  * 但用户取名成 `报表(1).csv` 时会得到 `报表(1)_1.csv`。把序号插在扩展名前、
  * 只碰扩展名左边那一段，至少不会把括号、引号这类有语法含义的东西搞乱。
  */
-internal fun numberedFileName(base: String, index: Int, total: Int): String {
+internal fun numberedFileName(
+    base: String,
+    index: Int,
+    total: Int,
+): String {
     if (total <= 1) return base
     val dot = base.lastIndexOf('.')
     // 无扩展名 / 隐藏文件（`.env` 这种 dot 在开头）都直接追加
@@ -3126,14 +3286,28 @@ internal fun numberedFileName(base: String, index: Int, total: Int): String {
  * ⚠️ **不能**直接用 `Value.toString()`：那给的是 `string_value: "另一个库的行"`
  * 这种调试串，拿去和真实内容比永远不相等 —— 而值本身其实是对的。
  */
-internal fun unwrapProtoValue(v: ProtoValue): String = when (v.kindCase) {
-    ProtoValue.KindCase.STRING_VALUE -> v.stringValue
-    ProtoValue.KindCase.NUMBER_VALUE ->
-        if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
-        else v.numberValue.toString()
-    ProtoValue.KindCase.BOOL_VALUE -> v.boolValue.toString()
-    else -> ""
-}
+internal fun unwrapProtoValue(v: ProtoValue): String =
+    when (v.kindCase) {
+        ProtoValue.KindCase.STRING_VALUE -> {
+            v.stringValue
+        }
+
+        ProtoValue.KindCase.NUMBER_VALUE -> {
+            if (v.numberValue == kotlin.math.floor(v.numberValue)) {
+                v.numberValue.toLong().toString()
+            } else {
+                v.numberValue.toString()
+            }
+        }
+
+        ProtoValue.KindCase.BOOL_VALUE -> {
+            v.boolValue.toString()
+        }
+
+        else -> {
+            ""
+        }
+    }
 
 /**
  * 导出对话框 —— 选格式与路径，**编辑导出 SQL**，并预览结果。
@@ -3198,17 +3372,19 @@ private fun ExportDialog(
     }
     // 只有选 SQL INSERT 才问目标表；其余格式的「目标表」是参数校验里的硬要求
     val needsTable = format == DatabaseBrowserState.ExportFormat.SQL_INSERT
-    val canSubmit = dir.isNotBlank() && name.isNotBlank() &&
-        (!needsTable || tableName.isNotBlank()) && sql.isNotBlank()
+    val canSubmit =
+        dir.isNotBlank() && name.isNotBlank() &&
+            (!needsTable || tableName.isNotBlank()) && sql.isNotBlank()
     // 选择器是**阻塞**的模态框，绝不能在重组过程中直接调；
     // 也不该让用户等着期间界面是死的 —— 交给 IO 线程，点完再回主线程写回状态
     val pickPath: (Boolean) -> Unit = { wholeFile ->
         scope.launch {
-            val picked = if (wholeFile) {
-                NativePathPicker.pickFile(dir, name)
-            } else {
-                NativePathPicker.pickDirectory(dir, name)
-            } ?: return@launch
+            val picked =
+                if (wholeFile) {
+                    NativePathPicker.pickFile(dir, name)
+                } else {
+                    NativePathPicker.pickDirectory(dir, name)
+                } ?: return@launch
             dir = picked.dir
             if (picked.name.isNotBlank()) name = picked.name
         }
@@ -3224,6 +3400,7 @@ private fun ExportDialog(
     // 预览代次：SQL 一改，上一次的结果立刻作废 —— 否则用户看到的表格
     // 属于上一条语句，而对话框里摆着新写的 SQL，两者对不上却没有任何提示。
     var previewGen by remember { mutableStateOf(0) }
+
     fun invalidatePreview() {
         previewGen++
         preview = null
@@ -3236,20 +3413,26 @@ private fun ExportDialog(
         previewError = null
         scope.launch {
             val result = state.previewExportSql(snapshot, catalog)
-            if (gen != previewGen) return@launch   // 迟到的响应直接丢
+            if (gen != previewGen) return@launch // 迟到的响应直接丢
             result
-                .onSuccess { preview = it; previewError = null }
-                .onFailure { preview = null; previewError = it.message ?: Msg.text(StrKey.PREVIEW_FAILED) }
+                .onSuccess {
+                    preview = it
+                    previewError = null
+                }.onFailure {
+                    preview = null
+                    previewError = it.message ?: Msg.text(StrKey.PREVIEW_FAILED)
+                }
             previewing = false
         }
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.92f)
-                .testTag(EXPORT_DIALOG_TAG),
+            modifier =
+                Modifier
+                    .fillMaxWidth(0.94f)
+                    .fillMaxHeight(0.92f)
+                    .testTag(EXPORT_DIALOG_TAG),
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surface,
         ) {
@@ -3264,12 +3447,13 @@ private fun ExportDialog(
                     Spacer(Modifier.width(12.dp))
                     if (statementCount > 1) {
                         Text(
-                            text = plural(
-                PluralStrKey.EXPORT_STATEMENTS_TO_FILES,
-                statementCount,
-                statementCount,
-                statementCount,
-            ),
+                            text =
+                                plural(
+                                    PluralStrKey.EXPORT_STATEMENTS_TO_FILES,
+                                    statementCount,
+                                    statementCount,
+                                    statementCount,
+                                ),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -3377,7 +3561,10 @@ private fun ExportDialog(
                     // 需要写长 SQL 时它自己内部滚动，不影响可用性。
                     CodeEditorWithToolbar(
                         text = sql,
-                        onTextChange = { sql = it; invalidatePreview() },
+                        onTextChange = {
+                            sql = it
+                            invalidatePreview()
+                        },
                         languageId = state.sqlDialectProfile().languageId,
                         editorState = rememberCodeEditorState(sql),
                         showLanguageSwitcher = false,
@@ -3412,19 +3599,27 @@ private fun ExportDialog(
                     }
                     Spacer(Modifier.height(4.dp))
                     when {
-                        previewError != null -> Text(
-                            text = previewError!!,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        preview == null -> Text(
-                            text = str(StrKey.PREVIEW_EMPTY_HINT),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        previewError != null -> {
+                            Text(
+                                text = previewError!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
+                        preview == null -> {
+                            Text(
+                                text = str(StrKey.PREVIEW_EMPTY_HINT),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
                         // 结果表自己内部滚动（heightIn），不再撑高外层内容区 ——
                         // 否则一屏 100 行会把「开始导出」推到很远的下方
-                        else -> SqlPreviewTable(preview!!)
+                        else -> {
+                            SqlPreviewTable(preview!!)
+                        }
                     }
                 }
 
@@ -3471,16 +3666,18 @@ data class SqlPreviewRows(
 @Composable
 private fun SqlPreviewTable(preview: SqlPreviewRows) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 240.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 240.dp)
+                .verticalScroll(rememberScrollState()),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             preview.columns.forEach { col ->
                 Text(
@@ -3503,9 +3700,10 @@ private fun SqlPreviewTable(preview: SqlPreviewRows) {
         } else {
             preview.rows.forEach { row ->
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                 ) {
                     preview.columns.forEach { col ->
                         Text(
@@ -3521,10 +3719,13 @@ private fun SqlPreviewTable(preview: SqlPreviewRows) {
             }
         }
         Text(
-            text = plural(PluralStrKey.ROWS_COUNT, preview.rows.size, preview.rows.size) +
-                if (preview.truncated) {
-                    plural(PluralStrKey.ROWS_TRUNCATED, preview.rows.size, preview.rows.size)
-                } else "",
+            text =
+                plural(PluralStrKey.ROWS_COUNT, preview.rows.size, preview.rows.size) +
+                    if (preview.truncated) {
+                        plural(PluralStrKey.ROWS_TRUNCATED, preview.rows.size, preview.rows.size)
+                    } else {
+                        ""
+                    },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(8.dp),
@@ -3588,11 +3789,12 @@ private fun ExportProgressDialog(
                 Text(
                     // 还没收到第一帧时显示「正在连接…」而不是「0 行」——
                     // 「0 行」会被读成「导出失败」，那正是我们要避免的误读
-                    text = if (rowsWritten > 0) {
-                        plural(PluralStrKey.EXPORTED_ROWS_PROGRESS, rowsWritten.toInt(), rowsWritten)
-                    } else {
-                        str(StrKey.CONNECTING_ENGINE)
-                    },
+                    text =
+                        if (rowsWritten > 0) {
+                            plural(PluralStrKey.EXPORTED_ROWS_PROGRESS, rowsWritten.toInt(), rowsWritten)
+                        } else {
+                            str(StrKey.CONNECTING_ENGINE)
+                        },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag(EXPORT_PROGRESS_ROWS_TAG),
@@ -3655,9 +3857,10 @@ private fun PreviewTabContent(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -3667,33 +3870,42 @@ private fun PreviewTabContent(
                 )
                 Spacer(Modifier.width(12.dp))
                 when {
-                    tab.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(str(StrKey.LOADING), style = MaterialTheme.typography.labelMedium)
+                    tab.loading -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(str(StrKey.LOADING), style = MaterialTheme.typography.labelMedium)
+                        }
                     }
-                    tab.error != null -> Text(
-                        text = str(StrKey.ERROR_PREFIX, tab.error),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        // **必须限一行**：这一行与下方 `fillMaxSize()` 的 DataTable 同处一个
-                        // Column，报错有几百字符时会把表格挤成 0 高 —— 表格整个消失，
-                        // 而用户真正需要看的长报错反而被压在这一行里。完整内容在下方错误区可滚。
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    else -> Text(
-                        text = plural(
-                            PluralStrKey.PAGINATION_SUMMARY,
-                            tab.total.toInt(),
-                            tab.total,
-                            tab.page,
-                            tab.pageSize,
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+
+                    tab.error != null -> {
+                        Text(
+                            text = str(StrKey.ERROR_PREFIX, tab.error),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            // **必须限一行**：这一行与下方 `fillMaxSize()` 的 DataTable 同处一个
+                            // Column，报错有几百字符时会把表格挤成 0 高 —— 表格整个消失，
+                            // 而用户真正需要看的长报错反而被压在这一行里。完整内容在下方错误区可滚。
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    else -> {
+                        Text(
+                            text =
+                                plural(
+                                    PluralStrKey.PAGINATION_SUMMARY,
+                                    tab.total.toInt(),
+                                    tab.total,
+                                    tab.page,
+                                    tab.pageSize,
+                                ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 // 「非读取结果」的提示单独占一行：导出成功/失败**不能**塞进 [TablePreviewTab.error]。
                 //
@@ -3710,10 +3922,12 @@ private fun PreviewTabContent(
                         // 原来这里是 `notice.startsWith("导出失败")`。改成读
                         // [TablePreviewTab.noticeIsError]：中文前缀判定在任何非中文界面下
                         // 恒为 false，导出失败会被静默染成成功色 —— 见该字段的 KDoc。
-                        color = if (tab.noticeIsError)
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.primary,
+                        color =
+                            if (tab.noticeIsError) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 12.dp),
@@ -3733,37 +3947,48 @@ private fun PreviewTabContent(
             // 错误分支**必须排在最前**：翻页失败时 columns 仍留着上一页的、rows 已清空，
             // 若按「有列就画表格」的顺序判断，用户看到的是一张有表头但零行的空表，
             // 真正的失败原因只在上方那一行被省略号截断的提示里。
-            tab.error != null -> EmptyHint(
-                title = str(StrKey.READ_FAILED),
-                description = tab.error,
-                centerContent = false,
-                modifier = Modifier.fillMaxSize(),
-            )
-            tab.columns.isNotEmpty() || tab.rows.isNotEmpty() -> DataTable(
-                columns = tab.columns,
-                rows = tab.rows,
-                modifier = Modifier.fillMaxSize(),
-                pageSize = tab.pageSize.toPageSize(),
-                onPageSizeChange = onPageSizeChange,
-                currentPage = tab.page,
-                onPageChange = onPageChange,
-                // 引擎回的是 Long（表可能上亿行），DataTable 要 Int。
-                // 饱和到 Int.MAX_VALUE 而不是直接 toInt()：后者在 >21 亿行时会绕成负数，
-                // 算出 totalPages 为负，分页栏直接消失。
-                totalCount = tab.total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
-                // 预览是**引擎侧**分页：rows 已经是当前页，DataTable 再本地切一次就见不到第 2 页了
-                serverSidePaging = true,
-                fillParentHeight = false,
-                // 传 null = 只读。什么时候能传非 null，见 [DatabaseBrowserState.isTableEditable]
-                onCellEdit = onCellEdit,
-                cellEditable = cellEditable,
-            )
-            !tab.loading && tab.error == null -> EmptyHint(
-                title = str(StrKey.NO_DATA),
-                description = str(StrKey.NO_DATA_HINT),
-                modifier = Modifier.fillMaxSize(),
-            )
-            else -> Spacer(Modifier.fillMaxSize())
+            tab.error != null -> {
+                EmptyHint(
+                    title = str(StrKey.READ_FAILED),
+                    description = tab.error,
+                    centerContent = false,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            tab.columns.isNotEmpty() || tab.rows.isNotEmpty() -> {
+                DataTable(
+                    columns = tab.columns,
+                    rows = tab.rows,
+                    modifier = Modifier.fillMaxSize(),
+                    pageSize = tab.pageSize.toPageSize(),
+                    onPageSizeChange = onPageSizeChange,
+                    currentPage = tab.page,
+                    onPageChange = onPageChange,
+                    // 引擎回的是 Long（表可能上亿行），DataTable 要 Int。
+                    // 饱和到 Int.MAX_VALUE 而不是直接 toInt()：后者在 >21 亿行时会绕成负数，
+                    // 算出 totalPages 为负，分页栏直接消失。
+                    totalCount = tab.total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+                    // 预览是**引擎侧**分页：rows 已经是当前页，DataTable 再本地切一次就见不到第 2 页了
+                    serverSidePaging = true,
+                    fillParentHeight = false,
+                    // 传 null = 只读。什么时候能传非 null，见 [DatabaseBrowserState.isTableEditable]
+                    onCellEdit = onCellEdit,
+                    cellEditable = cellEditable,
+                )
+            }
+
+            !tab.loading && tab.error == null -> {
+                EmptyHint(
+                    title = str(StrKey.NO_DATA),
+                    description = str(StrKey.NO_DATA_HINT),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            else -> {
+                Spacer(Modifier.fillMaxSize())
+            }
         }
     }
 }
@@ -3799,13 +4024,14 @@ private fun SqlWorkbenchPane(
 ) {
     // 补全候选：库 / 表 / 字段，全部来自已有状态（见 [DatabaseBrowserState.sqlSchemaCompletions]）。
     // 缓存签名见 [schemaCompletionSignature] —— 它刻意不含 `tab.rows`。
-    val schemaCompletions = remember(
-        state.databases,
-        state.tablesByDatabase,
-        schemaCompletionSignature(state.tabs),
-    ) {
-        state.sqlSchemaCompletions()
-    }
+    val schemaCompletions =
+        remember(
+            state.databases,
+            state.tablesByDatabase,
+            schemaCompletionSignature(state.tabs),
+        ) {
+            state.sqlSchemaCompletions()
+        }
 
     Column(modifier = modifier) {
         // 顶部信息条：当前执行的 catalog —— 说明 SQL 会落到哪个库
@@ -3814,9 +4040,10 @@ private fun SqlWorkbenchPane(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -3908,49 +4135,57 @@ private fun SqlWorkbenchPane(
                     if (stmts.isNotEmpty()) {
                         // 每条语句一个任务（见 [DatabaseBrowserState.startExportBatch]）——
                         // 面板要能回答「哪一条失败了」，合成一条就答不了。
-                        trackedTaskIds = state.startExportBatch(
-                            statements = stmts,
-                            format = fmt,
-                            outputDir = dir,
-                            baseFileName = name,
-                            tableName = tbl,
-                        ) { results ->
-                            val ok = results.mapNotNull { it.getOrNull() }
-                            val failed = results.filter { it.isFailure }
-                            sheet?.let { s ->
-                                s.error = when {
-                                    failed.isEmpty() -> null
-                                    // 只报第一条失败的原文，其余只带计数 —— 一屏塞十条
-                                    // 异常既读不下去，也会把「哪条错了」淹没掉
-                                    // 这里在协程里（导出已开跑），不是组合上下文，走 Msg
-                                    else -> Msg.plural(
-                                        PluralStrKey.EXPORT_FAILED_STATEMENTS,
-                                        failed.size,
-                                        failed.size,
-                                        stmts.size,
-                                    ) +
-                                        failed.first().exceptionOrNull()?.message
-                                }
-                                if (ok.isNotEmpty()) {
-                                    s.notice = buildString {
-                                        append(Msg.plural(PluralStrKey.EXPORTED_FILES_COUNT, ok.size, ok.size))
-                                        if (stmts.size > 1) {
-                                            append(Msg.plural(PluralStrKey.STATEMENTS_TOTAL, stmts.size, stmts.size))
+                        trackedTaskIds =
+                            state.startExportBatch(
+                                statements = stmts,
+                                format = fmt,
+                                outputDir = dir,
+                                baseFileName = name,
+                                tableName = tbl,
+                            ) { results ->
+                                val ok = results.mapNotNull { it.getOrNull() }
+                                val failed = results.filter { it.isFailure }
+                                sheet?.let { s ->
+                                    s.error =
+                                        when {
+                                            failed.isEmpty() -> {
+                                                null
+                                            }
+
+                                            // 只报第一条失败的原文，其余只带计数 —— 一屏塞十条
+                                            // 异常既读不下去，也会把「哪条错了」淹没掉
+                                            // 这里在协程里（导出已开跑），不是组合上下文，走 Msg
+                                            else -> {
+                                                Msg.plural(
+                                                    PluralStrKey.EXPORT_FAILED_STATEMENTS,
+                                                    failed.size,
+                                                    failed.size,
+                                                    stmts.size,
+                                                ) +
+                                                    failed.first().exceptionOrNull()?.message
+                                            }
                                         }
-                                        append("：")
-                                        append(
-                                            ok.joinToString("；") {
-                                                it.file.substringAfterLast('\\').substringAfterLast('/')
-                                            },
-                                        )
+                                    if (ok.isNotEmpty()) {
+                                        s.notice =
+                                            buildString {
+                                                append(Msg.plural(PluralStrKey.EXPORTED_FILES_COUNT, ok.size, ok.size))
+                                                if (stmts.size > 1) {
+                                                    append(Msg.plural(PluralStrKey.STATEMENTS_TOTAL, stmts.size, stmts.size))
+                                                }
+                                                append("：")
+                                                append(
+                                                    ok.joinToString("；") {
+                                                        it.file.substringAfterLast('\\').substringAfterLast('/')
+                                                    },
+                                                )
+                                            }
+                                        // 「部分成功」也算失败色：只要有语句没导出来，
+                                        // 用户就该看见这一条不是纯成功播报。判定依据是
+                                        // `failed` 集合本身，不是那句文案长什么样。
+                                        s.noticeIsError = failed.isNotEmpty()
                                     }
-                                    // 「部分成功」也算失败色：只要有语句没导出来，
-                                    // 用户就该看见这一条不是纯成功播报。判定依据是
-                                    // `failed` 集合本身，不是那句文案长什么样。
-                                    s.noticeIsError = failed.isNotEmpty()
                                 }
                             }
-                        }
                     }
                 },
             )
@@ -3958,22 +4193,24 @@ private fun SqlWorkbenchPane(
         // 进度弹窗跟踪本次发起的全部任务；任一条还在跑就显示。
         // 「后台运行」只把弹窗收起来 —— 任务在 [DatabaseBrowserState.backgroundTasks] 里继续，
         // 工具栏的「任务 (N)」入口能看到（见 [BrowserToolBar]）。
-        val trackedTasks = trackedTaskIds.mapNotNull { id ->
-            state.backgroundTasks.firstOrNull { it.id == id }
-        }
+        val trackedTasks =
+            trackedTaskIds.mapNotNull { id ->
+                state.backgroundTasks.firstOrNull { it.id == id }
+            }
         val anyRunning = trackedTasks.any { it.isRunning }
         if (anyRunning) {
             ExportProgressDialog(
-                fileName = if (trackedTasks.size > 1) {
-                    plural(
-                        PluralStrKey.STATEMENTS_PROGRESS,
-                        trackedTasks.size,
-                        trackedTasks.count { it.isRunning },
-                        trackedTasks.size,
-                    )
-                } else {
-                    trackedTasks.firstOrNull()?.title ?: "export"
-                },
+                fileName =
+                    if (trackedTasks.size > 1) {
+                        plural(
+                            PluralStrKey.STATEMENTS_PROGRESS,
+                            trackedTasks.size,
+                            trackedTasks.count { it.isRunning },
+                            trackedTasks.size,
+                        )
+                    } else {
+                        trackedTasks.firstOrNull()?.title ?: "export"
+                    },
                 outputDir = trackedTasks.firstOrNull()?.subtitle.orEmpty(),
                 rowsWritten = trackedTasks.firstOrNull { it.isRunning }?.progress ?: 0L,
                 onBackground = { trackedTaskIds = emptyList() },
@@ -3986,9 +4223,10 @@ private fun SqlWorkbenchPane(
                     title = str(StrKey.NO_EDITABLE_SQL_SHEET),
                     description = str(StrKey.NO_EDITABLE_SQL_SHEET_HINT),
                     // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
                 )
             } else {
                 CodeEditorWithToolbar(
@@ -4055,10 +4293,11 @@ private fun SqlWorkbenchPane(
                                     }
                                 },
                                 shape = SundaysPalette.buttonShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                ),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    ),
                             ) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
@@ -4093,10 +4332,11 @@ private fun SqlWorkbenchPane(
                             WinButton(
                                 onClick = { state.cancelSql() },
                                 shape = SundaysPalette.buttonShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                ),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    ),
                             ) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
@@ -4140,17 +4380,19 @@ private fun SqlWorkbenchPane(
                             Text(str(StrKey.EXPORT))
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.6f),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(0.6f),
                 )
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SqlResultArea(
                 sheet = sheet,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.4f),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(0.4f),
             )
         }
     }
@@ -4205,10 +4447,11 @@ private fun WorkbenchTabStrip(
     var renameTarget by remember { mutableStateOf<Int?>(null) }
     val scrollState = rememberScrollState()
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 4.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -4225,9 +4468,10 @@ private fun WorkbenchTabStrip(
             containerColor = tabStripContainerColor(),
             contentColor = MaterialTheme.colorScheme.onSurface,
             divider = {},
-            modifier = Modifier
-                .weight(1f)
-                .verticalWheelScrollsHorizontally(scrollState),
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .verticalWheelScrollsHorizontally(scrollState),
         ) {
             titles.forEachIndexed { index, title ->
                 Tab(
@@ -4244,9 +4488,10 @@ private fun WorkbenchTabStrip(
                                 Icon(
                                     imageVector = Icons.Filled.Close,
                                     contentDescription = removeDescription,
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clickable { onRemove(index) },
+                                    modifier =
+                                        Modifier
+                                            .size(16.dp)
+                                            .clickable { onRemove(index) },
                                 )
                             }
                         }
@@ -4327,18 +4572,19 @@ private fun TabRenameDialog(
                     onValueChange = { value = it },
                     singleLine = true,
                     label = { Text(str(StrKey.NAME)) },
-                    modifier = Modifier
-                        .width(280.dp)
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.Enter || event.key == Key.NumPadEnter)
-                            ) {
-                                onConfirm(value)
-                                true
-                            } else {
-                                false
-                            }
-                        },
+                    modifier =
+                        Modifier
+                            .width(280.dp)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                                ) {
+                                    onConfirm(value)
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -4404,20 +4650,20 @@ private fun SqlResultArea(
         // 第一眼要看到的是「文件已经写到哪儿了」。
         if (sheet?.notice != null) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        // 失败时整条染错误色 —— 由 [SqlSheet.noticeIsError] 决定，
-                        // **不再**靠 `notice.startsWith("导出失败")` 那种中文前缀判定：
-                        // 一旦界面语言不是中文，那个判断恒为 false，所有失败提示都会
-                        // 静默变回成功色。这是从数据模型上修，不是从文案上绕。
-                        if (sheet.noticeIsError) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        }
-                    )
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            // 失败时整条染错误色 —— 由 [SqlSheet.noticeIsError] 决定，
+                            // **不再**靠 `notice.startsWith("导出失败")` 那种中文前缀判定：
+                            // 一旦界面语言不是中文，那个判断恒为 false，所有失败提示都会
+                            // 静默变回成功色。这是从数据模型上修，不是从文案上绕。
+                            if (sheet.noticeIsError) {
+                                MaterialTheme.colorScheme.errorContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                        ).padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -4438,86 +4684,105 @@ private fun SqlResultArea(
             // ⚠️ 有导出结果时**不要**再显示「尚未执行 SQL」—— 那句话与刚出现的
             // 「已导出 2 个文件」并排，读起来像自相矛盾（导出明明已经发生过了）。
             // 此时只留顶部那行提示，不占满整块区域。
-            sheet == null -> EmptyHint(
-                title = str(StrKey.NO_SQL_EXECUTED),
-                description = str(StrKey.NO_SQL_EXECUTED_HINT),
-                modifier = Modifier.fillMaxSize(),
-            )
+            sheet == null -> {
+                EmptyHint(
+                    title = str(StrKey.NO_SQL_EXECUTED),
+                    description = str(StrKey.NO_SQL_EXECUTED_HINT),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
             sheet.notice != null && sheet.error == null &&
                 sheet.rows.isEmpty() && sheet.affectedRows == null && !sheet.running -> {
                 // 占位：结果区空，但已经有话说清楚了（顶部那行）
             }
-            sheet.running -> Box(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(str(StrKey.EXECUTING), style = MaterialTheme.typography.labelMedium)
-                }
-            }
-            sheet.error != null -> EmptyHint(
-                title = str(StrKey.EXECUTE_FAILED),
-                description = sheet.error,
-                // 报错顶对齐、从上往下读
-                centerContent = false,
-                modifier = Modifier.fillMaxSize(),
-            )
-            sheet.affectedRows != null -> Box(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-            ) {
-                Text(
-                    // `affectedRows` 是 `by mutableStateOf` 的委托属性，编译器不给智能转换，
-                    // 所以这里显式兜底 —— 外层 `affectedRows != null` 分支已经保证了它非空
-                    text = plural(PluralStrKey.AFFECTED_ROWS, sheet.affectedRows ?: 0, sheet.affectedRows ?: 0),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            sheet.rows.isNotEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+
+            sheet.running -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = plural(PluralStrKey.QUERY_RESULT_ROWS, sheet.rowCount, sheet.rowCount),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // 截断必须**显式**说出来。静默截断等于骗人：用户会以为这张表就这么大，
-                    // 而导出去的数据却是全的。措辞说清「收到多少」而不是「一共多少」——
-                    // 后者我们并不知道，引擎没有回总行数。
-                    if (sheet.rowsTruncated) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = plural(PluralStrKey.TRUNCATED_MAX_ROWS, SQL_RESULT_MAX_ROWS, SQL_RESULT_MAX_ROWS),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                        Text(str(StrKey.EXECUTING), style = MaterialTheme.typography.labelMedium)
                     }
                 }
-                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                DataTable(
-                    columns = sheet.columns,
-                    rows = sheet.rows,
+            }
+
+            sheet.error != null -> {
+                EmptyHint(
+                    title = str(StrKey.EXECUTE_FAILED),
+                    description = sheet.error,
+                    // 报错顶对齐、从上往下读
+                    centerContent = false,
                     modifier = Modifier.fillMaxSize(),
-                    pageSize = sheet.resultPageSize,
-                    onPageSizeChange = { sheet.resultPageSize = it },
-                    currentPage = sheet.resultPage,
-                    onPageChange = { sheet.resultPage = it },
-                    selectedRowId = sheet.selectedRowId,
-                    onSelectedRowChange = { sheet.selectedRowId = it?.id },
-                    fillParentHeight = false,
                 )
             }
-            else -> EmptyHint(
-                title = str(StrKey.NO_SQL_EXECUTED),
-                description = str(StrKey.NO_SQL_EXECUTED_HINT),
-                modifier = Modifier.fillMaxSize(),
-            )
+
+            sheet.affectedRows != null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                ) {
+                    Text(
+                        // `affectedRows` 是 `by mutableStateOf` 的委托属性，编译器不给智能转换，
+                        // 所以这里显式兜底 —— 外层 `affectedRows != null` 分支已经保证了它非空
+                        text = plural(PluralStrKey.AFFECTED_ROWS, sheet.affectedRows ?: 0, sheet.affectedRows ?: 0),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            sheet.rows.isNotEmpty() -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = plural(PluralStrKey.QUERY_RESULT_ROWS, sheet.rowCount, sheet.rowCount),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // 截断必须**显式**说出来。静默截断等于骗人：用户会以为这张表就这么大，
+                        // 而导出去的数据却是全的。措辞说清「收到多少」而不是「一共多少」——
+                        // 后者我们并不知道，引擎没有回总行数。
+                        if (sheet.rowsTruncated) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = plural(PluralStrKey.TRUNCATED_MAX_ROWS, SQL_RESULT_MAX_ROWS, SQL_RESULT_MAX_ROWS),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    DataTable(
+                        columns = sheet.columns,
+                        rows = sheet.rows,
+                        modifier = Modifier.fillMaxSize(),
+                        pageSize = sheet.resultPageSize,
+                        onPageSizeChange = { sheet.resultPageSize = it },
+                        currentPage = sheet.resultPage,
+                        onPageChange = { sheet.resultPage = it },
+                        selectedRowId = sheet.selectedRowId,
+                        onSelectedRowChange = { sheet.selectedRowId = it?.id },
+                        fillParentHeight = false,
+                    )
+                }
+            }
+
+            else -> {
+                EmptyHint(
+                    title = str(StrKey.NO_SQL_EXECUTED),
+                    description = str(StrKey.NO_SQL_EXECUTED_HINT),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
@@ -4561,9 +4826,10 @@ private fun GenerateWorkbenchPane(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -4601,9 +4867,10 @@ private fun GenerateWorkbenchPane(
         )
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -4618,14 +4885,15 @@ private fun GenerateWorkbenchPane(
                     onClick = { state.generateLuaVersion = version },
                     enabled = connected,
                     label = { Text(version) },
-                    colors = if (selected) {
-                        AssistChipDefaults.assistChipColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    } else {
-                        AssistChipDefaults.assistChipColors()
-                    },
+                    colors =
+                        if (selected) {
+                            AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        } else {
+                            AssistChipDefaults.assistChipColors()
+                        },
                 )
             }
         }
@@ -4637,9 +4905,10 @@ private fun GenerateWorkbenchPane(
                     title = str(StrKey.NO_EDITABLE_SCRIPT),
                     description = str(StrKey.NO_EDITABLE_SCRIPT_HINT),
                     // 用 weight 而非 fillMaxSize —— 与下方两个 weighted 子项共存时不会互相挤掉
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
                 )
             } else {
                 CodeEditorWithToolbar(
@@ -4665,17 +4934,19 @@ private fun GenerateWorkbenchPane(
                             Text(if (state.generateRunning) str(StrKey.GENERATING) else str(StrKey.RUN_GENERATE))
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.6f),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(0.6f),
                 )
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             GenerateResultArea(
                 state = state,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.4f),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(0.4f),
             )
         }
     }
@@ -4697,76 +4968,92 @@ private fun GenerateResultArea(
         modifier = modifier,
     ) {
         when {
-            state.generateRunning -> Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                Text(
-                    text = plural(
-                PluralStrKey.GENERATING_INSERTED,
-                state.generateTotalInserted.toInt(),
-                state.generateTotalInserted,
-            ),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            state.generateError != null -> EmptyHint(
-                title = str(StrKey.GENERATE_FAILED),
-                description = state.generateError,
-                centerContent = false,
-                modifier = Modifier.fillMaxSize(),
-            )
-            state.hasGenerateResult -> Column(modifier = Modifier.fillMaxSize()) {
+            state.generateRunning -> {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
                     Text(
-                        text = plural(
-                PluralStrKey.GENERATE_COMPLETE_SUMMARY,
-                state.generateTotalInserted.toInt(),
-                state.generateTotalInserted,
-                state.generateTablesProcessed,
-            ),
+                        text =
+                            plural(
+                                PluralStrKey.GENERATING_INSERTED,
+                                state.generateTotalInserted.toInt(),
+                                state.generateTotalInserted,
+                            ),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                DataTable(
-                    columns = GENERATE_RESULT_COLUMNS,
-                    rows = state.generateResultRows(),
+            }
+
+            state.generateError != null -> {
+                EmptyHint(
+                    title = str(StrKey.GENERATE_FAILED),
+                    description = state.generateError,
+                    centerContent = false,
                     modifier = Modifier.fillMaxSize(),
-                    pageSize = state.generateResultPageSize,
-                    onPageSizeChange = { state.generateResultPageSize = it },
-                    currentPage = state.generateResultPage,
-                    onPageChange = { state.generateResultPage = it },
-                    selectedRowId = state.generateResultSelectedRowId,
-                    onSelectedRowChange = { state.generateResultSelectedRowId = it?.id },
-                    fillParentHeight = false,
                 )
             }
-            else -> EmptyHint(
-                title = str(StrKey.NO_GENERATE_EXECUTED),
-                description = str(StrKey.NO_GENERATE_EXECUTED_HINT),
-                modifier = Modifier.fillMaxSize(),
-            )
+
+            state.hasGenerateResult -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text =
+                                plural(
+                                    PluralStrKey.GENERATE_COMPLETE_SUMMARY,
+                                    state.generateTotalInserted.toInt(),
+                                    state.generateTotalInserted,
+                                    state.generateTablesProcessed,
+                                ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    DataTable(
+                        columns = GENERATE_RESULT_COLUMNS,
+                        rows = state.generateResultRows(),
+                        modifier = Modifier.fillMaxSize(),
+                        pageSize = state.generateResultPageSize,
+                        onPageSizeChange = { state.generateResultPageSize = it },
+                        currentPage = state.generateResultPage,
+                        onPageChange = { state.generateResultPage = it },
+                        selectedRowId = state.generateResultSelectedRowId,
+                        onSelectedRowChange = { state.generateResultSelectedRowId = it?.id },
+                        fillParentHeight = false,
+                    )
+                }
+            }
+
+            else -> {
+                EmptyHint(
+                    title = str(StrKey.NO_GENERATE_EXECUTED),
+                    description = str(StrKey.NO_GENERATE_EXECUTED_HINT),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
 
 /** 造数结果表列定义（脚本 / 目标表 / 插入行数）。 */
-private val GENERATE_RESULT_COLUMNS = listOf(
-    TableColumn(key = "script", header = Msg.text(StrKey.SCRIPT)),
-    TableColumn(key = "table", header = Msg.text(StrKey.TARGET_TABLE)),
-    TableColumn(key = "inserted", header = Msg.text(StrKey.INSERTED_ROWS)),
-)
+private val GENERATE_RESULT_COLUMNS =
+    listOf(
+        TableColumn(key = "script", header = Msg.text(StrKey.SCRIPT)),
+        TableColumn(key = "table", header = Msg.text(StrKey.TARGET_TABLE)),
+        TableColumn(key = "inserted", header = Msg.text(StrKey.INSERTED_ROWS)),
+    )
 
 /**
  * 连接方言 → SQL 高亮档位。
@@ -4777,14 +5064,15 @@ private val GENERATE_RESULT_COLUMNS = listOf(
  * 映射放在 desktopApp 而不是 `:shared` 的编辑器模块 —— 编辑器只认 [SqlDialectProfile]，
  * 不依赖连接配置（依赖方向见 desktopApp/ARCHITECTURE.md）。
  */
-private fun DialectType.toSqlDialectProfile(): SqlDialectProfile = when (this) {
-    DialectType.MYSQL -> SqlDialectProfile.MYSQL
-    DialectType.POSTGRESQL -> SqlDialectProfile.POSTGRESQL
-    DialectType.H2 -> SqlDialectProfile.H2
-    DialectType.DUCKDB -> SqlDialectProfile.DUCKDB
-    DialectType.SQLITE -> SqlDialectProfile.SQLITE
-    DialectType.UNKNOWN -> SqlDialectProfile.STANDARD
-}
+private fun DialectType.toSqlDialectProfile(): SqlDialectProfile =
+    when (this) {
+        DialectType.MYSQL -> SqlDialectProfile.MYSQL
+        DialectType.POSTGRESQL -> SqlDialectProfile.POSTGRESQL
+        DialectType.H2 -> SqlDialectProfile.H2
+        DialectType.DUCKDB -> SqlDialectProfile.DUCKDB
+        DialectType.SQLITE -> SqlDialectProfile.SQLITE
+        DialectType.UNKNOWN -> SqlDialectProfile.STANDARD
+    }
 
 // ============================================================================
 // 数据库浏览器状态机 —— 与 UI 解耦, 由 [DatabaseBrowserScreen] 创建
@@ -4991,9 +5279,10 @@ private fun Int.toPageSize(): PageSize =
  */
 internal fun schemaCompletionSignature(
     tabs: List<TablePreviewTab>,
-): List<Triple<String, String, List<Pair<String, String>>>> = tabs.map { tab ->
-    Triple(tab.schema, tab.tableName, tab.columns.map { it.key to it.header })
-}
+): List<Triple<String, String, List<Pair<String, String>>>> =
+    tabs.map { tab ->
+        Triple(tab.schema, tab.tableName, tab.columns.map { it.key to it.header })
+    }
 
 /**
  * 数据库浏览屏幕的状态机 —— 维护数据库/表加载、标签页打开/关闭/选择,
@@ -5064,7 +5353,9 @@ class DatabaseBrowserState(
      * 用户能看表却看不到视图和触发器，而这两类恰恰是排查「数据从哪来 / 会不会被改」时
      * 最先要看的东西。
      */
-    enum class DatabaseObjectKind(val labelKey: StrKey) {
+    enum class DatabaseObjectKind(
+        val labelKey: StrKey,
+    ) {
         VIEW(StrKey.VIEWS),
         TRIGGER(StrKey.TRIGGERS),
         FUNCTION(StrKey.ROUTINES),
@@ -5084,7 +5375,9 @@ class DatabaseBrowserState(
     val objectLoadError: Map<String, String> get() = _objectLoadError
 
     /** 表级对象的三种：**字段 / 索引 / 外键**（引擎侧要 `table_name`，所以挂表节点下）。 */
-    enum class TableObjectKind(val labelKey: StrKey) {
+    enum class TableObjectKind(
+        val labelKey: StrKey,
+    ) {
         /** 字段 —— 走 `TABLE.LIST`（`tableColumnListRequest`），值结构化，存 [_tableColumns]。 */
         COLUMNS(StrKey.COLUMN),
 
@@ -5126,15 +5419,22 @@ class DatabaseBrowserState(
      */
     private val _tableColumns = mutableStateMapOf<String, List<ColumnInfo>>()
 
+    /** 字段表本身 —— 与 [_tableObjects] 同形态的只读出口。 */
+    val tableColumns: Map<String, List<ColumnInfo>> get() = _tableColumns
+
     /** 表级对象加载错误：`"库::表::类型" -> 文案`。 */
     private val _tableObjectError = mutableStateMapOf<String, String>()
     val tableObjectError: Map<String, String> get() = _tableObjectError
 
-    fun columnsOf(database: String, table: String): List<ColumnInfo>? =
-        _tableColumns["$database::$table"]
+    fun columnsOf(
+        database: String,
+        table: String,
+    ): List<ColumnInfo>? = _tableColumns["$database::$table"]
 
-    fun isTableObjectLoading(database: String, table: String): Boolean =
-        loadingTableObjects.any { it.first == "$database::$table" }
+    fun isTableObjectLoading(
+        database: String,
+        table: String,
+    ): Boolean = loadingTableObjects.any { it.first == "$database::$table" }
 
     /** `"库::表" -> 该类对象名列表。 */
     private val _tableObjects = mutableStateMapOf<String, Map<TableObjectKind, List<String>>>()
@@ -5152,7 +5452,10 @@ class DatabaseBrowserState(
      * 与库级对象不同，这里**不缓存**：每张表的对象是「这张表的」，不存在跨表复用，
      * 而缓存会让「别处新建的索引看不到」。
      */
-    fun toggleTableObjects(database: String, table: String) {
+    fun toggleTableObjects(
+        database: String,
+        table: String,
+    ) {
         val slot = "$database::$table"
         if (slot in expandedTableObjects) {
             expandedTableObjects.remove(slot)
@@ -5238,21 +5541,31 @@ class DatabaseBrowserState(
         val dbIsCurrent = target.database.equals(currentConnection?.database, ignoreCase = true)
         val tableText = SqlIdentifier.tableRef(dialect, target.database, target.schema, table ?: "", dbIsCurrent)
         return when {
-            table != null && column != null ->
+            table != null && column != null -> {
                 // 字段接在表引用后面 —— PG 认 `catalog.schema.table.column` 四段式
                 // （实测 `SELECT "examquestions"."public"."t1"."l2" FROM ...` 通过）
                 tableText + "." + SqlIdentifier.quote(dialect, column)
-            table != null -> tableText
-            else -> SqlIdentifier.databaseRef(dialect, target.database)
+            }
+
+            table != null -> {
+                tableText
+            }
+
+            else -> {
+                SqlIdentifier.databaseRef(dialect, target.database)
+            }
         }
     }
 
     /** 节点显示用的裸名 —— 「复制名称」写进剪贴板的内容。 */
-    fun treePlainName(target: TreeTarget): String =
-        target.column ?: target.table ?: target.database
+    fun treePlainName(target: TreeTarget): String = target.column ?: target.table ?: target.database
 
     /** 复制成功后推一条通知（失败由各调用点自己带原因推）。 */
-    private fun notifyCopied(what: String, detail: String, ok: Boolean) {
+    private fun notifyCopied(
+        what: String,
+        detail: String,
+        ok: Boolean,
+    ) {
         val center = notifications ?: return
         center.push(
             if (ok) AppNotification.Severity.SUCCESS else AppNotification.Severity.ERROR,
@@ -5271,7 +5584,10 @@ class DatabaseBrowserState(
      * 占用 / Wayland 无剪贴板服务，三种原因用户都看不出来）。推一条错误通知，
      * 用户至少知道是**这一步**失败了，而不是应用卡了。
      */
-    fun copyTreeText(target: TreeTarget, quoted: Boolean) {
+    fun copyTreeText(
+        target: TreeTarget,
+        quoted: Boolean,
+    ) {
         val what = if (quoted) Msg.text(StrKey.REFERENCE_NAME) else Msg.text(StrKey.NAME)
         val text = if (quoted) treeReferenceText(target) else treePlainName(target)
         notifyCopied(what, text, clipboard(text))
@@ -5303,22 +5619,35 @@ class DatabaseBrowserState(
         // 判据散在两处时，迟早会有一处被漏掉。
         if (table == null || target.column != null) return
         scope.launch {
-            val schema = if (target.schema.isNotBlank()) target.schema
-            else resolveSchemas(database).firstOrNull() ?: ""
-            val resp = runCatching {
-                engine.invoke(engineConn(database = database)) {
-                    category = Category.TABLE
-                    action = Action.GET_DDL
-                    tableRequest = tableRequest {
-                        getDdl = tableGetDdlRequest {
-                            tableName = table
-                            this.schema = schema
-                        }
-                    }
+            val schema =
+                if (target.schema.isNotBlank()) {
+                    target.schema
+                } else {
+                    resolveSchemas(database).firstOrNull() ?: ""
                 }
-            }.getOrNull()
+            val resp =
+                runCatching {
+                    engine.invoke(engineConn(database = database)) {
+                        category = Category.TABLE
+                        action = Action.GET_DDL
+                        tableRequest =
+                            tableRequest {
+                                getDdl =
+                                    tableGetDdlRequest {
+                                        tableName = table
+                                        this.schema = schema
+                                    }
+                            }
+                    }
+                }.getOrNull()
 
-            val ddl = resp?.takeIf { it.success }?.table?.getDdl?.ddl.orEmpty()
+            val ddl =
+                resp
+                    ?.takeIf { it.success }
+                    ?.table
+                    ?.getDdl
+                    ?.ddl
+                    .orEmpty()
             if (ddl.isBlank()) {
                 // 失败原因**用引擎原文**：本项目里「请求成功但结果为空」比「请求失败」
                 // 更难察觉，而 DDL 为空几乎总是因为 schema / 表名对不上 ——
@@ -5327,10 +5656,10 @@ class DatabaseBrowserState(
                 notifyCopied(Msg.text(StrKey.CREATE_TABLE_DDL), reason, ok = false)
             } else {
                 notifyCopied(
-            Msg.text(StrKey.CREATE_TABLE_DDL),
-            Msg.plural(PluralStrKey.DDL_WITH_LENGTH, ddl.length, table, ddl.length),
-            clipboard(ddl),
-        )
+                    Msg.text(StrKey.CREATE_TABLE_DDL),
+                    Msg.plural(PluralStrKey.DDL_WITH_LENGTH, ddl.length, table, ddl.length),
+                    clipboard(ddl),
+                )
             }
         }
     }
@@ -5371,7 +5700,6 @@ class DatabaseBrowserState(
         activePane = pane
     }
 
-
     /**
      * 单个 SQL sheet —— 一份 SQL 文本 + 该 sheet 自己的执行结果。
      *
@@ -5382,7 +5710,9 @@ class DatabaseBrowserState(
      * - [generation] 是本 sheet 的 in-flight 失效代次：重新执行 / 删除时自增，
      *   迟到的行帧据此丢弃（不能让上一轮响应覆盖新一轮状态）
      */
-    class SqlSheet(title: String) {
+    class SqlSheet(
+        title: String,
+    ) {
         /** 标签条上展示的名字（默认 `SQL N`）—— 用户可重命名，见 [renameSqlSheet]。 */
         var title: String by mutableStateOf(title)
 
@@ -5490,11 +5820,12 @@ class DatabaseBrowserState(
         // 该 sheet 可能正在执行 —— 自增代次让其 in-flight 行帧作废
         sqlSheets[index].generation++
         sqlSheets.removeAt(index)
-        selectedSqlIndex = when {
-            sqlSheets.isEmpty() -> -1
-            index >= sqlSheets.size -> sqlSheets.lastIndex
-            else -> index
-        }
+        selectedSqlIndex =
+            when {
+                sqlSheets.isEmpty() -> -1
+                index >= sqlSheets.size -> sqlSheets.lastIndex
+                else -> index
+            }
     }
 
     fun selectSqlSheet(index: Int) {
@@ -5502,7 +5833,10 @@ class DatabaseBrowserState(
     }
 
     /** 重命名 SQL sheet —— 去首尾空白；空名（或纯空白）视为无效，保持原名。 */
-    fun renameSqlSheet(index: Int, title: String) {
+    fun renameSqlSheet(
+        index: Int,
+        title: String,
+    ) {
         val sheet = sqlSheets.getOrNull(index) ?: return
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
@@ -5511,8 +5845,7 @@ class DatabaseBrowserState(
 
     /** 当前连接下激活的 schema —— SQL 执行时作为 catalog 写入 proto config。
      *  默认取第一个展开的数据库，若无则为 `""`（默认 catalog）。 */
-    fun currentSchema(): String =
-        expandedDatabases.firstOrNull() ?: ""
+    fun currentSchema(): String = expandedDatabases.firstOrNull() ?: ""
 
     /**
      * SQL 工作台的高亮档位 —— 按**当前连接的方言**选关键字 / 类型 / 内置函数词表。
@@ -5520,8 +5853,7 @@ class DatabaseBrowserState(
      * 未连接 / 未知方言 → 标准 SQL 档位（`"sql"`）。返回值同时决定编辑器的 `languageId`
      * （高亮 + 格式化）与标题条上显示的方言名。
      */
-    fun sqlDialectProfile(): SqlDialectProfile =
-        currentConnection?.dialect?.toSqlDialectProfile() ?: SqlDialectProfile.STANDARD
+    fun sqlDialectProfile(): SqlDialectProfile = currentConnection?.dialect?.toSqlDialectProfile() ?: SqlDialectProfile.STANDARD
 
     /**
      * SQL 工作台补全用的 schema 候选 —— 库 → 表 → 字段，全部**来自已有状态，零额外请求**。
@@ -5635,35 +5967,38 @@ class DatabaseBrowserState(
             // 因此登记进 activeDatabases —— 否则 close-sheet 的 releasePools 遍历不到它，
             // 池会一直挂着到 JVM 退出。
             activeDatabases.add(schema)
-            val result = runCatching {
-                engine.handle(
-                    request {
-                        id = requestId
-                        this.connection = engineConn(database = schema)
-                        // 事务会话：非空时引擎把本次执行钉在 [beginTransaction] 开的那条
-                        // 连接上（`autocommit=false`），COMMIT / ROLLBACK 之前不会落盘。
-                        // 留空 = 无事务，每条语句独立提交（原有行为）。
-                        sessionId = sheet.transactionSessionId.orEmpty()
-                        category = Category.SQL
-                        action = Action.EXECUTE
-                        sqlRequest = sqlRequest {
-                            execute = sqlExecuteRequest {
-                                this.sql = sql
-                                // **不要**把 catalog（数据库）名写进 schema —— 引擎会把
-                                // req.schema 传给 PoolManager.getConnection → setSearchPath，
-                                // 对 H2 是 `SET SCHEMA "<库名>"` → `Schema "X" not found`，
-                                // 对 PG 是把库名当 schema 设进 search_path。见 engineConnFor 的 KDoc。
-                                this.schema = ""
-                                // 逐 sheet 的开关（见 [SqlSheet.multiStatement]）。引擎侧
-                                // `SqlScriptSplitter` 只切顶层 `;`，引号 / 注释 / PG 美元引用里
-                                // 的分号不会被误切。
-                                multiStatement = sheet.multiStatement
-                            }
-                        }
-                    },
-                )
-            }
-            if (gen != sheet.generation) return@launch  // 用户已重新执行 —— 丢弃过期响应
+            val result =
+                runCatching {
+                    engine.handle(
+                        request {
+                            id = requestId
+                            this.connection = engineConn(database = schema)
+                            // 事务会话：非空时引擎把本次执行钉在 [beginTransaction] 开的那条
+                            // 连接上（`autocommit=false`），COMMIT / ROLLBACK 之前不会落盘。
+                            // 留空 = 无事务，每条语句独立提交（原有行为）。
+                            sessionId = sheet.transactionSessionId.orEmpty()
+                            category = Category.SQL
+                            action = Action.EXECUTE
+                            sqlRequest =
+                                sqlRequest {
+                                    execute =
+                                        sqlExecuteRequest {
+                                            this.sql = sql
+                                            // **不要**把 catalog（数据库）名写进 schema —— 引擎会把
+                                            // req.schema 传给 PoolManager.getConnection → setSearchPath，
+                                            // 对 H2 是 `SET SCHEMA "<库名>"` → `Schema "X" not found`，
+                                            // 对 PG 是把库名当 schema 设进 search_path。见 engineConnFor 的 KDoc。
+                                            this.schema = ""
+                                            // 逐 sheet 的开关（见 [SqlSheet.multiStatement]）。引擎侧
+                                            // `SqlScriptSplitter` 只切顶层 `;`，引号 / 注释 / PG 美元引用里
+                                            // 的分号不会被误切。
+                                            multiStatement = sheet.multiStatement
+                                        }
+                                }
+                        },
+                    )
+                }
+            if (gen != sheet.generation) return@launch // 用户已重新执行 —— 丢弃过期响应
             val flow = result.getOrNull()
             if (flow == null) {
                 sheet.error = result.exceptionOrNull()?.message ?: Msg.text(StrKey.EXECUTE_FAILED)
@@ -5716,14 +6051,16 @@ class DatabaseBrowserState(
             if (frames.isNotEmpty()) {
                 val columnNames = frames.flatMap { it.row.valuesMap.keys }.distinct()
                 sheet.columns = columnNames.map { TableColumn(key = it, header = it) }
-                sheet.rows = frames.mapIndexed { idx, frame ->
-                    val idCell = frame.row.valuesMap.entries
-                        .firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
-                    TableRow(
-                        id = idCell?.let { cellValueAsId(it.value) } ?: idx,
-                        cells = frame.row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
-                    )
-                }
+                sheet.rows =
+                    frames.mapIndexed { idx, frame ->
+                        val idCell =
+                            frame.row.valuesMap.entries
+                                .firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
+                        TableRow(
+                            id = idCell?.let { cellValueAsId(it.value) } ?: idx,
+                            cells = frame.row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
+                        )
+                    }
                 sheet.rowCount = frames.size
                 sheet.rowsTruncated = truncated
             } else if (sheet.affectedRows == null && sheet.error == null) {
@@ -5752,13 +6089,14 @@ class DatabaseBrowserState(
         val requestId = sheet.runningRequestId ?: return
         val schema = currentSchema()
         scope.launch {
-            val resp = runCatching {
-                engine.invoke(engineConn(database = schema)) {
-                    category = Category.SYSTEM
-                    action = Action.CANCEL
-                    systemRequest = systemRequest { targetRequestId = requestId }
+            val resp =
+                runCatching {
+                    engine.invoke(engineConn(database = schema)) {
+                        category = Category.SYSTEM
+                        action = Action.CANCEL
+                        systemRequest = systemRequest { targetRequestId = requestId }
+                    }
                 }
-            }
             // 只在**没找到目标**时补一句提示：请求已经自己结束时引擎会回 cancelled=false，
             // 那不是错误，那正是「已经跑完了」。真正失败（gRPC 断了等）才写 error。
             val cancelResp = resp.getOrNull()?.system?.cancel
@@ -5803,7 +6141,11 @@ class DatabaseBrowserState(
     // ------------------------------------------------------------------------
 
     /** 导出格式 —— 与 `ExportRunRequest.format` 一一对应。 */
-    enum class ExportFormat(val labelKey: StrKey, val protoValue: String, val extension: String) {
+    enum class ExportFormat(
+        val labelKey: StrKey,
+        val protoValue: String,
+        val extension: String,
+    ) {
         CSV(StrKey.FORMAT_CSV, "CSV", "csv"),
         JSON_LINES(StrKey.FORMAT_JSON_LINES, "JSON_LINES", "jsonl"),
         SQL_INSERT(StrKey.FORMAT_SQL_INSERT, "SQL_INSERT", "sql"),
@@ -5812,7 +6154,10 @@ class DatabaseBrowserState(
     }
 
     /** 导出结果 —— 引擎终止帧回的实际文件路径。 */
-    data class ExportResult(val file: String, val rowsWritten: Long)
+    data class ExportResult(
+        val file: String,
+        val rowsWritten: Long,
+    )
 
     // --------------------------------------------------------------------
     // 后台任务
@@ -5873,14 +6218,23 @@ class DatabaseBrowserState(
          * 「0 行」会被读成「导出失败」，而引擎启动子进程本来就要几秒。
          */
         val statusLine: String
-            get() = when (status) {
-                Status.RUNNING -> progress?.let { Msg.plural(PluralStrKey.EXPORT_PROGRESS_ROWS, it.toInt(), it) }
-            ?: Msg.text(StrKey.CONNECTING_ENGINE)
-                Status.SUCCEEDED -> detail?.let { Msg.format(StrKey.TASK_DONE_DETAIL, it) }
-            ?: Msg.text(StrKey.DONE)
-                Status.FAILED -> detail?.let { Msg.format(StrKey.TASK_FAILED_DETAIL, it) }
-            ?: Msg.text(StrKey.FAILED)
-            }
+            get() =
+                when (status) {
+                    Status.RUNNING -> {
+                        progress?.let { Msg.plural(PluralStrKey.EXPORT_PROGRESS_ROWS, it.toInt(), it) }
+                            ?: Msg.text(StrKey.CONNECTING_ENGINE)
+                    }
+
+                    Status.SUCCEEDED -> {
+                        detail?.let { Msg.format(StrKey.TASK_DONE_DETAIL, it) }
+                            ?: Msg.text(StrKey.DONE)
+                    }
+
+                    Status.FAILED -> {
+                        detail?.let { Msg.format(StrKey.TASK_FAILED_DETAIL, it) }
+                            ?: Msg.text(StrKey.FAILED)
+                    }
+                }
     }
 
     /**
@@ -5941,41 +6295,41 @@ class DatabaseBrowserState(
         scope.launch {
             exportQuery(sql, format, outputDir, fileName, tableName) { p ->
                 updateTask(taskId) { it.copy(progress = p.rowsWritten) }
-            }
-                .onSuccess { r ->
-                    updateTask(taskId) {
-                        it.copy(
-                            progress = r.rowsWritten,
-                            status = DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED,
-                            detail = r.file,
-                        )
-                    }
-                    notifications?.push(
-                        AppNotification.Severity.SUCCESS,
-                        Msg.format(StrKey.EXPORT_COMPLETE_FILE, fileName),
-                        Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, r.rowsWritten.toInt(), r.rowsWritten, r.file),
+            }.onSuccess { r ->
+                updateTask(taskId) {
+                    it.copy(
+                        progress = r.rowsWritten,
+                        status = DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED,
+                        detail = r.file,
                     )
                 }
-                .onFailure { e ->
-                    updateTask(taskId) {
-                        it.copy(
-                            status = DatabaseBrowserState.BackgroundTask.Status.FAILED,
-                            detail = e.message ?: Msg.text(StrKey.EXPORT_FAILED),
-                        )
-                    }
-                    notifications?.push(
-                        AppNotification.Severity.ERROR,
-                        Msg.format(StrKey.EXPORT_FAILED_FILE, fileName),
-                        e.message ?: Msg.text(StrKey.EXPORT_FAILED),
+                notifications?.push(
+                    AppNotification.Severity.SUCCESS,
+                    Msg.format(StrKey.EXPORT_COMPLETE_FILE, fileName),
+                    Msg.plural(PluralStrKey.EXPORTED_ROWS_TO_FILE, r.rowsWritten.toInt(), r.rowsWritten, r.file),
+                )
+            }.onFailure { e ->
+                updateTask(taskId) {
+                    it.copy(
+                        status = DatabaseBrowserState.BackgroundTask.Status.FAILED,
+                        detail = e.message ?: Msg.text(StrKey.EXPORT_FAILED),
                     )
                 }
-                .also { onComplete(it) }
+                notifications?.push(
+                    AppNotification.Severity.ERROR,
+                    Msg.format(StrKey.EXPORT_FAILED_FILE, fileName),
+                    e.message ?: Msg.text(StrKey.EXPORT_FAILED),
+                )
+            }.also { onComplete(it) }
         }
         return taskId
     }
 
     /** 按 id 更新任务（不存在则忽略 —— 任务可能已被「清除」）。 */
-    private fun updateTask(taskId: String, transform: (DatabaseBrowserState.BackgroundTask) -> DatabaseBrowserState.BackgroundTask) {
+    private fun updateTask(
+        taskId: String,
+        transform: (DatabaseBrowserState.BackgroundTask) -> DatabaseBrowserState.BackgroundTask,
+    ) {
         val idx = backgroundTasks.indexOfFirst { it.id == taskId }
         if (idx >= 0) backgroundTasks[idx] = transform(backgroundTasks[idx])
     }
@@ -6005,29 +6359,33 @@ class DatabaseBrowserState(
         onComplete: (List<Result<ExportResult>>) -> Unit = {},
     ): List<String> {
         if (statements.isEmpty()) return emptyList()
-        val taskIds = statements.mapIndexed { index, _ ->
-            newExportTask(numberedFileName(baseFileName, index, statements.size), format, outputDir)
-        }
+        val taskIds =
+            statements.mapIndexed { index, _ ->
+                newExportTask(numberedFileName(baseFileName, index, statements.size), format, outputDir)
+            }
         scope.launch {
-            val results = statements.mapIndexed { index, sql ->
-                exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName) { p ->
-                    updateTask(taskIds[index]) { it.copy(progress = p.rowsWritten) }
-                }.also { result ->
-                    updateTask(taskIds[index]) {
-                        it.copy(
-                            progress = result.getOrNull()?.rowsWritten ?: it.progress,
-                            status = if (result.isSuccess) {
-                                DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED
-                            } else {
-                                DatabaseBrowserState.BackgroundTask.Status.FAILED
-                            },
-                            detail = result.getOrNull()?.file
-                                ?: result.exceptionOrNull()?.message
-                                ?: Msg.text(StrKey.EXPORT_FAILED),
-                        )
+            val results =
+                statements.mapIndexed { index, sql ->
+                    exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName) { p ->
+                        updateTask(taskIds[index]) { it.copy(progress = p.rowsWritten) }
+                    }.also { result ->
+                        updateTask(taskIds[index]) {
+                            it.copy(
+                                progress = result.getOrNull()?.rowsWritten ?: it.progress,
+                                status =
+                                    if (result.isSuccess) {
+                                        DatabaseBrowserState.BackgroundTask.Status.SUCCEEDED
+                                    } else {
+                                        DatabaseBrowserState.BackgroundTask.Status.FAILED
+                                    },
+                                detail =
+                                    result.getOrNull()?.file
+                                        ?: result.exceptionOrNull()?.message
+                                        ?: Msg.text(StrKey.EXPORT_FAILED),
+                            )
+                        }
                     }
                 }
-            }
             // 通知**按批次汇总**成一条，而不是每条推一条 ——
             // 一次导出 20 条语句推 20 条通知会把面板刷爆，而用户真正想知道的
             // 只是「这一批成了几条、哪几条挂了」。逐条明细在任务面板里。
@@ -6035,25 +6393,34 @@ class DatabaseBrowserState(
             val failed = results.filter { it.isFailure }
             notifications?.let { nc ->
                 when {
-                    failed.isEmpty() -> nc.push(
-                        AppNotification.Severity.SUCCESS,
-                        Msg.plural(PluralStrKey.EXPORT_COMPLETE_FILES, results.size, results.size),
-                        Msg.plural(PluralStrKey.FILES_WRITTEN, okCount, okCount) +
-                            results.mapNotNull { it.getOrNull()?.file }
-                                .joinToString("；") { File(it).name },
-                    )
+                    failed.isEmpty() -> {
+                        nc.push(
+                            AppNotification.Severity.SUCCESS,
+                            Msg.plural(PluralStrKey.EXPORT_COMPLETE_FILES, results.size, results.size),
+                            Msg.plural(PluralStrKey.FILES_WRITTEN, okCount, okCount) +
+                                results
+                                    .mapNotNull { it.getOrNull()?.file }
+                                    .joinToString("；") { File(it).name },
+                        )
+                    }
+
                     // 部分失败必须**说清楚是部分**：只报成功数会让用户以为全好了
-                    okCount == 0 -> nc.push(
-                        AppNotification.Severity.ERROR,
-                        Msg.plural(PluralStrKey.EXPORT_FAILED_ALL_FILES, results.size, results.size),
-                        failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.EXPORT_FAILED),
-                    )
-                    else -> nc.push(
-                        AppNotification.Severity.ERROR,
-                        Msg.plural(PluralStrKey.EXPORT_PARTIAL_FILES, results.size, okCount, results.size),
-                        Msg.plural(PluralStrKey.EXPORT_SUCCESS_FAILURE_COUNTS, okCount, okCount, failed.size) +
-                            (failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.UNKNOWN_REASON)),
-                    )
+                    okCount == 0 -> {
+                        nc.push(
+                            AppNotification.Severity.ERROR,
+                            Msg.plural(PluralStrKey.EXPORT_FAILED_ALL_FILES, results.size, results.size),
+                            failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.EXPORT_FAILED),
+                        )
+                    }
+
+                    else -> {
+                        nc.push(
+                            AppNotification.Severity.ERROR,
+                            Msg.plural(PluralStrKey.EXPORT_PARTIAL_FILES, results.size, okCount, results.size),
+                            Msg.plural(PluralStrKey.EXPORT_SUCCESS_FAILURE_COUNTS, okCount, okCount, failed.size) +
+                                (failed.first().exceptionOrNull()?.message ?: Msg.text(StrKey.UNKNOWN_REASON)),
+                        )
+                    }
                 }
             }
             onComplete(results)
@@ -6062,7 +6429,11 @@ class DatabaseBrowserState(
     }
 
     /** 登记一个运行中的导出任务，返回它的 id。 */
-    private fun newExportTask(fileName: String, format: ExportFormat, outputDir: String): String {
+    private fun newExportTask(
+        fileName: String,
+        format: ExportFormat,
+        outputDir: String,
+    ): String {
         val id = "task-" + java.util.UUID.randomUUID()
         backgroundTasks.add(
             0,
@@ -6092,7 +6463,10 @@ class DatabaseBrowserState(
      * 报一个假的百分比比不报更糟，所以进度条走不确定态（indeterminate），
      * 旁边如实显示「已导出 N 行」。
      */
-    data class ExportProgress(val rowsWritten: Long, val completed: Boolean)
+    data class ExportProgress(
+        val rowsWritten: Long,
+        val completed: Boolean,
+    )
 
     /**
      * 导出的**看门狗超时**（毫秒）。
@@ -6145,21 +6519,26 @@ class DatabaseBrowserState(
         activeDatabases.add(schema)
         // 在 DSL 之外构造：`sql` / `outputDir` 等字段名会与外层 `dataRequest` 的兄弟消息
         // 撞名，内联赋值会被解析到外层去（见 updateCell 的 KDoc）
-        val runReq = com.langbiantianya.grpc.exportRunRequest {
-            this.sql = sql
-            this.outputDir = outputDir
-            this.fileName = fileName
-            this.format = format.protoValue
-            this.tableName = tableName
-        }
-        return runCatching {
-            val req = request {
-                id = java.util.UUID.randomUUID().toString()
-                this.connection = engineConn(database = schema)
-                category = Category.EXPORT
-                action = Action.RUN_EXPORT
-                exportRequest = com.langbiantianya.grpc.exportRequest { runExport = runReq }
+        val runReq =
+            com.langbiantianya.grpc.exportRunRequest {
+                this.sql = sql
+                this.outputDir = outputDir
+                this.fileName = fileName
+                this.format = format.protoValue
+                this.tableName = tableName
             }
+        return runCatching {
+            val req =
+                request {
+                    id =
+                        java.util.UUID
+                            .randomUUID()
+                            .toString()
+                    this.connection = engineConn(database = schema)
+                    category = Category.EXPORT
+                    action = Action.RUN_EXPORT
+                    exportRequest = com.langbiantianya.grpc.exportRequest { runExport = runReq }
+                }
             var file = ""
             var rows = 0L
             // ⚠️ `withTimeoutOrNull` 不是「防御性编程」，是这条契约的**实现**：
@@ -6167,21 +6546,22 @@ class DatabaseBrowserState(
             // 光靠 `collect` 结束前的检查是够不着的 —— 得有人替它兜底。
             // 没有这一行时，真窗口上点「开始导出」的表现是：对话框关了，
             // 文件没有，界面上一个字都没有（实测，见 TEST_CASES.md §9.13）。
-            val finished = withTimeoutOrNull(exportTimeoutMs) {
-                engine.handle(req).collect { resp ->
-                    if (!resp.success) throw IllegalStateException(resp.error.ifBlank { Msg.text(StrKey.EXPORT_FAILED) })
-                    val p = resp.export.progress
-                    rows = p.exportedRows
-                    // 进度要**逐帧**往外抛，而不是只留最后一帧：
-                    // 进度弹窗的价值全在「动起来」这件事上，只报最终行数等于没报
-                    onProgress(ExportProgress(rowsWritten = p.exportedRows, completed = p.completed))
-                    if (p.completed) {
-                        file = p.filePath
-                        if (p.error.isNotBlank()) throw IllegalStateException(p.error)
+            val finished =
+                withTimeoutOrNull(exportTimeoutMs) {
+                    engine.handle(req).collect { resp ->
+                        if (!resp.success) throw IllegalStateException(resp.error.ifBlank { Msg.text(StrKey.EXPORT_FAILED) })
+                        val p = resp.export.progress
+                        rows = p.exportedRows
+                        // 进度要**逐帧**往外抛，而不是只留最后一帧：
+                        // 进度弹窗的价值全在「动起来」这件事上，只报最终行数等于没报
+                        onProgress(ExportProgress(rowsWritten = p.exportedRows, completed = p.completed))
+                        if (p.completed) {
+                            file = p.filePath
+                            if (p.error.isNotBlank()) throw IllegalStateException(p.error)
+                        }
                     }
+                    true
                 }
-                true
-            }
             if (finished != true) {
                 throw IllegalStateException(Msg.format(StrKey.EXPORT_TIMEOUT, exportTimeoutMs / 1000))
             }
@@ -6198,7 +6578,10 @@ class DatabaseBrowserState(
      * **调用方必须先校验** [isTableEditable]：这里 `where` 为空 map 时，引擎会把它当成
      * 「无条件更新」，等于改写整张表。
      */
-    suspend fun updateCell(tab: TablePreviewTab, edit: CellEdit): String? {
+    suspend fun updateCell(
+        tab: TablePreviewTab,
+        edit: CellEdit,
+    ): String? {
         val pk = tab.primaryKeyColumn ?: return Msg.text(StrKey.NO_PRIMARY_KEY_EDIT_DISABLED)
         val row = tab.rows.firstOrNull { it.id == edit.rowId } ?: return Msg.text(StrKey.ROW_NOT_ON_PAGE)
         val old = row.cells[pk]?.toString() ?: return Msg.format(StrKey.PRIMARY_KEY_NOT_IN_ROW, pk)
@@ -6212,32 +6595,35 @@ class DatabaseBrowserState(
         // 内层写 `schema = ""` 会解析到外层去，编译报「val cannot be reassigned」。
         // Kotlin 的内联 lambda 没有标签可用来消歧（`this@xxx` 对内联 lambda 不可用），
         // 所以把构造提到外面是唯一干净的做法。
-        val updateReq = com.langbiantianya.grpc.dataUpdateRequest {
-            tableName = tab.tableName
-            // catalog 走 engineConnFor 的 database 维度，schema 字段留空
-            // —— 写进去会让 H2 执行 `SET SCHEMA "<库名>"` 而报「Schema not found」，
-            // 见 engineConnFor 的 KDoc。
-            //
-            // 局部变量刻意叫 `catalog` 而不是 `schema`：同名的话这里的 `schema = ""`
-            // 会解析到那个 val 上（仍是「val cannot be reassigned」），只是换了张脸。
-            schema = ""
-            // map 字段用 `put(k, v)`（DslMap 的扩展函数），不是 `=` 赋值
-            changes.put(edit.columnKey, edit.newValue)
-            where.put(pk, old)
-        }
-        val result = runCatching {
-            engine.invoke(engineConnFor(currentConnection, catalog)) {
-                category = Category.DATA
-                action = Action.UPDATE
-                dataRequest = dataRequest { update = updateReq }
+        val updateReq =
+            com.langbiantianya.grpc.dataUpdateRequest {
+                tableName = tab.tableName
+                // catalog 走 engineConnFor 的 database 维度，schema 字段留空
+                // —— 写进去会让 H2 执行 `SET SCHEMA "<库名>"` 而报「Schema not found」，
+                // 见 engineConnFor 的 KDoc。
+                //
+                // 局部变量刻意叫 `catalog` 而不是 `schema`：同名的话这里的 `schema = ""`
+                // 会解析到那个 val 上（仍是「val cannot be reassigned」），只是换了张脸。
+                schema = ""
+                // map 字段用 `put(k, v)`（DslMap 的扩展函数），不是 `=` 赋值
+                changes.put(edit.columnKey, edit.newValue)
+                where.put(pk, old)
             }
-        }
+        val result =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, catalog)) {
+                    category = Category.DATA
+                    action = Action.UPDATE
+                    dataRequest = dataRequest { update = updateReq }
+                }
+            }
         val resp = result.getOrNull() ?: return result.exceptionOrNull()?.message ?: Msg.text(StrKey.UPDATE_FAILED)
         if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.UPDATE_FAILED) }
         // 本地也改一份：否则用户改完看到还是旧值，会以为没生效而再改一次。
-        tab.rows = tab.rows.map { r ->
-            if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
-        }
+        tab.rows =
+            tab.rows.map { r ->
+                if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
+            }
         return null
     }
 
@@ -6294,21 +6680,27 @@ class DatabaseBrowserState(
         val schema = currentSchema()
         activeDatabases.add(catalog.ifBlank { schema })
         return runCatching {
-            val req = request {
-                id = java.util.UUID.randomUUID().toString()
-                this.connection = engineConn(database = catalog.ifBlank { schema })
-                category = Category.SQL
-                action = Action.EXECUTE
-                sqlRequest = com.langbiantianya.grpc.sqlRequest {
-                    execute = com.langbiantianya.grpc.sqlExecuteRequest {
-                        this.sql = statement
-                        multiStatement = false
-                        // 只读标记：即便 [DangerousSql.isReadOnlyQuery] 的白名单被绕过，
-                        // 引擎侧还有一道（见 engine 侧 SqlEngineHandler 的只读处理）
-                        readOnly = true
-                    }
+            val req =
+                request {
+                    id =
+                        java.util.UUID
+                            .randomUUID()
+                            .toString()
+                    this.connection = engineConn(database = catalog.ifBlank { schema })
+                    category = Category.SQL
+                    action = Action.EXECUTE
+                    sqlRequest =
+                        com.langbiantianya.grpc.sqlRequest {
+                            execute =
+                                com.langbiantianya.grpc.sqlExecuteRequest {
+                                    this.sql = statement
+                                    multiStatement = false
+                                    // 只读标记：即便 [DangerousSql.isReadOnlyQuery] 的白名单被绕过，
+                                    // 引擎侧还有一道（见 engine 侧 SqlEngineHandler 的只读处理）
+                                    readOnly = true
+                                }
+                        }
                 }
-            }
             // 行帧是 `Response.sql_row_frame`（顶层字段），不是 `Response.sql` ——
             // 后者只装 `execute` / `explain` 两个终止体。抄 [executeSql] 的读法。
             val columnNames = LinkedHashSet<String>()
@@ -6354,10 +6746,11 @@ class DatabaseBrowserState(
         baseFileName: String,
         tableName: String = "",
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): List<Result<ExportResult>> = statements.mapIndexed { index, sql ->
-        onProgress(index, statements.size)
-        exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName)
-    }
+    ): List<Result<ExportResult>> =
+        statements.mapIndexed { index, sql ->
+            onProgress(index, statements.size)
+            exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName)
+        }
 
     // ------------------------------------------------------------------------
     // 事务会话（v2.16 引擎能力，此前前端未接）
@@ -6373,13 +6766,14 @@ class DatabaseBrowserState(
      */
     suspend fun beginTransaction(sheet: DatabaseBrowserState.SqlSheet): String? {
         if (sheet.transactionSessionId != null) return Msg.text(StrKey.SHEET_ALREADY_IN_TRANSACTION)
-        val resp = runCatching {
-            engine.invoke(engineConn(database = currentSchema())) {
-                category = Category.SYSTEM
-                action = Action.BEGIN
-                systemRequest = systemRequest { sessionId = UUID.randomUUID().toString() }
-            }
-        }.getOrNull() ?: return Msg.text(StrKey.BEGIN_TRANSACTION_NO_RESPONSE)
+        val resp =
+            runCatching {
+                engine.invoke(engineConn(database = currentSchema())) {
+                    category = Category.SYSTEM
+                    action = Action.BEGIN
+                    systemRequest = systemRequest { sessionId = UUID.randomUUID().toString() }
+                }
+            }.getOrNull() ?: return Msg.text(StrKey.BEGIN_TRANSACTION_NO_RESPONSE)
         if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.BEGIN_TRANSACTION_FAILED) }
         val body = resp.system
         // 引擎回显 session id；拿不到就当失败 —— 前端**必须**持有它，
@@ -6391,12 +6785,10 @@ class DatabaseBrowserState(
     }
 
     /** 提交事务 —— 发 `SYSTEM.COMMIT`。 */
-    suspend fun commitTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
-        endTransaction(sheet, Action.COMMIT, Msg.text(StrKey.COMMIT_TRANSACTION_FAILED))
+    suspend fun commitTransaction(sheet: DatabaseBrowserState.SqlSheet): String? = endTransaction(sheet, Action.COMMIT, Msg.text(StrKey.COMMIT_TRANSACTION_FAILED))
 
     /** 回滚事务 —— 发 `SYSTEM.ROLLBACK`。 */
-    suspend fun rollbackTransaction(sheet: DatabaseBrowserState.SqlSheet): String? =
-        endTransaction(sheet, Action.ROLLBACK, Msg.text(StrKey.ROLLBACK_TRANSACTION_FAILED))
+    suspend fun rollbackTransaction(sheet: DatabaseBrowserState.SqlSheet): String? = endTransaction(sheet, Action.ROLLBACK, Msg.text(StrKey.ROLLBACK_TRANSACTION_FAILED))
 
     private suspend fun endTransaction(
         sheet: DatabaseBrowserState.SqlSheet,
@@ -6404,13 +6796,14 @@ class DatabaseBrowserState(
         fallback: String,
     ): String? {
         val sid = sheet.transactionSessionId ?: return Msg.text(StrKey.NOT_IN_TRANSACTION)
-        val resp = runCatching {
-            engine.invoke(engineConn(database = currentSchema())) {
-                category = Category.SYSTEM
-                this.action = action
-                systemRequest = systemRequest { sessionId = sid }
-            }
-        }.getOrNull() ?: return Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, fallback)
+        val resp =
+            runCatching {
+                engine.invoke(engineConn(database = currentSchema())) {
+                    category = Category.SYSTEM
+                    this.action = action
+                    systemRequest = systemRequest { sessionId = sid }
+                }
+            }.getOrNull() ?: return Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, fallback)
         if (!resp.success) return resp.error.ifBlank { fallback }
         // 无论引擎报成功与否都清本地 id：`SYSTEM.ROLLBACK` 失败时那条连接仍被钉着，
         // 但用户已经看到错误并会重试 —— 留着 id 会让「提交」按钮一直亮着，
@@ -6429,7 +6822,9 @@ class DatabaseBrowserState(
      * - [editor] 由状态机持有（文本 + 光标 / 选区 + 滚动），切到表预览再切回来保持不变
      * - [inserted] / [lastTable] 由引擎 `gen_progress_frame` 流实时回填
      */
-    class GenerateScript(title: String) {
+    class GenerateScript(
+        title: String,
+    ) {
         /** 标签条上展示的名字（默认 `脚本 N`）—— 用户可重命名，见 [renameGenerateScript]。 */
         var title: String by mutableStateOf(title)
 
@@ -6475,11 +6870,12 @@ class DatabaseBrowserState(
     fun removeGenerateScript(index: Int) {
         if (index !in generateScripts.indices) return
         generateScripts.removeAt(index)
-        selectedGenerateIndex = when {
-            generateScripts.isEmpty() -> -1
-            index >= generateScripts.size -> generateScripts.lastIndex
-            else -> index
-        }
+        selectedGenerateIndex =
+            when {
+                generateScripts.isEmpty() -> -1
+                index >= generateScripts.size -> generateScripts.lastIndex
+                else -> index
+            }
     }
 
     fun selectGenerateScript(index: Int) {
@@ -6487,7 +6883,10 @@ class DatabaseBrowserState(
     }
 
     /** 重命名造数脚本 —— 规则同 [renameSqlSheet]：去首尾空白，空名保持原名。 */
-    fun renameGenerateScript(index: Int, title: String) {
+    fun renameGenerateScript(
+        index: Int,
+        title: String,
+    ) {
         val script = generateScripts.getOrNull(index) ?: return
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
@@ -6501,16 +6900,18 @@ class DatabaseBrowserState(
     val hasGenerateResult: Boolean get() = generateScripts.any { it.inserted > 0 }
 
     /** 造数结果表数据 —— 每个脚本一行。 */
-    fun generateResultRows(): List<TableRow> = generateScripts.mapIndexed { index, script ->
-        TableRow(
-            id = index.toLong(),
-            cells = mapOf(
-                "script" to "${index + 1}. ${script.title}",
-                "table" to script.lastTable.ifBlank { "—" },
-                "inserted" to script.inserted.toString(),
-            ),
-        )
-    }
+    fun generateResultRows(): List<TableRow> =
+        generateScripts.mapIndexed { index, script ->
+            TableRow(
+                id = index.toLong(),
+                cells =
+                    mapOf(
+                        "script" to "${index + 1}. ${script.title}",
+                        "table" to script.lastTable.ifBlank { "—" },
+                        "inserted" to script.inserted.toString(),
+                    ),
+            )
+        }
 
     /**
      * 执行造数 —— 走 `Category.DATA` / `Action.GENERATE` 流式通道：
@@ -6543,27 +6944,30 @@ class DatabaseBrowserState(
         scope.launch {
             // 同 executeSql：登记本请求建池所处的 catalog 维度，供 releasePools 回收。
             activeDatabases.add(schema)
-            val result = runCatching {
-                engine.handle(
-                    request {
-                        id = UUID.randomUUID().toString()
-                        this.connection = engineConn(database = schema)
-                        category = Category.DATA
-                        action = Action.GENERATE
-                        dataRequest = dataRequest {
-                            generate = dataGenerateRequest {
-                                // 同 executeSql：schema 必须留空，不能塞 catalog 名。
-                                this.schema = ""
-                                this.luaVersion = luaVersion
-                                // 进度帧的 script_index 是**本次请求内**的下标，
-                                // 因此回填时也按这个过滤后的列表定位。
-                                scripts.forEach { tables += generateTable { script = it.editor.text } }
-                            }
-                        }
-                    },
-                )
-            }
-            if (gen != generateGeneration) return@launch  // 已重新执行 —— 丢弃过期响应
+            val result =
+                runCatching {
+                    engine.handle(
+                        request {
+                            id = UUID.randomUUID().toString()
+                            this.connection = engineConn(database = schema)
+                            category = Category.DATA
+                            action = Action.GENERATE
+                            dataRequest =
+                                dataRequest {
+                                    generate =
+                                        dataGenerateRequest {
+                                            // 同 executeSql：schema 必须留空，不能塞 catalog 名。
+                                            this.schema = ""
+                                            this.luaVersion = luaVersion
+                                            // 进度帧的 script_index 是**本次请求内**的下标，
+                                            // 因此回填时也按这个过滤后的列表定位。
+                                            scripts.forEach { tables += generateTable { script = it.editor.text } }
+                                        }
+                                }
+                        },
+                    )
+                }
+            if (gen != generateGeneration) return@launch // 已重新执行 —— 丢弃过期响应
             val flow = result.getOrNull()
             if (flow == null) {
                 generateError = result.exceptionOrNull()?.message ?: Msg.text(StrKey.GENERATE_FAILED)
@@ -6716,17 +7120,19 @@ class DatabaseBrowserState(
         val requestGeneration = generation
         loadingDatabases = true
         errorMessage = null
-        activeDatabases.add("")     // 该请求会用到默认 catalog 的池
+        activeDatabases.add("") // 该请求会用到默认 catalog 的池
         scope.launch {
-            val result = runCatching {
-                engine.invoke(engineConn(database = "")) {
-                    category = Category.SCHEMA
-                    action = Action.LIST
-                    schemaRequest = schemaRequest {
-                        list = schemaListRequest { level = "database" }
+            val result =
+                runCatching {
+                    engine.invoke(engineConn(database = "")) {
+                        category = Category.SCHEMA
+                        action = Action.LIST
+                        schemaRequest =
+                            schemaRequest {
+                                list = schemaListRequest { level = "database" }
+                            }
                     }
                 }
-            }
             // 连接已切换 —— 丢弃过期响应。
             //
             // ⚠️ **这里不补 `loadingDatabases = false` 是有意的，不要「顺手修好」**：
@@ -6775,17 +7181,19 @@ class DatabaseBrowserState(
         val requestGeneration = generation
         loadingTables.add(database)
         _tableLoadError.remove(database)
-        activeDatabases.add(database)   // 该请求会用到 database 维度上的池
+        activeDatabases.add(database) // 该请求会用到 database 维度上的池
         scope.launch {
-            val result = runCatching {
-                engine.invoke(engineConn(database = database)) {
-                    category = Category.TABLE
-                    action = Action.LIST
-                    tableRequest = tableRequest {
-                        list = tableListRequest {}
+            val result =
+                runCatching {
+                    engine.invoke(engineConn(database = database)) {
+                        category = Category.TABLE
+                        action = Action.LIST
+                        tableRequest =
+                            tableRequest {
+                                list = tableListRequest {}
+                            }
                     }
                 }
-            }
             // 同 [refreshDatabases]：早退**不**清 `loadingTables`（理由见那里的注释），
             // 清理点同样只有 [invalidateInFlight] 的 `loadingTables.clear()`
             if (requestGeneration != generation) return@launch
@@ -6796,7 +7204,8 @@ class DatabaseBrowserState(
                         _tableLoadError[database] = resp.error.ifBlank { Msg.text(StrKey.LOAD_TABLES_FAILED) }
                     } else {
                         _tablesByDatabase[database] =
-                            resp.table.list.itemsList.map { it.name }
+                            resp.table.list.itemsList
+                                .map { it.name }
                     }
                 },
                 onFailure = {
@@ -6835,39 +7244,64 @@ class DatabaseBrowserState(
                 var failure: String? = null
                 // 一个 schema 失败不该让其他 schema 的同类对象也消失
                 for (s in resolvedSchemas) {
-                    val resp = runCatching {
-                        engine.invoke(engineConn(database = database)) {
-                            category = when (kind) {
-                                DatabaseObjectKind.VIEW -> Category.VIEW
-                                DatabaseObjectKind.TRIGGER -> Category.TRIGGER
-                                DatabaseObjectKind.FUNCTION -> Category.FUNCTION
-                            }
-                            action = Action.LIST
-                            when (kind) {
-                                DatabaseObjectKind.VIEW ->
-                                    viewRequest = viewRequest { list = viewListRequest { schema = s } }
-                                DatabaseObjectKind.TRIGGER ->
-                                    triggerRequest = triggerRequest { list = triggerListRequest { schema = s } }
-                                DatabaseObjectKind.FUNCTION ->
-                                    functionRequest = functionRequest {
-                                        list = functionListRequest { schema = s }
+                    val resp =
+                        runCatching {
+                            engine.invoke(engineConn(database = database)) {
+                                category =
+                                    when (kind) {
+                                        DatabaseObjectKind.VIEW -> Category.VIEW
+                                        DatabaseObjectKind.TRIGGER -> Category.TRIGGER
+                                        DatabaseObjectKind.FUNCTION -> Category.FUNCTION
                                     }
+                                action = Action.LIST
+                                when (kind) {
+                                    DatabaseObjectKind.VIEW -> {
+                                        viewRequest = viewRequest { list = viewListRequest { schema = s } }
+                                    }
+
+                                    DatabaseObjectKind.TRIGGER -> {
+                                        triggerRequest = triggerRequest { list = triggerListRequest { schema = s } }
+                                    }
+
+                                    DatabaseObjectKind.FUNCTION -> {
+                                        functionRequest =
+                                            functionRequest {
+                                                list = functionListRequest { schema = s }
+                                            }
+                                    }
+                                }
                             }
-                        }
-                    }.getOrNull()
+                        }.getOrNull()
                     when {
-                        resp == null -> failure = failure ?: Msg.text(StrKey.ENGINE_NO_RESPONSE)
-                        !resp.success ->
+                        resp == null -> {
+                            failure = failure ?: Msg.text(StrKey.ENGINE_NO_RESPONSE)
+                        }
+
+                        !resp.success -> {
                             failure = failure ?: resp.error.ifBlank { Msg.text(StrKey.LOAD_FAILED) }
+                        }
+
                         else -> {
                             // 五类的 list 元素都是消息（视图带 definition、触发器带
                             // timing/event 等），树里只显示 `.name`；其余字段留给
                             // 将来的对象详情面板。
-                            names += when (kind) {
-                                DatabaseObjectKind.VIEW -> resp.view.list.itemsList.map { it.name }
-                                DatabaseObjectKind.TRIGGER -> resp.trigger.list.itemsList.map { it.name }
-                                DatabaseObjectKind.FUNCTION -> resp.function.list.itemsList.map { it.name }
-                            }
+                            names +=
+                                when (kind) {
+                                    DatabaseObjectKind.VIEW -> {
+                                        resp.view.list.itemsList
+                                            .map { it.name }
+                                    }
+
+                                    DatabaseObjectKind.TRIGGER -> {
+                                        resp.trigger.list.itemsList
+                                            .map { it.name }
+                                    }
+
+                                    DatabaseObjectKind.FUNCTION -> {
+                                        resp.function.list.itemsList
+                                            .map { it.name }
+                                    }
+                                }
                         }
                     }
                 }
@@ -6924,18 +7358,21 @@ class DatabaseBrowserState(
      */
     private suspend fun resolveSchemas(database: String): List<String> {
         _schemasByDatabase[database]?.let { return it }
-        val schemas = runCatching {
-            engine.invoke(engineConn(database = database)) {
-                category = Category.SCHEMA
-                action = Action.LIST
-                schemaRequest = schemaRequest {
-                    list = schemaListRequest {
-                        level = "schema"
-                        this.database = database
-                    }
+        val schemas =
+            runCatching {
+                engine.invoke(engineConn(database = database)) {
+                    category = Category.SCHEMA
+                    action = Action.LIST
+                    schemaRequest =
+                        schemaRequest {
+                            list =
+                                schemaListRequest {
+                                    level = "schema"
+                                    this.database = database
+                                }
+                        }
                 }
-            }
-        }.getOrNull()?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty()
+            }.getOrNull()?.takeIf { it.success }?.schema?.list?.itemsList.orEmpty()
         _schemasByDatabase[database] = schemas
         return schemas
     }
@@ -6963,7 +7400,10 @@ class DatabaseBrowserState(
      *
      * 代价是最坏情况多等一个往返（schema 通常已在展开库时解析好了）。
      */
-    fun loadTableObjects(database: String, table: String) {
+    fun loadTableObjects(
+        database: String,
+        table: String,
+    ) {
         val slot = "$database::$table"
         for (kind in TableObjectKind.entries) {
             loadingTableObjects += slot to kind
@@ -6973,64 +7413,96 @@ class DatabaseBrowserState(
             // 没有 schema 概念的方言）时拿到空列表，那正是它应有的样子。
             val schema = resolveSchemas(database).firstOrNull() ?: ""
             for (kind in TableObjectKind.entries) {
-                val resp = runCatching {
-                    engine.invoke(engineConn(database = database)) {
-                        category = when (kind) {
-                            TableObjectKind.INDEX -> Category.INDEX
-                            TableObjectKind.FOREIGN_KEY -> Category.FOREIGN_KEY
-                            TableObjectKind.COLUMNS -> Category.TABLE
+                val resp =
+                    runCatching {
+                        engine.invoke(engineConn(database = database)) {
+                            category =
+                                when (kind) {
+                                    TableObjectKind.INDEX -> Category.INDEX
+                                    TableObjectKind.FOREIGN_KEY -> Category.FOREIGN_KEY
+                                    TableObjectKind.COLUMNS -> Category.TABLE
+                                }
+                            action = Action.LIST
+                            when (kind) {
+                                TableObjectKind.INDEX -> {
+                                    indexRequest =
+                                        indexRequest {
+                                            list =
+                                                indexListRequest {
+                                                    tableName = table
+                                                    this.schema = schema
+                                                }
+                                        }
+                                }
+
+                                TableObjectKind.FOREIGN_KEY -> {
+                                    foreignKeyRequest =
+                                        foreignKeyRequest {
+                                            list =
+                                                foreignKeyListRequest {
+                                                    tableName = table
+                                                    this.schema = schema
+                                                }
+                                        }
+                                }
+
+                                // 字段走 `TABLE.LIST` 的 **column_list** 分支（`TableRequest` 的 oneof 里
+                                // `list` 是表列表、`column_list` 才是列列表 —— 两个字段名只差前缀，
+                                // 写错编译期根本发现不了，只会拿到「空列表」的假成功）。
+                                // ⚠️ 这里**不能**把 catalog 塞进 `schema` —— 那会让 H2 执行
+                                // `SET SCHEMA "<库名>"` 而报「Schema not found」（同 engineConnFor 的 KDoc）。
+                                TableObjectKind.COLUMNS -> {
+                                    tableRequest =
+                                        tableRequest {
+                                            columnList =
+                                                tableColumnListRequest {
+                                                    tableName = table
+                                                    this.schema = schema
+                                                }
+                                        }
+                                }
+                            }
                         }
-                        action = Action.LIST
-                        when (kind) {
-                            TableObjectKind.INDEX -> indexRequest = indexRequest {
-                                list = indexListRequest {
-                                    tableName = table
-                                    this.schema = schema
-                                }
-                            }
-                            TableObjectKind.FOREIGN_KEY -> foreignKeyRequest = foreignKeyRequest {
-                                list = foreignKeyListRequest {
-                                    tableName = table
-                                    this.schema = schema
-                                }
-                            }
-                            // 字段走 `TABLE.LIST` 的 **column_list** 分支（`TableRequest` 的 oneof 里
-                            // `list` 是表列表、`column_list` 才是列列表 —— 两个字段名只差前缀，
-                            // 写错编译期根本发现不了，只会拿到「空列表」的假成功）。
-                            // ⚠️ 这里**不能**把 catalog 塞进 `schema` —— 那会让 H2 执行
-                            // `SET SCHEMA "<库名>"` 而报「Schema not found」（同 engineConnFor 的 KDoc）。
-                            TableObjectKind.COLUMNS -> tableRequest = tableRequest {
-                                columnList = tableColumnListRequest {
-                                    tableName = table
-                                    this.schema = schema
-                                }
-                            }
-                        }
-                    }
-                }.getOrNull()
+                    }.getOrNull()
                 // ⚠️ 失败必须**就地留文案**，不能静默 —— 「请求成功但结果为空」看上去像
                 // 「这张表没有索引 / 没有字段」，那是比报错更难察觉的一类（见本函数上方注释）。
                 if (resp != null && resp.success) {
                     when (kind) {
-                        TableObjectKind.INDEX ->
-                            _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap())
-                                .plus(kind to resp.index.list.itemsList.map { it.name })
-                        TableObjectKind.FOREIGN_KEY ->
-                            _tableObjects[slot] = (_tableObjects[slot] ?: emptyMap())
-                                .plus(kind to resp.foreignKey.list.itemsList.map { it.name })
-                        TableObjectKind.COLUMNS ->
-                            _tableColumns[slot] = resp.table.columns.itemsList.map {
-                                ColumnInfo(
-                                    name = it.name,
-                                    type = it.type,
-                                    size = it.size,
-                                    // proto3 的 `optional bool nullable` 有 presence 语义：
-                                    // 没给就是 null，按「默认可空」处理，与引擎的 mapper 一致。
-                                    nullable = if (it.hasNullable()) it.nullable else true,
-                                    primaryKey = it.isPrimaryKey,
-                                    autoIncrement = it.autoIncrement,
-                                )
-                            }
+                        TableObjectKind.INDEX -> {
+                            _tableObjects[slot] =
+                                (_tableObjects[slot] ?: emptyMap())
+                                    .plus(
+                                        kind to
+                                            resp.index.list.itemsList
+                                                .map { it.name },
+                                    )
+                        }
+
+                        TableObjectKind.FOREIGN_KEY -> {
+                            _tableObjects[slot] =
+                                (_tableObjects[slot] ?: emptyMap())
+                                    .plus(
+                                        kind to
+                                            resp.foreignKey.list.itemsList
+                                                .map { it.name },
+                                    )
+                        }
+
+                        TableObjectKind.COLUMNS -> {
+                            _tableColumns[slot] =
+                                resp.table.columns.itemsList.map {
+                                    ColumnInfo(
+                                        name = it.name,
+                                        type = it.type,
+                                        size = it.size,
+                                        // proto3 的 `optional bool nullable` 有 presence 语义：
+                                        // 没给就是 null，按「默认可空」处理，与引擎的 mapper 一致。
+                                        nullable = if (it.hasNullable()) it.nullable else true,
+                                        primaryKey = it.isPrimaryKey,
+                                        autoIncrement = it.autoIncrement,
+                                    )
+                                }
+                        }
                     }
                     _tableObjectError.remove("$slot::${kind.name}")
                 } else {
@@ -7045,7 +7517,10 @@ class DatabaseBrowserState(
     /**
      * 打开表的预览标签页 —— 同一表已存在则激活之, 不重复加载.
      */
-    fun openTab(schema: String, tableName: String) {
+    fun openTab(
+        schema: String,
+        tableName: String,
+    ) {
         val tabKey = "$schema::$tableName"
         val existingIndex = tabs.indexOfFirst { it.key == tabKey }
         if (existingIndex >= 0) {
@@ -7071,18 +7546,22 @@ class DatabaseBrowserState(
         if (index !in tabs.indices) return
         val newTabs = tabs.toMutableList().also { it.removeAt(index) }
         tabs = newTabs
-        selectedTabIndex = when {
-            newTabs.isEmpty() -> -1
-            index >= newTabs.size -> newTabs.size - 1
-            else -> index
-        }
+        selectedTabIndex =
+            when {
+                newTabs.isEmpty() -> -1
+                index >= newTabs.size -> newTabs.size - 1
+                else -> index
+            }
     }
 
     /**
      * 翻到指定页。页码先落到 tab 上再发请求，这样加载中信息条显示的就是**目标页**
      * 而不是上一页（否则会出现「点了下一页，转圈时却写着第 1 页」的错位）。
      */
-    fun goToTabPage(tab: TablePreviewTab, page: Int) {
+    fun goToTabPage(
+        tab: TablePreviewTab,
+        page: Int,
+    ) {
         if (page < 1 || page == tab.page) return
         tab.page = page
         // 换页后旧页的选中行不再存在于本页，清掉避免详情面板显示上一批数据
@@ -7095,7 +7574,10 @@ class DatabaseBrowserState(
      * （100 行/页的第 5 页在 20 行/页下变成第 25 页，而表只有 100 行 = 5 页），
      * 不归位就会停在一个永远加载不出内容、又没有「越界回退」可救的页上。
      */
-    fun changeTabPageSize(tab: TablePreviewTab, size: PageSize) {
+    fun changeTabPageSize(
+        tab: TablePreviewTab,
+        size: PageSize,
+    ) {
         val next = size.value.coerceAtLeast(1)
         if (next == tab.pageSize) return
         tab.pageSize = next
@@ -7110,21 +7592,30 @@ class DatabaseBrowserState(
      * 在第 3 页把过滤条件收紧，结果集可能只剩 2 页；停在第 3 页用户看到的是
      * 一张**空表**，而引擎没报错、总数也变了 —— 那是最难自查的一种「看起来坏了」。
      */
-    fun setTabFilter(tab: TablePreviewTab, where: String) {
+    fun setTabFilter(
+        tab: TablePreviewTab,
+        where: String,
+    ) {
         if (tab.whereClause == where) return
         tab.whereClause = where
         tab.page = 1
         loadTabPreview(tab, targetPage = 1)
     }
 
-    fun setTabOrderBy(tab: TablePreviewTab, orderBy: String) {
+    fun setTabOrderBy(
+        tab: TablePreviewTab,
+        orderBy: String,
+    ) {
         if (tab.orderByClause == orderBy) return
         tab.orderByClause = orderBy
         tab.page = 1
         loadTabPreview(tab, targetPage = 1)
     }
 
-    fun setTabSearch(tab: TablePreviewTab, term: String) {
+    fun setTabSearch(
+        tab: TablePreviewTab,
+        term: String,
+    ) {
         if (tab.searchTerm == term) return
         tab.searchTerm = term
         tab.page = 1
@@ -7141,7 +7632,10 @@ class DatabaseBrowserState(
      * 参数名不叫 `page`：`dataListRequest` 的 DSL 里同名属性会把它解析成 builder 自己的
      * `val page`，导致「给 builder 赋值」变成给只读局部变量赋值，编译直接失败。
      */
-    private fun loadTabPreview(tab: TablePreviewTab, targetPage: Int = tab.page) {
+    private fun loadTabPreview(
+        tab: TablePreviewTab,
+        targetPage: Int = tab.page,
+    ) {
         val sessionGeneration = generation
         // tab 级代次：同一张表上的并发载入靠它区分。连翻两页时两次请求都在飞，
         // 没有这个令牌就是「谁后返回谁说了算」—— 慢的第 1 页会盖掉快的第 2 页。
@@ -7149,30 +7643,33 @@ class DatabaseBrowserState(
         val tabGeneration = tab.requestGeneration
         tab.loading = true
         tab.error = null
-        activeDatabases.add(tab.schema)   // 预览用的池绑定在 tab.schema 这个 catalog 上
+        activeDatabases.add(tab.schema) // 预览用的池绑定在 tab.schema 这个 catalog 上
         scope.launch {
-            val result = runCatching {
-                engine.invoke(engineConn(database = tab.schema)) {
-                    category = Category.DATA
-                    action = Action.LIST
-                    dataRequest = dataRequest {
-                        list = dataListRequest {
-                            tableName = tab.tableName
-                            // **不能写死 1**：写死等于分页器是装饰品 —— 引擎每次都回第 1 页，
-                            // 而表超过一页时用户永远看不到后面的行。
-                            page = targetPage.coerceAtLeast(1)
-                            // `pageSize = 0` 在 DATA.LIST 里是**流式**哨兵（逐行 frame，无 paged body），
-                            // 预览固定走分页路径，故下限钳到 1。
-                            pageSize = tab.pageSize.coerceAtLeast(1)
-                            // 过滤与排序**全部交给引擎**：`where` / `order_by` 是裸 SQL 片段，
-                            // 引擎侧 `DatabaseDialect.validateOrderBy` 负责挡排序注入。
-                            // 前端不在本地过滤 —— 那样只能筛当前页，翻页后结果就不对了。
-                            where = tab.effectiveWhere().orEmpty()
-                            orderBy = tab.orderByClause.trim()
-                        }
+            val result =
+                runCatching {
+                    engine.invoke(engineConn(database = tab.schema)) {
+                        category = Category.DATA
+                        action = Action.LIST
+                        dataRequest =
+                            dataRequest {
+                                list =
+                                    dataListRequest {
+                                        tableName = tab.tableName
+                                        // **不能写死 1**：写死等于分页器是装饰品 —— 引擎每次都回第 1 页，
+                                        // 而表超过一页时用户永远看不到后面的行。
+                                        page = targetPage.coerceAtLeast(1)
+                                        // `pageSize = 0` 在 DATA.LIST 里是**流式**哨兵（逐行 frame，无 paged body），
+                                        // 预览固定走分页路径，故下限钳到 1。
+                                        pageSize = tab.pageSize.coerceAtLeast(1)
+                                        // 过滤与排序**全部交给引擎**：`where` / `order_by` 是裸 SQL 片段，
+                                        // 引擎侧 `DatabaseDialect.validateOrderBy` 负责挡排序注入。
+                                        // 前端不在本地过滤 —— 那样只能筛当前页，翻页后结果就不对了。
+                                        where = tab.effectiveWhere().orEmpty()
+                                        orderBy = tab.orderByClause.trim()
+                                    }
+                            }
                     }
                 }
-            }
             // 两级守卫都要在**写任何状态之前**判：连接换了，或这个 tab 已经翻到别的页去了。
             // 早退时**不清 loading** 是有意的 —— 清它会把新一轮的转圈也一并抹掉。
             if (sessionGeneration != generation) return@launch
@@ -7190,19 +7687,21 @@ class DatabaseBrowserState(
                         tab.page = paged.page
                         tab.pageSize = paged.pageSize
                         // 表可能为空 —— 此时 rowsList 为空, 退化到无列预览
-                        val columnNames = paged.rowsList
-                            .flatMap { it.valuesMap.keys }
-                            .distinct()
+                        val columnNames =
+                            paged.rowsList
+                                .flatMap { it.valuesMap.keys }
+                                .distinct()
                         tab.columns = columnNames.map { TableColumn(key = it, header = it) }
-                        tab.rows = paged.rowsList.mapIndexed { idx, row ->
-                            // 主键承载: 大小写不敏感查找 "id" / "ID" / "Id" —— 不同方言
-                            // (H2 大写 / MySQL 小写) 列名归一策略不同; 找不到则退化为行号.
-                            val idCell = row.valuesMap.entries.firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
-                            TableRow(
-                                id = idCell?.let { cellValueAsId(it.value) } ?: idx,
-                                cells = row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
-                            )
-                        }
+                        tab.rows =
+                            paged.rowsList.mapIndexed { idx, row ->
+                                // 主键承载: 大小写不敏感查找 "id" / "ID" / "Id" —— 不同方言
+                                // (H2 大写 / MySQL 小写) 列名归一策略不同; 找不到则退化为行号.
+                                val idCell = row.valuesMap.entries.firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
+                                TableRow(
+                                    id = idCell?.let { cellValueAsId(it.value) } ?: idx,
+                                    cells = row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
+                                )
+                            }
                     }
                 },
                 onFailure = { tab.error = it.message ?: "Unknown error" },
@@ -7216,8 +7715,7 @@ class DatabaseBrowserState(
     // ------------------------------------------------------------------------
 
     /** 以当前连接构造引擎 proto config（见 [engineConnFor]）。 */
-    private fun engineConn(database: String): com.langbiantianya.grpc.ConnectionConfig =
-        engineConnFor(currentConnection, database)
+    private fun engineConn(database: String): com.langbiantianya.grpc.ConnectionConfig = engineConnFor(currentConnection, database)
 
     /**
      * 构造引擎 proto [com.langbiantianya.grpc.ConnectionConfig].
@@ -7237,33 +7735,36 @@ class DatabaseBrowserState(
     private fun engineConnFor(
         config: ConnectionConfig?,
         database: String,
-    ): com.langbiantianya.grpc.ConnectionConfig = connectionConfig {
-        if (config != null) {
-            driver = config.dialect.engineDriverName
-            jdbcUrl = config.jdbcUrl
-            user = config.username
-            password = config.password
-            if (database.isNotBlank()) {
+    ): com.langbiantianya.grpc.ConnectionConfig =
+        connectionConfig {
+            if (config != null) {
+                driver = config.dialect.engineDriverName
+                jdbcUrl = config.jdbcUrl
+                user = config.username
+                password = config.password
+                if (database.isNotBlank()) {
+                    this.database = database
+                }
+            } else if (database.isNotBlank()) {
+                // 无选中连接 —— 引擎会因找不到方言 / 缺少 JDBC URL 返回 error, UI 显示即可.
                 this.database = database
             }
-        } else if (database.isNotBlank()) {
-            // 无选中连接 —— 引擎会因找不到方言 / 缺少 JDBC URL 返回 error, UI 显示即可.
-            this.database = database
         }
-    }
 
-    private fun cellValueAsId(v: ProtoValue): Any = when (v.kindCase) {
-        ProtoValue.KindCase.NUMBER_VALUE -> v.numberValue.toLong()
-        ProtoValue.KindCase.STRING_VALUE -> v.stringValue
-        ProtoValue.KindCase.BOOL_VALUE -> v.boolValue.toString()
-        else -> v.toString()
-    }
+    private fun cellValueAsId(v: ProtoValue): Any =
+        when (v.kindCase) {
+            ProtoValue.KindCase.NUMBER_VALUE -> v.numberValue.toLong()
+            ProtoValue.KindCase.STRING_VALUE -> v.stringValue
+            ProtoValue.KindCase.BOOL_VALUE -> v.boolValue.toString()
+            else -> v.toString()
+        }
 
-    private fun cellValueToAny(v: ProtoValue): Any? = when (v.kindCase) {
-        ProtoValue.KindCase.NULL_VALUE -> null
-        ProtoValue.KindCase.NUMBER_VALUE -> v.numberValue
-        ProtoValue.KindCase.STRING_VALUE -> v.stringValue
-        ProtoValue.KindCase.BOOL_VALUE -> v.boolValue
-        else -> v.toString()
-    }
+    private fun cellValueToAny(v: ProtoValue): Any? =
+        when (v.kindCase) {
+            ProtoValue.KindCase.NULL_VALUE -> null
+            ProtoValue.KindCase.NUMBER_VALUE -> v.numberValue
+            ProtoValue.KindCase.STRING_VALUE -> v.stringValue
+            ProtoValue.KindCase.BOOL_VALUE -> v.boolValue
+            else -> v.toString()
+        }
 }

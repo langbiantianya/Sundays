@@ -28,7 +28,6 @@ import kotlin.test.assertTrue
  * SQLiteDialect 全量单元测试 — 直接对内存 SQLite (`jdbc:sqlite::memory:`) 跑每个 SPI 方法。
  */
 class SQLiteDialectTest {
-
     private val dialect = SQLiteDialect()
     private val jdbcUrl = "jdbc:sqlite::memory:"
     private lateinit var conn: Connection
@@ -40,12 +39,16 @@ class SQLiteDialectTest {
 
     @AfterEach
     fun tearDown() {
-        try { conn.close() } catch (_: Exception) {}
+        try {
+            conn.close()
+        } catch (_: Exception) {
+        }
     }
 
-    private fun withConn(block: suspend (Connection) -> Unit) = runBlocking {
-        block(conn)
-    }
+    private fun withConn(block: suspend (Connection) -> Unit) =
+        runBlocking {
+            block(conn)
+        }
 
     private fun exec(sql: String) {
         conn.createStatement().use { it.execute(sql) }
@@ -76,7 +79,9 @@ class SQLiteDialectTest {
     }
 
     @Test
-    fun `buildJdbcUrl with file path returns file url`(@TempDir tempDir: Path) {
+    fun `buildJdbcUrl with file path returns file url`(
+        @TempDir tempDir: Path,
+    ) {
         val dbFile = tempDir.resolve("test.db").toFile()
         val url = dialect.buildJdbcUrl("ignored", 9999, dbFile.absolutePath)
         assertEquals("jdbc:sqlite:${dbFile.absolutePath}", url)
@@ -112,17 +117,19 @@ class SQLiteDialectTest {
     // ============ 4. Schema / Database ============
 
     @Test
-    fun `listDatabases returns single element for in-memory`() = withConn { c ->
-        val dbs = dialect.listDatabases(c)
-        assertEquals(1, dbs.size)
-        assertEquals(":memory:", dbs[0])
-    }
+    fun `listDatabases returns single element for in-memory`() =
+        withConn { c ->
+            val dbs = dialect.listDatabases(c)
+            assertEquals(1, dbs.size)
+            assertEquals(":memory:", dbs[0])
+        }
 
     @Test
-    fun `listSchemas returns main and temp`() = withConn { c ->
-        val schemas = dialect.listSchemas(c, "")
-        assertTrue(schemas.contains("main"))
-    }
+    fun `listSchemas returns main and temp`() =
+        withConn { c ->
+            val schemas = dialect.listSchemas(c, "")
+            assertTrue(schemas.contains("main"))
+        }
 
     @Test
     fun `deleteSchema rejects main schema`() {
@@ -134,31 +141,34 @@ class SQLiteDialectTest {
     // ============ 5. Table / Column ============
 
     @Test
-    fun `listTables returns empty for fresh database`() = withConn { c ->
-        val tables = dialect.listTables(c, "", "")
-        assertEquals(0, tables.size)
-    }
+    fun `listTables returns empty for fresh database`() =
+        withConn { c ->
+            val tables = dialect.listTables(c, "", "")
+            assertEquals(0, tables.size)
+        }
 
     @Test
-    fun `listTables returns created table`() = withConn { c ->
-        exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-        val tables = dialect.listTables(c, "", "")
-        assertEquals(1, tables.size)
-        assertEquals("users", tables[0]["name"])
-        assertEquals("TABLE", tables[0]["type"])
-    }
+    fun `listTables returns created table`() =
+        withConn { c ->
+            exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            val tables = dialect.listTables(c, "", "")
+            assertEquals(1, tables.size)
+            assertEquals("users", tables[0]["name"])
+            assertEquals("TABLE", tables[0]["type"])
+        }
 
     @Test
-    fun `listColumns returns columns with PK flag`() = withConn { c ->
-        exec("CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, price REAL)")
-        val cols = dialect.listColumns(c, "", "", "products")
-        assertEquals(3, cols.size)
-        val id = cols.first { it["name"] == "id" }
-        assertEquals(true, id["isPrimaryKey"])
-        val name = cols.first { it["name"] == "name" }
-        assertEquals(false, name["nullable"])
-        assertEquals("TEXT", name["type"])
-    }
+    fun `listColumns returns columns with PK flag`() =
+        withConn { c ->
+            exec("CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, price REAL)")
+            val cols = dialect.listColumns(c, "", "", "products")
+            assertEquals(3, cols.size)
+            val id = cols.first { it["name"] == "id" }
+            assertEquals(true, id["isPrimaryKey"])
+            val name = cols.first { it["name"] == "name" }
+            assertEquals(false, name["nullable"])
+            assertEquals("TEXT", name["type"])
+        }
 
     // ============ 6. DDL 构造 ============
 
@@ -225,20 +235,22 @@ class SQLiteDialectTest {
     // ============ 7. getCreateTableDDL ============
 
     @Test
-    fun `getCreateTableDDL returns original DDL`() = withConn { c ->
-        exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)")
-        val ddl = dialect.getCreateTableDDL(c, "products")
-        assertTrue(ddl.contains("CREATE TABLE"), "DDL must contain CREATE TABLE: $ddl")
-        assertTrue(ddl.contains("products"), "DDL must contain table name: $ddl")
-        assertTrue(ddl.contains("id"), "DDL must contain column id: $ddl")
-    }
+    fun `getCreateTableDDL returns original DDL`() =
+        withConn { c ->
+            exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)")
+            val ddl = dialect.getCreateTableDDL(c, "products")
+            assertTrue(ddl.contains("CREATE TABLE"), "DDL must contain CREATE TABLE: $ddl")
+            assertTrue(ddl.contains("products"), "DDL must contain table name: $ddl")
+            assertTrue(ddl.contains("id"), "DDL must contain column id: $ddl")
+        }
 
     @Test
-    fun `getCreateTableDDL throws for missing table`() = withConn { c ->
-        assertFailsWith<IllegalArgumentException> {
-            runBlocking { dialect.getCreateTableDDL(c, "nonexistent") }
+    fun `getCreateTableDDL throws for missing table`() =
+        withConn { c ->
+            assertFailsWith<IllegalArgumentException> {
+                runBlocking { dialect.getCreateTableDDL(c, "nonexistent") }
+            }
         }
-    }
 
     // ============ 8. SQL 安全校验 ============
 
@@ -346,108 +358,126 @@ class SQLiteDialectTest {
     // ============ 10. View / Index / FK ============
 
     @Test
-    fun `listViews returns created view`() = withConn { c ->
-        exec("CREATE TABLE t (id INT)")
-        exec("CREATE VIEW v AS SELECT id FROM t")
-        val views = dialect.listViews(c, "main")
-        assertEquals(1, views.size)
-        assertEquals("v", views[0]["name"])
-    }
-
-    @Test
-    fun `createView then getDDL returns DDL`() = withConn { c ->
-        exec("CREATE TABLE t (id INT, name TEXT)")
-        dialect.createView(c, "v_t", "SELECT id, name FROM t")
-        val ddl = dialect.getViewDDL(c, "v_t", "main")
-        assertTrue(ddl.contains("CREATE VIEW"), "DDL: $ddl")
-        assertTrue(ddl.contains("v_t"), "DDL: $ddl")
-    }
-
-    @Test
-    fun `dropView with ifExists does not throw on missing`() = withConn { c ->
-        dialect.dropView(c, "nonexistent", ifExists = true)
-    }
-
-    @Test
-    fun `dropView without ifExists throws on missing`() = withConn { c ->
-        assertFailsWith<Exception> {
-            runBlocking { dialect.dropView(c, "nonexistent", ifExists = false) }
+    fun `listViews returns created view`() =
+        withConn { c ->
+            exec("CREATE TABLE t (id INT)")
+            exec("CREATE VIEW v AS SELECT id FROM t")
+            val views = dialect.listViews(c, "main")
+            assertEquals(1, views.size)
+            assertEquals("v", views[0]["name"])
         }
-    }
 
     @Test
-    fun `listIndexes returns created indexes`() = withConn { c ->
-        exec("CREATE TABLE t (id INT, name TEXT)")
-        dialect.createIndex(c, "t", "idx_t_name", listOf("name"), unique = false)
-        val idxs = dialect.listIndexes(c, "t")
-        assertEquals(1, idxs.size)
-        assertEquals("idx_t_name", idxs[0]["name"])
-        assertEquals("false", idxs[0]["unique"])
-    }
+    fun `createView then getDDL returns DDL`() =
+        withConn { c ->
+            exec("CREATE TABLE t (id INT, name TEXT)")
+            dialect.createView(c, "v_t", "SELECT id, name FROM t")
+            val ddl = dialect.getViewDDL(c, "v_t", "main")
+            assertTrue(ddl.contains("CREATE VIEW"), "DDL: $ddl")
+            assertTrue(ddl.contains("v_t"), "DDL: $ddl")
+        }
 
     @Test
-    fun `createIndex UNIQUE then list shows unique true`() = withConn { c ->
-        exec("CREATE TABLE t (email TEXT)")
-        dialect.createIndex(c, "t", "idx_email", listOf("email"), unique = true, ifNotExists = true)
-        val idxs = dialect.listIndexes(c, "t")
-        assertEquals("true", idxs[0]["unique"])
-    }
+    fun `dropView with ifExists does not throw on missing`() =
+        withConn { c ->
+            dialect.dropView(c, "nonexistent", ifExists = true)
+        }
 
     @Test
-    fun `addForeignKey then listForeignKeys returns FK`() = withConn { c ->
-        exec("CREATE TABLE users (id INTEGER PRIMARY KEY)")
-        exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
-        dialect.addForeignKey(c, "orders", "fk_orders_user",
-            columns = listOf("user_id"), refTable = "users", refColumns = listOf("id"),
-            onDelete = "CASCADE", onUpdate = "NO ACTION")
-        val fks = dialect.listForeignKeys(c, "orders")
-        assertEquals(1, fks.size)
-        assertEquals("users", fks[0]["ref_table"])
-        assertEquals("user_id", fks[0]["columns"])
-    }
+    fun `dropView without ifExists throws on missing`() =
+        withConn { c ->
+            assertFailsWith<Exception> {
+                runBlocking { dialect.dropView(c, "nonexistent", ifExists = false) }
+            }
+        }
+
+    @Test
+    fun `listIndexes returns created indexes`() =
+        withConn { c ->
+            exec("CREATE TABLE t (id INT, name TEXT)")
+            dialect.createIndex(c, "t", "idx_t_name", listOf("name"), unique = false)
+            val idxs = dialect.listIndexes(c, "t")
+            assertEquals(1, idxs.size)
+            assertEquals("idx_t_name", idxs[0]["name"])
+            assertEquals("false", idxs[0]["unique"])
+        }
+
+    @Test
+    fun `createIndex UNIQUE then list shows unique true`() =
+        withConn { c ->
+            exec("CREATE TABLE t (email TEXT)")
+            dialect.createIndex(c, "t", "idx_email", listOf("email"), unique = true, ifNotExists = true)
+            val idxs = dialect.listIndexes(c, "t")
+            assertEquals("true", idxs[0]["unique"])
+        }
+
+    @Test
+    fun `addForeignKey then listForeignKeys returns FK`() =
+        withConn { c ->
+            exec("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
+            dialect.addForeignKey(
+                c,
+                "orders",
+                "fk_orders_user",
+                columns = listOf("user_id"),
+                refTable = "users",
+                refColumns = listOf("id"),
+                onDelete = "CASCADE",
+                onUpdate = "NO ACTION",
+            )
+            val fks = dialect.listForeignKeys(c, "orders")
+            assertEquals(1, fks.size)
+            assertEquals("users", fks[0]["ref_table"])
+            assertEquals("user_id", fks[0]["columns"])
+        }
 
     // ============ 11. Table Operations ============
 
     @Test
-    fun `renameTable works`() = withConn { c ->
-        exec("CREATE TABLE old (id INT)")
-        dialect.renameTable(c, "old", "new")
-        val tables = dialect.listTables(c, "", "")
-        assertTrue(tables.any { it["name"] == "new" })
-    }
+    fun `renameTable works`() =
+        withConn { c ->
+            exec("CREATE TABLE old (id INT)")
+            dialect.renameTable(c, "old", "new")
+            val tables = dialect.listTables(c, "", "")
+            assertTrue(tables.any { it["name"] == "new" })
+        }
 
     @Test
-    fun `truncateTable empties data but keeps schema`() = withConn { c ->
-        exec("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)")
-        exec("INSERT INTO t (v) VALUES ('a'), ('b')")
-        dialect.truncateTable(c, "t")
-        conn.createStatement().use { rs ->
-            rs.executeQuery("SELECT COUNT(*) FROM t").use { cnt ->
-                cnt.next()
-                assertEquals(0, cnt.getInt(1))
+    fun `truncateTable empties data but keeps schema`() =
+        withConn { c ->
+            exec("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)")
+            exec("INSERT INTO t (v) VALUES ('a'), ('b')")
+            dialect.truncateTable(c, "t")
+            conn.createStatement().use { rs ->
+                rs.executeQuery("SELECT COUNT(*) FROM t").use { cnt ->
+                    cnt.next()
+                    assertEquals(0, cnt.getInt(1))
+                }
             }
         }
-    }
 
     // ============ 12. EXPLAIN ============
 
     @Test
-    fun `explainSQL returns plan rows`() = withConn { c ->
-        exec("CREATE TABLE t (id INT)")
-        val plan = dialect.explainSQL(c, "SELECT id FROM t")
-        assertTrue(plan.isNotEmpty(), "EXPLAIN 必须至少返回一行")
-    }
+    fun `explainSQL returns plan rows`() =
+        withConn { c ->
+            exec("CREATE TABLE t (id INT)")
+            val plan = dialect.explainSQL(c, "SELECT id FROM t")
+            assertTrue(plan.isNotEmpty(), "EXPLAIN 必须至少返回一行")
+        }
 
     // ============ 13. Server Info ============
 
     @Test
-    fun `getServerInfo returns SQLite product`() = withConn { c ->
-        val info = dialect.getServerInfo(c)
-        assertEquals("SQLite", info["product"])
-        assertEquals("embedded", info["mode"])
-        assertNotNull(info["version"])
-        assertTrue((info["version"] ?: "").isNotEmpty())
-    }
+    fun `getServerInfo returns SQLite product`() =
+        withConn { c ->
+            val info = dialect.getServerInfo(c)
+            assertEquals("SQLite", info["product"])
+            assertEquals("embedded", info["mode"])
+            assertNotNull(info["version"])
+            assertTrue((info["version"] ?: "").isNotEmpty())
+        }
 
     // ============ 14. 元数据 (v2.8) ============
 

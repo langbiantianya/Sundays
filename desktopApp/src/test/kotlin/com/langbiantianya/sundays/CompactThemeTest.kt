@@ -31,7 +31,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class CompactThemeTest {
-
     private data class Measured(
         val density: Float,
         val boxPx: Float,
@@ -44,12 +43,13 @@ class CompactThemeTest {
             setContent {
                 SundaysTheme(compact = compact) {
                     val density = LocalDensity.current
-                    result = Measured(
-                        density = density.density,
-                        // 40dp ≈ M3 Button 最小高；13sp ≈ bodyMedium
-                        boxPx = with(density) { 40.dp.toPx() },
-                        textPx = with(density) { 13.sp.toPx() },
-                    )
+                    result =
+                        Measured(
+                            density = density.density,
+                            // 40dp ≈ M3 Button 最小高；13sp ≈ bodyMedium
+                            boxPx = with(density) { 40.dp.toPx() },
+                            textPx = with(density) { 13.sp.toPx() },
+                        )
                 }
             }
         }

@@ -26,7 +26,6 @@ import kotlin.test.assertTrue
  * 用户看了会以为这张表有问题。
  */
 class ColumnInfoDisplayTest {
-
     private fun col(
         name: String = "col",
         type: String = "VARCHAR",
@@ -49,7 +48,8 @@ class ColumnInfoDisplayTest {
         assertEquals("TEXT", col(type = "TEXT", size = 0).typeWithSize)
         assertEquals("JSONB", col(type = "JSONB", size = 0).typeWithSize)
         assertEquals(
-            "VARCHAR", col(type = "VARCHAR", size = 0).typeWithSize,
+            "VARCHAR",
+            col(type = "VARCHAR", size = 0).typeWithSize,
             "proto 的 size 未指定就是 0 —— 同样是 0，绝不能显示成 VARCHAR(0)",
         )
     }

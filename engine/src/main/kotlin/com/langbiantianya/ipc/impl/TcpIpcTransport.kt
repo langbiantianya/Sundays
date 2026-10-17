@@ -23,10 +23,13 @@ import java.net.InetSocketAddress
  * **绑定地址**：默认 [IpcConfig.LOOPBACK]（仅回环）。该端口**没有鉴权** —— 连上即可执行
  * 任意 SQL，因此不默认暴露到 `0.0.0.0`；确需跨机时用 `--host 0.0.0.0` 显式开启。
  */
-class TcpIpcTransport(private val cfg: IpcConfig) : IpcTransport {
+class TcpIpcTransport(
+    private val cfg: IpcConfig,
+) : IpcTransport {
     private val logger = LoggerFactory.getLogger(TcpIpcTransport::class.java)
 
     override fun scheme(): String = "tcp"
+
     override fun displayTarget(): String = "${cfg.tcpHost}:${cfg.tcpPort}"
 
     override fun prepare() {
@@ -45,15 +48,17 @@ class TcpIpcTransport(private val cfg: IpcConfig) : IpcTransport {
             if (cfg.tcpHost != IpcConfig.LOOPBACK) {
                 logger.warn(
                     "JDK ServerBuilder cannot bind a specific address; falling back to port {} " +
-                        "which listens on ALL interfaces ({}) instead of {}", cfg.tcpPort, cfg.tcpHost, cfg.tcpHost
+                        "which listens on ALL interfaces ({}) instead of {}",
+                    cfg.tcpPort,
+                    cfg.tcpHost,
+                    cfg.tcpHost,
                 )
             }
             io.grpc.ServerBuilder.forPort(cfg.tcpPort)
         }
     }
 
-    override fun channelBuilder(): ManagedChannelBuilder<*> =
-        ManagedChannelBuilder.forAddress(cfg.tcpHost, cfg.tcpPort).usePlaintext()
+    override fun channelBuilder(): ManagedChannelBuilder<*> = ManagedChannelBuilder.forAddress(cfg.tcpHost, cfg.tcpPort).usePlaintext()
 
     override fun cleanup() { /* no-op */ }
 }

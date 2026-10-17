@@ -10,20 +10,19 @@ package com.langbiantianya.importer
 
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.LanguageScope
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.io.StringReader
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
 
 /**
  * CsvReader 单元测试 —— 纯内存（StringReader），不触碰任何数据库。
  * 重点是引号 / 转义 / 换行 / CRLF 这些「朴素 split 会切错」的场景。
  */
 class CsvReaderTest {
-
     /**
      * 把进程级默认语言钉死成简体中文 —— 本类断言的是**错误消息的中文子串**。
      *
@@ -122,11 +121,12 @@ class CsvReaderTest {
 
     @Test
     fun `headerless csv keeps every row as data and takes columns from the target table`() {
-        val (columns, rows) = readAll(
-            "1,Alice\n2,Bob\n",
-            hasHeader = false,
-            targetColumns = listOf("id", "name"),
-        )
+        val (columns, rows) =
+            readAll(
+                "1,Alice\n2,Bob\n",
+                hasHeader = false,
+                targetColumns = listOf("id", "name"),
+            )
 
         assertEquals(listOf("id", "name"), columns)
         assertEquals(2, rows.size, "无表头时首行也是数据，一行都不能丢")
@@ -187,7 +187,14 @@ class CsvReaderTest {
     @Test
     fun `rows is single pass and rejects a second call`() {
         val reader = CsvReader(StringReader("a\n1\n"), ',', true)
-        assertEquals(1, reader.rows().asSequence().toList().size)
+        assertEquals(
+            1,
+            reader
+                .rows()
+                .asSequence()
+                .toList()
+                .size,
+        )
         val e = assertThrows<IllegalStateException> { reader.rows() }
         assertTrue(e.message!!.contains("只能调用一次"), "实际消息: ${e.message}")
     }

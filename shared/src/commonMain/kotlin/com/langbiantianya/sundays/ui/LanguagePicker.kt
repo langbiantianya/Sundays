@@ -80,23 +80,24 @@ private fun LanguageChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
+    val borderColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        }
     Row(
-        modifier = Modifier
-            // `selectable` 而不是 `clickable(role = …)`：后者只设 role 不设 `selected` 语义，
-            // 读屏会念「单选按钮」却永远不告诉用户「这一个选中了没有」—— 那比不给 role 更糟。
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .border(if (selected) 2.dp else 1.dp, borderColor, winShape(6.dp))
-            .background(selectionContainerColor(selected, MaterialTheme.colorScheme.surface), winShape(6.dp))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+        modifier =
+            Modifier
+                // `selectable` 而不是 `clickable(role = …)`：后者只设 role 不设 `selected` 语义，
+                // 读屏会念「单选按钮」却永远不告诉用户「这一个选中了没有」—— 那比不给 role 更糟。
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = onClick,
+                ).border(if (selected) 2.dp else 1.dp, borderColor, winShape(6.dp))
+                .background(selectionContainerColor(selected, MaterialTheme.colorScheme.surface), winShape(6.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

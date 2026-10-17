@@ -30,7 +30,6 @@ import kotlinx.serialization.json.doubleOrNull
  * RequestDispatcher 负责在边界做双向转换；所有 Handler 不需要改动。
  */
 object PayloadAdapter {
-
     // ============ JsonElement → Value ============
 
     /**
@@ -43,7 +42,10 @@ object PayloadAdapter {
      */
     fun toValue(element: JsonElement): Value {
         return when (element) {
-            is JsonNull -> Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+            is JsonNull -> {
+                Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+            }
+
             is JsonPrimitive -> {
                 // 关键：先判断是不是字符串（避免 "42" / "true" 被误判为 NUMBER / BOOL）
                 if (element.isString) {
@@ -60,25 +62,34 @@ object PayloadAdapter {
                     Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
                 }
             }
-            is JsonObject -> Value.newBuilder()
-                .setStructValue(
-                    Struct.newBuilder()
-                        .apply {
-                            element.forEach { (k, v) -> putFields(k, toValue(v)) }
-                        }
-                        .build()
-                )
-                .build()
-            is JsonArray -> Value.newBuilder()
-                .setListValue(
-                    ListValue.newBuilder()
-                        .apply {
-                            element.forEach { addValues(toValue(it)) }
-                        }
-                        .build()
-                )
-                .build()
-            else -> Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+
+            is JsonObject -> {
+                Value
+                    .newBuilder()
+                    .setStructValue(
+                        Struct
+                            .newBuilder()
+                            .apply {
+                                element.forEach { (k, v) -> putFields(k, toValue(v)) }
+                            }.build(),
+                    ).build()
+            }
+
+            is JsonArray -> {
+                Value
+                    .newBuilder()
+                    .setListValue(
+                        ListValue
+                            .newBuilder()
+                            .apply {
+                                element.forEach { addValues(toValue(it)) }
+                            }.build(),
+                    ).build()
+            }
+
+            else -> {
+                Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+            }
         }
     }
 
@@ -94,34 +105,51 @@ object PayloadAdapter {
     /**
      * 空 JsonObject → NULL Value（语义对齐 google.protobuf.Value 默认构造）
      */
-    fun nullValue(): Value =
-        Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+    fun nullValue(): Value = Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
 
     // ============ Value → JsonElement ============
 
     /**
      * google.protobuf.Value → JsonElement
      */
-    fun toJsonElement(value: Value): JsonElement {
-        return when (value.kindCase) {
-            Value.KindCase.NULL_VALUE -> JsonNull
-            Value.KindCase.NUMBER_VALUE -> numberPrimitive(value.numberValue)
-            Value.KindCase.STRING_VALUE -> JsonPrimitive(value.stringValue)
-            Value.KindCase.BOOL_VALUE -> JsonPrimitive(value.boolValue)
+    fun toJsonElement(value: Value): JsonElement =
+        when (value.kindCase) {
+            Value.KindCase.NULL_VALUE -> {
+                JsonNull
+            }
+
+            Value.KindCase.NUMBER_VALUE -> {
+                numberPrimitive(value.numberValue)
+            }
+
+            Value.KindCase.STRING_VALUE -> {
+                JsonPrimitive(value.stringValue)
+            }
+
+            Value.KindCase.BOOL_VALUE -> {
+                JsonPrimitive(value.boolValue)
+            }
+
             Value.KindCase.STRUCT_VALUE -> {
                 val fields = value.structValue.fieldsMap
                 val obj = LinkedHashMap<String, JsonElement>(fields.size)
                 fields.forEach { (k, v) -> obj[k] = toJsonElement(v) }
                 JsonObject(obj)
             }
+
             Value.KindCase.LIST_VALUE -> {
                 val arr = value.listValue.valuesList.map { toJsonElement(it) }
                 JsonArray(arr)
             }
-            Value.KindCase.KIND_NOT_SET -> JsonNull
-            else -> JsonNull
+
+            Value.KindCase.KIND_NOT_SET -> {
+                JsonNull
+            }
+
+            else -> {
+                JsonNull
+            }
         }
-    }
 
     /**
      * double → JsonPrimitive，**整数不补小数点**
@@ -166,20 +194,24 @@ object PayloadAdapter {
     // ============ 便捷：从 Value 提取基础类型 ============
 
     /** 取出字符串（如果 kindCase == STRING_VALUE），否则返回 null */
-    fun asStringOrNull(value: Value): String? =
-        if (value.kindCase == Value.KindCase.STRING_VALUE) value.stringValue else null
+    fun asStringOrNull(value: Value): String? = if (value.kindCase == Value.KindCase.STRING_VALUE) value.stringValue else null
 
     /** 取出 Int（如果 kindCase == NUMBER_VALUE 且 numberValue 整数） */
     fun asIntOrNull(value: Value): Int? =
-        if (value.kindCase == Value.KindCase.NUMBER_VALUE && value.numberValue % 1.0 == 0.0)
-            value.numberValue.toInt() else null
+        if (value.kindCase == Value.KindCase.NUMBER_VALUE && value.numberValue % 1.0 == 0.0) {
+            value.numberValue.toInt()
+        } else {
+            null
+        }
 
     /** 取出 Long（如果 kindCase == NUMBER_VALUE 且 numberValue 整数） */
     fun asLongOrNull(value: Value): Long? =
-        if (value.kindCase == Value.KindCase.NUMBER_VALUE && value.numberValue % 1.0 == 0.0)
-            value.numberValue.toLong() else null
+        if (value.kindCase == Value.KindCase.NUMBER_VALUE && value.numberValue % 1.0 == 0.0) {
+            value.numberValue.toLong()
+        } else {
+            null
+        }
 
     /** 取出 Boolean（如果 kindCase == BOOL_VALUE） */
-    fun asBooleanOrNull(value: Value): Boolean? =
-        if (value.kindCase == Value.KindCase.BOOL_VALUE) value.boolValue else null
+    fun asBooleanOrNull(value: Value): Boolean? = if (value.kindCase == Value.KindCase.BOOL_VALUE) value.boolValue else null
 }

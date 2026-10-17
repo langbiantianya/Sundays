@@ -44,7 +44,10 @@ object StatementRegistry {
      * 登记一条正在执行的语句。同 id 重复登记以**最后一次**为准
      * （一次请求内可能先后建多条语句，例如多语句脚本）。
      */
-    fun register(requestId: String, statement: Statement) {
+    fun register(
+        requestId: String,
+        statement: Statement,
+    ) {
         if (requestId.isBlank()) return
         running[requestId] = CancelTarget { statement.cancel() }
     }
@@ -52,10 +55,14 @@ object StatementRegistry {
     /**
      * 登记自定义取消动作（非 JDBC 目标，例如批量导入的「停标志 + 中断当前批次」）。
      */
-    fun registerCanceler(requestId: String, action: () -> Unit) {
+    fun registerCanceler(
+        requestId: String,
+        action: () -> Unit,
+    ) {
         if (requestId.isBlank()) return
         running[requestId] = CancelTarget { action() }
     }
+
     /** 注销。请求结束时必须调用，否则 [running] 会泄漏已关闭的 Statement 引用。 */
     fun unregister(requestId: String) {
         if (requestId.isBlank()) return
@@ -74,14 +81,16 @@ object StatementRegistry {
      * @return true = 找到目标且 `cancel()` 未抛异常；false = 该请求不在运行或已结束
      */
     fun cancel(requestId: String): Boolean {
-        val target = running[requestId]
-            ?: running.entries.firstOrNull { (key, _) ->
-                key.length > requestId.length && key.startsWith("$requestId#")
-            }?.value
-            ?: run {
-                logger.debug("No running statement for request id={}", requestId)
-                return false
-            }
+        val target =
+            running[requestId]
+                ?: running.entries
+                    .firstOrNull { (key, _) ->
+                        key.length > requestId.length && key.startsWith("$requestId#")
+                    }?.value
+                ?: run {
+                    logger.debug("No running statement for request id={}", requestId)
+                    return false
+                }
         return try {
             target.cancel()
             logger.info("Cancellation issued for request id={}", requestId)

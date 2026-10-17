@@ -36,7 +36,6 @@ package com.langbiantianya.sundays.connection
  * 的名字**。剪贴板里放一个看着像对、实际会查错表的引用，比不给引用更糟。
  */
 object SqlIdentifier {
-
     /**
      * 用该方言的引用符包裹 [name]。
      *
@@ -45,18 +44,29 @@ object SqlIdentifier {
      *
      * **不做大小写折叠**，理由见本文件的 KDoc。
      */
-    fun quote(dialect: DialectType, name: String): String = when (dialect) {
-        // MySQL 是唯一用反引号的方言；ANSI 双引号在 MySQL 里默认是**字符串字面量**，
-        // 写成 `"biz_user"` 会被当成 SELECT 'biz_user' 而不是标识符 —— 这是 MySQL 的
-        // 历史包袱（ANSI_QUOTES 模式才改变），因此这里必须分开写而不是统一走双引号。
-        DialectType.MYSQL -> "`" + name.replace("`", "``") + "`"
-        DialectType.POSTGRESQL, DialectType.H2, DialectType.DUCKDB, DialectType.SQLITE ->
-            "\"" + name.replace("\"", "\"\"") + "\""
-        // 未知方言：没有引擎方言可依（`DialectType.UNKNOWN` 对应引擎会直接报
-        // 「No dialect plugin loaded」），此时给双引号 —— 四个内置方言里三个用它，
-        // 是概率上最不容易让用户手工返工的那个选择。
-        DialectType.UNKNOWN -> "\"" + name.replace("\"", "\"\"") + "\""
-    }
+    fun quote(
+        dialect: DialectType,
+        name: String,
+    ): String =
+        when (dialect) {
+            // MySQL 是唯一用反引号的方言；ANSI 双引号在 MySQL 里默认是**字符串字面量**，
+            // 写成 `"biz_user"` 会被当成 SELECT 'biz_user' 而不是标识符 —— 这是 MySQL 的
+            // 历史包袱（ANSI_QUOTES 模式才改变），因此这里必须分开写而不是统一走双引号。
+            DialectType.MYSQL -> {
+                "`" + name.replace("`", "``") + "`"
+            }
+
+            DialectType.POSTGRESQL, DialectType.H2, DialectType.DUCKDB, DialectType.SQLITE -> {
+                "\"" + name.replace("\"", "\"\"") + "\""
+            }
+
+            // 未知方言：没有引擎方言可依（`DialectType.UNKNOWN` 对应引擎会直接报
+            // 「No dialect plugin loaded」），此时给双引号 —— 四个内置方言里三个用它，
+            // 是概率上最不容易让用户手工返工的那个选择。
+            DialectType.UNKNOWN -> {
+                "\"" + name.replace("\"", "\"\"") + "\""
+            }
+        }
 
     /**
      * 用 `.` 连接若干段，每段各自引用。
@@ -64,14 +74,19 @@ object SqlIdentifier {
      * 先各自引用再拼，才不会出现「只有一半被引用」的中间态。
      * 空段直接跳过 —— 调用方不必为「这一级没有名字」单独分叉。
      */
-    fun path(dialect: DialectType, vararg parts: String): String =
-        parts.filter { it.isNotBlank() }.joinToString(".") { quote(dialect, it) }
+    fun path(
+        dialect: DialectType,
+        vararg parts: String,
+    ): String = parts.filter { it.isNotBlank() }.joinToString(".") { quote(dialect, it) }
 
     /**
      * 库 / 表限定名 —— [schema] 为空时退化为只有表名。
      */
-    fun qualified(dialect: DialectType, schema: String, name: String): String =
-        path(dialect, schema, name)
+    fun qualified(
+        dialect: DialectType,
+        schema: String,
+        name: String,
+    ): String = path(dialect, schema, name)
 
     /**
      * 树上某个表节点应当被引用成什么样子。
@@ -122,19 +137,33 @@ object SqlIdentifier {
         schema: String,
         table: String,
         databaseIsCurrent: Boolean = false,
-    ): String = when {
-        // PG 三段式：database + schema 都有，且这个库就是当前连接的库
-        dialect == DialectType.POSTGRESQL &&
-            databaseIsCurrent && database.isNotBlank() && schema.isNotBlank() ->
-            path(dialect, database, schema, table)
-        schema.isNotBlank() -> qualified(dialect, schema, table)
-        dialect == DialectType.MYSQL && database.isNotBlank() -> qualified(dialect, database, table)
-        // 既没有 schema，MySQL 那条路也走不通（database 为空）：只给表名。
-        // 这是最小可用形态 —— 用户要的通常是「一个能粘进 SQL 编辑器的引用」，
-        // 而不是一定要全限定。
-        else -> quote(dialect, table)
-    }
+    ): String =
+        when {
+            // PG 三段式：database + schema 都有，且这个库就是当前连接的库
+            dialect == DialectType.POSTGRESQL &&
+                databaseIsCurrent && database.isNotBlank() && schema.isNotBlank() -> {
+                path(dialect, database, schema, table)
+            }
+
+            schema.isNotBlank() -> {
+                qualified(dialect, schema, table)
+            }
+
+            dialect == DialectType.MYSQL && database.isNotBlank() -> {
+                qualified(dialect, database, table)
+            }
+
+            // 既没有 schema，MySQL 那条路也走不通（database 为空）：只给表名。
+            // 这是最小可用形态 —— 用户要的通常是「一个能粘进 SQL 编辑器的引用」，
+            // 而不是一定要全限定。
+            else -> {
+                quote(dialect, table)
+            }
+        }
 
     /** 库节点本身的引用（`USE` / 跨库查询里能用）。 */
-    fun databaseRef(dialect: DialectType, database: String): String = quote(dialect, database)
+    fun databaseRef(
+        dialect: DialectType,
+        database: String,
+    ): String = quote(dialect, database)
 }

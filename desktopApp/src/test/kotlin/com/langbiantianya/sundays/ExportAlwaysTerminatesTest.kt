@@ -9,7 +9,6 @@
 package com.langbiantianya.sundays
 
 import com.langbiantianya.client.EngineClient
-import com.langbiantianya.grpc.ConnectionConfig as GrpcConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.DialectType
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +23,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import com.langbiantianya.grpc.ConnectionConfig as GrpcConnectionConfig
 
 /**
  * 「导出必须给得出结论」——**不允许静默**。
@@ -51,7 +51,6 @@ import kotlin.test.assertTrue
  * 且两者都要带上用户看得懂的原因。
  */
 class ExportAlwaysTerminatesTest {
-
     /** 引擎回了进度帧但永远不给完成帧 —— 复刻子进程中途消失那条最坏路径。 */
     private class NeverCompletingEngine : EngineClient {
         override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> =
@@ -73,37 +72,51 @@ class ExportAlwaysTerminatesTest {
 
         override fun close() = Unit
 
-        private fun progressFrame(id: String, completed: Boolean, rows: Long, filePath: String) =
-            com.langbiantianya.grpc.response {
-                this.id = id
-                success = true
-                stream = true
-                export = com.langbiantianya.grpc.exportResponse {
-                    progress = com.langbiantianya.grpc.ExportProgressFrame.newBuilder()
-                        .setExportedRows(rows)
-                        .setCompleted(completed)
-                        .setFilePath(filePath)
-                        .build()
+        private fun progressFrame(
+            id: String,
+            completed: Boolean,
+            rows: Long,
+            filePath: String,
+        ) = com.langbiantianya.grpc.response {
+            this.id = id
+            success = true
+            stream = true
+            export =
+                com.langbiantianya.grpc.exportResponse {
+                    progress =
+                        com.langbiantianya.grpc.ExportProgressFrame
+                            .newBuilder()
+                            .setExportedRows(rows)
+                            .setCompleted(completed)
+                            .setFilePath(filePath)
+                            .build()
                 }
-            }
+        }
     }
 
     /** 引擎正常完成：回报完成帧与文件路径。 */
-    private class CompletingEngine(private val file: File) : EngineClient {
+    private class CompletingEngine(
+        private val file: File,
+    ) : EngineClient {
         override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> =
             flow {
-                emit(com.langbiantianya.grpc.response {
-                    id = request.id
-                    success = true
-                    stream = true
-                    export = com.langbiantianya.grpc.exportResponse {
-                        progress = com.langbiantianya.grpc.ExportProgressFrame.newBuilder()
-                            .setExportedRows(1)
-                            .setCompleted(true)
-                            .setFilePath(file.absolutePath)
-                            .build()
-                    }
-                })
+                emit(
+                    com.langbiantianya.grpc.response {
+                        id = request.id
+                        success = true
+                        stream = true
+                        export =
+                            com.langbiantianya.grpc.exportResponse {
+                                progress =
+                                    com.langbiantianya.grpc.ExportProgressFrame
+                                        .newBuilder()
+                                        .setExportedRows(1)
+                                        .setCompleted(true)
+                                        .setFilePath(file.absolutePath)
+                                        .build()
+                            }
+                    },
+                )
             }
 
         override suspend fun invoke(
@@ -120,8 +133,7 @@ class ExportAlwaysTerminatesTest {
         override fun close() = Unit
     }
 
-    private fun newState(engine: EngineClient) =
-        DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
+    private fun newState(engine: EngineClient) = DatabaseBrowserState(engine, CoroutineScope(Dispatchers.Default))
 
     /**
      * 跑一次导出。
@@ -143,8 +155,10 @@ class ExportAlwaysTerminatesTest {
      * `exportTimeoutMs` 在那条用例里是 300ms，这里给它 20s —— 足够「正确实现」返回，
      * 又短到挂死的实现一定会被这里截断。
      */
-    private fun <T> withTestGuard(timeoutMs: Long, block: suspend () -> T): T? =
-        runBlocking { withTimeoutOrNull(timeoutMs) { block() } }
+    private fun <T> withTestGuard(
+        timeoutMs: Long,
+        block: suspend () -> T,
+    ): T? = runBlocking { withTimeoutOrNull(timeoutMs) { block() } }
 
     @Test
     fun `an export that never completes must still produce a visible conclusion`() {
@@ -178,7 +192,8 @@ class ExportAlwaysTerminatesTest {
         // 还得在对话框里猜是自己哪里填错了
         assertTrue(result != null && result.isFailure, "空文件名必须被拒：$result")
         assertEquals(
-            "请填写文件名", result.exceptionOrNull()?.message,
+            "请填写文件名",
+            result.exceptionOrNull()?.message,
             "校验失败的原因要指名道姓，而不是「导出失败」四个字",
         )
     }
@@ -207,23 +222,25 @@ class ExportAlwaysTerminatesTest {
     }
 
     @Test
-    fun `progress is reported frame by frame not only the final count`() = runBlocking {
-        // 进度弹窗的全部价值在「动起来」这三个字上。
-        // 只在最后一帧报一次行数 = 弹窗从头到尾纹丝不动，用户和面对 §9.13 那个
-        // 静默缺陷时**分辨不出区别** —— 那这一整轮改动就白做了。
-        val out = Files.createTempDirectory("sundays-export-progress").toFile()
-        val file = out.resolve("p.csv").also { it.writeText("id\n") }
-        val seen = mutableListOf<Long>()
-        val state = newState(SteppingEngine(file, listOf(100, 500, 1200)))
-        state.exportQuery("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, out.absolutePath, "p.csv") { p ->
-            seen += p.rowsWritten
+    fun `progress is reported frame by frame not only the final count`() =
+        runBlocking {
+            // 进度弹窗的全部价值在「动起来」这三个字上。
+            // 只在最后一帧报一次行数 = 弹窗从头到尾纹丝不动，用户和面对 §9.13 那个
+            // 静默缺陷时**分辨不出区别** —— 那这一整轮改动就白做了。
+            val out = Files.createTempDirectory("sundays-export-progress").toFile()
+            val file = out.resolve("p.csv").also { it.writeText("id\n") }
+            val seen = mutableListOf<Long>()
+            val state = newState(SteppingEngine(file, listOf(100, 500, 1200)))
+            state.exportQuery("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, out.absolutePath, "p.csv") { p ->
+                seen += p.rowsWritten
+            }
+            assertEquals(
+                listOf(100L, 500L, 1200L),
+                seen,
+                "每一帧进度都要往外抛（含最后一帧 completed）——只报最后一帧的话，弹窗全程不动，" +
+                    "用户和面对 §9.13 那个静默缺陷时分辨不出区别",
+            )
         }
-        assertEquals(
-            listOf(100L, 500L, 1200L), seen,
-            "每一帧进度都要往外抛（含最后一帧 completed）——只报最后一帧的话，弹窗全程不动，" +
-                "用户和面对 §9.13 那个静默缺陷时分辨不出区别",
-        )
-    }
 
     /** 按给定行数逐帧推进度，最后一帧带 `completed=true`。 */
     private class SteppingEngine(
@@ -234,18 +251,23 @@ class ExportAlwaysTerminatesTest {
             flow {
                 steps.forEachIndexed { i, rows ->
                     val last = i == steps.lastIndex
-                    emit(com.langbiantianya.grpc.response {
-                        id = request.id
-                        success = true
-                        stream = true
-                        export = com.langbiantianya.grpc.exportResponse {
-                            progress = com.langbiantianya.grpc.ExportProgressFrame.newBuilder()
-                                .setExportedRows(rows)
-                                .setCompleted(last)
-                                .setFilePath(if (last) file.absolutePath else "")
-                                .build()
-                        }
-                    })
+                    emit(
+                        com.langbiantianya.grpc.response {
+                            id = request.id
+                            success = true
+                            stream = true
+                            export =
+                                com.langbiantianya.grpc.exportResponse {
+                                    progress =
+                                        com.langbiantianya.grpc.ExportProgressFrame
+                                            .newBuilder()
+                                            .setExportedRows(rows)
+                                            .setCompleted(last)
+                                            .setFilePath(if (last) file.absolutePath else "")
+                                            .build()
+                                }
+                        },
+                    )
                 }
             }
 

@@ -29,7 +29,6 @@ import kotlin.test.assertTrue
  * 本测试直接向引擎索取已注册方言（`SYSTEM.LIST_DRIVERS` 的数据源），任何一侧改名都会失败。
  */
 class DialectNameContractTest {
-
     @Before
     fun setUp() {
         // IdbEngine bootstrap 是全局一次性的，其它测试类调过 engine.close() 会清空方言表。
@@ -40,7 +39,12 @@ class DialectNameContractTest {
 
     @Test
     fun `every DialectType maps to a driver name the engine actually registers`() {
-        val registered = SystemHandler.listDrivers().itemsList.map { it.driverName }.toSet()
+        val registered =
+            SystemHandler
+                .listDrivers()
+                .itemsList
+                .map { it.driverName }
+                .toSet()
         assertTrue(
             registered.isNotEmpty(),
             "expected dialect plugins on the test classpath, found none",

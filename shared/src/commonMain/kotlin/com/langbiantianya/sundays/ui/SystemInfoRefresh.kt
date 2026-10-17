@@ -28,8 +28,10 @@ import kotlin.time.Duration.Companion.seconds
  * 翻译只替换了 Composable 里的字面量，而这里是数据，翻译器根本碰不到。
  * 枚举改成只存键，文案查表在渲染时发生，于是「换语言」才真的覆盖到所有入口。
  */
-enum class SystemInfoRefresh(val labelKey: StrKey, private val seconds: Int) {
-
+enum class SystemInfoRefresh(
+    val labelKey: StrKey,
+    private val seconds: Int,
+) {
     /** 不自动刷新（默认）。 */
     OFF(StrKey.AUTO_REFRESH_OFF, 0),
     S10(StrKey.AUTO_REFRESH_10S, 10),

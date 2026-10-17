@@ -36,7 +36,10 @@ import com.langbiantianya.sundays.settings.SettingsStorage
  * 构造参数里写死中文时，切语言换不掉它 —— 翻译只改 Composable 里的字面量，
  * 这里是数据，翻译器碰不到。枚举只存键、渲染时查表，所有入口才真正跟着语言走。
  */
-enum class ThemeMode(val labelKey: StrKey, val descriptionKey: StrKey) {
+enum class ThemeMode(
+    val labelKey: StrKey,
+    val descriptionKey: StrKey,
+) {
     SYSTEM(StrKey.THEME_FOLLOW_SYSTEM, StrKey.THEME_FOLLOW_SYSTEM_DESC),
     LIGHT(StrKey.THEME_LIGHT, StrKey.THEME_LIGHT_DESC),
     DARK(StrKey.THEME_DARK, StrKey.THEME_DARK_DESC),
@@ -44,19 +47,21 @@ enum class ThemeMode(val labelKey: StrKey, val descriptionKey: StrKey) {
 
     /** 下一档 —— 按钮单击走这条路径。 */
     val next: ThemeMode
-        get() = when (this) {
-            SYSTEM -> LIGHT
-            LIGHT -> DARK
-            DARK -> SYSTEM
-        }
+        get() =
+            when (this) {
+                SYSTEM -> LIGHT
+                LIGHT -> DARK
+                DARK -> SYSTEM
+            }
 
     /** 上一档。 */
     val previous: ThemeMode
-        get() = when (this) {
-            SYSTEM -> DARK
-            LIGHT -> SYSTEM
-            DARK -> LIGHT
-        }
+        get() =
+            when (this) {
+                SYSTEM -> DARK
+                LIGHT -> SYSTEM
+                DARK -> LIGHT
+            }
 
     /**
      * 解析成实际生效的明暗值。
@@ -64,11 +69,12 @@ enum class ThemeMode(val labelKey: StrKey, val descriptionKey: StrKey) {
      * [isSystemDark] 必须是**组合时**的当前系统值 —— 必须在 Composable 里就地调
      * `isSystemInDarkTheme()` 取，缓存到普通字段会漏掉运行中的系统切换。
      */
-    fun resolveDark(isSystemDark: Boolean): Boolean = when (this) {
-        SYSTEM -> isSystemDark
-        LIGHT -> false
-        DARK -> true
-    }
+    fun resolveDark(isSystemDark: Boolean): Boolean =
+        when (this) {
+            SYSTEM -> isSystemDark
+            LIGHT -> false
+            DARK -> true
+        }
 }
 
 /**
@@ -99,7 +105,6 @@ class AppearanceState(
     initialLanguage: AppLanguage = AppLanguage.DEFAULT,
     private val onChange: (AppearanceState) -> Unit = {},
 ) {
-
     /** 当前配色主题。 */
     var palette: ThemePalette by mutableStateOf(initialPalette)
         private set
@@ -216,7 +221,8 @@ class AppearanceState(
         persist()
     }
 
-    /** 当前应生效的配色 —— 明暗由 [resolvedDark] 决定。 */    fun colorScheme(resolvedDark: Boolean) = palette.schemeFor(resolvedDark)
+    /** 当前应生效的配色 —— 明暗由 [resolvedDark] 决定。 */
+    fun colorScheme(resolvedDark: Boolean) = palette.schemeFor(resolvedDark)
 
     /**
      * 明暗在当前系统主题下的解析结果。
@@ -240,8 +246,10 @@ class AppearanceState(
  * 值得被单独断言。`fileExists` 由调用方传入而非本函数自己去读文件，
  * 于是这条判据可以脱离文件系统被测试。
  */
-internal fun resolveOnboardingCompleted(settings: AppSettings, fileExists: Boolean): Boolean =
-    settings.onboardingCompleted || fileExists
+internal fun resolveOnboardingCompleted(
+    settings: AppSettings,
+    fileExists: Boolean,
+): Boolean = settings.onboardingCompleted || fileExists
 
 /**
  * 首次启动的界面语言 —— 「系统语言探测」与「读设置」的分叉点。
@@ -272,14 +280,15 @@ internal fun resolveInitialLanguage(
  * 标记重置为 `false`，下次启动又回到引导页。而这种 bug 只在「改完主题 → 重启」两步之后
  * 才显形，靠读代码极难发现，只能靠一条断言把它钉住。
  */
-internal fun AppearanceState.toAppSettings(): AppSettings = AppSettings(
-    palette = palette,
-    themeMode = mode,
-    systemInfoRefresh = systemInfoRefresh,
-    compactMode = compactMode,
-    onboardingCompleted = onboardingCompleted,
-    language = language,
-)
+internal fun AppearanceState.toAppSettings(): AppSettings =
+    AppSettings(
+        palette = palette,
+        themeMode = mode,
+        systemInfoRefresh = systemInfoRefresh,
+        compactMode = compactMode,
+        onboardingCompleted = onboardingCompleted,
+        language = language,
+    )
 
 /** 创建并 [remember] 一个 [AppearanceState]（不落盘，供测试与预览）。 */
 @Composable
@@ -306,11 +315,12 @@ fun rememberPersistentAppearanceState(): AppearanceState {
             // 判据见 resolveOnboardingCompleted：老用户升级上来时字段必然缺失，
             // 只看字段会让每次升级都被引导页拦一次。
             initialOnboardingCompleted = resolveOnboardingCompleted(settings, fileExists),
-            initialLanguage = resolveInitialLanguage(
-                settings = settings,
-                fileExists = fileExists,
-                systemLanguage = AppLanguage.detectSystemLanguage(),
-            ),
+            initialLanguage =
+                resolveInitialLanguage(
+                    settings = settings,
+                    fileExists = fileExists,
+                    systemLanguage = AppLanguage.detectSystemLanguage(),
+                ),
             onChange = { state -> SettingsStorage.save(state.toAppSettings()) },
         )
     }

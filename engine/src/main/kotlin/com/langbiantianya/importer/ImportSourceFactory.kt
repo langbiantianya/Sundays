@@ -30,7 +30,6 @@ import java.nio.charset.UnsupportedCharsetException
  * 业务层就只需要 `ImportSourceFactory.open(req).use { ... }` 一行。
  */
 object ImportSourceFactory {
-
     /**
      * 按请求打开文件并返回匹配的读取器。调用方负责 [ImportSource.close]（`use {}` 即可）。
      *
@@ -47,7 +46,10 @@ object ImportSourceFactory {
      * 文件不存在 / 不可读 / 编码非法 / 无表头但未提供目标列时抛 [IllegalArgumentException]，
      * 消息里带文件路径，便于前端直接把路径回显给用户。
      */
-    fun open(req: ImportRunRequest, targetColumns: List<String> = emptyList()): ImportSource {
+    fun open(
+        req: ImportRunRequest,
+        targetColumns: List<String> = emptyList(),
+    ): ImportSource {
         val path = req.filePath
         require(path.isNotBlank()) { Msg.text(StrKey.IMPORT_PATH_EMPTY) }
 
@@ -96,18 +98,25 @@ object ImportSourceFactory {
      *
      * 只认 UTF-8 BOM（EF BB BF）：GBK 等其它编码不以它开头，不受影响。
      */
-    private fun openReader(file: File, charset: Charset, path: String): BufferedReader = try {
-        BufferedReader(InputStreamReader(BomStrippingInputStream(FileInputStream(file)), charset))
-    } catch (e: IOException) {
-        // canRead() 只能挡住大部分情况，权限在检查之后被改、或路径指向目录仍可能落到这里
-        throw IllegalArgumentException(Msg.format(StrKey.IMPORT_FILE_OPEN_FAILED, path, e.message), e)
-    }
+    private fun openReader(
+        file: File,
+        charset: Charset,
+        path: String,
+    ): BufferedReader =
+        try {
+            BufferedReader(InputStreamReader(BomStrippingInputStream(FileInputStream(file)), charset))
+        } catch (e: IOException) {
+            // canRead() 只能挡住大部分情况，权限在检查之后被改、或路径指向目录仍可能落到这里
+            throw IllegalArgumentException(Msg.format(StrKey.IMPORT_FILE_OPEN_FAILED, path, e.message), e)
+        }
 
     /**
      * 惰性剥离 UTF-8 BOM 的输入流 —— 只在第一次读取时判断前三个字节，
      * 探测后立即决定「吞掉」或「回推」，因此不破坏流式导入。
      */
-    private class BomStrippingInputStream(input: InputStream) : InputStream() {
+    private class BomStrippingInputStream(
+        input: InputStream,
+    ) : InputStream() {
         // PushbackInputStream：非 BOM 文件把已读的字节原样推回，不丢任何数据
         private val delegate = PushbackInputStream(input, UTF8_BOM.size)
         private var checked = false
@@ -117,7 +126,11 @@ object ImportSourceFactory {
             return delegate.read()
         }
 
-        override fun read(b: ByteArray, off: Int, len: Int): Int {
+        override fun read(
+            b: ByteArray,
+            off: Int,
+            len: Int,
+        ): Int {
             stripBomOnce()
             return delegate.read(b, off, len)
         }
@@ -132,11 +145,12 @@ object ImportSourceFactory {
                 if (b < 0) break
                 head[n++] = b.toByte()
             }
-            if (n == head.size && head.contentEquals(UTF8_BOM)) return   // 命中 BOM：已吞掉
-            if (n > 0) delegate.unread(head, 0, n)                          // 未命中：全部回推
+            if (n == head.size && head.contentEquals(UTF8_BOM)) return // 命中 BOM：已吞掉
+            if (n > 0) delegate.unread(head, 0, n) // 未命中：全部回推
         }
 
         override fun available(): Int = delegate.available()
+
         override fun close() = delegate.close()
 
         companion object {

@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -29,21 +29,21 @@ import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.WizardStep
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.After
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import org.junit.After
-import org.junit.Assume.assumeTrue
-import org.junit.Before
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
-import org.junit.Test
 
 /**
  * **鼠标 + 键盘协同走完连接向导** —— 真引擎、真点击、真打字。
@@ -76,8 +76,9 @@ import org.junit.Test
  */
 @RunWith(Parameterized::class)
 @OptIn(ExperimentalTestApi::class)
-class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
-
+class ConnectionWizardMouseKeyboardTest(
+    private val target: SmokeTarget,
+) {
     companion object {
         /**
          * 只跑**填了字段也能往前走**的方言。
@@ -92,8 +93,7 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
          */
         @JvmStatic
         @Parameterized.Parameters(name = "[{0}]")
-        fun targets(): List<Array<Any>> =
-            smokeTargets().filter { it.dialectType != DialectType.H2 }.map { arrayOf(it as Any) }
+        fun targets(): List<Array<Any>> = smokeTargets().filter { it.dialectType != DialectType.H2 }.map { arrayOf(it as Any) }
     }
 
     private lateinit var tempHome: File
@@ -126,7 +126,11 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
     @After
     fun tearDown() {
         scope?.cancel()
-        try { engine.close() } catch (e: Exception) { println("engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("engine.close 抛了：$e")
+        }
         runCatching { target.teardown(workspace) }
             .onFailure { println("⚠ [${target.label}] 归还工作区失败：$it") }
         System.setProperty("user.home", originalHome)
@@ -182,48 +186,54 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
      * **enabled 状态与字段内容是联动的**，这条断言就能守住。
      */
     @Test
-    fun `wizard can be walked forward with the mouse`() = runComposeUiTest(testTimeout = 3.minutes) {
-        val s = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
-        val session = ConnectionSession(engine, s)
-        setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
+    fun `wizard can be walked forward with the mouse`() =
+        runComposeUiTest(testTimeout = 3.minutes) {
+            val s = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
+            val session = ConnectionSession(engine, s)
+            setContent { ProvideTestStrings { MaterialTheme { Screen(session) } } }
 
-        // ---- ① 鼠标点「新建连接」
-        onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
-        waitForIdle()
-        assertEquals(WizardStep.BASIC_INFO, session.wizard.step, "点「新建连接」应进第 1 步")
-
-        // ---- ② 鼠标点方言卡
-        val dialectLabel = target.dialectType.name
-        onNodeWithText(dialectLabel).performClick()
-        waitForIdle()
-        assertEquals(
-            target.dialectType, session.wizard.editingConnection?.dialect,
-            "点方言卡「$dialectLabel」应选中该方言",
-        )
-        println("RESULT WIZ-dialect [${target.label}] ${session.wizard.editingConnection?.dialect}")
-
-        // ---- ③ 一直点「下一步」，直到步骤不再前进
-        val trail = mutableListOf<String>()
-        var stuck = false
-        repeat(8) { round ->
-            val before = session.wizard.step
-            runCatching { onNodeWithText(zh(StrKey.NEXT_STEP)).performClick() }
+            // ---- ① 鼠标点「新建连接」
+            onNodeWithText(zh(StrKey.NEW_CONNECTION)).performClick()
             waitForIdle()
-            val after = session.wizard.step
-            trail += "$before → $after"
-            println("RESULT WIZ-round$round [${target.label}] $before → $after")
-            if (after == before) { stuck = true; return@repeat }
-            if (after == WizardStep.TEST_SAVE) return@repeat
-        }
-        assertEquals(
-            WizardStep.TEST_SAVE, session.wizard.step,
-            "[${target.label}] 鼠标点「下一步」应一路点到测试保存步；轨迹：${trail.joinToString(" / ")}",
-        )
+            assertEquals(WizardStep.BASIC_INFO, session.wizard.step, "点「新建连接」应进第 1 步")
 
-        // ---- ④ 到了测试步，「测试连接」按钮必须在（点得到 = enabled）
-        onNodeWithText(zh(StrKey.TEST_CONNECTION)).assertIsDisplayed()
-        println("RESULT WIZ [${target.label}] 鼠标点着走完向导：${trail.joinToString(" → ")}")
-    }
+            // ---- ② 鼠标点方言卡
+            val dialectLabel = target.dialectType.name
+            onNodeWithText(dialectLabel).performClick()
+            waitForIdle()
+            assertEquals(
+                target.dialectType,
+                session.wizard.editingConnection?.dialect,
+                "点方言卡「$dialectLabel」应选中该方言",
+            )
+            println("RESULT WIZ-dialect [${target.label}] ${session.wizard.editingConnection?.dialect}")
+
+            // ---- ③ 一直点「下一步」，直到步骤不再前进
+            val trail = mutableListOf<String>()
+            var stuck = false
+            repeat(8) { round ->
+                val before = session.wizard.step
+                runCatching { onNodeWithText(zh(StrKey.NEXT_STEP)).performClick() }
+                waitForIdle()
+                val after = session.wizard.step
+                trail += "$before → $after"
+                println("RESULT WIZ-round$round [${target.label}] $before → $after")
+                if (after == before) {
+                    stuck = true
+                    return@repeat
+                }
+                if (after == WizardStep.TEST_SAVE) return@repeat
+            }
+            assertEquals(
+                WizardStep.TEST_SAVE,
+                session.wizard.step,
+                "[${target.label}] 鼠标点「下一步」应一路点到测试保存步；轨迹：${trail.joinToString(" / ")}",
+            )
+
+            // ---- ④ 到了测试步，「测试连接」按钮必须在（点得到 = enabled）
+            onNodeWithText(zh(StrKey.TEST_CONNECTION)).assertIsDisplayed()
+            println("RESULT WIZ [${target.label}] 鼠标点着走完向导：${trail.joinToString(" → ")}")
+        }
 
     // ---------------------------------------------------------------- 交互原语
 
@@ -237,50 +247,67 @@ class ConnectionWizardMouseKeyboardTest(private val target: SmokeTarget) {
      * （5 个方言全 0 条「已填」输出），而 `ConnectionManagerFlowTest` 那种直接输入的
      * 写法是好的。字段有预填值，但预填值不影响我们后续按状态覆盖。
      */
-    private fun androidx.compose.ui.test.ComposeUiTest.fillField(label: String, value: String) {
+    private fun androidx.compose.ui.test.ComposeUiTest.fillField(
+        label: String,
+        value: String,
+    ) {
         onNode(hasSetTextAction() and hasText(label)).performTextInput(value)
         waitForIdle()
     }
 
     /** 文本框没出现就当「这步没这个字段」，不报错 —— 方言之间步骤与字段本就不同。 */
-    private fun androidx.compose.ui.test.ComposeUiTest.tryFillField(label: String, value: String): Boolean =
+    private fun androidx.compose.ui.test.ComposeUiTest.tryFillField(
+        label: String,
+        value: String,
+    ): Boolean =
         runCatching { fillField(label, value) }
             .onFailure { println("  · 填「$label」失败：${it.message?.lineSequence()?.first()}") }
             .isSuccess
 
     /** 鼠标点一个按钮；不存在或 disabled 返回 false。 */
-    private fun androidx.compose.ui.test.ComposeUiTest.clickIfEnabled(text: String): Boolean = runCatching {
-        onNodeWithText(text).performClick()
-        true
-    }.getOrDefault(false)
+    private fun androidx.compose.ui.test.ComposeUiTest.clickIfEnabled(text: String): Boolean =
+        runCatching {
+            onNodeWithText(text).performClick()
+            true
+        }.getOrDefault(false)
 
     /** 该方言在向导里要填的字段（按 label → 值）。不存在的 label 会被 `tryFillField` 跳过。 */
     private fun fieldValues(): List<Pair<String, String>> {
         val host = "192.168.1.5"
         return when (target.dialectType) {
-            com.langbiantianya.sundays.connection.DialectType.MYSQL -> listOf(
-                "主机地址" to host,
-                "端口" to "3306",
-                "用户名" to "root",
-                "密码" to "666666",
-            )
-            com.langbiantianya.sundays.connection.DialectType.POSTGRESQL -> listOf(
-                "主机地址" to host,
-                "端口" to "5432",
-                "用户名" to "postgres",
-                "密码" to "666666",
-            )
-            else -> listOf(
-                // 嵌入式方言只有一个「数据库名」：H2 是库名 / DuckDB·SQLite 是文件路径
-                "数据库名" to target.dialectType.let {
-                    when (it) {
-                        com.langbiantianya.sundays.connection.DialectType.DUCKDB,
-                        com.langbiantianya.sundays.connection.DialectType.SQLITE,
-                        -> cfg.database
-                        else -> "向导走查库"
-                    }
-                },
-            )
+            com.langbiantianya.sundays.connection.DialectType.MYSQL -> {
+                listOf(
+                    "主机地址" to host,
+                    "端口" to "3306",
+                    "用户名" to "root",
+                    "密码" to "666666",
+                )
+            }
+
+            com.langbiantianya.sundays.connection.DialectType.POSTGRESQL -> {
+                listOf(
+                    "主机地址" to host,
+                    "端口" to "5432",
+                    "用户名" to "postgres",
+                    "密码" to "666666",
+                )
+            }
+
+            else -> {
+                listOf(
+                    // 嵌入式方言只有一个「数据库名」：H2 是库名 / DuckDB·SQLite 是文件路径
+                    "数据库名" to
+                        target.dialectType.let {
+                            when (it) {
+                                com.langbiantianya.sundays.connection.DialectType.DUCKDB,
+                                com.langbiantianya.sundays.connection.DialectType.SQLITE,
+                                -> cfg.database
+
+                                else -> "向导走查库"
+                            }
+                        },
+                )
+            }
         }
     }
 }

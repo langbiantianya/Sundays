@@ -36,7 +36,6 @@ import kotlin.test.fail
  * 在 Windows 上可用（在其他平台上构造失败但不在此测试范围）。
  */
 class NamedPipeIpcTransportIntegrationTest {
-
     @Test
     fun `client can construct channel builder for pipe name`() {
         val name = TestIds.uniqueName("idb-test")

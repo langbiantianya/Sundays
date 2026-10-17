@@ -12,7 +12,7 @@ import com.langbiantianya.dialect.DatabaseDialect
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.URLClassLoader
-import java.util.*
+import java.util.ServiceLoader
 
 /**
  * 方言插件动态加载器。
@@ -66,13 +66,14 @@ object DialectLoader {
      */
     private fun loadFromClasspath() {
         val loader = DialectLoader::class.java.classLoader ?: return
-        val discovered = try {
-            ServiceLoader.load(DatabaseDialect::class.java, loader).toList()
-        } catch (e: Throwable) {
-            // ServiceConfigurationError 等 —— 单个坏插件不应阻断引擎启动
-            logger.warn("Classpath dialect scan failed: ${e.message}")
-            return
-        }
+        val discovered =
+            try {
+                ServiceLoader.load(DatabaseDialect::class.java, loader).toList()
+            } catch (e: Throwable) {
+                // ServiceConfigurationError 等 —— 单个坏插件不应阻断引擎启动
+                logger.warn("Classpath dialect scan failed: ${e.message}")
+                return
+            }
 
         var count = 0
         for (dialect in discovered) {
@@ -107,25 +108,27 @@ object DialectLoader {
         // 同 DriverLoader：守卫迭代器本身，坏 provider 只跳过自己，不让
         // ServiceConfigurationError 逃出去中断引擎启动。
         while (true) {
-            val hasNext = try {
-                iterator.hasNext()
-            } catch (e: Throwable) {
-                logger.warn("Aborting dialect scan of ${dir.absolutePath} (hasNext failed): ${e.message}")
-                break
-            }
-            if (!hasNext) break
-
-            val dialect = try {
-                iterator.next()
-            } catch (e: Throwable) {
-                failures++
-                logger.warn("Skipping unloadable dialect entry in ${dir.absolutePath}: ${e.message}")
-                if (++consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
-                    logger.warn("Too many consecutive dialect failures, aborting scan of ${dir.absolutePath}")
+            val hasNext =
+                try {
+                    iterator.hasNext()
+                } catch (e: Throwable) {
+                    logger.warn("Aborting dialect scan of ${dir.absolutePath} (hasNext failed): ${e.message}")
                     break
                 }
-                continue
-            }
+            if (!hasNext) break
+
+            val dialect =
+                try {
+                    iterator.next()
+                } catch (e: Throwable) {
+                    failures++
+                    logger.warn("Skipping unloadable dialect entry in ${dir.absolutePath}: ${e.message}")
+                    if (++consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                        logger.warn("Too many consecutive dialect failures, aborting scan of ${dir.absolutePath}")
+                        break
+                    }
+                    continue
+                }
             consecutiveFailures = 0
             try {
                 dialects[dialect.driverName] = dialect
@@ -143,7 +146,7 @@ object DialectLoader {
             classLoader.close()
             logger.warn(
                 "No valid dialect plugins found in ${dir.absolutePath}" +
-                    if (failures == 0) "" else " (skipped $failures broken plugin entr(ies))"
+                    if (failures == 0) "" else " (skipped $failures broken plugin entr(ies))",
             )
         }
     }
@@ -155,10 +158,9 @@ object DialectLoader {
      * 获取指定驱动名的方言实例
      * @param driverName 驱动枚举名（如 "Mysql"、"Postgresql"）
      */
-    fun getDialect(driverName: String): DatabaseDialect {
-        return dialects[driverName]
+    fun getDialect(driverName: String): DatabaseDialect =
+        dialects[driverName]
             ?: throw UnsupportedOperationException("No dialect plugin loaded for driver: $driverName")
-    }
 
     /**
      * 通过 JDBC URL 前缀反查方言实例（无匹配返回 null）。
@@ -181,20 +183,24 @@ object DialectLoader {
      * 调用方不应持有此集合后假设它永远不会变（loadFromDir 可累积注册）；
      * 每次调用都会拿到最新注册表。
      */
-    fun getAllDialects(): List<DatabaseDialect> {
-        return dialects.values.sortedBy { it.driverName }
-    }
+    fun getAllDialects(): List<DatabaseDialect> = dialects.values.sortedBy { it.driverName }
 
     /**
      * 直接注册一个方言实例（用于测试 — 跳过 SPI 扫描）。
      */
-    fun registerForTesting(driverName: String, dialect: DatabaseDialect) {
+    fun registerForTesting(
+        driverName: String,
+        dialect: DatabaseDialect,
+    ) {
         dialects[driverName] = dialect
     }
 
     fun closeAll() {
         dialectClassLoader?.let {
-            try { it.close() } catch (_: Exception) {}
+            try {
+                it.close()
+            } catch (_: Exception) {
+            }
         }
         dialectClassLoader = null
         dialects.clear()

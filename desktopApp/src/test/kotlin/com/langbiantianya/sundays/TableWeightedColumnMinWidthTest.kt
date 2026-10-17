@@ -57,17 +57,19 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class TableWeightedColumnMinWidthTest {
-
     /**
      * 与 [com.langbiantianya.sundays.DatabaseBrowserScreen] 建列方式一致：
      * 只给 key 与 header，`width` 留空 → 走 `weight` 路径。
      */
-    private fun weightedColumns(count: Int): List<TableColumn> =
-        (1..count).map { TableColumn(key = "c$it", header = "column_name_$it") }
+    private fun weightedColumns(count: Int): List<TableColumn> = (1..count).map { TableColumn(key = "c$it", header = "column_name_$it") }
 
-    private fun rows(count: Int, cols: Int): List<TableRow> = (1..count).map { r ->
-        TableRow(id = r, cells = (1..cols).associate { i -> "c$i" to "value-${r}-$i" })
-    }
+    private fun rows(
+        count: Int,
+        cols: Int,
+    ): List<TableRow> =
+        (1..count).map { r ->
+            TableRow(id = r, cells = (1..cols).associate { i -> "c$i" to "value-$r-$i" })
+        }
 
     private fun ComposeUiTest.renderWeightedTable(colCount: Int) {
         setContent {
@@ -93,7 +95,8 @@ class TableWeightedColumnMinWidthTest {
      * 与真正的问题（列被压扁）毫无关系，很容易被当成测试写错而绕开。
      */
     private fun ComposeUiTest.hScrollMax(tag: String) =
-        onNodeWithTag(tag).fetchSemanticsNode()
+        onNodeWithTag(tag)
+            .fetchSemanticsNode()
             .config[SemanticsProperties.HorizontalScrollAxisRange]
             ?.maxValue
             ?.invoke()
@@ -106,22 +109,23 @@ class TableWeightedColumnMinWidthTest {
      * 于是每列被均分成 28dp。
      */
     @Test
-    fun `多列时网格能横向滚动而不是把列压扁`() = runComposeUiTest {
-        renderWeightedTable(colCount = 23)
+    fun `多列时网格能横向滚动而不是把列压扁`() =
+        runComposeUiTest {
+            renderWeightedTable(colCount = 23)
 
-        val body = hScrollMax(TABLE_BODY_TAG)
-        val header = hScrollMax(TABLE_HEADER_TAG)
+            val body = hScrollMax(TABLE_BODY_TAG)
+            val header = hScrollMax(TABLE_HEADER_TAG)
 
-        assertTrue(
-            body > 0f,
-            "⚠️ 23 列的表没有横向可滚量（maxValue=$body）—— 说明每列被均分到约 28dp，" +
-                "整张表会塌成竖条、列名互相盖住。列一多就该横滚。",
-        )
-        assertTrue(
-            header > 0f,
-            "表头同样必须能横滚（maxValue=$header），否则表名与数据列会错位",
-        )
-    }
+            assertTrue(
+                body > 0f,
+                "⚠️ 23 列的表没有横向可滚量（maxValue=$body）—— 说明每列被均分到约 28dp，" +
+                    "整张表会塌成竖条、列名互相盖住。列一多就该横滚。",
+            )
+            assertTrue(
+                header > 0f,
+                "表头同样必须能横滚（maxValue=$header），否则表名与数据列会错位",
+            )
+        }
 
     /**
      * 反向护栏：**列不多时不该凭空多出一条横向滚动条**。
@@ -132,14 +136,15 @@ class TableWeightedColumnMinWidthTest {
      * 4 列 × 100dp + 内边距 ≈ 429dp，远小于测试视口（默认 1024dp）。
      */
     @Test
-    fun `少列时不产生多余的横向滚动`() = runComposeUiTest {
-        renderWeightedTable(colCount = 4)
+    fun `少列时不产生多余的横向滚动`() =
+        runComposeUiTest {
+            renderWeightedTable(colCount = 4)
 
-        assertTrue(
-            hScrollMax(TABLE_BODY_TAG) == 0f,
-            "4 列时不该有横向可滚量 —— 下限把内容撑宽过头了",
-        )
-    }
+            assertTrue(
+                hScrollMax(TABLE_BODY_TAG) == 0f,
+                "4 列时不该有横向可滚量 —— 下限把内容撑宽过头了",
+            )
+        }
 
     /**
      * **逐列对齐** —— 表头第 i 列与表体第 i 个单元格必须在**同一个横坐标**。
@@ -165,28 +170,35 @@ class TableWeightedColumnMinWidthTest {
      * 只有 `id` 这种短名字还认得出 —— 即 §9.24「表头只剩第一个列名」。
      */
     @Test
-    fun `表头每一列都与表体对应列对齐`() = runComposeUiTest {
-        renderWeightedTable(colCount = 23)
+    fun `表头每一列都与表体对应列对齐`() =
+        runComposeUiTest {
+            renderWeightedTable(colCount = 23)
 
-        // 取第 1、2、5、8 列：跨过首列，且分散在视口内外。
-        // 选这几个不是随手 —— 缺陷版本里第 2 列就已经差了近 60px，
-        // 用「第 8 列」能顺带证明**错位是累积的**而不是恒定偏移。
-        val probes = listOf(1, 2, 5, 8)
-        probes.forEach { i ->
-            val header = onAllNodesWithText("column_name_$i").fetchSemanticsNodes()
-                .first { it.boundsInRoot.width > 0 }
-            // ⚠️ 必须 `useUnmergedTree = true`：只读行的 `clickable` 把整行合并成一个语义节点，
-            // 合并树上按文本查到的是「整行」（x=0、宽 1024），不是某个单元格。
-            val body = onAllNodesWithText("value-1-$i", useUnmergedTree = true).fetchSemanticsNodes()
-                .first { it.boundsInRoot.width > 0 }
+            // 取第 1、2、5、8 列：跨过首列，且分散在视口内外。
+            // 选这几个不是随手 —— 缺陷版本里第 2 列就已经差了近 60px，
+            // 用「第 8 列」能顺带证明**错位是累积的**而不是恒定偏移。
+            val probes = listOf(1, 2, 5, 8)
+            probes.forEach { i ->
+                val header =
+                    onAllNodesWithText("column_name_$i")
+                        .fetchSemanticsNodes()
+                        .first { it.boundsInRoot.width > 0 }
+                // ⚠️ 必须 `useUnmergedTree = true`：只读行的 `clickable` 把整行合并成一个语义节点，
+                // 合并树上按文本查到的是「整行」（x=0、宽 1024），不是某个单元格。
+                val body =
+                    onAllNodesWithText("value-1-$i", useUnmergedTree = true)
+                        .fetchSemanticsNodes()
+                        .first { it.boundsInRoot.width > 0 }
 
-            assertEquals(
-                body.boundsInRoot.left, header.boundsInRoot.left, 1f,
-                "第 $i 列错位：表头在 x=${header.boundsInRoot.left}、表体在 x=${body.boundsInRoot.left}。" +
-                    "按列名读数会读到隔壁那一列，对数据库工具来说这是读错数据。",
-            )
+                assertEquals(
+                    body.boundsInRoot.left,
+                    header.boundsInRoot.left,
+                    1f,
+                    "第 $i 列错位：表头在 x=${header.boundsInRoot.left}、表体在 x=${body.boundsInRoot.left}。" +
+                        "按列名读数会读到隔壁那一列，对数据库工具来说这是读错数据。",
+                )
+            }
         }
-    }
 
     /**
      * **表头列宽必须与表体同基准** —— 表头文本宽度不该被视口宽度摊薄。
@@ -199,24 +211,27 @@ class TableWeightedColumnMinWidthTest {
      * 判据必须**对要抓的缺陷敏感、对无关变化不敏感**。
      */
     @Test
-    fun `表头列宽不被视口宽度摊薄`() = runComposeUiTest {
-        renderWeightedTable(colCount = 23)
+    fun `表头列宽不被视口宽度摊薄`() =
+        runComposeUiTest {
+            renderWeightedTable(colCount = 23)
 
-        val leftOf = { i: Int ->
-            onAllNodesWithText("column_name_$i").fetchSemanticsNodes()
-                .first { it.boundsInRoot.width > 0 }.boundsInRoot.left
+            val leftOf = { i: Int ->
+                onAllNodesWithText("column_name_$i")
+                    .fetchSemanticsNodes()
+                    .first { it.boundsInRoot.width > 0 }
+                    .boundsInRoot.left
+            }
+            val spacing = leftOf(2) - leftOf(1)
+            val viewport = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode().boundsInRoot.width
+
+            assertTrue(
+                spacing > viewport / 23,
+                "表头列起点间距只有 $spacing，而视口摊到 23 列是 ${viewport / 23} —— " +
+                    "说明表头仍按**视口宽**分列，而表体按 contentWidth 分列，两者错位。",
+            )
         }
-        val spacing = leftOf(2) - leftOf(1)
-        val viewport = onNodeWithTag(TABLE_BODY_TAG).fetchSemanticsNode().boundsInRoot.width
 
-        assertTrue(
-            spacing > viewport / 23,
-            "表头列起点间距只有 $spacing，而视口摊到 23 列是 ${viewport / 23} —— " +
-                "说明表头仍按**视口宽**分列，而表体按 contentWidth 分列，两者错位。",
-        )
-    }
-
-    /**
+    /*
      * ⚠️ 这里**不再**留「表头列名可见」的弱断言。
      *
      * §9.24 试过两条，都在缺陷版本上绿：

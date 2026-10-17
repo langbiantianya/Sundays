@@ -26,13 +26,16 @@ package com.langbiantianya.dialect
  * 引号内保持大写才能命中 executeUpdate("CREATE TABLE t") 建出的 T）。
  */
 object DialectUtil {
-
     // region ─── 标识符包裹 ───
 
     /**
      * 用 [quoteChar] 包裹 [identifier] 并转义内嵌引号。
      */
-    fun quoteWith(identifier: String, quoteChar: Char, escapeChar: Char = quoteChar): String {
+    fun quoteWith(
+        identifier: String,
+        quoteChar: Char,
+        escapeChar: Char = quoteChar,
+    ): String {
         val escaped = identifier.replace("$escapeChar", "$escapeChar$escapeChar")
         return "$quoteChar$escaped$quoteChar"
     }
@@ -54,7 +57,10 @@ object DialectUtil {
      *
      * @param label 抛异常时的标签（`"table name"` / `"column name"` …），便于定位是哪一处
      */
-    fun sanitizeIdentifier(name: String, label: String) {
+    fun sanitizeIdentifier(
+        name: String,
+        label: String,
+    ) {
         if (name.isBlank()) throw IllegalArgumentException("$label cannot be empty")
         if (name.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         if (name.contains('\'')) throw IllegalArgumentException("$label contains illegal quote character")
@@ -87,10 +93,21 @@ object DialectUtil {
      * MySQL 另维护一份 `Set` + 逐词扫描而没走本工厂 —— 它用反引号而非双引号，
      * 整体风格不同，强行合并反而要在两处各加一个开关。
      */
-    public val BASE_DANGEROUS_KEYWORDS: Set<String> = setOf(
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
-        "UNION", "EXEC", "EXECUTE", "TRUNCATE", "GRANT", "REVOKE"
-    )
+    public val BASE_DANGEROUS_KEYWORDS: Set<String> =
+        setOf(
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "DROP",
+            "ALTER",
+            "CREATE",
+            "UNION",
+            "EXEC",
+            "EXECUTE",
+            "TRUNCATE",
+            "GRANT",
+            "REVOKE",
+        )
 
     /**
      * 工厂：把 [extraKeywords] 合并到 [BASE_DANGEROUS_KEYWORDS]，每个词预编译为
@@ -101,12 +118,11 @@ object DialectUtil {
      *
      * @param extraKeywords 本方言额外禁用的词；与基线取并集，重复项自动去重
      */
-    public fun buildDangerousKeywordRegexes(extraKeywords: Set<String> = emptySet()): List<Regex> {
-        return (BASE_DANGEROUS_KEYWORDS + extraKeywords).map { kw ->
+    public fun buildDangerousKeywordRegexes(extraKeywords: Set<String> = emptySet()): List<Regex> =
+        (BASE_DANGEROUS_KEYWORDS + extraKeywords).map { kw ->
             val pattern = "\\b" + kw + "\\b"
             Regex(pattern, RegexOption.IGNORE_CASE)
         }
-    }
 
     /**
      * 校验 SQL 片段（WHERE 条件等）的安全性 —— 失败时抛 `IllegalArgumentException`。
@@ -124,7 +140,11 @@ object DialectUtil {
      * @param keywordRegexes 由 [buildDangerousKeywordRegexes] 生成
      * @throws IllegalArgumentException 命中任一规则
      */
-    fun validateSqlFragment(sql: String, label: String, keywordRegexes: List<Regex>) {
+    fun validateSqlFragment(
+        sql: String,
+        label: String,
+        keywordRegexes: List<Regex>,
+    ) {
         if (sql.contains('\u0000')) throw IllegalArgumentException("$label contains null byte")
         val bare = sql.replace(QUOTED_STRING_REGEX, "")
         if (bare.contains(';')) throw IllegalArgumentException("$label contains illegal character ';'")
@@ -169,7 +189,10 @@ object DialectUtil {
      * @param sql 待校验的 ORDER BY 子句（不含 `ORDER BY` 关键字本身）
      * @param regex 由 [orderByRegex] 生成
      */
-    fun validateOrderBy(sql: String, regex: Regex) {
+    fun validateOrderBy(
+        sql: String,
+        regex: Regex,
+    ) {
         if (!regex.matches(sql)) {
             throw IllegalArgumentException("Invalid ORDER BY format: $sql")
         }

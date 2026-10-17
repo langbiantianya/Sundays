@@ -21,7 +21,6 @@ package com.langbiantianya.sundays
  * 已经挡了（`name; DROP TABLE users` 会被拒），前端再拼一套规则只会与它漂移。
  */
 internal object SqlLiterals {
-
     /**
      * 把任意字符串转成可安全嵌入 SQL 的**字符串字面量**（含两侧单引号）。
      *
@@ -97,7 +96,11 @@ internal object SqlLiterals {
      * @param column 结果集里的列名（与 `TableColumn.key` 同源）
      * @param castType 目标类型，见 [castTypeFor]；传错会得到语法错误（MySQL）或静默截断（PG）
      */
-    fun likeContains(column: String, term: String, castType: String = "VARCHAR"): String? {
+    fun likeContains(
+        column: String,
+        term: String,
+        castType: String = "VARCHAR",
+    ): String? {
         val col = column.trim()
         val t = term.trim()
         if (t.isEmpty() || col.isEmpty()) return null

@@ -35,7 +35,6 @@ import java.awt.datatransfer.StringSelection
  * （见 [DatabaseBrowserState.copyTreeDdl]）。
  */
 object ClipboardWriter {
-
     /**
      * 把 [text] 写入系统剪贴板。
      *

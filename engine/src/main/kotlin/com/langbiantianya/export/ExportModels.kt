@@ -26,7 +26,7 @@ data class ExportRequest(
     /** 目标表名（仅 SQL 格式需要，用于生成 INSERT 语句） */
     val tableName: String? = null,
     /** 每次从数据库拉取的行数 */
-    val fetchSize: Int = 1000
+    val fetchSize: Int = 1000,
 )
 
 /**
@@ -36,14 +36,18 @@ data class ExportRequest(
 enum class ExportFormat {
     /** CSV 格式 */
     CSV,
+
     /** JSON Lines 格式（每行一个 JSON 对象） */
     JSON_LINES,
+
     /** SQL INSERT 语句格式 */
     SQL_INSERT,
+
     /** Excel 格式（.xlsx） */
     EXCEL,
+
     /** Parquet 列式存储格式 */
-    PARQUET
+    PARQUET,
 }
 
 /**
@@ -60,7 +64,7 @@ data class ExportProgress(
     /** 导出完成后的文件路径 */
     val filePath: String? = null,
     /** 错误信息（如果有） */
-    val error: String? = null
+    val error: String? = null,
 )
 
 /**
@@ -72,5 +76,5 @@ data class ColumnInfo(
     /** JDBC 类型名称 */
     val typeName: String,
     /** JDBC 类型代码 */
-    val typeCode: Int
+    val typeCode: Int,
 )

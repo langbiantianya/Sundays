@@ -27,7 +27,6 @@ import kotlin.test.assertTrue
  * 拼错了用户看不出来，只能事后发现文件不对。
  */
 class ExportSqlBuildingTest {
-
     @Test
     fun `无过滤无排序时就是整表 SELECT`() {
         val tab = TablePreviewTab(schema = "shop", tableName = "orders")
@@ -70,10 +69,11 @@ class ExportSqlBuildingTest {
     @Test
     fun `表内搜索也算过滤`() {
         val tab = TablePreviewTab(schema = "shop", tableName = "orders")
-        tab.columns = listOf(
-            TableColumn(key = "id", header = "id"),
-            TableColumn(key = "label", header = "label"),
-        )
+        tab.columns =
+            listOf(
+                TableColumn(key = "id", header = "id"),
+                TableColumn(key = "label", header = "label"),
+            )
         tab.searchTerm = "第一行"
         val sql = tab.buildExportSql()
 
@@ -111,16 +111,16 @@ class ExportSqlBuildingTest {
  * 用户点了个叫「导出」的按钮却改了数据，是不能接受的。所以切分之后立刻过滤。
  */
 class ExportStatementSplittingTest {
-
     @Test
     fun `多条 SELECT 被切成多条`() {
-        val stmts = exportStatementsFor(
-            """
-            SELECT id FROM a
-            ;
-            SELECT name FROM b
-            """.trimIndent(),
-        )
+        val stmts =
+            exportStatementsFor(
+                """
+                SELECT id FROM a
+                ;
+                SELECT name FROM b
+                """.trimIndent(),
+            )
         assertEquals(2, stmts.size, "应切成两条：$stmts")
         assertTrue("FROM a" in stmts[0], "第 1 条内容不对：${stmts[0]}")
         assertTrue("FROM b" in stmts[1], "第 2 条内容不对：${stmts[1]}")
@@ -134,24 +134,26 @@ class ExportStatementSplittingTest {
 
     @Test
     fun `注释里的分号不被误切`() {
-        val stmts = exportStatementsFor(
-            """
-            -- 初始化; schema
-            SELECT 1
-            """.trimIndent(),
-        )
+        val stmts =
+            exportStatementsFor(
+                """
+                -- 初始化; schema
+                SELECT 1
+                """.trimIndent(),
+            )
         assertEquals(1, stmts.size, "注释里的分号不构成边界：$stmts")
     }
 
     @Test
     fun `写语句被剔掉`() {
-        val stmts = exportStatementsFor(
-            """
-            SELECT 1;
-            DROP TABLE t;
-            SELECT 2
-            """.trimIndent(),
-        )
+        val stmts =
+            exportStatementsFor(
+                """
+                SELECT 1;
+                DROP TABLE t;
+                SELECT 2
+                """.trimIndent(),
+            )
         assertEquals(2, stmts.size, "只留读语句：$stmts")
         assertTrue(stmts.none { "DROP" in it }, "DROP 绝不能进导出：$stmts")
     }
@@ -177,7 +179,8 @@ class ExportStatementSplittingTest {
         // 对照：换行拼接（丢分号）确实切不开 —— 这正是修复前的行为
         val joinedByNewline = original.joinToString("\n")
         assertEquals(
-            1, exportStatementsFor(joinedByNewline).size,
+            1,
+            exportStatementsFor(joinedByNewline).size,
             "丢掉分号后切不开（这条断言记录的是**反例**，不要照它写实现）",
         )
     }
@@ -190,7 +193,6 @@ class ExportStatementSplittingTest {
  * 会让用户以为自己导了个片段。
  */
 class NumberedFileNameTest {
-
     @Test
     fun `单条语句不加序号`() {
         assertEquals("export.csv", numberedFileName("export.csv", 0, 1))
@@ -231,7 +233,6 @@ class NumberedFileNameTest {
  * 所以只放行 `SELECT` 与 `WITH`。
  */
 class ExportPreviewGuardTest {
-
     @Test
     fun `SELECT 可以预览`() {
         assertTrue(DangerousSql.isReadOnlyQuery("SELECT * FROM t"))

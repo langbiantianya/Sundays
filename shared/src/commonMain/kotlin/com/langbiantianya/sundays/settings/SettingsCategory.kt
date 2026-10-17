@@ -17,7 +17,9 @@ import com.langbiantianya.i18n.StrKey
  *
  * [labelKey] 是文案键而非文案本身 —— 左侧分类名要跟着界面语言走。
  */
-enum class SettingsCategory(val labelKey: StrKey) {
+enum class SettingsCategory(
+    val labelKey: StrKey,
+) {
     /** 个性化：主题与日夜模式。 */
     PERSONALIZATION(StrKey.PERSONALIZATION),
 

@@ -15,7 +15,6 @@ import java.io.Closeable
  * 所有格式实现该接口，仅关注单行列数据的写入逻辑
  */
 interface ExportWriter : Closeable {
-
     /**
      * 写入表头
      * @param columns 列名列表

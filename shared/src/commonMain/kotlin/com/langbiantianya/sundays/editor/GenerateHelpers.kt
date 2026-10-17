@@ -41,7 +41,6 @@ import com.langbiantianya.i18n.StrKey
  * 新增函数时**两边都要改**：`GenerateHandler.registerHelpers` + 本清单。
  */
 object GenerateHelpers {
-
     /**
      * 宿主函数候选（按展示顺序排列，**不要**在此处排序 —— 弹层按传入顺序展示）。
      *
@@ -52,21 +51,22 @@ object GenerateHelpers {
      * `random_date(起, 止)`。纯 ASCII 的签名（`random_int(min, max)`）没有这个问题，
      * 保持字符串字面量即可，不必浪费一个键位。
      */
-    val completions: List<CompletionItem> = listOf(
-        CompletionItem("insert", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_INSERT),
-        CompletionItem("lastId", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_LAST_ID),
-        CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
-        CompletionItem("random_float", CompletionKind.BUILTIN, "random_float(min, max)"),
-        CompletionItem("random_string", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_STRING),
-        CompletionItem("random_name", CompletionKind.BUILTIN, "random_name()"),
-        CompletionItem("random_email", CompletionKind.BUILTIN, "random_email()"),
-        CompletionItem("random_phone", CompletionKind.BUILTIN, "random_phone()"),
-        CompletionItem("random_date", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATE),
-        CompletionItem("random_datetime", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATETIME),
-        CompletionItem("random_time", CompletionKind.BUILTIN, "random_time()"),
-        CompletionItem("random_uuid", CompletionKind.BUILTIN, "random_uuid()"),
-        CompletionItem("random_enum", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_ENUM),
-    )
+    val completions: List<CompletionItem> =
+        listOf(
+            CompletionItem("insert", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_INSERT),
+            CompletionItem("lastId", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_LAST_ID),
+            CompletionItem("random_int", CompletionKind.BUILTIN, "random_int(min, max)"),
+            CompletionItem("random_float", CompletionKind.BUILTIN, "random_float(min, max)"),
+            CompletionItem("random_string", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_STRING),
+            CompletionItem("random_name", CompletionKind.BUILTIN, "random_name()"),
+            CompletionItem("random_email", CompletionKind.BUILTIN, "random_email()"),
+            CompletionItem("random_phone", CompletionKind.BUILTIN, "random_phone()"),
+            CompletionItem("random_date", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATE),
+            CompletionItem("random_datetime", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_DATETIME),
+            CompletionItem("random_time", CompletionKind.BUILTIN, "random_time()"),
+            CompletionItem("random_uuid", CompletionKind.BUILTIN, "random_uuid()"),
+            CompletionItem("random_enum", CompletionKind.BUILTIN, detailKey = StrKey.HELPER_RANDOM_ENUM),
+        )
 
     /**
      * 被沙箱置 nil 的标准库入口 —— **仅作文档用途，本清单不据此抑制补全**。
@@ -77,12 +77,24 @@ object GenerateHelpers {
      * 而候选出现了、运行时才报 `attempt to call a nil value`，用户至少能查到函数名。
      * 把错误暴露在能指认的位置，好过让它变成沉默。
      */
-    val sandboxDisabled: List<String> = listOf(
-        "os", "io", "debug", "package", "require",
-        "loadfile", "dofile", "loadstring", "load",
-        "rawget", "rawset", "rawequal",
-        "setfenv", "getfenv", "newproxy",
-    )
+    val sandboxDisabled: List<String> =
+        listOf(
+            "os",
+            "io",
+            "debug",
+            "package",
+            "require",
+            "loadfile",
+            "dofile",
+            "loadstring",
+            "load",
+            "rawget",
+            "rawset",
+            "rawequal",
+            "setfenv",
+            "getfenv",
+            "newproxy",
+        )
 
     /** 全部宿主函数名（测试与契约校验用）。 */
     val names: List<String> = completions.map { it.label }

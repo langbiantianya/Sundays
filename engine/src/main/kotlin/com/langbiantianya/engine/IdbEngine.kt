@@ -67,7 +67,6 @@ class IdbEngine(
     driversDir: File = File("drivers"),
     dialectsDir: File = File("dialects"),
 ) : EngineClient {
-
     init {
         // 构造即 bootstrap — 保证 IdbEngine() 拿到时 drivers/dialects 已加载
         // (幂等: DriverLoader/DialectLoader 内部用 ConcurrentHashMap 去重)
@@ -89,9 +88,10 @@ class IdbEngine(
      * handler 那里。走 proto 这条路与 gRPC 模式共用同一个载体（见 `RequestLanguage.kt`），
      * 免得两条路径的语言规则各写一遍、慢慢分叉。
      */
-    override fun handle(request: Request): Flow<Response> = RequestDispatcher.dispatch(
-        request.withLanguageTag(LanguageScope.currentLanguage().persistedValue())
-    )
+    override fun handle(request: Request): Flow<Response> =
+        RequestDispatcher.dispatch(
+            request.withLanguageTag(LanguageScope.currentLanguage().persistedValue()),
+        )
 
     /**
      * 断开连接 —— 关闭 [config] 对应的 HikariCP 连接池（含该配置下各 schema 维度的池），
@@ -103,8 +103,7 @@ class IdbEngine(
      *
      * @return 是否真的关闭了连接池（false = 该配置当前没有活跃池）
      */
-    override suspend fun disconnect(config: ConnectionConfig): Boolean =
-        withContext(Dispatchers.IO) { PoolManager.close(config) }
+    override suspend fun disconnect(config: ConnectionConfig): Boolean = withContext(Dispatchers.IO) { PoolManager.close(config) }
 
     /**
      * 测试 / 初始化连接 —— **本地直连**：不经 gRPC server、不经 IPC transport，也不经
@@ -118,17 +117,28 @@ class IdbEngine(
      * `config.jdbcUrl` 非空时**只依赖 URL**：方言由 URL scheme 反查，
      * `driver` / `host` / `port` / `database` 均被忽略。
      */
-    override suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse =
-        SystemHandler.testConnection(config)
+    override suspend fun testConnection(config: ConnectionConfig): SystemTestConnectionResponse = SystemHandler.testConnection(config)
 
     /**
      * 关闭资源 — 调用 PoolManager.closeAll() / DriverLoader.closeAll() / DialectLoader.closeAll()。
      * 通常由 JVM ShutdownHook 触发，业务代码不必显式调用。
      */
     override fun close() {
-        try { PoolManager.closeAll() } catch (e: Exception) { logger.warn("PoolManager.closeAll failed: ${e.message}") }
-        try { DriverLoader.closeAll() } catch (e: Exception) { logger.warn("DriverLoader.closeAll failed: ${e.message}") }
-        try { DialectLoader.closeAll() } catch (e: Exception) { logger.warn("DialectLoader.closeAll failed: ${e.message}") }
+        try {
+            PoolManager.closeAll()
+        } catch (e: Exception) {
+            logger.warn("PoolManager.closeAll failed: ${e.message}")
+        }
+        try {
+            DriverLoader.closeAll()
+        } catch (e: Exception) {
+            logger.warn("DriverLoader.closeAll failed: ${e.message}")
+        }
+        try {
+            DialectLoader.closeAll()
+        } catch (e: Exception) {
+            logger.warn("DialectLoader.closeAll failed: ${e.message}")
+        }
     }
 
     companion object {
@@ -152,15 +162,18 @@ class IdbEngine(
             driversDir: File = File("drivers"),
             dialectsDir: File = File("dialects"),
         ) {
-            if (bootstrapped.get()) return          // 已成功初始化 —— 幂等短路
+            if (bootstrapped.get()) return // 已成功初始化 —— 幂等短路
             synchronized(bootstrapped) {
-                if (bootstrapped.get()) return      // 双检：并发调用只加载一次
+                if (bootstrapped.get()) return // 双检：并发调用只加载一次
                 try {
                     DriverLoader.loadFromDir(driversDir)
                     DialectLoader.loadFromDir(dialectsDir)
                     bootstrapped.set(true)
-                    logger.info("IdbEngine bootstrap complete (drivers={}, dialects={})",
-                        driversDir.absolutePath, dialectsDir.absolutePath)
+                    logger.info(
+                        "IdbEngine bootstrap complete (drivers={}, dialects={})",
+                        driversDir.absolutePath,
+                        dialectsDir.absolutePath,
+                    )
                 } catch (e: Throwable) {
                     // 失败不复位标志 —— 下次调用会重试，坏插件修好后即可恢复
                     logger.warn("IdbEngine bootstrap failed, will retry on next call: ${e.message}")
@@ -174,16 +187,30 @@ class IdbEngine(
          * 供 shell 测试 / 守护进程使用。KMP frontend 不走此入口 — 直接构造 [IdbEngine] 即可。
          */
         @JvmStatic
-        fun runDirectMode(driversDir: File = File("drivers"), dialectsDir: File = File("dialects")) {
+        fun runDirectMode(
+            driversDir: File = File("drivers"),
+            dialectsDir: File = File("dialects"),
+        ) {
             bootstrap(driversDir, dialectsDir)
             logger.info("IdbEngine direct mode: drivers/dialects loaded, awaiting shutdown signal")
             // 注册 shutdown hook — 保持与其他 JVM 模式一致的优雅退出
-            Runtime.getRuntime().addShutdownHook(Thread({
-                logger.info("Direct mode shutdown hook triggered")
-                try { PoolManager.closeAll() } catch (_: Exception) {}
-                try { DriverLoader.closeAll() } catch (_: Exception) {}
-                try { DialectLoader.closeAll() } catch (_: Exception) {}
-            }, "idb-engine-direct-shutdown"))
+            Runtime.getRuntime().addShutdownHook(
+                Thread({
+                    logger.info("Direct mode shutdown hook triggered")
+                    try {
+                        PoolManager.closeAll()
+                    } catch (_: Exception) {
+                    }
+                    try {
+                        DriverLoader.closeAll()
+                    } catch (_: Exception) {
+                    }
+                    try {
+                        DialectLoader.closeAll()
+                    } catch (_: Exception) {
+                    }
+                }, "idb-engine-direct-shutdown"),
+            )
             // 阻塞主线程 — 直到 JVM 关闭
             Thread.currentThread().join()
         }

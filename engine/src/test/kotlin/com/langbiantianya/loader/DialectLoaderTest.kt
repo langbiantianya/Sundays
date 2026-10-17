@@ -27,7 +27,6 @@ import kotlin.test.fail
  * 并能通过 registerForTesting 直接注入方言。
  */
 class DialectLoaderTest {
-
     @AfterEach
     fun tearDown() {
         DialectLoader.closeAll()
@@ -35,12 +34,13 @@ class DialectLoaderTest {
 
     @Test
     fun `loadFromDir discovers dialects from build artifacts`() {
-        val dirs = listOf(
-            File("engine/build/libs/dialects"),
-            File("../engine/build/libs/dialects"),
-            File("../../engine/build/libs/dialects"),
-            File("build/libs/dialects")
-        )
+        val dirs =
+            listOf(
+                File("engine/build/libs/dialects"),
+                File("../engine/build/libs/dialects"),
+                File("../../engine/build/libs/dialects"),
+                File("build/libs/dialects"),
+            )
         val dir = dirs.firstOrNull { it.isDirectory }
         if (dir == null) {
             // 没有 dialects 目录，跳过（开发环境可能没构建）
@@ -52,11 +52,19 @@ class DialectLoaderTest {
 
         // 至少能拿到一个方言
         val drivers = listOf("Mysql", "Postgresql", "H2")
-        val found = drivers.filter { try {
-            DialectLoader.getDialect(it); true
-        } catch (_: Exception) { false } }
-        assertTrue(found.isNotEmpty(),
-            "spike: 至少一个方言应被加载。在 ${dir.absolutePath} 下找到：${dir.listFiles()?.map { it.name }}")
+        val found =
+            drivers.filter {
+                try {
+                    DialectLoader.getDialect(it)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        assertTrue(
+            found.isNotEmpty(),
+            "spike: 至少一个方言应被加载。在 ${dir.absolutePath} 下找到：${dir.listFiles()?.map { it.name }}",
+        )
     }
 
     @Test
@@ -122,13 +130,14 @@ class DialectLoaderTest {
         listOf(H2Dialect(), MySQLDialect(), PostgreSQLDialect(), DuckDBDialect(), SQLiteDialect())
             .forEach { DialectLoader.registerForTesting(it.driverName, it) }
 
-        val cases = mapOf(
-            "jdbc:h2:mem:x;DB_CLOSE_DELAY=-1" to "H2",
-            "jdbc:mysql://localhost:3306/db?useSSL=false" to "Mysql",
-            "jdbc:postgresql://localhost:5432/db" to "Postgresql",
-            "jdbc:duckdb:/tmp/x.duckdb" to "Duckdb",
-            "jdbc:sqlite:/tmp/x.db" to "Sqlite",
-        )
+        val cases =
+            mapOf(
+                "jdbc:h2:mem:x;DB_CLOSE_DELAY=-1" to "H2",
+                "jdbc:mysql://localhost:3306/db?useSSL=false" to "Mysql",
+                "jdbc:postgresql://localhost:5432/db" to "Postgresql",
+                "jdbc:duckdb:/tmp/x.duckdb" to "Duckdb",
+                "jdbc:sqlite:/tmp/x.db" to "Sqlite",
+            )
         cases.forEach { (url, expected) ->
             assertEquals(expected, DialectLoader.getDialectByJdbcUrl(url)?.driverName, "URL: $url")
         }

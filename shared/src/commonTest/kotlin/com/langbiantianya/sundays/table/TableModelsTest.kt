@@ -25,15 +25,15 @@ import kotlin.test.assertTrue
  * - [ContextMenuState]：[show] / [dismiss] 状态转换
  */
 class TableModelsTest {
-
     @Test
     fun table_row_vararg_constructor_builds_cells_map() {
-        val row = TableRow(
-            id = 1L,
-            "id" to 1L,
-            "name" to "Alice",
-            "age" to 30,
-        )
+        val row =
+            TableRow(
+                id = 1L,
+                "id" to 1L,
+                "name" to "Alice",
+                "age" to 30,
+            )
         assertEquals(1L, row.id)
         assertEquals(3, row.cells.size)
         assertEquals(1L, row.cells["id"])
@@ -53,11 +53,12 @@ class TableModelsTest {
     fun table_row_formatted_applies_formatter() {
         val row = TableRow(id = 1L, "age" to 30, "active" to true)
         val ageCol = TableColumn(key = "age", header = "年龄", formatter = { (it as? Int)?.toString() ?: "—" })
-        val activeCol = TableColumn(
-            key = "active",
-            header = "状态",
-            formatter = { if (it == true) "✓" else "✗" },
-        )
+        val activeCol =
+            TableColumn(
+                key = "active",
+                header = "状态",
+                formatter = { if (it == true) "✓" else "✗" },
+            )
         assertEquals("30", row.formatted(ageCol))
         assertEquals("✓", row.formatted(activeCol))
     }
@@ -133,7 +134,9 @@ class TableModelsTest {
     fun context_menu_state_show_sets_position_and_target() {
         val state = ContextMenuState()
         val row = TableRow(id = 1L, "id" to 1L)
-        val pos = androidx.compose.ui.geometry.Offset(100f, 200f)
+        val pos =
+            androidx.compose.ui.geometry
+                .Offset(100f, 200f)
         state.show(pos, row)
         assertEquals(true, state.visible)
         assertSame(row, state.payload)
@@ -143,7 +146,11 @@ class TableModelsTest {
     @Test
     fun context_menu_state_show_supports_null_row() {
         val state = ContextMenuState()
-        state.show(androidx.compose.ui.geometry.Offset(50f, 50f), null)
+        state.show(
+            androidx.compose.ui.geometry
+                .Offset(50f, 50f),
+            null,
+        )
         assertEquals(true, state.visible)
         assertNull(state.payload)
     }
@@ -151,7 +158,11 @@ class TableModelsTest {
     @Test
     fun context_menu_state_dismiss_resets_state() {
         val state = ContextMenuState()
-        state.show(androidx.compose.ui.geometry.Offset(10f, 10f), TableRow(id = 1L, "id" to 1L))
+        state.show(
+            androidx.compose.ui.geometry
+                .Offset(10f, 10f),
+            TableRow(id = 1L, "id" to 1L),
+        )
         state.dismiss()
         assertEquals(false, state.visible)
         assertNull(state.payload)
@@ -166,11 +177,12 @@ class TableModelsTest {
 
     @Test
     fun table_column_with_custom_formatter() {
-        val col = TableColumn(
-            key = "status",
-            header = "状态",
-            formatter = { v -> if (v as? Boolean == true) "ON" else "OFF" },
-        )
+        val col =
+            TableColumn(
+                key = "status",
+                header = "状态",
+                formatter = { v -> if (v as? Boolean == true) "ON" else "OFF" },
+            )
         assertEquals("ON", col.formatter(true))
         assertEquals("OFF", col.formatter(false))
         assertEquals("OFF", col.formatter(null))

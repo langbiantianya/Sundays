@@ -10,19 +10,18 @@ package com.langbiantianya.importer
 
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.LanguageScope
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.io.StringReader
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
 
 /**
  * JsonLinesReader 单元测试 —— 纯内存（StringReader），不触碰任何数据库。
  */
 class JsonLinesReaderTest {
-
     /**
      * 把进程级默认语言钉死成简体中文 —— 本类断言的是**错误消息的中文子串**。
      *
@@ -57,12 +56,13 @@ class JsonLinesReaderTest {
 
     @Test
     fun `multiple objects become one row each`() {
-        val (columns, rows) = readAll(
-            """
-            {"id":1,"name":"Alice"}
-            {"id":2,"name":"Bob"}
-            """.trimIndent()
-        )
+        val (columns, rows) =
+            readAll(
+                """
+                {"id":1,"name":"Alice"}
+                {"id":2,"name":"Bob"}
+                """.trimIndent(),
+            )
         assertEquals(listOf("id", "name"), columns)
         assertEquals(2, rows.size)
         assertEquals(mapOf("id" to "1", "name" to "Alice"), rows[0])
@@ -77,9 +77,10 @@ class JsonLinesReaderTest {
 
     @Test
     fun `mixed scalar types are converted to their textual form`() {
-        val (_, rows) = readAll(
-            """{"s":"text","i":42,"neg":-7,"f":1.50,"big":1234567890123,"t":true,"f2":false,"n":null}"""
-        )
+        val (_, rows) =
+            readAll(
+                """{"s":"text","i":42,"neg":-7,"f":1.50,"big":1234567890123,"t":true,"f2":false,"n":null}""",
+            )
         val row = rows.single()
         assertEquals("text", row["s"])
         assertEquals("42", row["i"])
@@ -115,14 +116,15 @@ class JsonLinesReaderTest {
 
     @Test
     fun `blank lines are skipped`() {
-        val (_, rows) = readAll(
-            """
-            {"id":1}
+        val (_, rows) =
+            readAll(
+                """
+                {"id":1}
 
-            {"id":2}
+                {"id":2}
 
-            """.trimIndent()
-        )
+                """.trimIndent(),
+            )
         assertEquals(2, rows.size)
         assertEquals("2", rows[1]["id"])
     }
@@ -175,7 +177,14 @@ class JsonLinesReaderTest {
     @Test
     fun `rows is single pass and rejects a second call`() {
         val reader = JsonLinesReader(StringReader("""{"a":1}""" + "\n"))
-        assertEquals(1, reader.rows().asSequence().toList().size)
+        assertEquals(
+            1,
+            reader
+                .rows()
+                .asSequence()
+                .toList()
+                .size,
+        )
         val e = assertThrows<IllegalStateException> { reader.rows() }
         assertTrue(e.message!!.contains("只能调用一次"), "实际消息: ${e.message}")
     }

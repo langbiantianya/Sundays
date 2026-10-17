@@ -20,7 +20,6 @@ import kotlin.test.assertTrue
  * 不会抛异常、不会打日志，只表现为「候选列表右半截不见了」。所以只能在这里钉死规则。
  */
 class CompletionPopupLayoutTest {
-
     // ---------------------------------------------------------------- 宽度上限
 
     @Test

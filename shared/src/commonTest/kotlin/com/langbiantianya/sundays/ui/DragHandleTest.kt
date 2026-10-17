@@ -24,7 +24,6 @@ import kotlin.test.assertEquals
  * 而是每一帧都在发生的常态。
  */
 class DragHandleTest {
-
     /** 1x 密度，换算最直观：1px = 1dp。 */
     private val d1 = Density(density = 1f, fontScale = 1f)
 

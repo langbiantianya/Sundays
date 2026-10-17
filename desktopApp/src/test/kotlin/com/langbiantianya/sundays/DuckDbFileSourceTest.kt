@@ -74,7 +74,6 @@ import kotlin.test.assertTrue
  * 顺带这也是一条**给使用方的约束**：想让 Excel 走通，就必须让 URL 由方言生成。
  */
 class DuckDbFileSourceTest {
-
     private companion object {
         /** 每份文件都放这 20 行，断言才有具体锚点。 */
         const val ROWS = 20
@@ -102,7 +101,11 @@ class DuckDbFileSourceTest {
 
     @After
     fun tearDown() {
-        try { engine.close() } catch (e: Exception) { println("engine.close 抛了：$e") }
+        try {
+            engine.close()
+        } catch (e: Exception) {
+            println("engine.close 抛了：$e")
+        }
         created.forEach { runCatching { it.delete() } }
         System.setProperty("user.home", originalHome)
         tempDir.deleteRecursively()
@@ -113,16 +116,13 @@ class DuckDbFileSourceTest {
     // ==================================================================
 
     @Test
-    fun `csv can be opened as a data source`() =
-        assertFileSource(makeCsv(), STEM, dbName = STEM, typed = true)
+    fun `csv can be opened as a data source`() = assertFileSource(makeCsv(), STEM, dbName = STEM, typed = true)
 
     @Test
-    fun `json lines can be opened as a data source`() =
-        assertFileSource(makeJsonLines(), STEM, dbName = STEM, typed = true)
+    fun `json lines can be opened as a data source`() = assertFileSource(makeJsonLines(), STEM, dbName = STEM, typed = true)
 
     @Test
-    fun `parquet can be opened as a data source`() =
-        assertFileSource(makeParquet(), STEM, dbName = STEM, typed = true)
+    fun `parquet can be opened as a data source`() = assertFileSource(makeParquet(), STEM, dbName = STEM, typed = true)
 
     /**
      * Excel 走的是**方言预转换**那条路（POI → 临时 `.duckdb`），与前三个「直开文件」不同。
@@ -142,8 +142,7 @@ class DuckDbFileSourceTest {
      * 两种机制混在一起看不出问题。
      */
     @Test
-    fun `excel can be opened as a data source`() =
-        assertFileSource(makeExcel(), EXCEL_SHEET, dbName = STEM, typed = false)
+    fun `excel can be opened as a data source`() = assertFileSource(makeExcel(), EXCEL_SHEET, dbName = STEM, typed = false)
 
     // ==================================================================
     // 公共判据
@@ -163,25 +162,51 @@ class DuckDbFileSourceTest {
      *   为 `false` 时跳过过滤 / 排序 / 搜索矩阵：那三项测的是 DuckDB 的类型系统，不是产品。
      *   注意这只影响**类型**；库名、表名、列名、行数四种格式一律照常断言。
      */
-    private fun assertFileSource(file: File, viewName: String, dbName: String?, typed: Boolean) {
+    private fun assertFileSource(
+        file: File,
+        viewName: String,
+        dbName: String?,
+        typed: Boolean,
+    ) {
         val fmt = file.extension
         // 走方言入口 —— Excel 的预转换只在这里发生
         val url = DuckDBDialect().buildJdbcUrl("", 0, file.absolutePath)
         println("[$fmt] buildJdbcUrl → $url")
 
-        val cfg = ConnectionConfig(
-            id = "file-$fmt", name = "File$fmt", dialect = DialectType.DUCKDB,
-            database = file.absolutePath, username = "", password = "", jdbcUrl = url,
-        )
+        val cfg =
+            ConnectionConfig(
+                id = "file-$fmt",
+                name = "File$fmt",
+                dialect = DialectType.DUCKDB,
+                database = file.absolutePath,
+                username = "",
+                password = "",
+                jdbcUrl = url,
+            )
 
         // ① 连得上
-        val hello = invoke(cfg) { category = Category.SQL; action = Action.EXECUTE
-            sqlRequest = sqlRequest { execute = sqlExecuteRequest { sql = "SELECT 1"; schema = "" } } }
+        val hello =
+            invoke(cfg) {
+                category = Category.SQL
+                action = Action.EXECUTE
+                sqlRequest =
+                    sqlRequest {
+                        execute =
+                            sqlExecuteRequest {
+                                sql = "SELECT 1"
+                                schema = ""
+                            }
+                    }
+            }
         assertTrue(hello.success, "[$fmt] 连不上：${hello.error}")
 
         // ② 库列表里有它（文件模式下的「库」就是文件名去扩展名）
-        val dbs = invoke(cfg) { category = Category.SCHEMA; action = Action.LIST
-            schemaRequest = schemaRequest { list = schemaListRequest { level = "database" } } }
+        val dbs =
+            invoke(cfg) {
+                category = Category.SCHEMA
+                action = Action.LIST
+                schemaRequest = schemaRequest { list = schemaListRequest { level = "database" } }
+            }
         assertTrue(dbs.success, "[$fmt] 列库失败：${dbs.error}")
         // SchemaListResponse.items 是 repeated string（不是消息列表），直接就是名字数组
         val dbNames = dbs.schema.list.itemsList
@@ -194,10 +219,16 @@ class DuckDbFileSourceTest {
         }
 
         // ③ 表列表里有它
-        val tables = invoke(cfg) { category = Category.TABLE; action = Action.LIST
-            tableRequest = tableRequest { list = tableListRequest {} } }
+        val tables =
+            invoke(cfg) {
+                category = Category.TABLE
+                action = Action.LIST
+                tableRequest = tableRequest { list = tableListRequest {} }
+            }
         assertTrue(tables.success, "[$fmt] 列表失败：${tables.error}")
-        val tableNames = tables.table.list.itemsList.map { it.name }
+        val tableNames =
+            tables.table.list.itemsList
+                .map { it.name }
         println("[$fmt] 表列表 = $tableNames")
         assertTrue(
             tableNames.any { it.equals(viewName, ignoreCase = true) },
@@ -220,7 +251,8 @@ class DuckDbFileSourceTest {
         // ⑥ 排序下推
         val sorted = dataList(cfg, viewName, where = "", orderBy = "id DESC")
         assertEquals(
-            ROWS.toString(), sorted.third.firstOrNull(),
+            ROWS.toString(),
+            sorted.third.firstOrNull(),
             "[$fmt] 按 id DESC 排序首行应为 $ROWS，实际 ${sorted.third}",
         )
 
@@ -229,7 +261,8 @@ class DuckDbFileSourceTest {
         val like = "(CAST(id AS $castType) LIKE '%person_1%' OR CAST(name AS $castType) LIKE '%person_1%')"
         val searched = dataList(cfg, viewName, where = like, orderBy = "")
         assertEquals(
-            11, searched.first,
+            11,
+            searched.first,
             "[$fmt] 表内搜索 person_1 应得 11 行，实际 ${searched.first}（第二段=${searched.second}）",
         )
     }
@@ -244,37 +277,45 @@ class DuckDbFileSourceTest {
      * 刻意不用手写字符串：手写 Parquet 做不到，而手写 CSV/JSONL 会引入
      * 「转义 / 空值 / 编码」这类与本用例无关的失败源 —— 造数据的任务交给最擅长的那个。
      */
-    private fun makeCsv(): File = withSeedDb { seed ->
-        val out = File(tempDir, "$STEM.csv")
-        copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT CSV, HEADER)")
-        out
-    }
+    private fun makeCsv(): File =
+        withSeedDb { seed ->
+            val out = File(tempDir, "$STEM.csv")
+            copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT CSV, HEADER)")
+            out
+        }
 
-    private fun makeJsonLines(): File = withSeedDb { seed ->
-        val out = File(tempDir, "$STEM.jsonl")
-        copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT JSON)")
-        out
-    }
+    private fun makeJsonLines(): File =
+        withSeedDb { seed ->
+            val out = File(tempDir, "$STEM.jsonl")
+            copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT JSON)")
+            out
+        }
 
-    private fun makeParquet(): File = withSeedDb { seed ->
-        val out = File(tempDir, "$STEM.parquet")
-        copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT PARQUET)")
-        out
-    }
+    private fun makeParquet(): File =
+        withSeedDb { seed ->
+            val out = File(tempDir, "$STEM.parquet")
+            copyOut(seed, "COPY t TO '${norm(out)}' (FORMAT PARQUET)")
+            out
+        }
 
     private fun withSeedDb(block: (Connection) -> File): File {
         val seedFile = File(tempDir, "seed.duckdb")
         DriverManager.getConnection("jdbc:duckdb:${seedFile.absolutePath}").use { c ->
             c.createStatement().use { s ->
-                s.execute("CREATE TABLE t AS SELECT * FROM (VALUES " +
-                    (1..ROWS).joinToString(",") { "($it, 'person_$it')" } + ") v(id, name)")
+                s.execute(
+                    "CREATE TABLE t AS SELECT * FROM (VALUES " +
+                        (1..ROWS).joinToString(",") { "($it, 'person_$it')" } + ") v(id, name)",
+                )
             }
         }
         created += seedFile
         return block(DriverManager.getConnection("jdbc:duckdb:${seedFile.absolutePath}"))
     }
 
-    private fun copyOut(seed: Connection, sql: String) {
+    private fun copyOut(
+        seed: Connection,
+        sql: String,
+    ) {
         seed.createStatement().use { it.execute(sql) }
     }
 
@@ -308,57 +349,92 @@ class DuckDbFileSourceTest {
     // 引擎调用
     // ==================================================================
 
-    private fun invoke(cfg: ConnectionConfig, configure: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit): Response =
+    private fun invoke(
+        cfg: ConnectionConfig,
+        configure: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit,
+    ): Response =
         runBlocking {
-            val resp = runCatching {
-                engine.invoke(connectionConfig {
-                    driver = cfg.dialect.engineDriverName
-                    jdbcUrl = cfg.jdbcUrl
-                    user = cfg.username
-                    password = cfg.password
-                }) {
-                    this.connection = connectionConfig {
-                        driver = cfg.dialect.engineDriverName
-                        jdbcUrl = cfg.jdbcUrl
+            val resp =
+                runCatching {
+                    engine.invoke(
+                        connectionConfig {
+                            driver = cfg.dialect.engineDriverName
+                            jdbcUrl = cfg.jdbcUrl
+                            user = cfg.username
+                            password = cfg.password
+                        },
+                    ) {
+                        this.connection =
+                            connectionConfig {
+                                driver = cfg.dialect.engineDriverName
+                                jdbcUrl = cfg.jdbcUrl
+                            }
+                        configure()
                     }
-                    configure()
-                }
-            }.getOrNull()
+                }.getOrNull()
             resp ?: throw AssertionError("引擎无响应")
         }
 
     /** `(行数, 引擎原文, 首行前两列)`。 */
-    private fun dataList(cfg: ConnectionConfig, table: String, where: String, orderBy: String) =
-        runBlocking {
-            val resp = invoke(cfg) {
+    private fun dataList(
+        cfg: ConnectionConfig,
+        table: String,
+        where: String,
+        orderBy: String,
+    ) = runBlocking {
+        val resp =
+            invoke(cfg) {
                 category = Category.DATA
                 action = Action.LIST
-                dataRequest = dataRequest {
-                    list = dataListRequest {
-                        tableName = table
-                        page = 1
-                        pageSize = 100
-                        schema = ""
-                        this.where = where
-                        this.orderBy = orderBy
+                dataRequest =
+                    dataRequest {
+                        list =
+                            dataListRequest {
+                                tableName = table
+                                page = 1
+                                pageSize = 100
+                                schema = ""
+                                this.where = where
+                                this.orderBy = orderBy
+                            }
                     }
+            }
+        assertTrue(resp.success, "DATA.LIST($table, where=$where) 失败：${resp.error}")
+        val rows = resp.data.list.rowsList
+        Triple(
+            resp.data.list.total
+                .toInt(),
+            resp.error,
+            rows
+                .firstOrNull()
+                ?.valuesMap
+                .orEmpty()
+                .entries
+                .take(2)
+                .map { unwrap(it.value) },
+        )
+    }
+
+    private fun unwrap(v: com.google.protobuf.Value): String =
+        when (v.kindCase) {
+            com.google.protobuf.Value.KindCase.STRING_VALUE -> {
+                v.stringValue
+            }
+
+            com.google.protobuf.Value.KindCase.NUMBER_VALUE -> {
+                if (v.numberValue == kotlin.math.floor(v.numberValue)) {
+                    v.numberValue.toLong().toString()
+                } else {
+                    v.numberValue.toString()
                 }
             }
-            assertTrue(resp.success, "DATA.LIST($table, where=$where) 失败：${resp.error}")
-            val rows = resp.data.list.rowsList
-            Triple(
-                resp.data.list.total.toInt(),
-                resp.error,
-                rows.firstOrNull()?.valuesMap.orEmpty().entries.take(2).map { unwrap(it.value) },
-            )
-        }
 
-    private fun unwrap(v: com.google.protobuf.Value): String = when (v.kindCase) {
-        com.google.protobuf.Value.KindCase.STRING_VALUE -> v.stringValue
-        com.google.protobuf.Value.KindCase.NUMBER_VALUE ->
-            if (v.numberValue == kotlin.math.floor(v.numberValue)) v.numberValue.toLong().toString()
-            else v.numberValue.toString()
-        com.google.protobuf.Value.KindCase.BOOL_VALUE -> v.boolValue.toString()
-        else -> ""
-    }
+            com.google.protobuf.Value.KindCase.BOOL_VALUE -> {
+                v.boolValue.toString()
+            }
+
+            else -> {
+                ""
+            }
+        }
 }

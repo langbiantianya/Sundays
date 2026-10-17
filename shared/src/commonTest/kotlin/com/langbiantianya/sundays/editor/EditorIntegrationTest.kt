@@ -24,7 +24,6 @@ import kotlin.test.assertTrue
  * 这些测试是**扩展模板**：当新增一种语言时，复制本文件并修改参数即可验证集成路径。
  */
 class EditorIntegrationTest {
-
     @Test
     fun language_registry_supports_register_and_lookup() {
         CodeLanguageRegistry.clear()
@@ -185,8 +184,10 @@ class EditorIntegrationTest {
     @Test
     fun register_builtin_editors_is_idempotent() {
         // 调用两次不应产生副作用
-        com.langbiantianya.sundays.editor.ui.registerBuiltinEditors()
-        com.langbiantianya.sundays.editor.ui.registerBuiltinEditors()
+        com.langbiantianya.sundays.editor.ui
+            .registerBuiltinEditors()
+        com.langbiantianya.sundays.editor.ui
+            .registerBuiltinEditors()
         assertNotNull(CodeLanguageRegistry.get("sql"))
         assertNotNull(CodeLanguageRegistry.get("lua"))
     }

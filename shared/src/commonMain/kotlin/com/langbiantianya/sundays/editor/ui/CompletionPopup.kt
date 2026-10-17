@@ -61,15 +61,20 @@ private val MAX_POPUP_WIDTH: Dp = 460.dp
  *
  * Compose 允许子节点被 place 到父级边界之外，越界部分由父级裁剪 —— 正是浮层该有的行为。
  */
-internal fun Modifier.atCaret(x: Int, y: Int): Modifier = layout { measurable, constraints ->
-    val placeable = measurable.measure(
-        // 解除最小尺寸约束：否则父级要求「至少这么宽/高」时，弹层会被强行撑大
-        constraints.copy(minWidth = 0, minHeight = 0),
-    )
-    layout(constraints.minWidth, constraints.minHeight) {
-        placeable.place(x, y)
+internal fun Modifier.atCaret(
+    x: Int,
+    y: Int,
+): Modifier =
+    layout { measurable, constraints ->
+        val placeable =
+            measurable.measure(
+                // 解除最小尺寸约束：否则父级要求「至少这么宽/高」时，弹层会被强行撑大
+                constraints.copy(minWidth = 0, minHeight = 0),
+            )
+        layout(constraints.minWidth, constraints.minHeight) {
+            placeable.place(x, y)
+        }
     }
-}
 
 /**
  * 补全弹层的宽度上限 —— 编辑器宽度的 70%，再夹在 160dp~460dp 之间。
@@ -81,8 +86,7 @@ internal fun Modifier.atCaret(x: Int, y: Int): Modifier = layout { measurable, c
  * 这是**上限**而非实际宽度 —— 弹层按内容自适应（见 [CompletionPopup] 里的 `widthIn`），
  * 所以两条短候选只会撑到两条短候选那么宽。
  */
-internal fun completionPopupMaxWidth(editorWidth: Dp): Dp =
-    (editorWidth * POPUP_WIDTH_RATIO).coerceIn(MIN_POPUP_WIDTH, MAX_POPUP_WIDTH)
+internal fun completionPopupMaxWidth(editorWidth: Dp): Dp = (editorWidth * POPUP_WIDTH_RATIO).coerceIn(MIN_POPUP_WIDTH, MAX_POPUP_WIDTH)
 
 /**
  * 补全弹层的横向落点 —— 靠右时向左翻转。
@@ -109,7 +113,11 @@ internal fun completionPopupMaxWidth(editorWidth: Dp): Dp =
  * @param popupMaxWidthPx 弹层宽度上限（px），用于放置前估算
  * @return 弹层左边缘坐标（px），已保证非负
  */
-internal fun completionPopupX(caretX: Int, editorWidth: Int, popupMaxWidthPx: Int): Int {
+internal fun completionPopupX(
+    caretX: Int,
+    editorWidth: Int,
+    popupMaxWidthPx: Int,
+): Int {
     val flipped = caretX + popupMaxWidthPx > editorWidth
     return if (flipped) (caretX - popupMaxWidthPx).coerceAtLeast(0) else caretX
 }
@@ -141,35 +149,38 @@ fun CompletionPopup(
     if (items.isEmpty()) return
     val colors = MaterialTheme.colorScheme
     Column(
-        modifier = modifier
-            // **宽度按内容自适应**，而不是写死一个 `maxWidth`：
-            // 写死的话，2 条短候选（`ID`、`NAME`）也会占掉 320dp，
-            // 把下面好几行代码全遮住。这里让内容决定宽度，只用 maxWidth 封顶。
-            // `widthIn(max=)` 而非 `width(max=)` —— 后者会把短内容**拉伸**到上限。
-            .widthIn(min = 120.dp, max = maxWidth)
-            .heightIn(max = MAX_VISIBLE_HEIGHT)
-            .clip(RoundedCornerShape(6.dp))
-            .background(colors.surface)
-            // 描边：弹层浮在代码上，没有边界会和代码糊在一起
-            .border(1.dp, colors.outlineVariant, RoundedCornerShape(6.dp))
-            .verticalScroll(rememberScrollState()),
+        modifier =
+            modifier
+                // **宽度按内容自适应**，而不是写死一个 `maxWidth`：
+                // 写死的话，2 条短候选（`ID`、`NAME`）也会占掉 320dp，
+                // 把下面好几行代码全遮住。这里让内容决定宽度，只用 maxWidth 封顶。
+                // `widthIn(max=)` 而非 `width(max=)` —— 后者会把短内容**拉伸**到上限。
+                .widthIn(min = 120.dp, max = maxWidth)
+                .heightIn(max = MAX_VISIBLE_HEIGHT)
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.surface)
+                // 描边：弹层浮在代码上，没有边界会和代码糊在一起
+                .border(1.dp, colors.outlineVariant, RoundedCornerShape(6.dp))
+                .verticalScroll(rememberScrollState()),
     ) {
         items.forEachIndexed { index, item ->
             val selected = index == selectedIndex
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(if (selected) colors.primary.copy(alpha = 0.16f) else colors.surface)
-                    .clickable { onAccept(item) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (selected) colors.primary.copy(alpha = 0.16f) else colors.surface)
+                        .clickable { onAccept(item) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
             ) {
                 Text(
                     text = item.label,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    ),
+                    style =
+                        MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        ),
                     color = if (selected) colors.primary else colors.onSurface,
                 )
                 // 类别徽标 —— 让用户一眼分清「关键字」与「函数」，

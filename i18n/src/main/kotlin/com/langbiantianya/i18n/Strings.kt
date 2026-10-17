@@ -35,7 +35,6 @@ class Strings internal constructor(
     private val texts: Map<StrKey, String>,
     private val plurals: Map<PluralStrKey, Map<PluralForm, String>>,
 ) {
-
     /**
      * 取一条文案。
      *
@@ -54,8 +53,10 @@ class Strings internal constructor(
      *
      * @param args 依次对应 `{0}`、`{1}`…；多余的参数忽略，少的保持原样。
      */
-    fun format(key: StrKey, vararg args: Any?): String =
-        substitute(get(key), args)
+    fun format(
+        key: StrKey,
+        vararg args: Any?,
+    ): String = substitute(get(key), args)
 
     /**
      * 取一条**按数量选变体**的文案。
@@ -66,14 +67,19 @@ class Strings internal constructor(
      * @param count 数量，**只用来选变体**；`{0}` 的取值默认也是它。
      * @param args 其余占位符对应 `{1}`、`{2}`…；省略时 `{0}` 自动取 [count]。
      */
-    fun plural(key: PluralStrKey, count: Int, vararg args: Any?): String {
+    fun plural(
+        key: PluralStrKey,
+        count: Int,
+        vararg args: Any?,
+    ): String {
         val form = language.pluralForm(count)
         val variants = plurals[key]
         // 该语言没给这一档（如日语表里只有 OTHER）就退到 OTHER，再退到简体中文。
-        val text = variants?.get(form)
-            ?: variants?.get(PluralForm.OTHER)
-            ?: FALLBACK.plurals[key]?.get(PluralForm.OTHER)
-            ?: key.name
+        val text =
+            variants?.get(form)
+                ?: variants?.get(PluralForm.OTHER)
+                ?: fallback.plurals[key]?.get(PluralForm.OTHER)
+                ?: key.name
         // 全部 31 条复数文案的 `{0}` 都是数量本身，所以调用点只传 count 不传 vararg
         // 时**直接用 count 顶上**。不补的话界面会渲染出字面量「共 {0} 条」，
         // 而失败症状是「找不到这个节点」，报错会把人引向「文案改了」而不是「少传了参数」。
@@ -87,12 +93,10 @@ class Strings internal constructor(
     internal fun declaredPluralKeys(): Set<PluralStrKey> = plurals.keys
 
     /** 供完整性测试用：某条复数文案在本语言下声明了哪些类别。 */
-    internal fun declaredForms(key: PluralStrKey): Set<PluralForm> =
-        plurals[key]?.keys.orEmpty()
+    internal fun declaredForms(key: PluralStrKey): Set<PluralForm> = plurals[key]?.keys.orEmpty()
 
     /** 回落简体中文的同一键。 */
-    private fun fallbackText(key: StrKey): String =
-        FALLBACK.texts[key] ?: key.name
+    private fun fallbackText(key: StrKey): String = fallback.texts[key] ?: key.name
 
     override fun toString(): String = "Strings(${language.tag})"
 
@@ -100,8 +104,8 @@ class Strings internal constructor(
         /**
          * 空表（构造期占位）。取任何键都返回键名，不会崩。
          *
-         * 声明在 [FALLBACK] **之前** —— Kotlin 的 `val` 必须先声明后引用，
-         * 而 [FALLBACK] 的初值就是它。两者互不递归，故这个顺序是安全的。
+         * 声明在 [fallback] **之前** —— Kotlin 的 `val` 必须先声明后引用，
+         * 而 [fallback] 的初值就是它。两者互不递归，故这个顺序是安全的。
          */
         internal val EMPTY: Strings =
             Strings(AppLanguage.DEFAULT, emptyMap(), emptyMap())
@@ -111,7 +115,7 @@ class Strings internal constructor(
          *
          * 由 [StringsRegistry] 在六张表都装载完之后回填一次。
          */
-        internal var FALLBACK: Strings = EMPTY
+        internal var fallback: Strings = EMPTY
 
         private val PLACEHOLDER = Regex("""\{(\d+)}""")
 
@@ -120,7 +124,10 @@ class Strings internal constructor(
          * 补空串会让「忘了传参数」变成一句读起来通顺但意思错了的话，
          * 原样保留则一眼看得出是哪里漏了。
          */
-        private fun substitute(text: String, args: Array<out Any?>): String {
+        private fun substitute(
+            text: String,
+            args: Array<out Any?>,
+        ): String {
             if (args.isEmpty()) return text
             return PLACEHOLDER.replace(text) { match ->
                 val index = match.groupValues[1].toInt()
@@ -137,18 +144,18 @@ class Strings internal constructor(
  * 文案表是纯编译期常量，切语言只该触发一次重组，不该每次重组都重建 Map。
  */
 object StringsRegistry {
-
     private val tables: Map<AppLanguage, Strings> by lazy {
-        val built = AppLanguage.entries.associateWith { language ->
-            Strings(
-                language = language,
-                texts = Texts.forLanguage(language),
-                plurals = Plurals.forLanguage(language),
-            )
-        }
+        val built =
+            AppLanguage.entries.associateWith { language ->
+                Strings(
+                    language = language,
+                    texts = Texts.forLanguage(language),
+                    plurals = Plurals.forLanguage(language),
+                )
+            }
         // 降级终点 = 简体中文表。必须在六张表都建完之后再回填，
-        // 否则构造 ZH_HANS 那一刻 FALLBACK 还是 EMPTY。
-        Strings.FALLBACK = built.getValue(AppLanguage.ZH_HANS)
+        // 否则构造 ZH_HANS 那一刻 fallback 还是 EMPTY。
+        Strings.fallback = built.getValue(AppLanguage.ZH_HANS)
         built
     }
 

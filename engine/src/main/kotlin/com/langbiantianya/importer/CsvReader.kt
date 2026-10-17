@@ -13,6 +13,7 @@ import com.langbiantianya.i18n.StrKey
 import java.io.BufferedReader
 import java.io.Reader
 import java.util.concurrent.atomic.AtomicBoolean
+
 /**
  * CSV 导入读取器 —— 与 [com.langbiantianya.export.CsvWriter] 互为逆过程。
  *
@@ -41,7 +42,6 @@ class CsvReader(
     private val hasHeader: Boolean = true,
     fallbackColumns: List<String> = emptyList(),
 ) : ImportSource {
-
     private val reader: BufferedReader =
         if (source is BufferedReader) source else BufferedReader(source)
 
@@ -49,14 +49,15 @@ class CsvReader(
 
     /** 列名；构造时即确定好，保证 rows() 之前就能拿到 columns */
     private val header: List<String>
+
     /** rows() 只允许调用一次（见类注释） */
     private val rowsCalled = AtomicBoolean(false)
 
-    /**
-     * @param fallbackColumns `hasHeader = false` 时使用的列名 —— 无表头的 CSV 里
-     *   文件本身给不出列名，只能由调用方（引擎从目标表的元数据拿到）提供。
-     *   为空时构造失败：宁可明确报错，也不要拿首行**数据值**冒充列名，
-     *   那样会拼出一条 `INSERT INTO t ("1","Alice")` 这种必然失败、且错误信息毫无指向性的语句。
+    /*
+     * fallbackColumns 的取值规则 —— `hasHeader = false` 时使用的列名，
+     * 无表头的 CSV 里文件本身给不出列名，只能由调用方（引擎从目标表的元数据拿到）提供。
+     * 为空时构造失败：宁可明确报错，也不要拿首行**数据值**冒充列名，
+     * 那样会拼出一条 `INSERT INTO t ("1","Alice")` 这种必然失败、且错误信息毫无指向性的语句。
      */
     init {
         if (hasHeader) {
@@ -98,9 +99,9 @@ class CsvReader(
         return row
     }
 
-    private inner class RowIterator(private var pending: List<String>?) :
-        Iterator<Map<String, String>> {
-
+    private inner class RowIterator(
+        private var pending: List<String>?,
+    ) : Iterator<Map<String, String>> {
         private var next: Map<String, String>? = null
         private var computed = false
 
@@ -132,8 +133,7 @@ class CsvReader(
 
     private companion object {
         /** 整行为空（只有一个空字段）视为空行，跳过 */
-        fun isBlankRecord(record: List<String>): Boolean =
-            record.size == 1 && record[0].isEmpty()
+        fun isBlankRecord(record: List<String>): Boolean = record.size == 1 && record[0].isEmpty()
     }
 }
 
@@ -148,7 +148,6 @@ private class CsvRecordParser(
     private val reader: Reader,
     private val delimiter: Char,
 ) {
-
     /** 单字符回退槽：处理 CRLF 时需要「读一个看看，不是就还回去」 */
     private var pushed = NOTHING
 

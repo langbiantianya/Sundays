@@ -30,9 +30,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.transformWhile
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -52,7 +52,6 @@ import kotlin.time.Duration.Companion.milliseconds
  * 两者共享 `parseExportRequest()`：把 typed `ExportRunRequest` → ExportRequest。
  */
 object ExportHandler {
-
     /**
      * 导出链路的日志。
      *
@@ -83,7 +82,10 @@ object ExportHandler {
         System.err.println("[export][warn] $message")
     }
 
-    private fun logError(message: String, t: Throwable) {
+    private fun logError(
+        message: String,
+        t: Throwable,
+    ) {
         logger.error(message, t)
         System.err.println("[export][error] $message: $t")
         t.printStackTrace()
@@ -93,109 +95,109 @@ object ExportHandler {
      * 主进程模式入口 — 由 [com.langbiantianya.dispatcher.RequestDispatcher] 直接调用。
      * 编排子进程 + 收集子进程响应并组装为 typed Response 流。
      */
-    fun executeInMainProcess(request: Request): Flow<Response> = flow {
-        val id = request.id
-        val config = request.connection
-        val runReq = request.exportRequest.runExport
+    fun executeInMainProcess(request: Request): Flow<Response> =
+        flow {
+            val id = request.id
+            val config = request.connection
+            val runReq = request.exportRequest.runExport
 
-        /**
-         * 找不到 jar **不再是致命错误** —— 交给 [ExportProcessManager] 退回「本进程 classpath」。
-         *
-         * 原来这里直接返回 `Cannot find idb-engine.jar path`，而 Gradle 跑测试 / `:run` 时
-         * classpath 上根本没有 jar（只有 `engine/build/classes/...`）。
-         * 于是**开发与 CI 环境里这条链路压根不可用**，能验它的只有打包产物 ——
-         * 这就是它坏掉这么久却没人发现的原因。
-         */
-        val jarPath = findEngineJarPath()
-        if (jarPath == null) {
-            logWarn("classpath 上没有 idb-engine.jar，改用本进程 classpath 启动导出子进程")
-        }
+            /**
+             * 找不到 jar **不再是致命错误** —— 交给 [ExportProcessManager] 退回「本进程 classpath」。
+             *
+             * 原来这里直接返回 `Cannot find idb-engine.jar path`，而 Gradle 跑测试 / `:run` 时
+             * classpath 上根本没有 jar（只有 `engine/build/classes/...`）。
+             * 于是**开发与 CI 环境里这条链路压根不可用**，能验它的只有打包产物 ——
+             * 这就是它坏掉这么久却没人发现的原因。
+             */
+            val jarPath = findEngineJarPath()
+            if (jarPath == null) {
+                logWarn("classpath 上没有 idb-engine.jar，改用本进程 classpath 启动导出子进程")
+            }
 
-        // 停止导出分支
-        val stopExportId = runReq.stopExportId.ifBlank { null }
-        if (stopExportId != null) {
+            // 停止导出分支
+            val stopExportId = runReq.stopExportId.ifBlank { null }
+            if (stopExportId != null) {
+                ensureSubprocessRunning(jarPath)
+                ExportProcessManager.stopExport(stopExportId)
+                emit(
+                    response {
+                        this.id = id
+                        success = true
+                        export =
+                            exportResponse {
+                                stop = exportStopResponse { stopped = stopExportId }
+                            }
+                    },
+                )
+                return@flow
+            }
+
+            // 启动导出分支。
+            //
+            // ⚠️ **订阅必须早于下发命令**，且 `startExport` 的失败必须自己收口成终止帧。
+            //
+            // [ExportProcessManager.collectResponses] 拿到的是 `replay = 0` 的 SharedFlow：
+            // **没有订阅者时 emit 出去的值直接丢**。原来「先 startExport 再 collect」，
+            // 小表（几十行）的整轮导出可能在订阅建立之前就回完了 —— 帧全丢，
+            // `collect` 永远等不到东西。
+            //
+            // 更糟的是另一条路径：`startExport` 在「通道没就绪」时只写日志就返回，
+            // 于是既没有命令、也没有人回帧 —— 前端 `collect` 永久挂起，
+            // 对话框关了、文件没有、界面一句话都没有（实测，见 TEST_CASES.md §9.13）。
+            // 所以这里两处都要堵：先订阅，收不到就**一定**回一帧 `success=false`。
             ensureSubprocessRunning(jarPath)
-            ExportProcessManager.stopExport(stopExportId)
-            emit(
-                response {
-                    this.id = id
-                    success = true
-                    export = exportResponse {
-                        stop = exportStopResponse { stopped = stopExportId }
-                    }
-                }
-            )
-            return@flow
-        }
-
-        // 启动导出分支。
-        //
-        // ⚠️ **订阅必须早于下发命令**，且 `startExport` 的失败必须自己收口成终止帧。
-        //
-        // [ExportProcessManager.collectResponses] 拿到的是 `replay = 0` 的 SharedFlow：
-        // **没有订阅者时 emit 出去的值直接丢**。原来「先 startExport 再 collect」，
-        // 小表（几十行）的整轮导出可能在订阅建立之前就回完了 —— 帧全丢，
-        // `collect` 永远等不到东西。
-        //
-        // 更糟的是另一条路径：`startExport` 在「通道没就绪」时只写日志就返回，
-        // 于是既没有命令、也没有人回帧 —— 前端 `collect` 永久挂起，
-        // 对话框关了、文件没有、界面一句话都没有（实测，见 TEST_CASES.md §9.13）。
-        // 所以这里两处都要堵：先订阅，收不到就**一定**回一帧 `success=false`。
-        ensureSubprocessRunning(jarPath)
-        // 转发给子进程的 ExportCommand 仍然使用 map<string,Value> payload — 子进程 wire 协议保持旧形态
-        val responses = ExportProcessManager.collectResponses(id)
-        val started = ExportProcessManager.startExport(id, config, runReqToPayloadMap(runReq))
-        if (!started) {
-            emit(
-                response {
-                    this.id = id
-                    success = false
-                    error = Msg.text(StrKey.EXPORT_HUB_NOT_READY)
-                }
-            )
-            return@flow
-        }
-
-        // 收集子进程响应（已由 ExportProcessManager 转为 typed Response）转发给上游 gRPC StreamObserver
-        // ⚠️ **SharedFlow 永远不会自己结束**，所以这里必须显式收口。
-        //
-        // 少了这一步：子进程把活干完了、文件也写了、完成帧也回传了，
-        // 可父进程的 `collect` 还在等「下一帧」—— 桌面那边永远收不到结论，
-        // 直到看门狗（5 分钟）超时。实测就是「文件已经导出成功，界面却一直转」。
-        //
-        // ⚠️ 用 `transformWhile` 而不是「collect 里 `return@collect`」：
-        // 后者只是**跳过本次回调**，下一帧照样进循环，等于没收口。
-        // `transformWhile` 在**同一个挂起循环**里既吐出完成帧又停下，
-        // 期间不会「取一帧再取一帧」那种窗口丢帧的竞态。
-        //
-        // 注意 `emit` 在这里是 `transformWhile` 的**内部**发射（转到下游），
-        // 真正吐给上游调用方的那个 `emit` 在下面的 `onEach` 里 —— 那个位置
-        // 与本 flow 的收集协程同上下文，才是合法的。
-        // `completed` 在下面 onEach 里被置位；这里先声明
-        var completed = false
-        responses
-            .transformWhile { frame ->
-                emit(frame)
-                !(frame.export.hasProgress() && frame.export.progress.completed)
+            // 转发给子进程的 ExportCommand 仍然使用 map<string,Value> payload — 子进程 wire 协议保持旧形态
+            val responses = ExportProcessManager.collectResponses(id)
+            val started = ExportProcessManager.startExport(id, config, runReqToPayloadMap(runReq))
+            if (!started) {
+                emit(
+                    response {
+                        this.id = id
+                        success = false
+                        error = Msg.text(StrKey.EXPORT_HUB_NOT_READY)
+                    },
+                )
+                return@flow
             }
-            .onEach { frame ->
-                if (frame.export.hasProgress() && frame.export.progress.completed) completed = true
-                log("主进程转发帧 completed=${frame.export.hasProgress() && frame.export.progress.completed}")
-                emit(frame)
+
+            // 收集子进程响应（已由 ExportProcessManager 转为 typed Response）转发给上游 gRPC StreamObserver
+            // ⚠️ **SharedFlow 永远不会自己结束**，所以这里必须显式收口。
+            //
+            // 少了这一步：子进程把活干完了、文件也写了、完成帧也回传了，
+            // 可父进程的 `collect` 还在等「下一帧」—— 桌面那边永远收不到结论，
+            // 直到看门狗（5 分钟）超时。实测就是「文件已经导出成功，界面却一直转」。
+            //
+            // ⚠️ 用 `transformWhile` 而不是「collect 里 `return@collect`」：
+            // 后者只是**跳过本次回调**，下一帧照样进循环，等于没收口。
+            // `transformWhile` 在**同一个挂起循环**里既吐出完成帧又停下，
+            // 期间不会「取一帧再取一帧」那种窗口丢帧的竞态。
+            //
+            // 注意 `emit` 在这里是 `transformWhile` 的**内部**发射（转到下游），
+            // 真正吐给上游调用方的那个 `emit` 在下面的 `onEach` 里 —— 那个位置
+            // 与本 flow 的收集协程同上下文，才是合法的。
+            // `completed` 在下面 onEach 里被置位；这里先声明
+            var completed = false
+            responses
+                .transformWhile { frame ->
+                    emit(frame)
+                    !(frame.export.hasProgress() && frame.export.progress.completed)
+                }.onEach { frame ->
+                    if (frame.export.hasProgress() && frame.export.progress.completed) completed = true
+                    log("主进程转发帧 completed=${frame.export.hasProgress() && frame.export.progress.completed}")
+                    emit(frame)
+                }.collect { }
+            // 流结束了却从没收到 `completed` 帧 —— 与其让上游无限等待，
+            // 不如把「没等到完成」这件事本身作为失败报出去。
+            if (!completed) {
+                emit(
+                    response {
+                        this.id = id
+                        success = false
+                        error = Msg.text(StrKey.EXPORT_NO_COMPLETION_FRAME)
+                    },
+                )
             }
-            .collect { }
-        // 流结束了却从没收到 `completed` 帧 —— 与其让上游无限等待，
-        // 不如把「没等到完成」这件事本身作为失败报出去。
-        if (!completed) {
-            emit(
-                response {
-                    this.id = id
-                    success = false
-                    error = Msg.text(StrKey.EXPORT_NO_COMPLETION_FRAME)
-                }
-            )
         }
-    }
 
     /**
      * 子进程模式入口 — 由 [com.langbiantianya.export.ExportSubProcess] 直接调用。
@@ -228,68 +230,75 @@ object ExportHandler {
      * 顺带修掉的另一处：引擎失败时**只返回** `ExportResult(success=false)` 而不抛，
      * 那条路径上 `onProgress` 一次都不会被调 —— 必须在返回后补一帧终止帧。
      */
-    fun executeAsSubprocess(request: Request): Flow<ExportHubResponse> = callbackFlow {
-        val id = request.id
-        val config = request.connection
-        val frames = Channel<ExportHubResponse>(Channel.UNLIMITED)
+    fun executeAsSubprocess(request: Request): Flow<ExportHubResponse> =
+        callbackFlow {
+            val id = request.id
+            val config = request.connection
+            val frames = Channel<ExportHubResponse>(Channel.UNLIMITED)
 
-        // 真正干活的协程：它只往 [frames] 里 `trySend`，**不碰 emit**。
-        // 见本函数 KDoc —— 从别人的协程里 emit 会撞上 Flow 不变量。
-        val worker = launch(Dispatchers.IO) {
-            fun failure(message: String) = exportHubResponse {
-                this.id = id
-                success = false
-                error = message
-                end = true
-            }
-
-            try {
-                val exportRequest = parseExportRequest(request.exportRequest.runExport)
-                log("导出开始: id=$id driver=${config.driver} sql=${exportRequest.sql}")
-                val result = ExportEngine.export(config, exportRequest) { progress ->
-                    val data = buildJsonObject {
-                        put("exportedRows", progress.exportedRows)
-                        put("columnCount", progress.columnCount)
-                        put("completed", progress.completed)
-                        if (progress.filePath != null) put("filePath", progress.filePath)
-                        if (progress.error != null) put("error", progress.error)
-                    }
-                    frames.trySend(
+            // 真正干活的协程：它只往 [frames] 里 `trySend`，**不碰 emit**。
+            // 见本函数 KDoc —— 从别人的协程里 emit 会撞上 Flow 不变量。
+            val worker =
+                launch(Dispatchers.IO) {
+                    fun failure(message: String) =
                         exportHubResponse {
                             this.id = id
-                            success = true
-                            stream = true
-                            end = progress.completed
-                            this.data = PayloadAdapter.toValue(data)
+                            success = false
+                            error = message
+                            end = true
                         }
-                    )
-                }
-                // ⚠️ **ExportEngine 失败时不抛异常，只返回 `ExportResult(success=false)`**
-                // （它内部 catch 后构造失败结果）。于是失败路径上 `onProgress` 一次都不会被调，
-                // 不在这里补一帧的话，整个流**一帧不发**就结束 ——
-                // 父进程 `collectResponses(id)` 永远等不到东西，界面上「点了导出，什么也没发生」。
-                if (!result.success) {
-                    logWarn("导出失败（引擎已返回失败结果）: id=$id error=${result.error}")
-                    frames.trySend(failure(result.error ?: Msg.text(StrKey.EXPORT_FAILED)))
-                } else {
-                    log("导出完成: id=$id rows=${result.exportedRows} file=${result.filePath}")
-                }
-            } catch (e: Throwable) {
-                // ⚠️ 必须是 **Throwable**，不是 Exception。
-                // 驱动装不上时抛的是 `ServiceConfigurationError` / `NoClassDefFoundError` ——
-                // 那是 `Error`。只 catch Exception 的话这类失败直接逃逸，一帧终止帧都不发。
-                logError("导出抛异常: id=$id", e)
-                frames.trySend(failure(e.message ?: e::class.java.simpleName))
-            } finally {
-                frames.close()
-            }
-        }
 
-        // emit 只在**本 flow 自己的协程**里做 —— 这是 Flow 的硬性要求
-        for (frame in frames) { send(frame) }
-        worker.join()
-        close()
-    }
+                    try {
+                        val exportRequest = parseExportRequest(request.exportRequest.runExport)
+                        log("导出开始: id=$id driver=${config.driver} sql=${exportRequest.sql}")
+                        val result =
+                            ExportEngine.export(config, exportRequest) { progress ->
+                                val data =
+                                    buildJsonObject {
+                                        put("exportedRows", progress.exportedRows)
+                                        put("columnCount", progress.columnCount)
+                                        put("completed", progress.completed)
+                                        if (progress.filePath != null) put("filePath", progress.filePath)
+                                        if (progress.error != null) put("error", progress.error)
+                                    }
+                                frames.trySend(
+                                    exportHubResponse {
+                                        this.id = id
+                                        success = true
+                                        stream = true
+                                        end = progress.completed
+                                        this.data = PayloadAdapter.toValue(data)
+                                    },
+                                )
+                            }
+                        // ⚠️ **ExportEngine 失败时不抛异常，只返回 `ExportResult(success=false)`**
+                        // （它内部 catch 后构造失败结果）。于是失败路径上 `onProgress` 一次都不会被调，
+                        // 不在这里补一帧的话，整个流**一帧不发**就结束 ——
+                        // 父进程 `collectResponses(id)` 永远等不到东西，界面上「点了导出，什么也没发生」。
+                        if (!result.success) {
+                            logWarn("导出失败（引擎已返回失败结果）: id=$id error=${result.error}")
+                            frames.trySend(failure(result.error ?: Msg.text(StrKey.EXPORT_FAILED)))
+                        } else {
+                            log("导出完成: id=$id rows=${result.exportedRows} file=${result.filePath}")
+                        }
+                    } catch (e: Throwable) {
+                        // ⚠️ 必须是 **Throwable**，不是 Exception。
+                        // 驱动装不上时抛的是 `ServiceConfigurationError` / `NoClassDefFoundError` ——
+                        // 那是 `Error`。只 catch Exception 的话这类失败直接逃逸，一帧终止帧都不发。
+                        logError("导出抛异常: id=$id", e)
+                        frames.trySend(failure(e.message ?: e::class.java.simpleName))
+                    } finally {
+                        frames.close()
+                    }
+                }
+
+            // emit 只在**本 flow 自己的协程**里做 —— 这是 Flow 的硬性要求
+            for (frame in frames) {
+                send(frame)
+            }
+            worker.join()
+            close()
+        }
 
     /**
      * 启动或复用导出子进程
@@ -344,13 +353,14 @@ object ExportHandler {
         val outputDir = runReq.outputDir.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_OUTPUT_DIR)) }
         val fileName = runReq.fileName.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_FILE_NAME)) }
         val formatStr = runReq.format.ifBlank { throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_FORMAT)) }.uppercase()
-        val format = try {
-            ExportFormat.valueOf(formatStr)
-        } catch (e: Exception) {
-            throw IllegalArgumentException(
-                Msg.format(StrKey.UNSUPPORTED_FORMAT, formatStr)
-            )
-        }
+        val format =
+            try {
+                ExportFormat.valueOf(formatStr)
+            } catch (e: Exception) {
+                throw IllegalArgumentException(
+                    Msg.format(StrKey.UNSUPPORTED_FORMAT, formatStr),
+                )
+            }
         val tableName = runReq.tableName.ifBlank { null }
         val fetchSize = if (runReq.fetchSize == 0) 1000 else runReq.fetchSize
 
@@ -360,7 +370,7 @@ object ExportHandler {
             fileName = fileName,
             format = format,
             tableName = tableName,
-            fetchSize = fetchSize
+            fetchSize = fetchSize,
         )
     }
 
@@ -368,16 +378,17 @@ object ExportHandler {
      * 把 typed `ExportRunRequest` 打成子进程 wire 的 `map<string, Value>` 形态。
      */
     private fun runReqToPayloadMap(runReq: ExportRunRequest): Map<String, com.google.protobuf.Value> {
-        val obj = JsonObject(
-            linkedMapOf(
-                "sql" to JsonPrimitive(runReq.sql),
-                "outputDir" to JsonPrimitive(runReq.outputDir),
-                "fileName" to JsonPrimitive(runReq.fileName),
-                "format" to JsonPrimitive(runReq.format),
-                "tableName" to JsonPrimitive(runReq.tableName),
-                "fetchSize" to JsonPrimitive(runReq.fetchSize)
+        val obj =
+            JsonObject(
+                linkedMapOf(
+                    "sql" to JsonPrimitive(runReq.sql),
+                    "outputDir" to JsonPrimitive(runReq.outputDir),
+                    "fileName" to JsonPrimitive(runReq.fileName),
+                    "format" to JsonPrimitive(runReq.format),
+                    "tableName" to JsonPrimitive(runReq.tableName),
+                    "fetchSize" to JsonPrimitive(runReq.fetchSize),
+                ),
             )
-        )
         return PayloadAdapter.toPayloadMap(obj)
     }
 

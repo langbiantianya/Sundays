@@ -19,7 +19,6 @@ import kotlin.test.assertTrue
  * 数字本身没有代码依赖，但每一条都对应一个用户能立刻看到的坏结果。
  */
 class WindowSizeTest {
-
     @Test
     fun `the default size is never clamped by the minimum`() {
         // 默认值若小于下限，`EnforceMinimumWindowSize` 会在启动第一帧就把窗口改写，
@@ -53,7 +52,7 @@ class WindowSizeTest {
         // 右栏再扣掉滚动条、详情面板等，至少仍要放得下几列。
         val leftTree = 250f
         val rightContentMin = 350f
-        val chrome = 32f          // 竖向分隔线 + 两侧内边距
+        val chrome = 32f // 竖向分隔线 + 两侧内边距
         val available = with(DEFAULT_WINDOW_SIZE) { width.value }
         val rightWidth = available - leftTree - chrome
         assertTrue(
@@ -72,7 +71,7 @@ class WindowSizeTest {
     fun `the onboarding content column still fits at the default width`() {
         // 引导页内容限宽 960dp：窗口再窄就要换行成两排色卡（省高度但更绕）。
         val onboardingContentMax = 960f
-        val horizontalPadding = 48f   // 24dp × 2，紧凑档下按非紧凑算（更保守）
+        val horizontalPadding = 48f // 24dp × 2，紧凑档下按非紧凑算（更保守）
         val available = with(DEFAULT_WINDOW_SIZE) { width.value }
         assertTrue(
             available - horizontalPadding >= onboardingContentMax,

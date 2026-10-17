@@ -14,10 +14,10 @@ import com.langbiantianya.grpc.ExportCommand
 import com.langbiantianya.grpc.ExportCommand.Kind
 import com.langbiantianya.grpc.ExportHubGrpc
 import com.langbiantianya.grpc.ExportHubResponse
-import com.langbiantianya.grpc.PayloadAdapter
-import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.ExportProgressFrame
 import com.langbiantianya.grpc.ExportResponse
+import com.langbiantianya.grpc.PayloadAdapter
+import com.langbiantianya.grpc.Response
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import io.grpc.ManagedChannel
@@ -59,7 +59,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 每个 exportId 的进度响应通过内部的 SharedFlow 转发给上游 gRPC StreamObserver。
  */
 object ExportProcessManager {
-
     /**
      * 连子进程用的地址 —— **写死 IPv4 回环，不写 `localhost`**。
      *
@@ -124,7 +123,10 @@ object ExportProcessManager {
      *
      * @return `true` = 帧已交给流；`false` = 没有可用通道或发送抛异常。
      */
-    private fun sendCommand(observer: StreamObserver<ExportCommand>, cmd: ExportCommand): Boolean =
+    private fun sendCommand(
+        observer: StreamObserver<ExportCommand>,
+        cmd: ExportCommand,
+    ): Boolean =
         synchronized(sendLock) {
             try {
                 observer.onNext(cmd)
@@ -254,7 +256,8 @@ object ExportProcessManager {
     fun start(jarPath: String?): Int {
         // 原子抢占 — 防止两个 caller 同时启动两个子进程
         if (!_isRunning.compareAndSet(false, true)) {
-            logger.warn("Export subprocess already running"); managerLog("[export] Export subprocess already running（复用）")
+            logger.warn("Export subprocess already running")
+            managerLog("[export] Export subprocess already running（复用）")
             return hubPort
         }
 
@@ -269,7 +272,8 @@ object ExportProcessManager {
         // 端口号会通过 `-Didb.export.hub.port` 传给子进程，父子两边自然一致。
         if (!isPortFree(hubPort)) {
             val fallback = freePort()
-            logger.warn("导出 hub 端口 $hubPort 已被占用，改用 $fallback"); System.err.println("[export] hub 端口 $hubPort 被占用，改用 $fallback")
+            logger.warn("导出 hub 端口 $hubPort 已被占用，改用 $fallback")
+            System.err.println("[export] hub 端口 $hubPort 被占用，改用 $fallback")
             hubPort = fallback
         }
 
@@ -287,9 +291,10 @@ object ExportProcessManager {
 
         try {
             val javaHome = System.getProperty("java.home")
-            val javaExe: String = File(File(javaHome), "bin/java").takeIf { it.exists() }?.absolutePath
-                ?: File(File(javaHome), "bin/java.exe").takeIf { it.exists() }?.absolutePath
-                ?: "java"
+            val javaExe: String =
+                File(File(javaHome), "bin/java").takeIf { it.exists() }?.absolutePath
+                    ?: File(File(javaHome), "bin/java.exe").takeIf { it.exists() }?.absolutePath
+                    ?: "java"
             val parentMaxMem = Runtime.getRuntime().maxMemory()
             val childMaxMem = maxOf(parentMaxMem, 256L * 1024 * 1024)
 
@@ -299,20 +304,22 @@ object ExportProcessManager {
             // 直接拼进命令行会在 Windows 上撞 `CreateProcess error=206
             // 「文件名或扩展名太长」` —— 于是子进程**根本起不来**。
             // Java 9+ 支持 `@file` 从文件读参数，这里每行一个参数、带空格的加引号。
-            val javaArgs = listOf(
-                "-Xmx${formatMem(childMaxMem)}",
-                "-Xms${formatMem(childMaxMem)}",
-                "-XX:+UseSerialGC",
-                "-Didb.subprocess=true",
-                "-D$HUB_PORT_PROPERTY=$hubPort",
-                "-cp",
-                classPath,
-                "com.langbiantianya.export.ExportSubProcess",
-            )
-            val argFile = (libsDir ?: File(".")).let { dir ->
-                dir.mkdirs()
-                File(dir, "export-subprocess.args")
-            }
+            val javaArgs =
+                listOf(
+                    "-Xmx${formatMem(childMaxMem)}",
+                    "-Xms${formatMem(childMaxMem)}",
+                    "-XX:+UseSerialGC",
+                    "-Didb.subprocess=true",
+                    "-D$HUB_PORT_PROPERTY=$hubPort",
+                    "-cp",
+                    classPath,
+                    "com.langbiantianya.export.ExportSubProcess",
+                )
+            val argFile =
+                (libsDir ?: File(".")).let { dir ->
+                    dir.mkdirs()
+                    File(dir, "export-subprocess.args")
+                }
             argFile.writeText(javaArgs.joinToString("\n") { if (it.contains(' ')) "\"$it\"" else it })
 
             val builder = ProcessBuilder(javaExe, "@${argFile.absolutePath}")
@@ -327,15 +334,17 @@ object ExportProcessManager {
             //
             // 现在固定写到 `engine/build/libs/export-subprocess.log`：
             // 出问题直接看这个文件就行。
-            val logFile = runCatching {
-                val dir = libsDir ?: File(".")
-                dir.mkdirs()
-                File(dir, "export-subprocess.log").also { it.delete() }
-            }.getOrNull()
+            val logFile =
+                runCatching {
+                    val dir = libsDir ?: File(".")
+                    dir.mkdirs()
+                    File(dir, "export-subprocess.log").also { it.delete() }
+                }.getOrNull()
             if (logFile != null) {
                 builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
                 builder.redirectError(ProcessBuilder.Redirect.appendTo(logFile))
-                logger.info("导出子进程日志: ${logFile.absolutePath}"); System.err.println("[export] 子进程日志: ${logFile.absolutePath}")
+                logger.info("导出子进程日志: ${logFile.absolutePath}")
+                System.err.println("[export] 子进程日志: ${logFile.absolutePath}")
             } else {
                 builder.redirectErrorStream(false)
             }
@@ -347,12 +356,13 @@ object ExportProcessManager {
             }
 
             process = builder.start()
-            managerLog("[export] 子进程已启动 pid=${process?.pid()} classpath=${classPath.split(File.pathSeparator).size} 项 cwd=${libsDir}")
+            managerLog("[export] 子进程已启动 pid=${process?.pid()} classpath=${classPath.split(File.pathSeparator).size} 项 cwd=$libsDir")
 
             // 监控进程退出
             scope.launch {
                 val code = process?.waitFor()
-                logger.info("Export subprocess exited with code: $code"); System.err.println("[export] 子进程退出 code=$code")
+                logger.info("Export subprocess exited with code: $code")
+                System.err.println("[export] 子进程退出 code=$code")
                 // ⚠️ 子进程没了 ⇒ 所有**在等**的导出都不可能再有回帧。
                 //
                 // 这一步以前只是 `stop()`：流被关掉、observer 置空，而
@@ -391,38 +401,43 @@ object ExportProcessManager {
      * 我们在主进程边界把它转换为对外的 typed Response（ExportProgressFrame body）。
      */
     private fun publishResponse(exportResp: ExportHubResponse) {
-        val flow = responseFlows.computeIfAbsent(exportResp.id) {
-            MutableSharedFlow<Response>(
-                replay = 0,
-                extraBufferCapacity = 64,
-                onBufferOverflow = BufferOverflow.DROP_OLDEST
-            )
-        }
+        val flow =
+            responseFlows.computeIfAbsent(exportResp.id) {
+                MutableSharedFlow<Response>(
+                    replay = 0,
+                    extraBufferCapacity = 64,
+                    onBufferOverflow = BufferOverflow.DROP_OLDEST,
+                )
+            }
         // 转换为对外暴露的 typed gRPC Response
-        val response = if (exportResp.success && exportResp.hasData() && exportResp.data.kindCase == Value.KindCase.STRUCT_VALUE) {
-            // progress frame — 解 Value → JsonObject → typed ExportProgressFrame
-            val progress = PayloadAdapter.toJsonElement(exportResp.data) as? kotlinx.serialization.json.JsonObject
-            if (progress != null) {
-                val pb = ExportProgressFrame.newBuilder()
-                    .setExportedRows(progress["exportedRows"]?.jsonPrimitive?.longOrNull ?: 0L)
-                    .setColumnCount(progress["columnCount"]?.jsonPrimitive?.intOrNull ?: 0)
-                    .setCompleted(progress["completed"]?.jsonPrimitive?.booleanOrNull ?: false)
-                progress["filePath"]?.jsonPrimitive?.let { if (it.content.isNotEmpty()) pb.setFilePath(it.content) }
-                progress["error"]?.jsonPrimitive?.let { if (it.content.isNotEmpty()) pb.setError(it.content) }
-                val exportRespMsg = ExportResponse.newBuilder().setProgress(pb).build()
-                Response.newBuilder()
-                    .setId(exportResp.id)
-                    .setSuccess(true)
-                    .setStream(true)
-                    .setEnd(exportResp.end)
-                    .setExport(exportRespMsg)
-                    .build()
+        val response =
+            if (exportResp.success && exportResp.hasData() && exportResp.data.kindCase == Value.KindCase.STRUCT_VALUE) {
+                // progress frame — 解 Value → JsonObject → typed ExportProgressFrame
+                val progress = PayloadAdapter.toJsonElement(exportResp.data) as? kotlinx.serialization.json.JsonObject
+                if (progress != null) {
+                    val pb =
+                        ExportProgressFrame
+                            .newBuilder()
+                            .setExportedRows(progress["exportedRows"]?.jsonPrimitive?.longOrNull ?: 0L)
+                            .setColumnCount(progress["columnCount"]?.jsonPrimitive?.intOrNull ?: 0)
+                            .setCompleted(progress["completed"]?.jsonPrimitive?.booleanOrNull ?: false)
+                    progress["filePath"]?.jsonPrimitive?.let { if (it.content.isNotEmpty()) pb.setFilePath(it.content) }
+                    progress["error"]?.jsonPrimitive?.let { if (it.content.isNotEmpty()) pb.setError(it.content) }
+                    val exportRespMsg = ExportResponse.newBuilder().setProgress(pb).build()
+                    Response
+                        .newBuilder()
+                        .setId(exportResp.id)
+                        .setSuccess(true)
+                        .setStream(true)
+                        .setEnd(exportResp.end)
+                        .setExport(exportRespMsg)
+                        .build()
+                } else {
+                    errorResponse(exportResp)
+                }
             } else {
                 errorResponse(exportResp)
             }
-        } else {
-            errorResponse(exportResp)
-        }
         scope.launch {
             runCatching { flow.emit(response) }
                 .onFailure { System.err.println("[export] 帧投递失败 id=${exportResp.id}: $it") }
@@ -451,7 +466,8 @@ object ExportProcessManager {
     }
 
     private fun errorResponse(exportResp: ExportHubResponse): Response =
-        Response.newBuilder()
+        Response
+            .newBuilder()
             .setId(exportResp.id)
             .setSuccess(exportResp.success)
             .setError(exportResp.error)
@@ -463,20 +479,23 @@ object ExportProcessManager {
      * 获取指定 exportId 的响应流（供 ExportHandler.collectResponses 调用）
      */
     fun collectResponses(exportId: String): SharedFlow<Response> {
-        val flow = responseFlows.computeIfAbsent(exportId) {
-            MutableSharedFlow<Response>(
-                replay = 0,
-                extraBufferCapacity = 64,
-                onBufferOverflow = BufferOverflow.DROP_OLDEST
-            )
-        }
+        val flow =
+            responseFlows.computeIfAbsent(exportId) {
+                MutableSharedFlow<Response>(
+                    replay = 0,
+                    extraBufferCapacity = 64,
+                    onBufferOverflow = BufferOverflow.DROP_OLDEST,
+                )
+            }
         return flow.asSharedFlow()
     }
-    private fun isPortFree(port: Int): Boolean = try {
-        java.net.ServerSocket(port).use { true }
-    } catch (_: Exception) {
-        false
-    }
+
+    private fun isPortFree(port: Int): Boolean =
+        try {
+            java.net.ServerSocket(port).use { true }
+        } catch (_: Exception) {
+            false
+        }
 
     /**
      * 等子进程的 ExportHub **真的能连上**，然后建立 hub 流。幂等。
@@ -506,41 +525,44 @@ object ExportProcessManager {
             return
         }
         managerLog("[export] hub 端口 $hubPort 已就绪，建立流")
-        val ch = ManagedChannelBuilder.forAddress(EXPORT_HUB_HOST, hubPort)
-            .usePlaintext()
-            .keepAliveTime(30, TimeUnit.SECONDS)
-            .build()
+        val ch =
+            ManagedChannelBuilder
+                .forAddress(EXPORT_HUB_HOST, hubPort)
+                .usePlaintext()
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .build()
         channel = ch
 
         val stub = ExportHubGrpc.newStub(ch)
-        val responseObserver = object : StreamObserver<ExportHubResponse> {
-            override fun onNext(value: ExportHubResponse) {
-                System.err.println("[export] 收到子进程帧 id=${value.id} end=${value.end} success=${value.success} 有数据=${value.hasData()}")
-                publishResponse(value)
-            }
+        val responseObserver =
+            object : StreamObserver<ExportHubResponse> {
+                override fun onNext(value: ExportHubResponse) {
+                    System.err.println("[export] 收到子进程帧 id=${value.id} end=${value.end} success=${value.success} 有数据=${value.hasData()}")
+                    publishResponse(value)
+                }
 
-            override fun onError(t: Throwable) {
-                logger.error("ExportHub bidi stream error", t)
-                managerLog("[export] hub 流出错（commandObserver 置空，isRunning 保持不变）: $t")
-                commandObserver = null
-                // ⚠️ 旧 channel 必须在这里释放 —— 它已经废了（流断了），
-                // 而 [awaitHubReadyOrReportFailure] 重建时会**新建**一个。
-                // 不关的话每次断流都漏一条连接池，导出用得越久漏得越多。
-                runCatching { channel?.shutdownNow() }
-                channel = null
-                // 流断了 ⇒ 这一局里所有在等的导出都不可能再有回帧。
-                // 不补失败帧的话，上游就是无限等待（§9.15 的老毛病）。
-                failPendingExports(Msg.format(StrKey.EXPORT_CHANNEL_BROKEN, t.message ?: t::class.java.simpleName))
-            }
+                override fun onError(t: Throwable) {
+                    logger.error("ExportHub bidi stream error", t)
+                    managerLog("[export] hub 流出错（commandObserver 置空，isRunning 保持不变）: $t")
+                    commandObserver = null
+                    // ⚠️ 旧 channel 必须在这里释放 —— 它已经废了（流断了），
+                    // 而 [awaitHubReadyOrReportFailure] 重建时会**新建**一个。
+                    // 不关的话每次断流都漏一条连接池，导出用得越久漏得越多。
+                    runCatching { channel?.shutdownNow() }
+                    channel = null
+                    // 流断了 ⇒ 这一局里所有在等的导出都不可能再有回帧。
+                    // 不补失败帧的话，上游就是无限等待（§9.15 的老毛病）。
+                    failPendingExports(Msg.format(StrKey.EXPORT_CHANNEL_BROKEN, t.message ?: t::class.java.simpleName))
+                }
 
-            override fun onCompleted() {
-                managerLog("[export] 子进程关闭了 hub 流（commandObserver 置空）")
-                commandObserver = null
-                runCatching { channel?.shutdownNow() }
-                channel = null
-                failPendingExports(Msg.text(StrKey.EXPORT_CHANNEL_CLOSED))
+                override fun onCompleted() {
+                    managerLog("[export] 子进程关闭了 hub 流（commandObserver 置空）")
+                    commandObserver = null
+                    runCatching { channel?.shutdownNow() }
+                    channel = null
+                    failPendingExports(Msg.text(StrKey.EXPORT_CHANNEL_CLOSED))
+                }
             }
-        }
         // 换流的同时换锁：新流不去抢旧流正在持有的锁
         sendLock = Any()
         commandObserver = stub.stream(responseObserver)
@@ -592,20 +614,26 @@ object ExportProcessManager {
      * 原来只拼 `libs/`，于是导出子进程**装不上 JDBC 驱动**。
      * 按目录枚举而不是写死某一个：以后再加一个 jar 目录也不会漏。
      */
-    private fun buildSubprocessClassPath(jarPath: String?, libsDir: File?): String {
+    private fun buildSubprocessClassPath(
+        jarPath: String?,
+        libsDir: File?,
+    ): String {
         val entries = LinkedHashSet<String>()
         jarPath?.takeIf { it.isNotBlank() }?.let { entries += it }
-        System.getProperty("java.class.path", "")
+        System
+            .getProperty("java.class.path", "")
             .split(File.pathSeparator)
             .filter { it.isNotBlank() }
             .forEach { entries += it }
         if (libsDir != null && libsDir.isDirectory) {
-            libsDir.listFiles { f: File -> f.isDirectory }
+            libsDir
+                .listFiles { f: File -> f.isDirectory }
                 ?.flatMap { dir -> dir.listFiles { f: File -> f.extension == "jar" }?.toList().orEmpty() }
                 ?.forEach { entries += it.absolutePath }
         }
         return entries.joinToString(File.pathSeparator)
     }
+
     /**
      * 给所有**还没收口**的导出补一帧失败。
      *
@@ -619,18 +647,20 @@ object ExportProcessManager {
     private fun failPendingExports(reason: String) {
         val pending = responseFlows.keys.filterNot { it in endedExports }
         if (pending.isEmpty()) return
-        logger.warn("Export subprocess gone, failing ${pending.size} pending export(s): $pending"); System.err.println("[export] 子进程消失，给 ${pending.size} 个在等的导出补失败帧")
+        logger.warn("Export subprocess gone, failing ${pending.size} pending export(s): $pending")
+        System.err.println("[export] 子进程消失，给 ${pending.size} 个在等的导出补失败帧")
         pending.forEach { exportId ->
             val flow = responseFlows.remove(exportId) ?: return@forEach
             scope.launch {
                 flow.emit(
-                    Response.newBuilder()
+                    Response
+                        .newBuilder()
                         .setId(exportId)
                         .setSuccess(false)
                         .setStream(true)
                         .setEnd(true)
                         .setError(reason)
-                        .build()
+                        .build(),
                 )
             }
         }
@@ -655,18 +685,24 @@ object ExportProcessManager {
      *
      * @return `true` = 命令已交给流；`false` = 通道未就绪或发送抛异常。
      */
-    fun startExport(id: String, connection: ConnectionConfig, payload: Map<String, Value>): Boolean {
+    fun startExport(
+        id: String,
+        connection: ConnectionConfig,
+        payload: Map<String, Value>,
+    ): Boolean {
         val observer = commandObserver
         if (observer == null) {
             managerLog("[export] 通道未就绪，命令没发出去 id=$id（isRunning=$isRunning observer=${commandObserver != null}）")
             return false
         }
-        val cmd = ExportCommand.newBuilder()
-            .setKind(Kind.START_EXPORT)
-            .setId(id)
-            .setConnection(connection)
-            .putAllPayload(payload)
-            .build()
+        val cmd =
+            ExportCommand
+                .newBuilder()
+                .setKind(Kind.START_EXPORT)
+                .setId(id)
+                .setConnection(connection)
+                .putAllPayload(payload)
+                .build()
         val ok = sendCommand(observer, cmd)
         if (ok) {
             managerLog("[export] 命令已下发 id=$id")
@@ -685,10 +721,12 @@ object ExportProcessManager {
             logger.warn("Cannot stop export: stream not open")
             return
         }
-        val cmd = ExportCommand.newBuilder()
-            .setKind(Kind.STOP_EXPORT)
-            .setExportId(exportId)
-            .build()
+        val cmd =
+            ExportCommand
+                .newBuilder()
+                .setKind(Kind.STOP_EXPORT)
+                .setExportId(exportId)
+                .build()
         if (sendCommand(observer, cmd)) {
             logger.info("Sent STOP_EXPORT command: $exportId")
         }
@@ -709,22 +747,29 @@ object ExportProcessManager {
                 runCatching { synchronized(sendLock) { obs.onCompleted() } }
             }
             commandObserver = null
-        } catch (_: Exception) { /* ignore */ }
+        } catch (_: Exception) {
+            // ignore
+        }
 
-        try { channel?.shutdownNow()?.awaitTermination(5, TimeUnit.SECONDS) } catch (_: Exception) {}
+        try {
+            channel?.shutdownNow()?.awaitTermination(5, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+        }
         channel = null
 
-        try { process?.destroyForcibly() } catch (_: Exception) {}
+        try {
+            process?.destroyForcibly()
+        } catch (_: Exception) {
+        }
         process = null
 
         responseFlows.clear()
         logger.info("Export subprocess stopped")
     }
 
-    private fun formatMem(bytes: Long): String {
-        return when {
+    private fun formatMem(bytes: Long): String =
+        when {
             bytes >= 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024 * 1024)}g"
             else -> "${bytes / (1024 * 1024)}m"
         }
-    }
 }

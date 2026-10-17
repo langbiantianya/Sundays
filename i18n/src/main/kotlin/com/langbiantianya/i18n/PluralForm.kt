@@ -66,20 +66,29 @@ enum class PluralForm {
  *
  * @param count 数量。**只对正整数有意义**；负数与 0 一律落 OTHER（见函数体）。
  */
-fun AppLanguage.pluralForm(count: Int): PluralForm = when (this) {
-    // 中文与日语没有词形变化 —— 全部 OTHER。这不是「偷懒」，是这两门语言的正确规则。
-    AppLanguage.ZH_HANS, AppLanguage.ZH_HANT, AppLanguage.JA -> PluralForm.OTHER
+fun AppLanguage.pluralForm(count: Int): PluralForm =
+    when (this) {
+        // 中文与日语没有词形变化 —— 全部 OTHER。这不是「偷懒」，是这两门语言的正确规则。
+        AppLanguage.ZH_HANS, AppLanguage.ZH_HANT, AppLanguage.JA -> {
+            PluralForm.OTHER
+        }
 
-    // 英语与德语：只有「恰好 1」是单数。注意 `count == 1` 而非 `count % 10 == 1` ——
-    // 11 行在德语里是复数（11 Zeilen），写成后者会得到 `11 Zeile`。
-    AppLanguage.EN, AppLanguage.DE ->
-        if (count == 1) PluralForm.ONE else PluralForm.OTHER
+        // 英语与德语：只有「恰好 1」是单数。注意 `count == 1` 而非 `count % 10 == 1` ——
+        // 11 行在德语里是复数（11 Zeilen），写成后者会得到 `11 Zeile`。
+        AppLanguage.EN, AppLanguage.DE -> {
+            if (count == 1) PluralForm.ONE else PluralForm.OTHER
+        }
 
-    AppLanguage.RU -> when {
-        // 负数不进 one/few/many：n % 10 在 Kotlin 里可能为负，规则表是按自然数定义的。
-        count <= 0 -> PluralForm.OTHER
-        count % 10 == 1 && count % 100 != 11 -> PluralForm.ONE
-        count % 10 in 2..4 && count % 100 !in 12..14 -> PluralForm.FEW
-        else -> PluralForm.MANY
+        AppLanguage.RU -> {
+            when {
+                // 负数不进 one/few/many：n % 10 在 Kotlin 里可能为负，规则表是按自然数定义的。
+                count <= 0 -> PluralForm.OTHER
+
+                count % 10 == 1 && count % 100 != 11 -> PluralForm.ONE
+
+                count % 10 in 2..4 && count % 100 !in 12..14 -> PluralForm.FEW
+
+                else -> PluralForm.MANY
+            }
+        }
     }
-}

@@ -32,7 +32,6 @@ class SyntaxHighlighter(
     private val colors: Map<TokenType, Color>,
     private val boldKeywords: Boolean = true,
 ) {
-
     /**
      * 把源码 + token 序列渲染为带样式的 [AnnotatedString]。
      *
@@ -40,7 +39,10 @@ class SyntaxHighlighter(
      * - 使用 [AnnotatedString.Builder] 一次性拼接，避免 [buildAnnotatedString] 反复构建
      * - 单次扫描处理所有 token，相邻 token 同类型时合并 `withStyle` 调用次数
      */
-    fun highlight(source: String, tokens: List<CodeToken>): AnnotatedString {
+    fun highlight(
+        source: String,
+        tokens: List<CodeToken>,
+    ): AnnotatedString {
         val builder = AnnotatedString.Builder(source.length)
         for (token in tokens) {
             val style = styleFor(token.type)
@@ -71,32 +73,34 @@ class SyntaxHighlighter(
 
     companion object {
         /** 默认浅色主题 — 用作 fallback，调用方通常会传入自定义主题。 */
-        val DefaultLightColors: Map<TokenType, Color> = mapOf(
-            TokenType.KEYWORD to Color(0xFF0000FF),       // blue
-            TokenType.BUILTIN to Color(0xFFAF00DB),       // purple
-            TokenType.TYPE to Color(0xFF2B91AF),          // teal
-            TokenType.STRING to Color(0xFFA31515),        // dark red
-            TokenType.NUMBER to Color(0xFF098658),        // dark green
-            TokenType.COMMENT to Color(0xFF008000),      // green
-            TokenType.OPERATOR to Color(0xFF000000),     // black
-            TokenType.PUNCTUATION to Color(0xFF666666),  // gray
-            TokenType.IDENTIFIER to Color(0xFF000000),    // black
-            TokenType.ERROR to Color(0xFFFF0000),         // red
-            // WHITESPACE 无样式
-        )
+        val DefaultLightColors: Map<TokenType, Color> =
+            mapOf(
+                TokenType.KEYWORD to Color(0xFF0000FF), // blue
+                TokenType.BUILTIN to Color(0xFFAF00DB), // purple
+                TokenType.TYPE to Color(0xFF2B91AF), // teal
+                TokenType.STRING to Color(0xFFA31515), // dark red
+                TokenType.NUMBER to Color(0xFF098658), // dark green
+                TokenType.COMMENT to Color(0xFF008000), // green
+                TokenType.OPERATOR to Color(0xFF000000), // black
+                TokenType.PUNCTUATION to Color(0xFF666666), // gray
+                TokenType.IDENTIFIER to Color(0xFF000000), // black
+                TokenType.ERROR to Color(0xFFFF0000), // red
+                // WHITESPACE 无样式
+            )
 
         /** 默认深色主题 — Intellij Darcula 风格。 */
-        val DefaultDarkColors: Map<TokenType, Color> = mapOf(
-            TokenType.KEYWORD to Color(0xFFCC7832),       // orange
-            TokenType.BUILTIN to Color(0xFF8888C6),       // light purple
-            TokenType.TYPE to Color(0xFF4FC1FF),          // sky blue
-            TokenType.STRING to Color(0xFF6A8759),        // light green
-            TokenType.NUMBER to Color(0xFF6897BB),        // blue
-            TokenType.COMMENT to Color(0xFF808080),       // gray
-            TokenType.OPERATOR to Color(0xFFB9B9B9),      // light gray
-            TokenType.PUNCTUATION to Color(0xFFB9B9B9),   // light gray
-            TokenType.IDENTIFIER to Color(0xFFA9B7C6),    // light gray
-            TokenType.ERROR to Color(0xFFFF6B68),         // red
-        )
+        val DefaultDarkColors: Map<TokenType, Color> =
+            mapOf(
+                TokenType.KEYWORD to Color(0xFFCC7832), // orange
+                TokenType.BUILTIN to Color(0xFF8888C6), // light purple
+                TokenType.TYPE to Color(0xFF4FC1FF), // sky blue
+                TokenType.STRING to Color(0xFF6A8759), // light green
+                TokenType.NUMBER to Color(0xFF6897BB), // blue
+                TokenType.COMMENT to Color(0xFF808080), // gray
+                TokenType.OPERATOR to Color(0xFFB9B9B9), // light gray
+                TokenType.PUNCTUATION to Color(0xFFB9B9B9), // light gray
+                TokenType.IDENTIFIER to Color(0xFFA9B7C6), // light gray
+                TokenType.ERROR to Color(0xFFFF6B68), // red
+            )
     }
 }

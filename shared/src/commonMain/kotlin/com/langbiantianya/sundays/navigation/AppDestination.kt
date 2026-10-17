@@ -18,7 +18,9 @@ import com.langbiantianya.i18n.StrKey
  *
  * [labelKey] 是文案键而非文案本身 —— 导航条的 chip 文字同样要跟着界面语言走。
  */
-enum class AppDestination(val labelKey: StrKey) {
+enum class AppDestination(
+    val labelKey: StrKey,
+) {
     CONNECTIONS(StrKey.NAV_CONNECTIONS),
     DATABASE(StrKey.NAV_DATABASE),
     SETTINGS(StrKey.SETTINGS_TITLE),

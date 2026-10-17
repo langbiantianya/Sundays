@@ -33,7 +33,6 @@ import kotlin.test.fail
  * | 值非空白 | 复制粘贴漏了内容 → 界面上一个空按钮 |
  */
 class StringsIntegrityTest {
-
     private val tables = StringsRegistry.all()
 
     private val zhHans = StringsRegistry.of(AppLanguage.ZH_HANS)
@@ -50,7 +49,7 @@ class StringsIntegrityTest {
             if (missing.isNotEmpty()) {
                 fail(
                     "${table.language.tag} 缺 ${missing.size} 条：\n" +
-                        missing.joinToString("\n") { "  $it" }
+                        missing.joinToString("\n") { "  $it" },
                 )
             }
         }
@@ -64,7 +63,7 @@ class StringsIntegrityTest {
             if (missing.isNotEmpty()) {
                 fail(
                     "${table.language.tag} 缺 ${missing.size} 条复数文案：\n" +
-                        missing.joinToString("\n") { "  $it" }
+                        missing.joinToString("\n") { "  $it" },
                 )
             }
         }
@@ -202,11 +201,12 @@ class StringsIntegrityTest {
     fun `繁体与日语里没有简体字形`() {
         val offenders = mutableListOf<String>()
         tables.forEach { table ->
-            val blacklist = when (table.language) {
-                AppLanguage.ZH_HANT -> SIMPLIFIED_ONLY_ZH_HANT
-                AppLanguage.JA -> SIMPLIFIED_ONLY_JA
-                else -> return@forEach
-            }
+            val blacklist =
+                when (table.language) {
+                    AppLanguage.ZH_HANT -> SIMPLIFIED_ONLY_ZH_HANT
+                    AppLanguage.JA -> SIMPLIFIED_ONLY_JA
+                    else -> return@forEach
+                }
             StrKey.entries.forEach { key ->
                 val hit = table[key].filter { it in blacklist }
                 if (hit.isNotEmpty()) offenders += "${table.language.tag}/$key 含简体字「$hit」= ${table[key]}"
@@ -221,11 +221,12 @@ class StringsIntegrityTest {
     fun `繁体与日语的复数文案里没有简体字形`() {
         val offenders = mutableListOf<String>()
         tables.forEach { table ->
-            val blacklist = when (table.language) {
-                AppLanguage.ZH_HANT -> SIMPLIFIED_ONLY_ZH_HANT
-                AppLanguage.JA -> SIMPLIFIED_ONLY_JA
-                else -> return@forEach
-            }
+            val blacklist =
+                when (table.language) {
+                    AppLanguage.ZH_HANT -> SIMPLIFIED_ONLY_ZH_HANT
+                    AppLanguage.JA -> SIMPLIFIED_ONLY_JA
+                    else -> return@forEach
+                }
             PluralStrKey.entries.forEach { key ->
                 val text = table.plural(key, 2)
                 val hit = text.filter { it in blacklist }
@@ -301,11 +302,12 @@ class StringsIntegrityTest {
     fun `复数类别按各语言规则齐备`() {
         val problems = mutableListOf<String>()
         tables.forEach { table ->
-            val required = when (table.language) {
-                AppLanguage.RU -> setOf(PluralForm.ONE, PluralForm.FEW, PluralForm.MANY)
-                AppLanguage.EN, AppLanguage.DE -> setOf(PluralForm.ONE, PluralForm.OTHER)
-                AppLanguage.ZH_HANS, AppLanguage.ZH_HANT, AppLanguage.JA -> setOf(PluralForm.OTHER)
-            }
+            val required =
+                when (table.language) {
+                    AppLanguage.RU -> setOf(PluralForm.ONE, PluralForm.FEW, PluralForm.MANY)
+                    AppLanguage.EN, AppLanguage.DE -> setOf(PluralForm.ONE, PluralForm.OTHER)
+                    AppLanguage.ZH_HANS, AppLanguage.ZH_HANT, AppLanguage.JA -> setOf(PluralForm.OTHER)
+                }
             PluralStrKey.entries.forEach { key ->
                 val declared = table.declaredForms(key)
                 val missing = required - declared
@@ -320,12 +322,13 @@ class StringsIntegrityTest {
     }
 
     /** 取一个会命中该类别的样本数量，用于检查该档文案非空白。 */
-    private fun sampleCountFor(form: PluralForm): Int = when (form) {
-        PluralForm.ONE -> 1
-        PluralForm.FEW -> 2
-        PluralForm.MANY -> 5
-        PluralForm.OTHER -> 3
-    }
+    private fun sampleCountFor(form: PluralForm): Int =
+        when (form) {
+            PluralForm.ONE -> 1
+            PluralForm.FEW -> 2
+            PluralForm.MANY -> 5
+            PluralForm.OTHER -> 3
+        }
 
     companion object {
         /** 拉丁 / 西里尔字母的语言 —— 「含汉字 = 未翻译」在这几种语言上成立。 */
@@ -344,23 +347,24 @@ class StringsIntegrityTest {
          * 一条会误报的断言，跑几次之后就不会再有人看它的输出了。
          */
         private val SIMPLIFIED_ONLY_ZH_HANT: Set<Char> =
-            ("连设语读写说课谁请调议论讲许认识记录终结经济贸银钱铁门间闻问开关闭进远运达过还边这" +
-                "样时东车马鸟鱼风飞长电视听词译证变换图团园圆爱节艺苏药虑处备复头夹夺奖妇孙宁宝实审对寻" +
-                "导层属岁币师带帮广庆库应废异张归当彻怀态战户执扩扫扬扰抢护报担拟挂换据摄摆摇敌数斋斩" +
-                "昼显晒暂术朴机杀杂权条来杨杰极构柜标栋栏树桥检楼欢欧残汇汉汤沟泪济浓测涂涛润渐温湾满滨" +
-                "灭灯灵灾炉炼烦烧热焕牵犹独狱猎猪猫献环现玛画疗疯监盘盖盗睁矫矿码砖础碍礼祸离秃种积称稳穷" +
-                "窃窍窑窜窝竖竞笔笼筑筛签简篮粮紧红纤约级纪纬纯纱纲纳纵纷纸纹纺线练组细织绍绑绒结绕绘给络" +
-                "绝统继绩绪续绳维绵综绿缓编缘缚缝缩网罗罚罢职联肃肠股肤肿胁胆胜胶脉脏脑脚脱腾舰舱艰艳荐莲莹" +
-                "菲蒙蓝虏虫蚀蚁蜡蝇蝉补观规觅览觉触誉订认讨让训访评试诗诚询误诸谅谋谐谓谢谨谱贝负贡财责贤" +
-                "败货质贩贪贫购贮贯贱贴贵贷费贺贼贿赁资赋赌赏赔赖赛赞赠赵赶趋跃践踪轨转轮软轻载较辆辈迟适选逊" +
-                "递逻遗邓郑邻酝酱释里针钉钓钙钝钟钢钥钦钩铜铝铸铺链销锁锅锋错锡锣键镇闪闲闷闹阀阁阅队阳阴阵阶" +
-                "阻附际陆陈险隐难雏雾静韦韩页顶项顺须顽顾顿颁颂预领颇颈频颗题颜额飘饭饮饱饲饶饼馆驾验骂骄骗鲁鲜" +
-                "鸡鸣鸦鸭鸿鹅鹰麦黄齐齿龙" +
-                // 体 / 类 / 杠 是补录的：都是简体独有（繁体作 體 / 類 / 槓），置信度高，
-                // 且日语把 体 用在「本体」里合法 —— 已被 VALID_IN_JAPANESE 豁免，
-                // 所以加进繁体表不会波及日语检查。
-                "体类杠"
-                ).toSet()
+            (
+                "连设语读写说课谁请调议论讲许认识记录终结经济贸银钱铁门间闻问开关闭进远运达过还边这" +
+                    "样时东车马鸟鱼风飞长电视听词译证变换图团园圆爱节艺苏药虑处备复头夹夺奖妇孙宁宝实审对寻" +
+                    "导层属岁币师带帮广庆库应废异张归当彻怀态战户执扩扫扬扰抢护报担拟挂换据摄摆摇敌数斋斩" +
+                    "昼显晒暂术朴机杀杂权条来杨杰极构柜标栋栏树桥检楼欢欧残汇汉汤沟泪济浓测涂涛润渐温湾满滨" +
+                    "灭灯灵灾炉炼烦烧热焕牵犹独狱猎猪猫献环现玛画疗疯监盘盖盗睁矫矿码砖础碍礼祸离秃种积称稳穷" +
+                    "窃窍窑窜窝竖竞笔笼筑筛签简篮粮紧红纤约级纪纬纯纱纲纳纵纷纸纹纺线练组细织绍绑绒结绕绘给络" +
+                    "绝统继绩绪续绳维绵综绿缓编缘缚缝缩网罗罚罢职联肃肠股肤肿胁胆胜胶脉脏脑脚脱腾舰舱艰艳荐莲莹" +
+                    "菲蒙蓝虏虫蚀蚁蜡蝇蝉补观规觅览觉触誉订认讨让训访评试诗诚询误诸谅谋谐谓谢谨谱贝负贡财责贤" +
+                    "败货质贩贪贫购贮贯贱贴贵贷费贺贼贿赁资赋赌赏赔赖赛赞赠赵赶趋跃践踪轨转轮软轻载较辆辈迟适选逊" +
+                    "递逻遗邓郑邻酝酱释里针钉钓钙钝钟钢钥钦钩铜铝铸铺链销锁锅锋错锡锣键镇闪闲闷闹阀阁阅队阳阴阵阶" +
+                    "阻附际陆陈险隐难雏雾静韦韩页顶项顺须顽顾顿颁颂预领颇颈频颗题颜额飘饭饮饱饲饶饼馆驾验骂骄骗鲁鲜" +
+                    "鸡鸣鸦鸭鸿鹅鹰麦黄齐齿龙" +
+                    // 体 / 类 / 杠 是补录的：都是简体独有（繁体作 體 / 類 / 槓），置信度高，
+                    // 且日语把 体 用在「本体」里合法 —— 已被 VALID_IN_JAPANESE 豁免，
+                    // 所以加进繁体表不会波及日语检查。
+                    "体类杠"
+            ).toSet()
 
         /**
          * 现代日文里**本来就长这样**的字 —— 日语检查必须放过。
@@ -384,9 +388,10 @@ class StringsIntegrityTest {
          * 它会让人直接忽略整条规则。
          */
         private val VALID_IN_JAPANESE: Set<Char> =
-            ("表条数理画残温湾灯炉独猫碍礼称窃胆脚脱蝉誉阻附静麦黄国学実気図対声売点会个方干争体从众免兔" +
-                "当里併")
-                .toSet()
+            (
+                "表条数理画残温湾灯炉独猫碍礼称窃胆脚脱蝉誉阻附静麦黄国学実気図対声売点会个方干争体从众免兔" +
+                    "当里併"
+            ).toSet()
 
         /** 日语用简体字表 = 全量简体字表 − 日语合法字。 */
         private val SIMPLIFIED_ONLY_JA: Set<Char> =
@@ -394,7 +399,6 @@ class StringsIntegrityTest {
 
         private val PLACEHOLDER = Regex("""\{(\d+)}""")
 
-        private fun String.placeholders(): Set<Int> =
-            PLACEHOLDER.findAll(this).map { it.groupValues[1].toInt() }.toSet()
+        private fun String.placeholders(): Set<Int> = PLACEHOLDER.findAll(this).map { it.groupValues[1].toInt() }.toSet()
     }
 }

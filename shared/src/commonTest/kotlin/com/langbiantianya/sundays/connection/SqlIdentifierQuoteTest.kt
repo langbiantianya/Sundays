@@ -24,7 +24,6 @@ import kotlin.test.assertEquals
  * 下面的期望值来源是各方言 `quoteIdentifier` 的当前实现（逐个读过，不是猜的）。
  */
 class SqlIdentifierQuoteTest {
-
     // ============ quote：五种方言的引号风格 ============
 
     @Test

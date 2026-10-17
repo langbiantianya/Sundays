@@ -21,16 +21,14 @@ import kotlin.test.assertTrue
 
 /** 只占位：本组用例不碰引擎，只需要一个构造得出来的 [EngineClient]。 */
 private class StubEngine : EngineClient {
-    override fun handle(request: com.langbiantianya.grpc.Request) =
-        kotlinx.coroutines.flow.flow<com.langbiantianya.grpc.Response> {}
+    override fun handle(request: com.langbiantianya.grpc.Request) = kotlinx.coroutines.flow.flow<com.langbiantianya.grpc.Response> {}
 
     override suspend fun invoke(
         connection: com.langbiantianya.grpc.ConnectionConfig,
         configure: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit,
     ): com.langbiantianya.grpc.Response = error("不调用")
 
-    override suspend fun testConnection(config: com.langbiantianya.grpc.ConnectionConfig) =
-        error("不调用")
+    override suspend fun testConnection(config: com.langbiantianya.grpc.ConnectionConfig) = error("不调用")
 
     override suspend fun disconnect(config: com.langbiantianya.grpc.ConnectionConfig) = false
 
@@ -50,7 +48,6 @@ private class StubEngine : EngineClient {
  * 用户是关心第二次的。所以配了 `forgetSourcesNotIn` 让来源能「重新变得可报」。
  */
 class NotificationCenterTest {
-
     @Test
     fun `push 按时间倒序，最新的在最前`() {
         val c = NotificationCenter()
@@ -67,7 +64,8 @@ class NotificationCenterTest {
         repeat(5) { c.pushOnce("conn:A", AppNotification.Severity.ERROR, "连接失败", "密码错") }
 
         assertEquals(
-            1, c.notifications.size,
+            1,
+            c.notifications.size,
             "同一个持续存在的错误只该报一次 —— 连接失败出现在每一次重组里",
         )
         assertEquals(1, c.unreadCount)
@@ -97,7 +95,8 @@ class NotificationCenterTest {
         // 密码又错了 → 同一个来源应当再报一次
         c.pushOnce(src, AppNotification.Severity.ERROR, "连接失败 · A", "密码错")
         assertEquals(
-            2, c.notifications.size,
+            2,
+            c.notifications.size,
             "「失败 → 恢复 → 又失败」必须报第二次，否则用户看不到复发",
         )
     }
@@ -179,7 +178,6 @@ class NotificationCenterTest {
  * [collectErrorSources] 这个纯函数来验。
  */
 class ErrorReconciliationTest {
-
     @Test
     fun `同一批错误反复对账只推一条`() {
         val c = NotificationCenter()
@@ -193,7 +191,8 @@ class ErrorReconciliationTest {
         }
 
         assertEquals(
-            1, c.notifications.size,
+            1,
+            c.notifications.size,
             "同一个持续存在的错误只该有一条通知 —— 连点三次不该变成 3 条",
         )
     }
@@ -201,6 +200,7 @@ class ErrorReconciliationTest {
     @Test
     fun `错误消失后再现会重新推送`() {
         val c = NotificationCenter()
+
         fun reconcile(sheets: List<SheetDescriptor>) {
             val sources = collectErrorSources(sheets)
             sources.forEach { s ->
@@ -223,6 +223,7 @@ class ErrorReconciliationTest {
     @Test
     fun `错误文本变化视为新的一条`() {
         val c = NotificationCenter()
+
         fun reconcile(sheets: List<SheetDescriptor>) {
             val sources = collectErrorSources(sheets)
             sources.forEach { s ->
@@ -235,7 +236,8 @@ class ErrorReconciliationTest {
         reconcile(listOf(connectionFailed("Table 'b' doesn't exist")))
 
         assertEquals(
-            2, c.notifications.size,
+            2,
+            c.notifications.size,
             "「表 a 不存在」变成「表 b 不存在」是**新的一件事**，必须报",
         )
     }
@@ -258,9 +260,12 @@ class ErrorReconciliationTest {
         val browser = DatabaseBrowserState(StubEngine(), CoroutineScope(Dispatchers.Default))
         browser.configure()
         return SheetDescriptor(
-            connection = ConnectionConfig(
-                id = "c1", name = "探针", dialect = DialectType.MYSQL,
-            ),
+            connection =
+                ConnectionConfig(
+                    id = "c1",
+                    name = "探针",
+                    dialect = DialectType.MYSQL,
+                ),
             browser = browser,
             status = status,
         )
@@ -273,12 +278,12 @@ class ErrorReconciliationTest {
      * 于是断言「1 条」拿到 2 条，红的是测试造错了状态，不是产品行为。
      * 这一点本身就是值得记的：屏级对账收的是**所有**来源，测试里随手多设一个字段就多一条。
      */
-    private fun connectionFailed(message: String): SheetDescriptor = sheet(
-        status = ConnectionStatus(state = ConnectionState.FAILED, message = message),
-    )
+    private fun connectionFailed(message: String): SheetDescriptor =
+        sheet(
+            status = ConnectionStatus(state = ConnectionState.FAILED, message = message),
+        )
 
-    private fun sqlFailed(message: String): SheetDescriptor =
-        sheet { sqlSheets.first().error = message }
+    private fun sqlFailed(message: String): SheetDescriptor = sheet { sqlSheets.first().error = message }
 
     private fun okSheet(): SheetDescriptor = sheet()
 }
