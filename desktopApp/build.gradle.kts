@@ -93,8 +93,40 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.langbiantianya.sundays"
+
+            // ------------------------------------------------------------------
+            // 程序名：Windows 用短名 `sundays`。
+            //
+            // 之前这里是 com.langbiantianya.sundays（跟着包名走），用户看到的是
+            // exe、开始菜单快捷方式、控制面板里「程序和功能」的一整串域名式
+            // 名字 —— 那是从代码包名直接漏到用户界面的，不是给人看的名字。
+            //
+            // ⚠️ packageName 是 nativeDistributions 级的，Dmg / Msi / Deb 三种
+            // 格式共用，所以**光改这一行会把 macOS 与 Linux 的产物名一起改掉**。
+            // 下面 macOS / linux 各自单独覆盖回原名，把影响面收在 Windows 内。
+            //
+            // 改包名**不影响启动**：
+            //   · mainClass 在上面显式写死了（com.langbiantianya.sundays.MainKt），
+            //     不由 packageName 推导 —— 这一点是 Compose 历史上最容易踩的坑，
+            //     这里先确认过才敢改；
+            //   · 应用自己的包名（源码里的 com.langbiantianya.*）是另一回事，
+            //     与打包元数据无关，不受影响。
+            // ------------------------------------------------------------------
+            packageName = "sundays"
             packageVersion = "1.0.0"
+
+            // macOS 保持原包名，否则 build-macos.yml 里硬编码的
+            // `com.langbiantianya.sundays.app` 与 `Contents/MacOS/<同名>`
+            // 两条路径会同时失配（那条流水线是 CI 里唯一会验证产物架构的）。
+            macOS {
+                packageName = "com.langbiantianya.sundays"
+            }
+
+            // Linux 同理：Flatpak 流水线的 launcher 断言写的是
+            // `bin/com.langbiantianya.sundays`，manifest 的 app id 也跟着这个名字。
+            linux {
+                packageName = "com.langbiantianya.sundays"
+            }
 
             // ---------------------------------------------------------------
             // jlink 运行时的模块集。**少一个模块，打出来的包就起不来。**
@@ -163,6 +195,23 @@ compose.desktop {
                 // 不给 menuGroup 的话，开始菜单文件夹名会退回产品名
                 // com.langbiantianya.sundays。
                 menuGroup = "Sundays"
+
+                // ------------------------------------------------------------------
+                // UpgradeCode 钉死在改名前的那个值上。
+                //
+                // jpackage 默认按 packageName 推导 UpgradeCode，所以改了包名它就变
+                // —— 后果是**新包不再覆盖旧安装，而是在旁边并排装一份**：控制面板
+                // 里出现两个条目，旧的 exe 还在，用户得自己去「应用和功能」卸载。
+                // 本仓库已经吃过一次这个亏（com.kxxnzstdsw → com.langbiantianya
+                // 那次改名就并排装了），这次不想再来一遍。
+                //
+                // 这个值是从改名前那份 MSI 的 Property 表里读出来的，不是猜的：
+                //   {1427B270-5AA8-3E6C-A0E1-02ED63A7160C}
+                //
+                // 钉住的额外好处：以后再改包名不会再动到升级链路，
+                // 新包会正常覆盖安装、替换 exe、保留用户数据。
+                // ------------------------------------------------------------------
+                upgradeUuid = "1427B270-5AA8-3E6C-A0E1-02ED63A7160C"
 
                 // ---------------------------------------------------------------
                 // 图标：不给就用插件自带的 JetBrains 默认图标。

@@ -106,8 +106,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       # packageMsi          → 安装包（WiX 由 Compose 插件自己下载解压，runner 无需预装）
-      # createDistributable → 便携版目录，内含 com.langbiantianya.sundays.exe
+      # createDistributable → 便携版目录，内含 sundays.exe
       #
+      # 这一条流水线**对程序名无感知**，所以 packageName 从 com.langbiantianya.sundays
+      # 改成 sundays 之后它一个字都不用动：
+      #   · 架构自检是 `Get-ChildItem …/app -Directory` 遍历出来的，不认目录名；
+      #   · 上传产物用的是 `msi/*.msi` 与 `app/` 通配；
+      #   · Release job 里的名字来自 workflow 自己的 artifact 名（sundays-windows-<arch>-msi），
+      #     与 packageName 无关。
+      # 真要在意的话，下次改 packageName 时留意这三处仍是通配即可。
       # ARM 腿上这两步**没有任何额外配置**。整个链路是靠「跑在哪台机器上」自动切换的，
       # 仓库的构建脚本一个字都不用改：
       #   · Compose 插件读 System.getProperty("os.arch")，aarch64 → 目标 windows-arm64，
