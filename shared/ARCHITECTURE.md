@@ -25,13 +25,15 @@
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |
 | **SettingsScreen / SettingsStorage** | 设置页（左分类 / 右内容）与设置持久化 | [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) |
 | **OnboardingScreen** | 首次启动外观引导（配色 / 明暗 / 密度 / 语言） | [`onboarding/OnboardingScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreen.kt) |
-| **通用 UI 工具** | `ContextMenuState<T>` + `Modifier.onRightClick` + `DragHandle` + `FocusRing` + 复古控件包装 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
+| **TableStructureDialog** | 表结构编辑弹窗（字段 / 主键 / 外键，类型下拉跟着方言走） | [`table/TableStructureDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/TableStructureDialog.kt) |
+| **SQL 文本工具** | 危险写操作识别与只读判定、WHERE 字面量转义与 CAST 类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
+| **通用 UI 工具** | `ContextMenuState<T>` + `Modifier.onRightClick` + `DragHandle` + `FocusRing` + `EmptyHint` + `ColumnBadge` + `TabRenameDialog` + 复古控件包装 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 
 ### 1.2 KMP Source Set 布局
 
 ```
 shared/
-├── commonMain/        所有业务 UI 组件（平台无关）：editor/ table/ connection/ navigation/ onboarding/ settings/ ui/
+├── commonMain/        所有业务 UI 组件（平台无关）：editor/ table/ connection/ navigation/ onboarding/ settings/ sql/ ui/
 ├── commonTest/        平台无关测试（tokenizer / 模型 / 集成 / 布局契约）
 ├── jvmMain/           当前为空 —— 无平台特定实现（`commonMain` 全量可用）
 └── jvmTest/           JVM 特定测试（文件持久化与 POSIX 权限）
@@ -49,10 +51,18 @@ shared/
 |---|---|---|
 | `AppDestination` / `SundaysTheme` / `ThemePalette` | 否（纯 Compose） | ✅ `shared/commonMain`（v2.14 上移） |
 | `ConnectionManagerScreen`（回调注入） | 否（引擎调用由 `onTestConnection` 等回调注入） | ✅ `shared/commonMain` |
+| `TableStructure*`（草稿 / 差分 / 校验 / 编辑弹窗） | 否（只依赖 Compose 与 `DialectType` / `ColumnTypeCatalog`） | ✅ `shared/commonMain` |
+| `DangerousSql` / `SqlLiterals` / 危险语句确认框 | 否（纯字符串扫描与转义） | ✅ `shared/commonMain` |
 | `ConnectionSession` | 是（`IdbEngine.testConnection` / `disconnect`） | ❌ `desktopApp` |
 | `DatabaseBrowserState` / `DatabaseBrowserScreen` | 是（`IdbEngine.invoke` + proto 构造器） | ❌ `desktopApp` |
 
 `:engine` 是纯 JVM 模块，因此任何引用 `IdbEngine` 或 proto 类型的代码**都无法进入 `commonMain`** —— 状态机与引擎接线必须留在 `desktopApp`。
+
+> ⚠️ 这条边界**只在代码里引用了 proto 时才生效**，写一段 KDoc 提到 `com.langbiantianya.grpc.ColumnDef` 不会挡住搬迁。
+> 判据是「代码引用」，不是「文本出现」—— 搬完顺手把 KDoc 里的全名改成短名，否则会留下一个在 commonMain 里永远解析不了的悬空链接。
+
+> ⚠️ `internal` 在 Kotlin 里是**模块内**可见。代码从 `desktopApp` 搬到 `shared` 之后，原来只给同模块用的声明会突然编译不过；
+> 反过来，不加区分地全改成 `public` 又会把测试 tag 契约变成一锅谁都能看见的公共面。逐个按「消费方真的引用到了吗」放开。
 
 ---
 

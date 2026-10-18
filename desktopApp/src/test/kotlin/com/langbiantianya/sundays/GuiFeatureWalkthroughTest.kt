@@ -30,6 +30,7 @@ import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
+import com.langbiantianya.sundays.sql.DANGEROUS_CONFIRM_BTN_TAG
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

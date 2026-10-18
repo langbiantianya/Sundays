@@ -6,10 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
-
-import com.langbiantianya.sundays.table.ColumnTypeCatalog
-import com.langbiantianya.sundays.table.ColumnTypeSpec
+package com.langbiantianya.sundays.table
 
 /**
  * 「读取表结构」的结果。

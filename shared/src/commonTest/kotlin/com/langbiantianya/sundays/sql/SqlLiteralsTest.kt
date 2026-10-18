@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.sql
 
 import com.langbiantianya.sundays.connection.DialectType
 import org.junit.Test

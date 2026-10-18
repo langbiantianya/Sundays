@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.sql
 
 import org.junit.Test
 import kotlin.test.assertEquals

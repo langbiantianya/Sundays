@@ -30,7 +30,7 @@
 | 目标 | 屏幕 | 状态机持有者 |
 |---|---|---|
 | `CONNECTIONS`（默认） | `ConnectionManagerScreen`（`:shared` 提供纯 UI） | [`ConnectionSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt) —— 连接列表 / 向导状态 / 引擎会话状态 / 多 sheet |
-| `DATABASE` | `DatabaseBrowserScreen`（本模块） | [`DatabaseBrowserScreen.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserScreen.kt) 里的 `DatabaseBrowserState` —— 浏览 / SQL 工作台 / 造数工作台三套状态机 |
+| `DATABASE` | `DatabaseBrowserScreen`（本模块，按功能域拆成 10 个文件，见 [`ARCHITECTURE.md` §2](./ARCHITECTURE.md)） | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) —— 浏览 / SQL 工作台 / 造数工作台三套状态机 |
 
 **状态机挂在导航之上**（在 `MainScreen` 里 `remember`，不在屏幕内部），因此切目标不丢连接、也不丢已打开的表预览标签页；
 通知中心与长生命周期 `CoroutineScope` 同样在屏级。各状态归谁、切连接时什么时候复位，见

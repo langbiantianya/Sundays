@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.table
 
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey

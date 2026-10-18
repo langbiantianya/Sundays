@@ -29,6 +29,7 @@ import com.langbiantianya.grpc.tableRequest
 import com.langbiantianya.grpc.viewListRequest
 import com.langbiantianya.grpc.viewRequest
 import com.langbiantianya.sundays.connection.ConnectionConfig
+import com.langbiantianya.sundays.sql.SqlLiterals
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assume.assumeTrue

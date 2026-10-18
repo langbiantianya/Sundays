@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.sql
 
 /**
  * 拼 `WHERE` 子句时用到的字面量转义。
@@ -20,7 +20,7 @@ package com.langbiantianya.sundays
  * 排序（`order_by`）不在这里处理 —— 引擎侧 `DatabaseDialect.validateOrderBy`
  * 已经挡了（`name; DROP TABLE users` 会被拒），前端再拼一套规则只会与它漂移。
  */
-internal object SqlLiterals {
+object SqlLiterals {
     /**
      * 把任意字符串转成可安全嵌入 SQL 的**字符串字面量**（含两侧单引号）。
      *

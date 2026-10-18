@@ -108,8 +108,8 @@
 
 | 测试类 | 覆盖的能力 |
 |---|---|
-| [`DangerousSqlTest`](./src/test/kotlin/com/langbiantianya/sundays/DangerousSqlTest.kt) | 危险写操作识别（`DROP` / 全表 `UPDATE` …）+ `isReadOnlyQuery` **逐句**判定（`SELECT 1; DROP TABLE t` 必须拒；注释里的关键字不算语义） |
-| [`SqlLiteralsTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlLiteralsTest.kt) | 字面量转义 / CAST 目标类型逐方言（MySQL 只能 `CHAR`）/ `likeContains` 必须产出**带左操作数**的完整谓词 |
+| [`DangerousSqlTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/sql/DangerousSqlTest.kt) | 危险写操作识别（`DROP` / 全表 `UPDATE` …）+ `isReadOnlyQuery` **逐句**判定（`SELECT 1; DROP TABLE t` 必须拒；注释里的关键字不算语义） |
+| [`SqlLiteralsTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/sql/SqlLiteralsTest.kt) | 字面量转义 / CAST 目标类型逐方言（MySQL 只能 `CHAR`）/ `likeContains` 必须产出**带左操作数**的完整谓词 |
 | [`CodeEditorKeyboardReachTest`](./src/test/kotlin/com/langbiantianya/sundays/CodeEditorKeyboardReachTest.kt) | 代码编辑器的键盘可达性 |
 | [`editor/CodeEditorThemeFollowTest`](./src/test/kotlin/com/langbiantianya/sundays/editor/CodeEditorThemeFollowTest.kt) | 编辑器高亮随主题 / 连接方言切换词表 |
 | [`GuiFeatureWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/GuiFeatureWalkthroughTest.kt) | GUI 真点击走查：浏览 / SQL 执行 / 多语句 / 危险确认 / 导出对话框 |

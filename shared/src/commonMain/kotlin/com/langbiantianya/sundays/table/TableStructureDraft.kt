@@ -6,9 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
-
-import com.langbiantianya.sundays.table.ColumnTypeSpec
+package com.langbiantianya.sundays.table
 
 /**
  * 「编辑表结构」弹窗里的一行 —— 一个字段。
@@ -21,7 +19,7 @@ import com.langbiantianya.sundays.table.ColumnTypeSpec
  *
  * @property originalName 打开弹窗时的列名。空 = 这是**新增**的列。
  *   差分靠它区分「加列」与「改列」—— 用户把列名从 `a` 改成 `b` 在语义上是
- *   「删 a 加 b」，但交给引擎时必须走 [com.langbiantianya.grpc.ColumnDef.new_name]
+ *   「删 a 加 b」，但交给引擎时必须走 [ColumnDef.new_name]
  *   的改名而不是两步，否则中途失败会真的掉一列数据。
  */
 data class ColumnDraft(

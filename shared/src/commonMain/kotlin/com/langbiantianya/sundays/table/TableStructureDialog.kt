@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.table
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +50,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.connection.DialectType
-import com.langbiantianya.sundays.table.DialectCapabilities
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinMenuItem
@@ -70,7 +69,7 @@ internal const val TABLE_STRUCTURE_CANCEL_BTN_TAG = "tableStructureCancelBtn"
 internal const val TABLE_STRUCTURE_ADD_COLUMN_BTN_TAG = "tableStructureAddColumnBtn"
 internal const val TABLE_STRUCTURE_ADD_FK_BTN_TAG = "tableStructureAddFkBtn"
 internal const val TABLE_STRUCTURE_ERROR_TAG = "tableStructureError"
-internal const val TABLE_STRUCTURE_DELETE_CONFIRM_BTN_TAG = "tableStructureDeleteConfirmBtn"
+const val TABLE_STRUCTURE_DELETE_CONFIRM_BTN_TAG = "tableStructureDeleteConfirmBtn"
 
 /** 字段行内的 tag —— 后缀是 0 起的行号。 */
 internal fun tableStructureColumnRowTag(index: Int): String = "tableStructureColumnRow$index"
@@ -328,7 +327,7 @@ data class StructureDialogState(
  * （PG 是 `integer`、MySQL 是 `INT`、SQLite 是 `INTEGER`）。给默认值的意义是
  * 「点一下就能提交」，不是「只能用这个」——下拉里随时能换。
  */
-internal fun defaultColumnType(dialect: DialectType): String = typeChoices(dialect, "").firstOrNull()?.name ?: "VARCHAR"
+fun defaultColumnType(dialect: DialectType): String = typeChoices(dialect, "").firstOrNull()?.name ?: "VARCHAR"
 
 // ============================================================================
 // 分区与表头

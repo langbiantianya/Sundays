@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays
 
+import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.table.TableColumn
 import org.junit.Test
 import kotlin.test.assertEquals

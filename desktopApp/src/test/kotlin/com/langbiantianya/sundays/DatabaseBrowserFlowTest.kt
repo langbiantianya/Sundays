@@ -15,6 +15,7 @@ import com.langbiantianya.pool.PoolManager
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.CompletionKind
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
+import com.langbiantianya.sundays.sql.SqlLiterals
 import com.langbiantianya.sundays.table.CellEdit
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.table.TableColumn

@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.sql
 
 import com.langbiantianya.i18n.StrKey
 
@@ -27,7 +27,7 @@ import com.langbiantianya.i18n.StrKey
  * 判据刻意**保守**：宁可多问一次，不可漏问一次。误报的代价是用户多点一下，
  * 漏报的代价是数据没了。
  */
-internal object DangerousSql {
+object DangerousSql {
     /** 一条被判为「需要用户确认」的写操作。 */
     data class Finding(
         /** 命中的类别，用于给确认框一个具体标题（「这会删除表」而不是「危险操作」）。 */

@@ -39,6 +39,12 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.material.icons.extended)
+
+            // 协程 —— 目前只有「表结构编辑弹窗」用它（rememberCoroutineScope + launch 去
+            // 按需拉引用表的列名）。现在能编过是靠 Compose runtime 的**传递依赖**，
+            // 但那不是约定：Compose 一旦收紧传递依赖，这里就会断，而断的时候报错信息
+            // 指向 `launch` 未解析，与真正的原因隔了三层。显式声明。
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
