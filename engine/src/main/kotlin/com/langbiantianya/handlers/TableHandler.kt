@@ -133,7 +133,7 @@ object TableHandler {
         }
 
     /**
-     * CREATE —— `tableName` + `columns[]` 必填。
+     * CREATE —— 建表。`tableName` + `columns[]` 必填。
      *
      * ## 自增主键为什么可能不追加表级 `PRIMARY KEY`
      *
@@ -144,20 +144,34 @@ object TableHandler {
      *
      * `options` 由方言翻译（MySQL `engine`/`charset`/`collate`/`comment`；
      * PostgreSQL 只认 `comment`，走 `COMMENT ON TABLE`）。
+     *
+     * ## [sessionId]：把建表并进调用方的 DDL 批次
+     *
+     * 一次「编辑表结构」通常是「建表 + 若干条外键」这种组合。逐条自动提交的话,
+     * 外键那条失败就留下一张**没有外键的表**——而用户在界面上看到的可能是「建表也失败了」。
+     * 带 [sessionId] 时整批落进同一个事务（见 [DataHandler.withBoundConnection]）。
+     *
+     * ## ⚠️ DDL 能不能真回滚,取决于方言,这里保证不了
+     *
+     * `autocommit=false` 只关掉自动提交,**能不能回滚 DDL 是数据库自己的事**：
+     * PostgreSQL / H2 支持事务性 DDL,ROLLBACK 真能把 `CREATE TABLE` 撤掉;
+     * MySQL 对 DDL 隐式提交（`DialectCapability.DDL_TRANSACTION` 在那里是「软支持」,见
+     * `MySQLDialect` 的 KDoc）,DuckDB / SQLite 则根本不声明这个能力。
+     * 所以「传了 sessionId」≠「原子」,别把它当成后者的保证。
      */
     suspend fun create(
         config: ConnectionConfig,
         req: TableCreateRequest,
+        sessionId: String = "",
     ): TableCreateResponse =
         withContext(Dispatchers.IO) {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             if (req.columnsList.isEmpty()) throw IllegalArgumentException("Missing 'columns' array")
             val schema = req.schema
 
-            val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
 
-            return@withContext connection.use { conn ->
+            return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val columnDefs =
                     req.columnsList.map { col ->
                         val name = col.name
@@ -225,20 +239,28 @@ object TableHandler {
      *
      * **能力按方言不同**：SQLite 只支持 RENAME（无 `ALTER COLUMN`），
      * DuckDB / SQLite 改约束类操作走 table-rebuild，都由方言 SPI 自己判断。
+     *
+     * ## 为什么 [sessionId] 在这里最要紧
+     *
+     * 一次「保存表结构」会算出**一串** `ADD_COLUMN` / `DROP_COLUMN` / `MODIFY_COLUMN`。
+     * 逐条自动提交的话,用户「删两列、加三列」中途撞上一次类型不兼容,
+     * 库里就停在「删了一列、加了一列」的半截结构——而界面上他只看到一句报错。
+     *
+     * 带 [sessionId] 时整串落进同一个事务；能否真回滚仍取决于方言,见 [create] 的说明。
      */
     suspend fun update(
         config: ConnectionConfig,
         req: TableUpdateRequest,
+        sessionId: String = "",
     ): TableUpdateResponse =
         withContext(Dispatchers.IO) {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             if (req.operation.isBlank()) throw IllegalArgumentException("Missing 'operation' (ADD_COLUMN|DROP_COLUMN|MODIFY_COLUMN)")
             val schema = req.schema
 
-            val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
 
-            return@withContext connection.use { conn ->
+            return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val sql =
                     when (req.operation) {
                         "ADD_COLUMN" -> {
@@ -311,15 +333,15 @@ object TableHandler {
     suspend fun delete(
         config: ConnectionConfig,
         req: TableDeleteRequest,
+        sessionId: String = "",
     ): TableDeleteResponse =
         withContext(Dispatchers.IO) {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             val schema = req.schema
 
-            val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
 
-            return@withContext connection.use { conn ->
+            return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val ifClause = if (req.hasIfExists() && req.ifExists) "IF EXISTS " else ""
                 val sql = "DROP TABLE ${ifClause}${dialect.quoteIdentifier(req.tableName)}"
                 conn.createStatement().use { it.execute(sql) }

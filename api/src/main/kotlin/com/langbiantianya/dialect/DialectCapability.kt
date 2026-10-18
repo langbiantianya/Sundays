@@ -91,9 +91,20 @@ enum class DialectCapability {
     /**
      * 支持 DDL 事务回滚（rollback DDL）。
      *
-     * 内置方言：MySQL / PostgreSQL / H2。**MySQL 属于「软支持」** —— 它会隐式提交 DDL，
-     * 批量 CREATE TABLE 中途失败时已成功的部分不会回滚（见 `MySQLDialect` 的说明）。
-     * DuckDB 同样不声明：CREATE / ALTER / DROP 一旦提交不可回滚。
+     * ## 「声明了」与「真能回滚」是两回事 —— MySQL **和 H2** 都属于软支持
+     *
+     * 这两个库都会对 DDL **隐式提交**。H2 这一条是实测出来的，不是推测：
+     * 用裸 JDBC 做最小复现，`autoCommit = false` 的连接上执行 `CREATE TABLE`，
+     * **在 commit 也好 rollback 也好之前**另借一条连接就已经能查到这张表了 ——
+     * 说明它压根没进事务。回归见
+     * `DdlTransactionIntegrationTest.H2 does not roll DDL back`。
+     *
+     * 后果一样：一次「保存表结构」算出的那串 `CREATE` / `ALTER`，中途失败时
+     * 已经生效的部分留在库里。界面上因此不能对这两个方言承诺「全成功或全不做」，
+     * 必须按方言如实提示（见前端 `DialectCapabilities`）。
+     *
+     * DuckDB / SQLite 干脆不声明：它们的 DDL 一旦提交就不可回滚。
+     * 内置方言里**真正**支持事务性 DDL 的是 PostgreSQL。
      */
     DDL_TRANSACTION,
 

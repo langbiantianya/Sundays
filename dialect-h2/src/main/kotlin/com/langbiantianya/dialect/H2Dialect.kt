@@ -37,6 +37,17 @@ import java.sql.Connection
  *   `setFetchSize(Integer.MIN_VALUE)` 那条服务端游标约定。
  * - **User 概念差异大。** H2 的 USER 表与其他方言结构不同，引擎级集成测试不依赖
  *   USER CRUD；`supportsUser` / `supportsPassword` 因此为 `false`。
+ *
+ * ## `DDL_TRANSACTION` 是**软支持**：H2 对 DDL 隐式提交
+ *
+ * 声明了这个能力，意思却是「批量改表结构中途失败时，已生效的部分会留在库里」。
+ * 这是实测出来的，不是照文档抄的：`autoCommit = false` 的连接上执行
+ * `CREATE TABLE`，**在任何 commit / rollback 之前**另借一条连接就查得到这张表，
+ * 说明它压根没进事务。回归见
+ * `DdlTransactionIntegrationTest.H2 does not roll DDL back`（那条用例故意断言
+ * 「回滚后表还在」—— 记录的是**已知限制**，不是期望行为）。
+ *
+ * 界面上因此**不能**对 H2 用户承诺「这次改表结构要么全成、要么什么都没发生」。
  */
 class H2Dialect : DatabaseDialect {
     private val logger = LoggerFactory.getLogger(H2Dialect::class.java)

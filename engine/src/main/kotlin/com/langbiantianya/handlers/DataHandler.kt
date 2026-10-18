@@ -637,12 +637,21 @@ object DataHandler {
      *
      * 会话连接的生死由 `SYSTEM.COMMIT` / `ROLLBACK` 决定 —— 在这里 `close()` 会把连接还回
      * HikariCP，后续语句将落到另一条物理连接上，事务语义直接失效。
+     *
+     * `internal` 而不是 `private`：表结构变更（[TableHandler.create] / `update` / `delete`
+     * 与 `ForeignKeyHandler.create` / `delete`）要的是**同一套**借用与归还语义 ——
+     * 那几处各写一遍「记得别关连接」的 try/finally 的话,漏一处就是一个静默的事务失效,
+     * 而且从代码上完全看不出来。
+     *
+     * [block] 是 **suspend** 的：方言 SPI 里的 `addForeignKey` / `dropForeignKey` 要在
+     * 库之间发往返,写死成普通函数就得在连接借出的作用域里 `runBlocking` —— 那会在
+     * IO 线程上再堵一个线程,连接池一满就自锁。
      */
-    private fun <T> withBoundConnection(
+    internal suspend fun <T> withBoundConnection(
         config: ConnectionConfig,
         schema: String,
         sessionId: String,
-        block: (java.sql.Connection) -> T,
+        block: suspend (java.sql.Connection) -> T,
     ): T {
         val conn = PoolManager.getConnection(config, schema, sessionId)
         return try {

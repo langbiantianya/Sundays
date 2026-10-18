@@ -32,6 +32,14 @@ SPI 接口定义见 [`api/README.md`](../api/README.md)，引擎如何消费方�
 **流式查询必须临时关掉 `autoCommit`**（与 PostgreSQL 同理，H2 不认
 `setFetchSize(Integer.MIN_VALUE)` 那条约定）。
 
+**`DDL_TRANSACTION` 是软支持 —— H2 对 DDL 隐式提交。** 这是实测的：
+`autoCommit = false` 的连接上执行 `CREATE TABLE`，**在任何 commit / rollback 之前**
+另借一条连接就已经查得到这张表，说明它根本没进事务；`ROLLBACK` 撤不掉。
+后果与 MySQL 一样：一次「保存表结构」算出的那串 `CREATE` / `ALTER` 中途失败时，
+已生效的部分留在库里。界面对 H2 不能承诺「全成功或全不做」。
+回归见 `DdlTransactionIntegrationTest.H2 does not roll DDL back`
+（那条用例故意断言「回滚后表还在」—— 它记录的是**已知限制**，不是期望行为）。
+
 **方言特性**：schema 导航用 `[conn.catalog]` + `INFORMATION_SCHEMA.SCHEMATA`；
 `search_path` 用 `SET SCHEMA <schema>`；`GET_DDL` 从 `INFORMATION_SCHEMA.COLUMNS` +
 `TABLE_CONSTRAINTS` 重建（过滤同名系统表）；Routines 走 `INFORMATION_SCHEMA.ROUTINES` +

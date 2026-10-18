@@ -126,12 +126,20 @@ gRPC 模式:
 | **MULTI_SCHEMA** | — | ✓ | ✓ | ✓ | — |
 | **CROSS_DATABASE** | — | ✓ | ✓ | ✓ (ATTACH) | — (ATTACH 不暴露) |
 | **EXPORT** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **DDL_TRANSACTION** | ✓ | ✓ | ✓ | — | — |
+| **DDL_TRANSACTION** | ✓ (软) | ✓ | ✓ (软) | — | — |
 | **EMBEDDED_MODE** | — | — | ✓ | ✓ | ✓ |
 
 `DialectCapability` 枚举是这份矩阵的单一事实来源 —— 不支持的能力由方言抛
 `UnsupportedOperationException`，而不是静默返回空结果。各方言的详细特性与已知约束见
 对应 `README.md`。
+
+> ⚠️ **`DDL_TRANSACTION` 标了 ✓ 不等于「DDL 能回滚」。** MySQL 与 H2 都对 DDL
+> **隐式提交**（矩阵里标「软」），批量改表结构中途失败时，已生效的部分留在库里。
+> H2 这条是实测的：`autoCommit = false` 的连接上 `CREATE TABLE` 一执行，
+> 另借连接就查得到，说明它根本没进事务 —— 回归见
+> `DdlTransactionIntegrationTest.H2 does not roll DDL back`。
+> 五个内置方言里真正支持事务性 DDL 的只有 **PostgreSQL**，界面上不能对别的方言
+> 承诺「全成功或全不做」。
 
 ---
 

@@ -83,10 +83,15 @@ object ForeignKeyHandler {
 
     /**
      * CREATE — 添加外键
+     *
+     * [sessionId] 的作用见 [TableHandler.create]：建表 + 建外键要能并进同一个事务。
+     * 外键尤其需要 —— 一条 `ALTER TABLE ... ADD CONSTRAINT` 失败却把表建好了,
+     * 用户的库里就多了一张**不受任何引用约束**的表。
      */
     suspend fun create(
         config: ConnectionConfig,
         req: ForeignKeyCreateRequest,
+        sessionId: String = "",
     ): ForeignKeyCreateResponse =
         withContext(Dispatchers.IO) {
             if (req.tableName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_TABLE_NAME))
@@ -98,9 +103,8 @@ object ForeignKeyHandler {
             val onDelete = req.onDelete.ifBlank { null }
             val onUpdate = req.onUpdate.ifBlank { null }
 
-            val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
-            return@withContext connection.use { conn ->
+            return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 dialect.addForeignKey(conn, req.tableName, req.fkName, req.columnsList, req.refTable, req.refColumnsList, onDelete, onUpdate)
                 foreignKeyCreateResponse {
                     created = req.fkName
@@ -110,20 +114,20 @@ object ForeignKeyHandler {
         }
 
     /**
-     * DELETE — 删除外键
+     * DELETE — 删除外键。[sessionId] 的作用见 [TableHandler.create]。
      */
     suspend fun delete(
         config: ConnectionConfig,
         req: ForeignKeyDeleteRequest,
+        sessionId: String = "",
     ): ForeignKeyDeleteResponse =
         withContext(Dispatchers.IO) {
             if (req.tableName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_TABLE_NAME))
             if (req.fkName.isBlank()) throw IllegalArgumentException(Msg.text(StrKey.MISSING_PARAM_FK_NAME))
             val schema = req.schema
 
-            val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
-            return@withContext connection.use { conn ->
+            return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val ifExists = req.hasIfExists() && req.ifExists
                 dialect.dropForeignKey(conn, req.tableName, req.fkName, ifExists)
                 foreignKeyDeleteResponse { deleted = req.fkName }

@@ -213,21 +213,21 @@ object RequestDispatcher {
             put(
                 Category.TABLE to Action.CREATE,
                 Route(
-                    invoke = { c, r -> TableHandler.create(c, r.tableRequest.create) },
+                    invoke = { c, r -> TableHandler.create(c, r.tableRequest.create, r.sessionId) },
                     wrap = { b, m -> b.table = tableResponse { create = m as com.langbiantianya.grpc.TableCreateResponse } },
                 ),
             )
             put(
                 Category.TABLE to Action.UPDATE,
                 Route(
-                    invoke = { c, r -> TableHandler.update(c, r.tableRequest.update) },
+                    invoke = { c, r -> TableHandler.update(c, r.tableRequest.update, r.sessionId) },
                     wrap = { b, m -> b.table = tableResponse { update = m as com.langbiantianya.grpc.TableUpdateResponse } },
                 ),
             )
             put(
                 Category.TABLE to Action.DELETE,
                 Route(
-                    invoke = { c, r -> TableHandler.delete(c, r.tableRequest.delete) },
+                    invoke = { c, r -> TableHandler.delete(c, r.tableRequest.delete, r.sessionId) },
                     wrap = { b, m -> b.table = tableResponse { delete = m as com.langbiantianya.grpc.TableDeleteResponse } },
                 ),
             )
@@ -489,14 +489,14 @@ object RequestDispatcher {
             put(
                 Category.FOREIGN_KEY to Action.CREATE,
                 Route(
-                    invoke = { c, r -> ForeignKeyHandler.create(c, r.foreignKeyRequest.create) },
+                    invoke = { c, r -> ForeignKeyHandler.create(c, r.foreignKeyRequest.create, r.sessionId) },
                     wrap = { b, m -> b.foreignKey = foreignKeyResponse { create = m as com.langbiantianya.grpc.ForeignKeyCreateResponse } },
                 ),
             )
             put(
                 Category.FOREIGN_KEY to Action.DELETE,
                 Route(
-                    invoke = { c, r -> ForeignKeyHandler.delete(c, r.foreignKeyRequest.delete) },
+                    invoke = { c, r -> ForeignKeyHandler.delete(c, r.foreignKeyRequest.delete, r.sessionId) },
                     wrap = { b, m -> b.foreignKey = foreignKeyResponse { delete = m as com.langbiantianya.grpc.ForeignKeyDeleteResponse } },
                 ),
             )
