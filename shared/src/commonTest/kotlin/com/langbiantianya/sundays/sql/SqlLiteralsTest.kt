@@ -9,7 +9,7 @@
 package com.langbiantianya.sundays.sql
 
 import com.langbiantianya.sundays.connection.DialectType
-import org.junit.Test
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
