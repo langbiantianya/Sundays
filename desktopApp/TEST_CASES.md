@@ -93,6 +93,7 @@
 | [`PostgreSQLSystemObjectTest`](./src/test/kotlin/com/langbiantianya/sundays/PostgreSQLSystemObjectTest.kt) | PG 系统对象不进表列表 / `information_schema` 不进 / 非 public schema 的处理 / `SCHEMA.LIST` 干净 |
 | [`MySQLRoutineTriggerQueryTest`](./src/test/kotlin/com/langbiantianya/sundays/MySQLRoutineTriggerQueryTest.kt) | 真 MySQL 的触发器 / 过程列表：列名必须是 `ROUTINE_COMMENT` 而不是 H2 的 `REMARKS`，且过程注释要**原样**读回 |
 | [`DialectNameContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectNameContractTest.kt) | `DialectType.engineDriverName` 与引擎 `SYSTEM.LIST_DRIVERS` 注册名逐一比对（防 `MYSQL` vs `Mysql` 漂移） |
+| [`TableStructureDiffTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/table/TableStructureDiffTest.kt) | 表结构草稿的校验与差分（弹窗本体在 `:shared`）：断言全钉在**不能少算**那一侧 —— 改名不能退化成「删 + 加」（中途失败就真的丢整列数据），外键改名 / 改内容必须落到 DROP + ADD |
 
 ### 2.3 表格与分页
 

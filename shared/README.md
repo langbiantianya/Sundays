@@ -1,7 +1,8 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。67 个源文件，KMP 工程结构，当前仅启用
-`jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续扩展 `androidMain` / `iosMain`。
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。83 个源文件（`commonMain` 59 / `commonTest` 21 /
+`jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
+扩展 `androidMain` / `iosMain`。
 
 > **本文档的形态**：**大纲 + 组件目录**。「有哪些组件、各自一句话、源码在哪」留在这里；
 > **组件内部的设计决策、踩过的坑与契约一律在 `.kt` 的 KDoc 与 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 里**。
@@ -17,6 +18,7 @@
 | `CodeLanguage` / `CodeFormatter` | 新语言与新 formatter 的 SPI（配对注册，编辑器零改动即支持） | [`editor/CodeLanguage.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/editor/CodeLanguage.kt)、[`formatter/`](./src/commonMain/kotlin/com/langbiantianya/sundays/editor/formatter/) |
 | `DataTable` | 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 / 可编辑 | [`table/DataTable.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/DataTable.kt) |
 | `TableColumn` / `TableRow` / `PageSize` | 表格的列 / 行 / 分页模型 | [`table/TableModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/TableModels.kt) |
+| `TableStructureDialog` / `TableStructureDraft` / `TableStructureDiff` / `typeChoices` | 表结构编辑整套：草稿校验与差分、类型候选跟着方言走（可自由输入）、编辑弹窗 | [`table/`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/) |
 | `ConnectionManagerScreen` | 连接管理（列表 + 引导式向导 + 连接总览 + 状态色点），**引擎调用全部由回调注入** | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
 | `ConnectionStorage` / `buildJdbcUrl` / `parseJdbcUrl` / `DialectType` | 连接配置持久化、字段 ↔ JDBC URL 折算、方言枚举 | [`connection/`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/) |
 | `SettingsScreen` / `SettingsStorage` / `SettingsCategory` | 设置页（左分类 / 右内容）、设置持久化、分类枚举 | [`settings/`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/) |
@@ -29,6 +31,8 @@
 | `WinControls` / `FocusRing` / `DragHandle` / `ContextMenuState<T>` / `Modifier.onRightClick` | 通用 UI 工具：复古控件包装、可见焦点环、可拖拽分隔条、右键菜单 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) 等 |
 | `str(...)` / `plural(...)` / `ProvideStrings` / `LanguagePicker` | 界面语言入口（文案表在 `:i18n`，本模块只提供 Composable 侧） | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt) |
 | `SettingsEntryButton` / `ThemeModeToggleButton` / `SystemInfoRefresh` | 设置页入口按钮、日夜切换按钮、系统信息自动刷新间隔（默认关闭） | [`ui/ThemeModeToggle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ThemeModeToggle.kt) 等 |
+| `DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog` | SQL 危险写操作识别与**逐句**只读判定、WHERE 字面量转义与 CAST 目标类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
+| `EmptyHint` / `ColumnBadge` / `TabRenameDialog` | 空态提示、字段类型徽标、标签重命名弹窗 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 
 **扩展方式**：新增语言 / formatter 走 SPI 注册；替换菜单项、详情面板、工具栏动作走 Composable lambda 插槽
 （`contextMenuItems` / `detailPanel` / `actions`）—— 不是 `List<UIElement>` 数据驱动。各扩展点的契约见

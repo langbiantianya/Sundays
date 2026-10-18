@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.14（与根 `../ARCHITECTURE.md` 同版本）
+> **版本**：v2.26（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -191,10 +191,13 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ---
 
-## 6. 通用 UI 工具
+## 6. SQL 文本工具与通用 UI 工具
 
 | 组件 | 一句话 | 关键点（详见 KDoc） | 源码 |
 |---|---|---|---|
+| `DangerousSql` | 危险写操作识别 + 只读判定 | **逐句**判定（`SELECT 1; DROP TABLE t` 必须拒），注释里的关键字不算语义；别序偏容易报（多点一次确认）而不漏报（没弹框就执行了 DROP） | [`sql/DangerousSql.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSql.kt) |
+| `SqlLiterals` | WHERE 字面量转义与 CAST 目标类型 | 它是**安全边界而不是格式校验**：`DataListRequest.where` 收的是**裸 SQL 片段**、没有占位符，表内搜索词直接拼进去就是注入面；CAST 目标类型逐方言差异大（MySQL 只能 `CHAR`） | [`sql/SqlLiterals.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/SqlLiterals.kt) |
+| `DangerousSqlConfirmDialog` | 危险语句二次确认框 | 导出预览与 SQL 执行共用同一个弹窗；识别与转义都是纯字符串遍历，因此能留在 `commonMain` | [`sql/DangerousSqlConfirmDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSqlConfirmDialog.kt) |
 | `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenuState.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenuState.kt) |
 | `Modifier.onRightClick` | 右键检测 | 只在主指针通道消费；不复用 Foundation 的 `internal onRightClickDown`（跨模块不可见） | [`ui/RightClick.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/RightClick.kt) |
 | `DragHandle` | 可拖拽分隔条 | 受控组件（宽度归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位** | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
@@ -256,6 +259,9 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算 |
 | `SettingsStorageTest` / `ConnectionStorageTest` | 逐档往返、原子写、损坏降级 + 自愈、v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | POSIX 权限位（0600）。**Windows 上是 `assumeTrue` skip 而非断言失败** —— 那里访问控制走 ACL，断言失败等于要求 Windows 做不到的事 |
+| `DangerousSqlTest` / `SqlLiteralsTest` | 危险写操作识别与**逐句**只读判定；WHERE 字面量转义 / CAST 目标类型逐方言 |
+| `TableStructureDiffTest` | 表结构草稿的校验与差分，每条都钉在**不能少算**的那一侧：改名不能退化成「删 + 加」（中途失败就真的丢整列数据），外键改动必须落到 DROP + ADD |
+| `EditorIntegrationTest` | 注册表 / formatter / 高亮器的协作路径，同时是**扩展模板**：新增一种语言时复制本文件改参数即可 |
 | `OnboardingStateTest` / `LanguageBootstrapTest` | 首启判据、**外观变更不得抹掉已完成标记**；语言表完整性 |
 
 运行：
@@ -291,7 +297,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 | 文档 | 内容 |
 |---|---|
-| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | 整体架构（V2.9）、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
+| [根 `../ARCHITECTURE.md`](../ARCHITECTURE.md) | 整体架构、双模式架构（Direct / gRPC）、引擎方言矩阵、迁移历史 |
 | [根 `../README.md`](../README.md) §"共享 UI 组件" | 顶层简短介绍 |
 | [`README.md`](./README.md) | 用户视角：组件目录、快速上手、构建测试、扩展新语言 |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎设计 —— 解释 `shared/` 与引擎解耦的原因（在 `desktopApp/` 集成层组合） |
@@ -307,3 +313,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.x | 新增 `editor/` + `table/` + `ui/`；`CodeEditor` 支持高亮 / 工具栏 / 右键菜单；`DataTable` 支持虚拟滚动 / 分页 / 详情面板 |
 | v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`、`DataTable.fillParentHeight` 默认 `true`（均填父容器剩余高度）；新增 `ConnectionManagerScreen` + `ConnectionStorage` |
 | v2.14 | **① 顶层导航与应用主题上移**：新增 `navigation/`（`AppDestination`）与 `ui/Theme.kt`（`SundaysTheme`），均自 `desktopApp` 提取；`ConnectionSession` / `DatabaseBrowserState` 因直连 `IdbEngine` 仍留在 `desktopApp`（见 §1.3）。**② 模块整理**：删除 KMP 脚手架样板与 `composeResources` logo，清理死代码与无调用方的兼容层。**③ 文档纠偏**：KDoc 中与实现不符的描述、失效链接，以及本文中「过度记录实现细节」的章节，按实现改正并把细节迁回源码 KDoc |
+| v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖）

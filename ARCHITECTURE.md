@@ -1,4 +1,4 @@
-# sundays — Kotlin 数据库管理端架构导航（v2.25）
+# sundays — Kotlin 数据库管理端架构导航（v2.26）
 
 > **本文件只做整体介绍与模块导航。** 契约、边界、设计理由都在对应类/函数的 KDoc 里，
 > 各模块文档也只写大纲 —— **改代码前先读源码注释，那是唯一权威处**。
@@ -104,7 +104,7 @@ gRPC 模式:
 | **`dialect-h2/`** | [`README.md`](./dialect-h2/README.md) | H2 嵌入式 / 集成测试 fixture / 已知约束 |
 | **`dialect-duckdb/`** | [`README.md`](./dialect-duckdb/README.md) | DuckDB 嵌入式 OLAP / Excel 预转换 / FK table-rebuild / 已知约束 |
 | **`dialect-sqlite/`** | [`README.md`](./dialect-sqlite/README.md) | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
-| **`shared/`** | [`README.md`](./shared/README.md) · [`ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | CodeEditor / DataTable / ConnectionManagerScreen / 右键菜单 / 主题与视觉规范 / 与引擎解耦的边界 |
+| **`shared/`** | [`README.md`](./shared/README.md) · [`ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | CodeEditor / DataTable / ConnectionManagerScreen / 表结构编辑弹窗 / SQL 文本工具 / 右键菜单 / 主题与视觉规范 / 与引擎解耦的边界 |
 | **`desktopApp/`** | [`README.md`](./desktopApp/README.md) · [`ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览屏 / 生命周期 |
 | **`packaging/flatpak/`** | [`README.md`](./packaging/flatpak/README.md) | Flatpak 选型结论索引 |
 

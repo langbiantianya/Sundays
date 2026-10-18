@@ -18,7 +18,7 @@
 
 
 
-**模块边界**：`AppDestination`（导航目标枚举）、`SundaysTheme` / `SundaysPalette`（主题）、以及 `ConnectionManagerScreen` / `CodeEditor` / `DataTable` / `OnboardingScreen` / `SettingsScreen` 等 UI 都在 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`，可跨平台复用。本模块因此只剩「**平台窗口 + 引擎状态机接线**」，9 个源文件。
+**模块边界**：`AppDestination`（导航目标枚举）、`SundaysTheme` / `SundaysPalette`（主题）、以及 `ConnectionManagerScreen` / `CodeEditor` / `DataTable` / `OnboardingScreen` / `SettingsScreen` 等 UI 都在 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`，可跨平台复用。本模块因此只剩「**平台窗口 + 引擎状态机接线**」，15 个源文件（见 §2）。
 
 
 
@@ -54,9 +54,7 @@ desktopApp （本模块）
 
    │     ├── BrowserToolBar.kt         工具栏 / sheet 标签 / 连接状态
 
-   │     ├── SchemaTree.kt             对象树 + 右键菜单 + 表结构弹窗宿主
-
-   │     ├── TableStructure*.kt        表结构弹窗宿主（**弹窗本体已上移到 :shared**）
+   │     ├── SchemaTree.kt             对象树 + 右键菜单 + 表结构弹窗宿主（弹窗本体在 :shared）
 
    │     ├── TablePreview.kt           表格预览区 + 新增行弹窗
 

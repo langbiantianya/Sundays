@@ -23,7 +23,7 @@ OLAP） / **SQLite**（本地嵌入式关系型），通过 `ServiceLoader` 动�
 系统语言预选，随时可在设置里改；引擎的错误消息也跟随界面语言。见
 [`i18n/README.md`](./i18n/README.md)。
 
-> **当前版本：v2.25**
+> **当前版本：v2.26**
 >
 > 📖 **功能文档：[`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md)** —— 这个工具现在能干什么、
 > 引擎已实现但前端尚未接线的部分、以及与 **DataGrip / Navicat** 的逐项差距矩阵。
@@ -38,7 +38,7 @@ OLAP） / **SQLite**（本地嵌入式关系型），通过 `ServiceLoader` 动�
 | `engine/` | 引擎实现：请求路由（`dispatcher/`）、SQL 执行与查询取消、连接池与事务、导入导出、IPC、插件加载、gRPC 服务端 |
 | `engine-grpc-client/` | `EngineClient` 的跨进程 gRPC 实现（TCP / UDS / 命名管道），**不拖入** Hadoop / POI / LuaJIT |
 | `i18n/` | 六语言文案：键枚举 + 六份译文表 + 简繁判定 + 复数规则 |
-| `shared/` | KMP 共享代码：CodeEditor / DataTable / ConnectionManagerScreen / 主题等 UI 组件，全部与引擎无关 |
+| `shared/` | KMP 共享代码：CodeEditor / DataTable / ConnectionManagerScreen / 表结构编辑弹窗 / SQL 文本工具 / 主题等，全部与引擎无关 |
 | `desktopApp/` | Compose Desktop 应用：窗口、连接会话状态机、数据库浏览屏 |
 | `packaging/flatpak/` | Flatpak manifest 与桌面项 |
 
@@ -215,6 +215,7 @@ SQL 注入这一块由 CodeQL 的 `java/sql-injection` 查询集覆盖（它对 
 | v2.23 | SQL 执行可取消、结果集封顶、浏览屏显示连接失败原因 |
 | v2.24 | 修复代码编辑器不跟随主题系统（根因在明暗档而非配色），顺带修掉三个自己写的假绿测试 |
 | v2.25 | **11 项长期红测归零** —— 根因是「Windows 上存不下任何连接配置」的产品缺陷 |
+| v2.26 | **表格内数据操作与表结构管理** —— 批量删除 / 批量添加、NULL 写入约定、引擎 `TableCapabilities`；右键菜单新增表 / 编辑表结构 / 删除表并接入事务会话（**实测纠正 H2 对 DDL 隐式提交**，能力位标「软」）；9605 行的 `DatabaseBrowserScreen.kt` 拆成 10 个文件，平台无关部分上移 `:shared`（新增 `sql/` 包） |
 
 ## 许可证
 
