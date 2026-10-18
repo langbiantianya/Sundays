@@ -229,6 +229,11 @@ object ColumnTypeCatalog {
      * 否则用户改个连接类型才发现下拉框是空的。
      */
     fun forDialect(dialect: DialectType): List<ColumnTypeEntry> {
+        // ⚠️ SQLite 是**唯一**不拼通用段的方言：它没有真正的类型系统，只有亲和性。
+        // 通用段里的 `TINYINT` / `AUTO_INCREMENT` / `VARBINARY` 在 SQLite 里不是类型，
+        // 只是决定亲和性的关键字 —— 把它们列进下拉框，用户点下去建出来的列
+        // 与他以为的不是一回事。所以 SQLite 只给那 4 个亲和性。
+        if (dialect == DialectType.SQLITE) return SQLITE_ONLY
         val extra =
             when (dialect) {
                 DialectType.MYSQL -> MYSQL_ONLY

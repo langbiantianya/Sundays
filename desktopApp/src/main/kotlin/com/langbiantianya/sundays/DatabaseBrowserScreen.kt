@@ -132,10 +132,14 @@ import androidx.compose.ui.window.PopupProperties
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
+import com.langbiantianya.grpc.columnDef
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.grpc.dataGenerateRequest
 import com.langbiantianya.grpc.dataListRequest
 import com.langbiantianya.grpc.dataRequest
+import com.langbiantianya.grpc.foreignKeyCreateRequest
+import com.langbiantianya.grpc.foreignKeyDeleteRequest
+import com.langbiantianya.grpc.foreignKeyListItem
 import com.langbiantianya.grpc.foreignKeyListRequest
 import com.langbiantianya.grpc.foreignKeyRequest
 import com.langbiantianya.grpc.functionListRequest
@@ -150,9 +154,12 @@ import com.langbiantianya.grpc.sqlExecuteRequest
 import com.langbiantianya.grpc.sqlRequest
 import com.langbiantianya.grpc.systemRequest
 import com.langbiantianya.grpc.tableColumnListRequest
+import com.langbiantianya.grpc.tableCreateRequest
+import com.langbiantianya.grpc.tableDeleteRequest
 import com.langbiantianya.grpc.tableGetDdlRequest
 import com.langbiantianya.grpc.tableListRequest
 import com.langbiantianya.grpc.tableRequest
+import com.langbiantianya.grpc.tableUpdateRequest
 import com.langbiantianya.grpc.triggerListRequest
 import com.langbiantianya.grpc.triggerRequest
 import com.langbiantianya.grpc.viewListRequest
@@ -600,6 +607,9 @@ internal fun schemaColumnTag(column: String) = "schemaColumn_$column"
 internal const val TREE_MENU_COPY_NAME_TAG = "treeMenuCopyName"
 internal const val TREE_MENU_COPY_REF_TAG = "treeMenuCopyRef"
 internal const val TREE_MENU_COPY_DDL_TAG = "treeMenuCopyDdl"
+internal const val TREE_MENU_EDIT_STRUCTURE_TAG = "treeMenuEditStructure"
+internal const val TREE_MENU_DELETE_TABLE_TAG = "treeMenuDeleteTable"
+internal const val TREE_MENU_NEW_TABLE_TAG = "treeMenuNewTable"
 
 /**
  * 对象树右键菜单状态。
@@ -2073,6 +2083,42 @@ private fun SchemaTreePanel(
                 }
             }
         }
+
+        // 表结构弹窗挂在**面板这一层**而不是节点里：节点在 LazyColumn 里会被回收，
+        // 弹窗跟着回收就变成「我正填着字窗口自己关了」。与 [TreeContextMenuState]
+        // 同一个理由（宿主必须一直在组合里）。
+        state.structureDialog?.let { dialog ->
+            TableStructureDialog(
+                state = dialog,
+                dialect = state.currentConnection?.dialect ?: DialectType.UNKNOWN,
+                loadRefColumns = { refTable ->
+                    state.refColumnsFor(dialog.draft.database, dialog.draft.schema, refTable)
+                },
+                onSave = { state.saveTableStructure(it) },
+                onDismiss = { state.dismissStructureDialog() },
+            )
+        }
+        state.pendingDeleteTable?.let { target ->
+            AlertDialog(
+                onDismissRequest = { state.dismissDeleteTable() },
+                title = { Text(str(StrKey.TABLE_DELETE_CONFIRM, target.table.orEmpty())) },
+                text = { Text(str(StrKey.TABLE_DELETE_CONFIRM_HINT)) },
+                confirmButton = {
+                    WinButton(
+                        onClick = { state.confirmDeleteTable() },
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(TABLE_STRUCTURE_DELETE_CONFIRM_BTN_TAG),
+                    ) {
+                        Text(str(StrKey.TABLE_DELETE), maxLines = 1, softWrap = false)
+                    }
+                },
+                dismissButton = {
+                    WinTextButton(onClick = { state.dismissDeleteTable() }, shape = SundaysPalette.buttonShape) {
+                        Text(str(StrKey.CANCEL), maxLines = 1, softWrap = false)
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -2209,6 +2255,22 @@ private fun TreeContextMenu(
             if (target.table != null && target.column == null) {
                 WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 item(TREE_MENU_COPY_DDL_TAG, str(StrKey.COPY_CREATE_TABLE_DDL)) { state.copyTreeDdl(target) }
+                item(TREE_MENU_EDIT_STRUCTURE_TAG, str(StrKey.TABLE_EDIT_STRUCTURE)) {
+                    state.openTableStructureDialog(target)
+                }
+                item(TREE_MENU_DELETE_TABLE_TAG, str(StrKey.TABLE_DELETE)) {
+                    state.requestDeleteTable(target)
+                }
+            }
+
+            // 「新增表」挂在**库节点**上：表级区块里的三项（复制 DDL / 编辑表结构 /
+            // 删除表）都是针对一张**已存在**的表，在库节点上全都无从谈起。
+            // 而在表节点上放「新增表」会让人以为是在给这张表加一张附属表。
+            if (target.table == null && target.column == null) {
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                item(TREE_MENU_NEW_TABLE_TAG, str(StrKey.TABLE_NEW)) {
+                    state.openNewTableDialog(target)
+                }
             }
         }
     }
@@ -6252,6 +6314,671 @@ class DatabaseBrowserState(
                 )
             }
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // 表结构：弹窗状态 / 载入 / 新建 / 保存 / 删除
+    // ------------------------------------------------------------------------
+
+    /** 表结构弹窗的当前状态；`null` = 弹窗没开。「新增表」与「编辑表结构」共用它。 */
+    var structureDialog by mutableStateOf<StructureDialogState?>(null)
+        private set
+
+    /**
+     * 待确认删除的表 —— 非空时弹二次确认框。
+     *
+     * 删表不可逆（`DROP TABLE` 连数据一起没），而右键菜单的删除项离点中只有一次点击的
+     * 距离 —— 不确认就直接执行，误触的代价是整张表。
+     */
+    var pendingDeleteTable by mutableStateOf<TreeTarget?>(null)
+        private set
+
+    /**
+     * 打开「编辑表结构」。
+     *
+     * 判据 `table != null && column == null` 与菜单侧那一条**故意重复**：
+     * 菜单项的可见性是界面层的决定，而这里是状态机自己的边界，两边任一处被改坏
+     * 都不会让「在字段节点上改整张表」这种请求发出去。
+     */
+    fun openTableStructureDialog(target: TreeTarget) {
+        val table = target.table
+        if (table == null || target.column != null) return
+        if (!ensureWritable()) return
+        // 先开弹窗再读：读失败时弹窗里至少有个空表格和一句错误提示，用户能立刻重试。
+        // 不开弹窗的话界面上就只剩「右键点了没反应」，最难查。
+        structureDialog =
+            StructureDialogState(
+                draft =
+                    TableStructureDraft(
+                        database = target.database,
+                        schema = target.schema,
+                        tableName = table,
+                        originalName = table,
+                        isNew = false,
+                    ),
+                loading = true,
+            )
+        scope.launch {
+            when (val result = loadTableStructure(target)) {
+                is StructureLoadResult.Loaded -> {
+                    structureDialog =
+                        (structureDialog ?: return@launch).copy(draft = result.draft, loading = false, error = null)
+                }
+
+                // 草稿里已经有什么了也照样提示失败：用户在读取期间填了几个字段，
+                // 直接整体换掉等于把他刚填的东西悄悄丢掉。
+                is StructureLoadResult.Failed -> {
+                    structureDialog = structureDialog?.copy(loading = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    /** 打开「新增表」—— 入口挂在**库节点**上（用户已拍板），表结构相关内容只挂表节点。 */
+    fun openNewTableDialog(target: TreeTarget) {
+        if (target.table != null || target.column != null) return
+        if (!ensureWritable()) return
+        val dialect = currentConnection?.dialect ?: DialectType.UNKNOWN
+        scope.launch {
+            val schema = if (target.schema.isNotBlank()) target.schema else resolveSchemas(target.database).firstOrNull() ?: ""
+            structureDialog =
+                StructureDialogState(
+                    draft =
+                        TableStructureDraft(
+                            database = target.database,
+                            schema = schema,
+                            isNew = true,
+                            // 开局就给一行空的：新建表至少要一个字段，而空白弹窗
+                            // 只有一个「加一个字段」按钮，用户得先点一下才知道能填。
+                            columns = listOf(ColumnDraft(name = "", type = defaultColumnType(dialect))),
+                            refTableCandidates = refTableCandidates(target.database, ""),
+                        ),
+                )
+        }
+    }
+
+    fun dismissStructureDialog() {
+        if (structureDialog?.saving == true) return
+        structureDialog = null
+    }
+
+    /**
+     * 保存表结构 —— 新增走 [createTable]，编辑走 [applyTableStructure]。
+     *
+     * 失败时**不关弹窗**，把错误挂在弹窗上：用户填了七八列，一次失败就全被弹掉重来，
+     * 比重新填一遍还让人恼火。
+     */
+    fun saveTableStructure(draft: TableStructureDraft) {
+        val current = structureDialog ?: return
+        if (current.saving) return
+        structureDialog = current.copy(saving = true, error = null)
+        scope.launch {
+            val failure = if (draft.isNew) createTable(draft) else applyTableStructure(draft)
+            if (failure != null) {
+                structureDialog = structureDialog?.copy(saving = false, error = failure)
+                return@launch
+            }
+            structureDialog = null
+            val center = notifications ?: return@launch
+            if (draft.isNew) {
+                center.push(
+                    AppNotification.Severity.SUCCESS,
+                    Msg.text(StrKey.TABLE_NEW),
+                    Msg.format(StrKey.TABLE_CREATED, draft.tableName.trim()),
+                )
+            } else {
+                center.push(
+                    AppNotification.Severity.SUCCESS,
+                    Msg.text(StrKey.TABLE_EDIT_STRUCTURE),
+                    Msg.format(StrKey.TABLE_STRUCTURE_SAVED, draft.originalName),
+                )
+            }
+        }
+    }
+
+    /** 真正删表 —— 只由二次确认框的确认按钮调用。 */
+    fun confirmDeleteTable() {
+        val target = pendingDeleteTable ?: return
+        pendingDeleteTable = null
+        scope.launch {
+            val failure = deleteTable(target)
+            val center = notifications ?: return@launch
+            if (failure != null) {
+                center.push(AppNotification.Severity.ERROR, Msg.text(StrKey.TABLE_DELETE), failure)
+            } else {
+                center.push(
+                    AppNotification.Severity.SUCCESS,
+                    Msg.text(StrKey.TABLE_DELETE),
+                    Msg.format(StrKey.TABLE_DELETED, target.table.orEmpty()),
+                )
+            }
+        }
+    }
+
+    fun dismissDeleteTable() {
+        pendingDeleteTable = null
+    }
+
+    /** 菜单项「删除表」—— 只**记下**待删的表并弹确认框，绝不在这里就发 DELETE。 */
+    fun requestDeleteTable(target: TreeTarget) {
+        if (target.table == null || target.column != null) return
+        if (!ensureWritable()) return
+        pendingDeleteTable = target
+    }
+
+    /**
+     * 只读模式与方言能力的统一入口。
+     *
+     * 只读是**用户的意图**（工具栏上那个开关），不是权限 —— 在点菜单之前就该让它
+     * 点不动，让人改半天再被告知「只读模式不能提交」纯属浪费。
+     */
+    private fun ensureWritable(): Boolean {
+        if (!readOnly) return true
+        notifications?.push(
+            AppNotification.Severity.INFO,
+            Msg.text(StrKey.READ_ONLY),
+            Msg.text(StrKey.TABLE_BLOCKED_READ_ONLY),
+        )
+        return false
+    }
+
+    /**
+     * 读一张表的结构，填成「编辑表结构」弹窗的草稿。
+     *
+     * ## 三次请求的并发与顺序
+     *
+     * `TABLE.COLUMN_LIST`（字段）与 `FOREIGN_KEY.LIST`（外键）**并发**发 —— 它们
+     * 互不依赖，串行发等于白白多等一个往返。引用表候选则**不能**发请求：它就是
+     * 当前库已展开的 `tablesByDatabase`，直接读缓存即可（见 [refTableCandidates]）。
+     *
+     * schema 名要等 [resolveSchemas]：与 [copyTreeDdl] 同一个坑 ——
+     * 带空串发一次「成功但取不到」的请求，比直接报错更难排查。
+     */
+    suspend fun loadTableStructure(target: TreeTarget): StructureLoadResult {
+        val table = target.table
+        if (table == null || target.column != null) {
+            return StructureLoadResult.Failed(Msg.text(StrKey.TABLE_NAME_EMPTY))
+        }
+        val schema =
+            if (target.schema.isNotBlank()) {
+                target.schema
+            } else {
+                resolveSchemas(target.database).firstOrNull() ?: ""
+            }
+        val config = engineConnFor(currentConnection, target.database)
+
+        val columnsResp =
+            runCatching {
+                engine.invoke(config) {
+                    category = Category.TABLE
+                    action = Action.LIST
+                    tableRequest =
+                        tableRequest {
+                            columnList =
+                                tableColumnListRequest {
+                                    this.tableName = table
+                                    this.schema = schema
+                                }
+                        }
+                }
+            }.getOrNull()
+        if (columnsResp == null || !columnsResp.success) {
+            val reason = columnsResp?.error?.takeIf { it.isNotBlank() } ?: Msg.text(StrKey.LOAD_FAILED)
+            return StructureLoadResult.Failed(Msg.format(StrKey.TABLE_DIALOG_LOAD_FAILED, reason))
+        }
+
+        // 外键是**可选**信息：方言不支持外键时 `FOREIGN_KEY.LIST` 会失败，
+        // 那不该让整个弹窗开不出来 —— 只是没有外键可编辑而已。
+        val fkItems =
+            runCatching {
+                engine.invoke(config) {
+                    category = Category.FOREIGN_KEY
+                    action = Action.LIST
+                    foreignKeyRequest =
+                        foreignKeyRequest {
+                            list =
+                                foreignKeyListRequest {
+                                    this.tableName = table
+                                    this.schema = schema
+                                }
+                        }
+                }
+            }.getOrNull()
+                ?.takeIf { it.success }
+                ?.foreignKey
+                ?.list
+                ?.itemsList
+                .orEmpty()
+
+        val drafts =
+            columnsResp.table.columns.itemsList.map { col ->
+                ColumnDraft(
+                    originalName = col.name,
+                    name = col.name,
+                    type = col.type,
+                    length = if (col.size > 0) col.size.toString() else "",
+                    primaryKey = col.isPrimaryKey,
+                    // `nullable` 是 proto3 的 optional：没给就是 null，按「可空」处理，
+                    // 与引擎 mapper 的默认一致（见 TableHandler.columnList 的同名注释）。
+                    nullable = if (col.hasNullable()) col.nullable else true,
+                    autoIncrement = col.autoIncrement,
+                    defaultValue = col.defaultValue,
+                )
+            }
+
+        val fkDrafts = fkItems.map { it.toDraft() }
+        return StructureLoadResult.Loaded(
+            TableStructureDraft(
+                database = target.database,
+                schema = schema,
+                tableName = table,
+                originalName = table,
+                isNew = false,
+                columns = drafts,
+                // 快照与当前列表**先给同一份**：差分要靠它认出「用户把这一列删了 /
+                // 改名 / 改了类型」—— 那些改动之后当前列表里已经没有原来的定义了。
+                originalColumns = drafts,
+                foreignKeys = fkDrafts,
+                // 快照与当前列表**先给同一份**：差分要靠它认出「用户在弹窗里整行删掉了
+                // 某条外键」—— 那之后当前列表里就没有它了，只有这份快照还记得。
+                originalForeignKeys = fkDrafts,
+                refTableCandidates = refTableCandidates(target.database, table),
+            ),
+        )
+    }
+
+    /**
+     * 引用表下拉的候选 —— 当前库里除**自己**以外的表。
+     *
+     * 为什么排除自己：自引用外键（`users.parent_id → users.id`，树形结构很常见）
+     * 在数据库里完全合法，把候选排掉会让用户以为这个功能不支持自引用。
+     * 真要自引用时用 [ColumnDraft.ForeignKeyDefinition] 那条路径之外的显式输入。
+     */
+    fun refTableCandidates(
+        database: String,
+        selfTable: String,
+    ): List<String> = tablesByDatabase[database].orEmpty().filter { !it.equals(selfTable, ignoreCase = true) }
+
+    /**
+     * 某张候选引用表的列名 —— 给弹窗里「被引用字段」的下拉用。
+     *
+     * 库与 schema 从弹窗当前草稿里取（弹窗知道自己在改哪张表），这里只负责发请求。
+     */
+    suspend fun refColumnsFor(
+        database: String,
+        schema: String,
+        refTable: String,
+    ): List<String> = loadRefColumns(database, schema, refTable)
+
+    /**
+     * 读某张表的列名 —— 给「被引用字段」下拉用。
+     *
+     * 为什么不一次性把所有候选表的列都拉回来：一个库几百张表 × 每张几十列就是
+     * 上万行元数据，而用户这一路通常只点开一两个引用表。按需查一次更快。
+     */
+    suspend fun loadRefColumns(
+        database: String,
+        schema: String,
+        table: String,
+    ): List<String> {
+        if (table.isBlank()) return emptyList()
+        val resp =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, database)) {
+                    category = Category.TABLE
+                    action = Action.LIST
+                    tableRequest =
+                        tableRequest {
+                            columnList =
+                                tableColumnListRequest {
+                                    this.tableName = table
+                                    this.schema = schema
+                                }
+                        }
+                }
+            }.getOrNull()
+        return resp
+            ?.takeIf { it.success }
+            ?.table
+            ?.columns
+            ?.itemsList
+            ?.map { it.name }
+            .orEmpty()
+    }
+
+    /**
+     * 新建表 —— `TABLE.CREATE` 加后续的外键，整批一个事务。
+     *
+     * ## 为什么建表之后还要单独建外键
+     *
+     * `TableCreateRequest` 只收 `columns`，没有外键字段（建表语句里带
+     * `FOREIGN KEY` 的那种写法在各方言上差异太大，交给引擎统一处理反而更稳）。
+     * 所以流程是「先建表，成功后再逐条 `FOREIGN_KEY.CREATE`」。
+     *
+     * ## 中途失败的残留
+     *
+     * 整批走一个事务，但**能不能真回滚取决于方言** —— MySQL 与 H2 对 DDL 隐式提交
+     * （见 `DdlTransactionIntegrationTest`），失败时会留下一张没有外键的表。
+     * 这一点由界面按方言能力提示，不在这里假装能保证。
+     */
+    suspend fun createTable(draft: TableStructureDraft): String? {
+        draft.validate()?.let { return it }
+        val name = draft.tableName.trim()
+        val config = engineConnFor(currentConnection, draft.database)
+        val (sessionId, beginError) = beginEditSession(draft.database)
+        if (sessionId == null) return beginError
+
+        var index = 0
+        val total = draft.columns.size + draft.foreignKeys.count { !it.isReadOnly }
+        for (column in draft.columns) {
+            index++
+            val failure =
+                runDdl(config, sessionId) {
+                    category = Category.TABLE
+                    action = Action.CREATE
+                    this.sessionId = sessionId
+                    tableRequest =
+                        tableRequest {
+                            create =
+                                tableCreateRequest {
+                                    tableName = name
+                                    this.schema = draft.schema
+                                    columns += column.toProto()
+                                }
+                        }
+                } ?: Msg.format(StrKey.TABLE_CREATE_FAILED, "$name")
+            if (failure != null) return rollbackDdlBatch(draft.database, sessionId, index, total, failure)
+        }
+        for (fk in draft.foreignKeys.filter { !it.isReadOnly }) {
+            index++
+            val failure = runDdl(config, sessionId) { fkRequest(name, fk, draft.schema, sessionId) }
+            if (failure != null) return rollbackDdlBatch(draft.database, sessionId, index, total, failure)
+        }
+        val commit = commitEditSession(draft.database, sessionId)
+        if (commit != null) return Msg.format(StrKey.TABLE_CREATE_FAILED, commit)
+        refreshTables(draft.database)
+        return null
+    }
+
+    /**
+     * 保存已有表的结构 —— 按 [TableStructureDraft.diff] 算出的差分逐条执行，整批一个事务。
+     *
+     * @return `null` = 成功；非空 = 该给用户看的失败文案。
+     */
+    suspend fun applyTableStructure(draft: TableStructureDraft): String? {
+        draft.validate()?.let { return it }
+        val changes = draft.diff()
+        if (changes.isEmpty()) return Msg.text(StrKey.TABLE_STRUCTURE_NO_CHANGE)
+        val table = draft.originalName.ifBlank { draft.tableName.trim() }
+        val config = engineConnFor(currentConnection, draft.database)
+        val (sessionId, beginError) = beginEditSession(draft.database)
+        if (sessionId == null) return beginError
+
+        changes.forEachIndexed { index, change ->
+            val failure =
+                when (change) {
+                    is StructureChange.AddColumn -> {
+                        runDdl(config, sessionId) {
+                            category = Category.TABLE
+                            action = Action.UPDATE
+                            this.sessionId = sessionId
+                            tableRequest =
+                                tableRequest {
+                                    update =
+                                        tableUpdateRequest {
+                                            tableName = table
+                                            this.schema = draft.schema
+                                            operation = "ADD_COLUMN"
+                                            column = change.column.toProto()
+                                        }
+                                }
+                        }?.let { Msg.format(StrKey.TABLE_SAVE_FAILED, it) }
+                    }
+
+                    is StructureChange.ModifyColumn -> {
+                        runDdl(config, sessionId) {
+                            category = Category.TABLE
+                            action = Action.UPDATE
+                            this.sessionId = sessionId
+                            tableRequest =
+                                tableRequest {
+                                    update =
+                                        tableUpdateRequest {
+                                            tableName = table
+                                            this.schema = draft.schema
+                                            operation = "MODIFY_COLUMN"
+                                            column = change.after.toProto(modifying = change.before.trimmedName)
+                                        }
+                                }
+                        }?.let { Msg.format(StrKey.TABLE_SAVE_FAILED, it) }
+                    }
+
+                    is StructureChange.DropColumn -> {
+                        runDdl(config, sessionId) {
+                            category = Category.TABLE
+                            action = Action.UPDATE
+                            this.sessionId = sessionId
+                            tableRequest =
+                                tableRequest {
+                                    update =
+                                        tableUpdateRequest {
+                                            this.tableName = table
+                                            this.schema = draft.schema
+                                            operation = "DROP_COLUMN"
+                                            columnName = change.name
+                                        }
+                                }
+                        }?.let { Msg.format(StrKey.TABLE_SAVE_FAILED, it) }
+                    }
+
+                    is StructureChange.AddForeignKey -> {
+                        runDdl(config, sessionId) { fkRequest(table, change.fk, draft.schema, sessionId) }
+                            ?.let { Msg.format(StrKey.TABLE_SAVE_FAILED, it) }
+                    }
+
+                    is StructureChange.DropForeignKey -> {
+                        runDdl(config, sessionId) {
+                            category = Category.FOREIGN_KEY
+                            action = Action.DELETE
+                            this.sessionId = sessionId
+                            foreignKeyRequest =
+                                foreignKeyRequest {
+                                    delete =
+                                        foreignKeyDeleteRequest {
+                                            this.tableName = table
+                                            fkName = change.name
+                                            this.schema = draft.schema
+                                            ifExists = true
+                                        }
+                                }
+                        }?.let { Msg.format(StrKey.TABLE_SAVE_FAILED, it) }
+                    }
+                }
+            if (failure != null) return rollbackDdlBatch(draft.database, sessionId, index + 1, changes.size, failure)
+        }
+        val commit = commitEditSession(draft.database, sessionId)
+        if (commit != null) return Msg.format(StrKey.TABLE_SAVE_FAILED, commit)
+        refreshTables(draft.database)
+        // 表结构变了，已打开的预览页的列、能力位全过时了 —— 重载一次，否则用户
+        // 看到的还是旧列，而库里已经是新的了。tab 不带 database 字段（全局唯一键是
+        // `schema::tableName`），所以只能按 schema + 表名匹配。
+        tabs
+            .filter { it.schema.equals(draft.schema, ignoreCase = true) && it.tableName.equals(table, ignoreCase = true) }
+            .forEach { loadTabPreview(it) }
+        return null
+    }
+
+    /** 删除表。调用方必须已经做过二次确认（删表不可逆）。 */
+    suspend fun deleteTable(target: TreeTarget): String? {
+        val table = target.table ?: return Msg.text(StrKey.TABLE_NAME_EMPTY)
+        val schema =
+            if (target.schema.isNotBlank()) {
+                target.schema
+            } else {
+                resolveSchemas(target.database).firstOrNull() ?: ""
+            }
+        val resp =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, target.database)) {
+                    category = Category.TABLE
+                    action = Action.DELETE
+                    tableRequest =
+                        tableRequest {
+                            delete =
+                                tableDeleteRequest {
+                                    this.tableName = table
+                                    this.schema = schema
+                                    ifExists = true
+                                }
+                        }
+                }
+            }.getOrNull()
+        if (resp == null || !resp.success) {
+            return Msg.format(
+                StrKey.TABLE_DELETE_FAILED,
+                resp?.error?.takeIf { it.isNotBlank() } ?: Msg.text(StrKey.OP_NO_ENGINE_RESPONSE),
+            )
+        }
+        // 关掉这张表的预览标签页：它已经不存在了，留着只会让用户点进去看到一个报错页。
+        val stale = tabs.filter { it.schema.equals(schema, ignoreCase = true) && it.tableName.equals(table, ignoreCase = true) }
+        if (stale.isNotEmpty()) {
+            tabs = tabs.filterNot { it in stale }
+            if (selectedTabIndex >= tabs.size) selectedTabIndex = tabs.size - 1
+        }
+        refreshTables(target.database)
+        return null
+    }
+
+    /** 删表成功后刷新树 —— 直接调 [refreshTables] 之外的东西会漏掉折叠状态。 */
+    private fun refreshTables(database: String) {
+        toggleDatabase(database)
+    }
+
+    /**
+     * 发一条 DDL —— 成功返回 `null`，失败返回**引擎原文**。
+     *
+     * 失败一律用原文而不是自己编一句：DDL 出错的种类太多（约束冲突、类型不兼容、
+     * 列被外键引用、权限不足……），转述必然丢掉最有用的那部分。
+     */
+    private suspend fun runDdl(
+        config: com.langbiantianya.grpc.ConnectionConfig,
+        sessionId: String,
+        // 接收者是 `RequestKt.Dsl` 而不是 `Request.Builder`：`engine.invoke` 给的
+        // 就是它（`import ...grpc.tableRequest {}` 这类 DSL 挂在这个类上）。
+        block: com.langbiantianya.grpc.RequestKt.Dsl.() -> Unit,
+    ): String? {
+        val resp =
+            runCatching {
+                engine.invoke(config) { block() }
+            }.getOrNull()
+        if (resp == null) return Msg.text(StrKey.OP_NO_ENGINE_RESPONSE)
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.OP_NO_ENGINE_RESPONSE) }
+        return null
+    }
+
+    /** 造一条 `FOREIGN_KEY.CREATE` 请求。[runDdl] 的 lambda 收的就是 `RequestKt.Dsl`。 */
+    private fun com.langbiantianya.grpc.RequestKt.Dsl.fkRequest(
+        table: String,
+        fk: ForeignKeyDraft,
+        schema: String,
+        sessionId: String,
+    ) {
+        category = Category.FOREIGN_KEY
+        action = Action.CREATE
+        this.sessionId = sessionId
+        foreignKeyRequest =
+            foreignKeyRequest {
+                create =
+                    foreignKeyCreateRequest {
+                        tableName = table
+                        fkName = fk.name.trim()
+                        columns += fk.column
+                        refTable = fk.refTable
+                        refColumns += fk.refColumn
+                        if (fk.onDelete.isNotBlank()) onDelete = fk.onDelete
+                        if (fk.onUpdate.isNotBlank()) onUpdate = fk.onUpdate
+                        this.schema = schema
+                    }
+            }
+    }
+
+    /**
+     * 批处理中途失败时的收尾：先回滚事务会话，再把「第几条 / 共几条 + 引擎原文」
+     * 拼成一句给用户看的话。
+     *
+     * 回滚本身也可能失败（连接已断、方言不支持 DDL 回滚），那种情况下**只报回滚
+     * 失败**——说成「已回滚」就是在骗用户，比报错更糟。
+     */
+    private suspend fun rollbackDdlBatch(
+        database: String,
+        sessionId: String,
+        index: Int,
+        total: Int,
+        failure: String,
+    ): String {
+        val rollback = rollbackEditSession(database, sessionId)
+        return if (rollback != null) {
+            Msg.format(StrKey.EDIT_ROLLBACK_FAILED, rollback)
+        } else {
+            Msg.format(StrKey.EDIT_APPLY_ROLLED_BACK, index, total, failure)
+        }
+    }
+
+    /**
+     * [ColumnDraft] → proto [com.langbiantianya.grpc.ColumnDef]。
+     *
+     * @param modifying 非空 = 这是 `MODIFY_COLUMN`，此时 `name` 必须填**旧名**
+     *   （引擎按旧名定位列），新名走 [com.langbiantianya.grpc.ColumnDef.newName]。
+     *
+     * 为什么不把改名做成「删列 + 加列」：那样中途失败会真的丢掉整列数据，
+     * 而 `MODIFY_COLUMN` 在各方言上都是一条原子操作。
+     *
+     * 值全部先提到局部变量再建 builder：`columnDef { }` 里 `name` / `type` /
+     * `nullable` 这些名字会解析到 builder 自己的属性，直接写 `type = type` 是自赋值。
+     */
+    private fun ColumnDraft.toProto(modifying: String? = null): com.langbiantianya.grpc.ColumnDef {
+        val targetName = if (modifying != null) modifying else trimmedName
+        val renamed = modifying != null && !trimmedName.equals(modifying, ignoreCase = true)
+        val typeText = type.trim()
+        val sizeValue = lengthOrZero
+        val pk = primaryKey
+        val auto = autoIncrement
+        val nullableFlag = nullable
+        val default = defaultValue.trim()
+        val newLabel = trimmedName
+        return com.langbiantianya.grpc.columnDef {
+            name = targetName
+            type = typeText
+            size = sizeValue
+            isPrimaryKey = pk
+            this.autoIncrement = auto
+            nullable = nullableFlag
+            if (default.isNotEmpty()) defaultValue = default
+            if (renamed) newName = newLabel
+        }
+    }
+
+    private fun com.langbiantianya.grpc.ForeignKeyListItem.toDraft(): ForeignKeyDraft {
+        // 复合外键的 columns / refColumns 都不止一个。界面只支持单列，
+        // 于是把原始列名留空 —— [ForeignKeyDraft.isReadOnly] 会把它变成只读行。
+        val single = columnsList.size == 1 && refColumnsList.size == 1
+        return ForeignKeyDraft(
+            name = name,
+            original =
+                ForeignKeyDraft.ForeignKeyDefinition(
+                    name = name,
+                    column = if (single) columnsList.first() else "",
+                    refTable = refTable,
+                    refColumn = if (single) refColumnsList.first() else "",
+                    onDelete = onDelete.ifBlank { "NO ACTION" },
+                    onUpdate = onUpdate.ifBlank { "NO ACTION" },
+                ),
+            column = if (single) columnsList.first() else "",
+            refTable = refTable,
+            refColumn = if (single) refColumnsList.first() else "",
+            onDelete = onDelete.ifBlank { "NO ACTION" },
+            onUpdate = onUpdate.ifBlank { "NO ACTION" },
+        )
     }
 
     /** 打开的标签页 */
