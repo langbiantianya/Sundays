@@ -270,20 +270,25 @@ class H2Dialect : DatabaseDialect {
                     while (rs.next()) {
                         val name = rs.getString(1) ?: continue
                         val dataTypeStr = rs.getString(2) ?: ""
-                        val charLen = rs.getInt(3)
+                        val charLen = rs.getLong(3)
                         // wasNull() 只反映“最近一次”读取，必须在每次读之后立刻取，
                         // 否则 charLen 的空值标记会被后面的 numPrec 覆盖（VARCHAR 长度因此被吞成 0）
                         val charLenWasNull = rs.wasNull()
-                        val numPrec = rs.getInt(4)
+                        val numPrec = rs.getLong(4)
                         val numPrecWasNull = rs.wasNull()
-                        val size =
+                        // H2 对 BLOB / BINARY LARGE OBJECT 的 NUMERIC_PRECISION 回
+                        // Long.MAX_VALUE（9223372036854775807），用 getInt 读会抛
+                        // "Numeric value out of range"，整张表的列定义一条都拿不到 ——
+                        // 含二进制列的表连列清单都列不出来。故按 Long 读再夹到 Int 区间。
+                        val rawSize =
                             if (!charLenWasNull && charLen > 0) {
                                 charLen
                             } else if (!numPrecWasNull) {
                                 numPrec
                             } else {
-                                0
+                                0L
                             }
+                        val size = rawSize.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                         val nullable = rs.getString(5)
                         val isPk = name in primaryKeys || name.lowercase() in primaryKeys
                         result.add(

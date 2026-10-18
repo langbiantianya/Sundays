@@ -50,9 +50,26 @@ class BackgroundTaskLifecycleTest {
      */
     private class CompletingEngine(
         private val file: File,
+        /**
+         * 可选的「闸门」—— 给了就在回报**完成帧之前**等它开闸。
+         *
+         * ## 为什么需要它
+         *
+         * `startExport` 把工作丢给 `Dispatchers.Default` 上的协程，而这个引擎
+         * **瞬间**就跑完。于是「刚登记就该是运行中」这条断言实际是在赌调度器
+         * 还没轮到那个协程 —— 机器一忙它就变成 SUCCEEDED，断言报
+         * 「刚登记就该是运行中」，而代码其实完全正确（实测全量并发下偶发）。
+         *
+         * 闸门把这段竞态**从测试里拿掉**：要断言「登记瞬间」的状态，就让引擎
+         * 在测试主动开闸之前不收口。不给闸门的其他用例保持原样。
+         */
+        private val gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
     ) : EngineClient {
         override fun handle(request: com.langbiantianya.grpc.Request): Flow<com.langbiantianya.grpc.Response> =
             flow {
+                // 闸门在**第一帧之前**：`刚登记` 那条断言还要验「没收到首帧时进度是 null」，
+                // 放到第一帧之后就只能验到 progress=7 了。
+                gate?.await()
                 emit(progressFrame(request.id, completed = false, rows = 7, filePath = ""))
                 emit(progressFrame(request.id, completed = true, rows = 7, filePath = file.absolutePath))
             }
@@ -198,7 +215,10 @@ class BackgroundTaskLifecycleTest {
         runBlocking<Unit> {
             val dir = Files.createTempDirectory("sundays-task-ok").toFile()
             val out = File(dir, "a.csv")
-            val state = newState(CompletingEngine(out))
+            // 闸门：不主动开，它就一直停在「运行中」，下面那条「刚登记」的断言
+            // 才是确定性的（见 [CompletingEngine] 的说明）。
+            val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val state = newState(CompletingEngine(out, gate))
 
             val taskId = state.startExport("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "a.csv")
 
@@ -208,6 +228,7 @@ class BackgroundTaskLifecycleTest {
             assertTrue(fresh.isRunning, "刚登记就该是运行中")
             assertEquals(null, fresh.progress, "没收到首帧时不能报 0 行")
 
+            gate.complete(Unit)
             awaitSettled(state, taskId)
 
             val done = state.backgroundTasks.first { it.id == taskId }

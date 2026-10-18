@@ -185,6 +185,40 @@ class DataHandlerIntegrationTest : H2Fixture() {
             assertEquals("1", executeQuerySingle("SELECT COUNT(*) FROM t"))
         }
 
+    /**
+     * 回归：文本与大对象列必须返回真实值。
+     * H2 的 CLOB 类型名是 `CHARACTER LARGE OBJECT`，旧实现因为只按类型名匹配 LOB 集合
+     * 而漏掉它，导致大文本列只能拿到占位符 —— 表格内编辑无从下手。
+     */
+    @Test
+    fun `LIST returns real text values for VARCHAR and CLOB, masks BLOB`() =
+        runBlocking<Unit> {
+            executeUpdate("CREATE TABLE docs (id INT PRIMARY KEY, title VARCHAR(50), body CLOB, raw BLOB)")
+            executeUpdate("INSERT INTO docs VALUES (1, '标题', '长文本正文内容', X'0102FF')")
+            val result =
+                DataHandler.list(
+                    config,
+                    DataListRequest
+                        .newBuilder()
+                        .setTableName("docs")
+                        .setPage(1)
+                        .setPageSize(10)
+                        .build(),
+                )
+            val row = result.rowsList.first()
+            // H2 把未加引号的标识符大写，所以列名查找必须忽略大小写
+
+            fun cell(name: String): String? =
+                row.valuesMap.entries
+                    .firstOrNull { it.key.equals(name, ignoreCase = true) }
+                    ?.value
+                    ?.stringValue
+            assertEquals("标题", cell("title"))
+            assertEquals("长文本正文内容", cell("body"))
+            // 二进制仍走占位符 —— 不能对 BLOB 调 getString
+            assertEquals("[LOB Data]", cell("raw"))
+        }
+
     @Test
     fun `INSERT binds LocalDate type for DATE column`() =
         runBlocking<Unit> {

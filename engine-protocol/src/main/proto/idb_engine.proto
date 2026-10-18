@@ -224,12 +224,17 @@ message DataCreateRequest {
   string table_name = 1;
   map<string, string> values = 2;   // column name -> stringified value
   string schema = 3;
+  // 这些列写 SQL NULL。`values` 装不下 null（「没这个键」与「这个键是 null」是两种
+  // map 表达不了的不同状态），所以用独立的列名清单显式声明。
+  repeated string null_columns = 4;
 }
 message DataUpdateRequest {
   string table_name = 1;
   map<string, string> changes = 2;
   map<string, string> where   = 3;
   string schema = 4;
+  // 同 DataCreateRequest.null_columns。
+  repeated string null_columns = 5;
 }
 message DataDeleteRequest {
   string table_name = 1;
@@ -579,11 +584,56 @@ message TableResponse {
 message Row {
   map<string, google.protobuf.Value> values = 1;
 }
+
+// 空串与 SQL NULL 的关系 —— 前端**必须**按它决定「清空输入框」写什么。
+enum EmptyValuePolicy {
+  // 旧引擎 / 未声明：前端按「未知」处理 —— 禁用写入口，不要猜。
+  EMPTY_VALUE_UNSPECIFIED = 0;
+  // 空串写 SQL NULL。
+  EMPTY_AS_NULL  = 1;
+  // 空串就写空串。**当前实现**：绝大多数用户「清空一个文本框」指的是清成空串，
+  // 而不是把字段变成 NULL；两者在查询、导出、唯一索引上行为都不同，猜错会静默改坏数据。
+  // 要写 NULL 必须走 `null_columns` 显式声明（见 DataCreateRequest）。
+  EMPTY_AS_STRING = 2;
+}
+
+// 表数据能力 —— 随 `DATA.LIST` 一起返回，前端据此决定「编辑 / 新增 / 删除」入口能不能用。
+//
+// 为什么必须由引擎回答：能不能写取决于这张表的**列定义**（有没有主键、哪些是自增、
+// 哪些是二进制）与**对象类型**（视图即使部分可写也不放行），这些只有
+// `dialect.listColumns` 答得上来。
+//
+// `DataListPagedResponse` 里用 `optional` 包它：新前端配老引擎时字段缺省，
+// 前端据此一律**禁用**写入口 —— 宁可不给编辑，也不要拿未确认的列名去发 UPDATE。
+message TableCapabilities {
+  // 有主键，且对象是真表（不是视图）。false 时编辑与删除入口都禁用。
+  bool can_update = 1;
+  // 至少有一列可填（排除自增列与二进制列）。
+  bool can_insert = 2;
+  // 有主键，且对象是真表。与 can_update 同一判据，但语义独立，单列出来给。
+  bool can_delete = 3;
+  // 不可编辑的列：主键列 + 二进制列。`DATA.LIST` 对二进制列回的是 "[LOB Data]"
+  // 占位串而不是真实内容，写回去等于用一句提示语覆盖掉用户的数据。
+  repeated string read_only_columns  = 4;
+  // 可编辑的列 = 全部列 − read_only_columns。
+  repeated string editable_columns   = 5;
+  // 新增时可填的列 = 全部列 − 自增列 − 二进制列（自增列交给数据库生成）。
+  repeated string insertable_columns = 6;
+  EmptyValuePolicy empty_value_policy = 7;
+  // 允许取 NULL 的列。前端据此决定编辑框里画不画「设为 NULL」的开关 ——
+  // 往 `NOT NULL` 列写 NULL 是**必然**失败的操作，给用户一个点下去就报错的按钮没有意义。
+  repeated string nullable_columns     = 8;
+  // 主键列（按列序）。与 [TableCapabilities.read_only_columns] 分开给，因为两者用途不同：
+  // `read_only_columns` 回答「这一格能不能改」，主键列回答「**用哪几列去定位这一行**」。
+  // 复合主键必须**整组**返回 —— 只带一列去 `WHERE` 不是唯一条件，会一次改掉多行。
+  repeated string primary_key_columns  = 9;
+}
 message DataListPagedResponse {
   int64 total = 1;
   int32 page = 2;
   int32 page_size = 3;
   repeated Row rows = 4;
+  optional TableCapabilities capabilities = 5;  // v2.17
 }
 message DataCreateResponse { int32 affected_rows = 1; }
 message DataUpdateResponse { int32 affected_rows = 1; }

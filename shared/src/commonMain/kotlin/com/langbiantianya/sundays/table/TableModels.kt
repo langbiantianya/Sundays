@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -209,6 +210,48 @@ data class DataTableTheme(
      * 事的后果完全不同（一个还没落盘，一个已选中待查看）。
      */
     val cellEditingBackground: Color = rowBackground,
+    /**
+     * 单元格「**已改但还没提交**」的背景色。
+     *
+     * ## 为什么必须是第三个颜色，不能复用前两个
+     *
+     * 这个组件现在要区分三件**后果完全不同**的事：
+     *
+     * | 状态 | 含义 | 后果 |
+     * |---|---|---|
+     * | [rowBackgroundSelected] | 这一行被选中 | 只是选中，要看详情 |
+     * | [cellEditingBackground] | 这一格正在输入 | 还没提交，但只有这一格 |
+     * | [cellPendingBackground] | 这一格改过，**攒着还没写进数据库** | 已经在缓冲区里，提交后才会落盘 |
+     *
+     * 前两者在一格宽的输入框里勉强能靠「有没有边框」区分；但暂存态是**散落在整张表里
+     * 的若干个不相邻格子**，和「选中行」「正在编辑」在视觉上会大量重叠。把三者画成同一个
+     * 颜色，用户根本判断不出「我现在点提交到底会改哪几格」—— 而那正是这个功能要回答的问题。
+     *
+     * 底色取**暖色系**：冷色已经被选中行 / 编辑态占满，而「待提交」在所有主流数据库工具里
+     * 都是暖色标记，继续沿用既有的用户预期。
+     */
+    val cellPendingBackground: Color = rowBackground,
+    /**
+     * 「**已标记删除**」整行的底色。
+     *
+     * 与 [cellPendingBackground] 必须能一眼分开：前者是「改了什么，等着提交」，
+     * 后者是「这行提交之后就没有了」。两者同时出现在一张表里（改两行、删一行），
+     * 画成同一个颜色的话用户点提交前根本分不清哪几行会消失。
+     */
+    val cellDeletedBackground: Color = rowBackground,
+    /**
+     * SQL NULL 单元格的文字样式（`null` = 沿用 [cellText]）。
+     *
+     * ## 为什么必须把 NULL **显示出来**
+     *
+     * 空串与 NULL 在查询、导出、唯一索引上行为都不同（见 [CellValueField]）。
+     * 但两者在界面上默认都是一片空白，用户无从分辨自己看到的是 `''` 还是 `NULL` ——
+     * 于是「清空」这个动作的后果变成了赌博。
+     *
+     * 所以 NULL 显示成斜体的 `NULL` 字样：用**占位而不是留白**，因为留白与空串
+     * 在视觉上就是同一个东西，正是要消除的歧义本身。
+     */
+    val cellNullText: TextStyle? = null,
 ) {
     companion object {
         /**
@@ -262,6 +305,15 @@ data class DataTableTheme(
                     },
                 borderColor = scheme.outlineVariant,
                 paginationBackground = scheme.surfaceVariant,
+                // 复古档没有独立的暖色语义可用，取 tertiaryContainer：
+                // 它与选行的 primaryContainer 分属两个色相，在 Win95/2000/XP 那套
+                // 低饱和配色里也已经能分辨，不至于把「待提交」画成「选中」。
+                cellPendingBackground = scheme.tertiaryContainer,
+                // 复古档：待删除行用 errorContainer（淡红），与待提交的 tertiaryContainer 分属冷暖两端；
+                // NULL 文字用 onSurfaceVariant，比正文淡一档但仍属同一色系 —— 复古配色里
+                // 再加一种颜色会立刻破坏它那套低饱和的整体感。
+                cellDeletedBackground = scheme.errorContainer,
+                cellNullText = TextStyle(fontSize = 13.sp, fontStyle = FontStyle.Italic, color = scheme.onSurfaceVariant),
             )
         }
 
@@ -291,6 +343,9 @@ data class DataTableTheme(
                 cellTextSelected = null,
                 borderColor = Color(0xFFE0E0E0),
                 paginationBackground = Color(0xFFF5F5F5),
+                cellPendingBackground = Color(0xFFFFF3CD),
+                cellDeletedBackground = Color(0xFFFFE0DE),
+                cellNullText = TextStyle(fontSize = 13.sp, fontStyle = FontStyle.Italic, color = Color(0xFF9E9E9E)),
             )
 
         /**
@@ -317,6 +372,9 @@ data class DataTableTheme(
                 cellTextSelected = TextStyle(fontSize = 13.sp, color = Color(0xFFFFFFFF)),
                 borderColor = Color(0xFF333A48),
                 paginationBackground = Color(0xFF2C3240),
+                cellPendingBackground = Color(0xFF3E3722),
+                cellDeletedBackground = Color(0xFF41262A),
+                cellNullText = TextStyle(fontSize = 13.sp, fontStyle = FontStyle.Italic, color = Color(0xFF7A828F)),
             )
 
         /**

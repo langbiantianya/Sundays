@@ -223,6 +223,32 @@ class DuckDBHandlerIntegrationTest : DuckDBFixture() {
             assertEquals(3, resp.rowsCount)
         }
 
+    /**
+     * 回归：DuckDB 的 VARCHAR 类型名不能被当成 LOB —— 文本列必须返回真实值。
+     */
+    @Test
+    fun `DATA LIST returns real VARCHAR value`() =
+        runBlocking {
+            executeUpdate("CREATE TABLE main.docs (id INTEGER, title VARCHAR)")
+            executeUpdate("INSERT INTO main.docs VALUES (1, 'duckdb title')")
+            val resp =
+                DataHandler.list(
+                    config,
+                    com.langbiantianya.grpc.DataListRequest
+                        .newBuilder()
+                        .setTableName("docs")
+                        .setPage(1)
+                        .setPageSize(10)
+                        .build(),
+                )
+            val title =
+                resp.rowsList
+                    .first()
+                    .valuesMap["title"]
+                    ?.stringValue
+            assertEquals("duckdb title", title)
+        }
+
     @Test
     fun `DATA CREATE inserts one row`() =
         runBlocking {

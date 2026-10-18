@@ -142,6 +142,30 @@ class SQLiteHandlerIntegrationTest : SQLiteFixture() {
             assertEquals(2, res.rowsCount)
         }
 
+    /**
+     * 回归（本缺陷的核心用例）：xerial JDBC 对 SQLite 每一个文本列的
+     * `ResultSetMetaData.getColumnTypeName` 都返回 `"TEXT"`。旧实现把 `TEXT`
+     * 放进 LOB_TYPES，于是浏览器里所有字符串列全部显示 `[LOB Data]`，真实值拿不到。
+     */
+    @Test
+    fun `DATA LIST returns real TEXT values and masks BLOB`() =
+        runBlocking {
+            executeUpdate("CREATE TABLE files (id INTEGER PRIMARY KEY, label TEXT, payload BLOB)")
+            executeUpdate("INSERT INTO files VALUES (1, 'hello sqlite', X'0102FF')")
+            val res =
+                DataHandler.list(
+                    config,
+                    dataListRequest {
+                        tableName = "files"
+                        page = 1
+                        pageSize = 10
+                    },
+                )
+            val row = res.rowsList.first()
+            assertEquals("hello sqlite", row.valuesMap["label"]?.stringValue)
+            assertEquals("[LOB Data]", row.valuesMap["payload"]?.stringValue)
+        }
+
     // ============ VIEW ============
 
     @Test

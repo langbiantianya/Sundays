@@ -13,6 +13,7 @@ import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -214,6 +216,54 @@ fun DataTable(
      * 默认跟随 [onCellEdit]（`true` 时才可编辑）；调用方拿不准时传 `false` 保持只读。
      */
     cellEditable: Boolean = onCellEdit != null,
+    /**
+     * 逐列的可编辑性 —— 在 [cellEditable] 为真时**进一步**收窄。
+     *
+     * ## 为什么表级一个 `Boolean` 不够
+     *
+     * 真实的表里总有几类列**不能**在单元格里改，而它们和「这张表可不可写」是两回事：
+     *
+     * - **主键列**：它同时是「定位这一行」的 `WHERE` 条件。允许改它，就得处理
+     *   「先改主键、后面几条改动的 `WHERE` 还能不能命中」这种自相矛盾的序列。
+     * - **二进制列**：`DATA.LIST` 对它们返回的是 `"[LOB Data]"` 占位串而不是真实内容，
+     *   拿占位串去写回去等于**用一句提示语覆盖掉用户的图片**。
+     *
+     * 这两类都不是「整张表只读」，恰恰相反，同一张表里绝大多数列照常可改。
+     * 所以必须是逐列谓词 —— 用表级开关一刀切，等于为了保护两列而让整张表都不能编辑。
+     *
+     * 默认 `{ true }` = 不额外收窄，保持既有行为。
+     */
+    isColumnEditable: (TableColumn) -> Boolean = { true },
+    /**
+     * 该单元格是否处于「**已改但还没提交**」状态 —— 用 [DataTableTheme.cellPendingBackground] 标出来。
+     *
+     * 之所以要调用方来判而不是组件自己记：值在调用方手里（暂存缓冲），
+     * 组件只负责渲染。这也让「放弃修改」只要把缓冲清空，高亮就自动消失 ——
+     * 若组件自己 `remember` 一份待提交列表，调用方放弃时就清不掉它，界面会一直显示脏格。
+     */
+    isCellPending: (TableRow, TableColumn) -> Boolean = { _, _ -> false },
+    /** 该列能否取 SQL NULL —— 决定编辑框里画不画 `∅` 开关（见 [CellValueField]）。 */
+    isColumnNullable: (TableColumn) -> Boolean = { true },
+    /** 该行是否已标记**待删除** —— 用 [DataTableTheme.cellDeletedBackground] 标出。 */
+    isRowDeleted: (TableRow) -> Boolean = { false },
+    /**
+     * 是否显示行首**复选框列**（多选）。
+     *
+     * ## 为什么必须是复选框，不能靠点行选中
+     *
+     * 本组件有两套互斥的手势：只读态下单击是「选中行」，可编辑态下单击是「进单元格编辑」
+     * （见 [DataTable.cellEditable] 的说明——两者抢同一个手势，所以编辑态必须去掉整行
+     * 的 `clickable`）。批量删除恰恰只在**可编辑**的表上才有意义，于是那一态里
+     * 已经没有「单击选中行」这条路了。复选框是唯一不与编辑手势打架、又符合
+     * Excel / DataGrip 肌肉记忆的做法。
+     *
+     * 默认 `false`：只读浏览与不需要多选的调用方**完全不受影响**（不多一列、不多一次测量）。
+     */
+    rowSelectable: Boolean = false,
+    /** 当前选中的行 id 集合（配合 [rowSelectable]）。 */
+    selectedRowIds: Set<Any> = emptySet(),
+    /** 选中行变化回调。传进来的集合是**新的**实例，调用方替换 state 即可。 */
+    onSelectedRowIdsChange: (Set<Any>) -> Unit = {},
 ) {
     require(columns.isNotEmpty()) { "DataTable requires at least one column" }
     require(detailPanelRatio in 0f..1f) { "detailPanelRatio must be in [0, 1], got $detailPanelRatio" }
@@ -280,7 +330,12 @@ fun DataTable(
             // 表头与表体都挂在 `horizontalScroll` 里，而滚动容器给子项的是**无界宽度**，
             // 此时 `Modifier.fillMaxWidth()` 是空操作、`Modifier.weight(1f)` 拿到 **0** 宽。
             BoxWithConstraints {
-                val contentWidth = contentWidthFor(columns, maxWidth)
+                val contentWidth =
+                    contentWidthFor(
+                        columns,
+                        maxWidth,
+                        if (rowSelectable) ROW_SELECTION_COLUMN_WIDTH else 0.dp,
+                    )
                 Column(modifier = Modifier.fillMaxSize()) {
                     // 表头与表体**共用同一个** ScrollState。
                     //
@@ -289,11 +344,25 @@ fun DataTable(
                     // 按列名读数会读到隔壁那一列。对数据库工具来说这是会读错数据的缺陷，
                     // 不是「体验不好」。
                     val hScroll = rememberScrollState()
+                    // 「本页全选」只认**当前页**的行：翻页后选中的行已经不在屏幕上，
+                    // 把它们算进来会让表头方框显示成「已全选」而实际只勾了几行。
+                    val pageIds = pageRows.map { it.id }.toSet()
                     TableHeader(
                         columns = columns,
                         theme = theme,
                         hScroll = hScroll,
                         contentWidth = contentWidth,
+                        rowSelectable = rowSelectable,
+                        allSelected = pageIds.isNotEmpty() && pageIds.all { it in selectedRowIds },
+                        onToggleAll = {
+                            onSelectedRowIdsChange(
+                                if (pageIds.isNotEmpty() && pageIds.all { it in selectedRowIds }) {
+                                    selectedRowIds - pageIds
+                                } else {
+                                    selectedRowIds + pageIds
+                                },
+                            )
+                        },
                     )
                     WinDivider(color = theme.borderColor)
                     TableBody(
@@ -306,6 +375,13 @@ fun DataTable(
                         hScroll = hScroll,
                         editable = cellEditable,
                         onCellEdit = onCellEdit,
+                        isColumnEditable = isColumnEditable,
+                        isCellPending = isCellPending,
+                        isColumnNullable = isColumnNullable,
+                        isRowDeleted = isRowDeleted,
+                        rowSelectable = rowSelectable,
+                        selectedRowIds = selectedRowIds,
+                        onSelectedRowIdsChange = onSelectedRowIdsChange,
                         contentWidth = contentWidth,
                     )
                     // 横向滚动条 —— 放在表体与分页栏**之间**。
@@ -485,9 +561,11 @@ fun DataTable(
 private fun contentWidthFor(
     columns: List<TableColumn>,
     viewport: Dp,
+    /** 复选框列等**不属于 columns 的定宽前缀**。表头与表体都要加，不加就整体错位。 */
+    extraFixed: Dp = 0.dp,
 ): Dp {
-    if (columns.isEmpty()) return viewport
-    val fixed = columns.fold(0.dp) { acc, c -> acc + (c.width ?: 0.dp) }
+    if (columns.isEmpty()) return viewport + extraFixed
+    val fixed = columns.fold(extraFixed) { acc, c -> acc + (c.width ?: 0.dp) }
     val weightedCount = columns.count { it.width == null }
     // 分隔线与左右内边距按 1dp / 12dp 估算，量级足够（差几 dp 不影响判断），
     // 真正要紧的是**有没有被固定成一个具体值**。
@@ -563,6 +641,15 @@ const val TABLE_PAGE_INDICATOR_TAG = "sundays.pageIndicator"
 const val TABLE_CELL_TAG_PREFIX = "sundays.cell."
 
 /**
+ * 行首选中方框的 UI 测试 tag —— 见 `DataTableRowSelectionTest`。
+ *
+ * 需要它的理由与 [TABLE_CELL_TAG_PREFIX] 一样：方框内部就是一个 `Text("✓")`，
+ * 既没有可点区域也没有别的稳定特征，测试只能靠 tag 精确定位「第 N 行的复选框」。
+ * 完整 tag 为 `"$TABLE_ROW_CHECKBOX_TAG<行 id>"`。
+ */
+const val TABLE_ROW_CHECKBOX_TAG = "sundays.rowCheckbox."
+
+/**
  * 分页底栏进入「紧凑档」的宽度阈值 —— 低于它就隐藏「首页 / 末页 / 共 N 条」。
  *
  * ## 为什么是这个取舍
@@ -629,6 +716,9 @@ private fun TableHeader(
     hScroll: ScrollState,
     /** 见 [contentWidthFor]：必须是显式宽度，不能用 `fillMaxWidth()`（滚动容器内是空操作）。 */
     contentWidth: Dp,
+    rowSelectable: Boolean,
+    allSelected: Boolean,
+    onToggleAll: () -> Unit,
 ) {
     Row(
         modifier =
@@ -669,6 +759,12 @@ private fun TableHeader(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (rowSelectable) {
+            // 表头这一格放「全选」。放在**表头**而不是工具条上，是因为它的语义就是
+            // 「选中本页所有行」，而只有表头能同时看到列宽与「全选」这两个上下文。
+            RowSelectionBox(checked = allSelected, onToggle = onToggleAll)
+            VerticalDivider(color = theme.borderColor, modifier = Modifier.height(20.dp))
+        }
         TableRowCells(columns = columns, theme = theme) { column, modifier ->
             TableCell(
                 text = column.header,
@@ -680,6 +776,69 @@ private fun TableHeader(
         }
     }
 }
+
+/**
+ * 行首的选中方框 —— 表头的「全选」与数据行的「选中本行」共用。
+ *
+ * 自己画而不用 Material3 `Checkbox`：那个控件带 48dp 最小可点击区域，
+ * 放进 20dp 高的表格行会把行高一倍不止，一屏能看的行数直接少一半。
+ */
+@Composable
+private fun RowSelectionBox(
+    checked: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val border =
+        if (checked) {
+            androidx.compose.material3.MaterialTheme.colorScheme.primary
+        } else {
+            androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant
+        }
+    Box(
+        modifier =
+            modifier
+                .width(ROW_SELECTION_COLUMN_WIDTH)
+                // ⚠️ 这里**不能**用 `fillMaxHeight()`。
+                //
+                // 表头那个 `Row` 是 `horizontalScroll` 里高度不定的行，它拿到的是**整列的
+                // 最大高度**约束；给子项加 `fillMaxHeight()` 会把「表头这一行」撑成满高，
+                // 于是表头文字被垂直居中到整张表的中间，分页栏被顶到窗口外面 ——
+                // 表现是「表格看起来少了一大截、翻页按钮点不到」，而根因在一处修饰符上。
+                //
+                // 数据行里同一个修饰符是无害的（LazyColumn item 的 maxHeight 是无穷），
+                // 正因为「有的地方没事有的地方出事」，它才更难被当场发现。
+                .padding(horizontal = 12.dp)
+                .clickable { onToggle() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .size(14.dp)
+                    .background(
+                        if (checked) {
+                            androidx.compose.material3.MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.Transparent
+                        },
+                    ).border(1.dp, border),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) {
+                Text(
+                    text = "✓",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onPrimary,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** 行首复选框列的宽度 —— 表头与表体共用同一个值，否则两者会错位。 */
+private val ROW_SELECTION_COLUMN_WIDTH = 40.dp
 
 // ============================================================================
 // 子组件：表体 (TableBody) —— 虚拟滚动
@@ -696,6 +855,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
     hScroll: ScrollState,
     editable: Boolean,
     onCellEdit: ((CellEdit) -> Unit)?,
+    isColumnEditable: (TableColumn) -> Boolean,
+    isCellPending: (TableRow, TableColumn) -> Boolean,
+    isColumnNullable: (TableColumn) -> Boolean,
+    isRowDeleted: (TableRow) -> Boolean,
+    rowSelectable: Boolean,
+    selectedRowIds: Set<Any>,
+    onSelectedRowIdsChange: (Set<Any>) -> Unit,
     /** 见 [contentWidthFor] —— 行宽必须显式给，不能靠 `fillMaxWidth()`。 */
     contentWidth: Dp,
 ) {
@@ -736,6 +902,17 @@ private fun androidx.compose.foundation.layout.ColumnScope.TableBody(
                 // 后者由 [DataTable.cellEditable] 表达，见其 KDoc；这里经 [TableBody] 转手。
                 editable = editable,
                 onCellEdit = onCellEdit,
+                isColumnEditable = isColumnEditable,
+                isCellPending = isCellPending,
+                isColumnNullable = isColumnNullable,
+                isRowDeleted = isRowDeleted(row),
+                rowSelectable = rowSelectable,
+                isRowChecked = row.id in selectedRowIds,
+                onToggleRowChecked = {
+                    onSelectedRowIdsChange(
+                        if (row.id in selectedRowIds) selectedRowIds - row.id else selectedRowIds + row.id,
+                    )
+                },
                 contentWidth = contentWidth,
             )
             WinDivider(color = theme.borderColor)
@@ -755,15 +932,22 @@ data class CellEdit(
     val rowId: Any,
     /** 目标列的 [TableColumn.key]。 */
     val columnKey: String,
-    /** 编辑前的原值（调用方可用于生成 `WHERE ... = <旧值>` 或写审计日志）。 */
-    val oldValue: String,
-    /** 用户提交的新值。 */
-    val newValue: String,
+    /** 编辑前的原值（调用方可用于生成 `WHERE ... = <旧值>` 或写审计日志）。`null` = 原来是 SQL NULL。 */
+    val oldValue: String?,
+    /**
+     * 用户提交的新值；`null` = **显式**要求写成 SQL NULL。
+     *
+     * 为什么用 `null` 而不是空串：数据库里 `''` 与 `NULL` 是两种东西（见 [CellValueField]
+     * 的说明），而协议的 `map<string, string>` 也表达不了 null。所以「置 NULL」
+     * 必须在这里有一个与「置空串」**类型上就不同**的表示方式 ——
+     * 否则前端迟早会把两者混成同一个 `""` 发出去。
+     */
+    val newValue: String?,
 ) {
     init {
         require(columnKey.isNotBlank()) { Msg.text(StrKey.CELL_EDIT_NO_COLUMN_KEY) }
         require(newValue != oldValue) {
-            Msg.format(StrKey.CELL_EDIT_SAME_VALUE, oldValue)
+            Msg.format(StrKey.CELL_EDIT_SAME_VALUE, oldValue ?: NULL_PLACEHOLDER)
         }
     }
 }
@@ -783,13 +967,28 @@ private fun TableRowView(
     contextMenuState: ContextMenuState,
     editable: Boolean,
     onCellEdit: ((CellEdit) -> Unit)?,
+    isColumnEditable: (TableColumn) -> Boolean,
+    /** 该列能否取 SQL NULL —— 决定编辑框里要不要画 `∅`。 */
+    isColumnNullable: (TableColumn) -> Boolean,
+    isCellPending: (TableRow, TableColumn) -> Boolean,
+    /** 整行是否已标记删除 —— 用 [DataTableTheme.cellDeletedBackground] 标出来。 */
+    isRowDeleted: Boolean,
+    rowSelectable: Boolean,
+    isRowChecked: Boolean,
+    onToggleRowChecked: () -> Unit,
     /** 行宽 —— 见 [contentWidthFor]。 */
     contentWidth: Dp,
 ) {
     val background =
         when {
+            // 已标记删除优先于选中/斑马纹：它是**后果最重**的状态 ——
+            // 提交后这一行就没了。选中只是要看详情，斑马纹只是排版辅助。
+            isRowDeleted -> theme.cellDeletedBackground
+
             isSelected -> theme.rowBackgroundSelected
+
             isAlternate && theme.rowBackgroundAlt != null -> theme.rowBackgroundAlt
+
             else -> theme.rowBackground
         }
     val cellStyle = if (isSelected && theme.cellTextSelected != null) theme.cellTextSelected else theme.cellText
@@ -805,6 +1004,11 @@ private fun TableRowView(
     // `detectTapGestures` 抢同一个手势，且父节点先拿到 —— 表现是点单元格只切换
     // 选中、永远进不了编辑。改为在单元格里**单击**就进编辑。
     //
+    // 判据用 [anyEditableColumn] 而不是入参 `editable`：表级说「可写」但逐列谓词把
+    // **所有**列都否掉了时（比如整张表只有一列，而那列恰好是主键），行里并没有任何
+    // 单元格会抢手势，此时去掉 `clickable` 只会让整行变成点不动的死区。
+    val anyEditableColumn = editable && onCellEdit != null && columns.any { isColumnEditable(it) }
+    //
     // ⚠️ [SelectionContainer] 与 [Row] 的**嵌套顺序不能动**。原实现是
     // `SelectionContainer { Row { … } }`；换成 `Row { SelectionContainer { … } }`
     // 之后实测 `TableColumnAlignmentTest` 两条一起红（表体 `maxValue` 变 0，
@@ -817,42 +1021,69 @@ private fun TableRowView(
             // fillMaxWidth 会静默失效，整行收缩成一个字符宽、几列叠在一起（见 [contentWidthFor]）。
             .width(contentWidth)
             .background(background)
-            .then(if (editable) Modifier else Modifier.clickable(onClick = onClick))
+            .then(if (anyEditableColumn) Modifier else Modifier.clickable(onClick = onClick))
             .onRightClick { offset -> contextMenuState.show(offset, row) }
             .padding(horizontal = 12.dp, vertical = 8.dp)
+
+    // 「正在编辑哪一列」要先过一遍**同一个**判据再往下用。
+    //
+    // 为什么：`editingColumn` 是 remember 下来的状态，而可编辑性是会变的 ——
+    // 用户编辑到一半打开只读开关，或这一页重新载入后该列变成了只读列。
+    // 这时若还拿旧值往下判断，既会渲染出一个「不能编辑却顶着编辑框」的格子，
+    // 更麻烦的是 `editingColumn != null` 会让整行**跳过 [SelectionContainer]**，
+    // 于是这一行再也点不动、也没有任何东西去清掉这个状态 —— 卡死的死区。
+    //
+    // 在**行这一层**算一次而不是每格算：它与「当前是第几列」无关。
+    val editingKey: String? =
+        editingColumn?.takeIf { key ->
+            editable && onCellEdit != null && columns.any { it.key == key && isColumnEditable(it) }
+        }
 
     @Composable
     fun RowScope.rowContent() {
         TableRowCells(columns = columns, theme = theme) { column, modifier ->
+            // 原始值。必须从 `cells` 直取而不是用 [TableRow.formatted]：后者把 null
+            // 也变成 `""`，而 NULL 与空串正是这里要区分开的两种东西。
+            val rawValue = row.cells[column.key]
+            val isNullValue = rawValue == null
             val value = row.formatted(column)
-            if (editingColumn == column.key) {
+            // 逐列收窄后的最终判据。三个条件缺一不可：
+            // 表可写、调用方挂了回调、这一列本身允许改。
+            //
+            // 已标记删除的行一律不再可编辑：这一行提交后就不存在了，
+            // 还在上面改值会让人以为改动会一起生效。
+            val canEditThisCell = editable && onCellEdit != null && !isRowDeleted && isColumnEditable(column)
+            if (editingKey == column.key) {
                 CellEditor(
-                    initial = value,
+                    initial = if (isNullValue) null else value,
                     theme = theme,
+                    nullable = isColumnNullable(column),
                     onCancel = { editingColumn = null },
                     onCommit = { newValue ->
                         editingColumn = null
                         // 值没变就不发回调：否则「点开又按 Esc」就会写一条
                         // `UPDATE SET x = x`，把表的修改时间白白弄脏。
-                        if (newValue != value) {
-                            onCellEdit?.invoke(CellEdit(row.id, column.key, value, newValue))
+                        if (newValue != (if (isNullValue) null else value)) {
+                            onCellEdit?.invoke(CellEdit(row.id, column.key, if (isNullValue) null else value, newValue))
                         }
                     },
                     modifier = modifier,
                 )
             } else {
                 TableCell(
-                    text = value,
+                    // NULL 显示成斜体 `NULL` 而不是留白 —— 留白与空串在视觉上完全一样，
+                    // 而它们在数据库里是两回事（见 [CellValueField]）。
+                    text = if (isNullValue) NULL_PLACEHOLDER else value,
                     column = column,
                     theme = theme,
-                    cellStyle = cellStyle,
+                    cellStyle = if (isNullValue) (theme.cellNullText ?: cellStyle) else cellStyle,
                     modifier = modifier,
                     // 可编辑时**单击**即进编辑。
                     //
                     // 为什么不是双击：双击要先等判定间隔、且与「选中行」这个高频动作
                     // 语义重叠 —— 用户在可编辑表格里点一下就想改值，选中行是**浏览**态才需要的。
                     cellModifier =
-                        if (editable) {
+                        if (canEditThisCell) {
                             Modifier
                                 .testTag(TABLE_CELL_TAG_PREFIX + column.key)
                                 .pointerInput(row.id, column.key) {
@@ -863,16 +1094,35 @@ private fun TableRowView(
                                 }
                         } else {
                             Modifier
+                        }.let { base ->
+                            // 待提交底色画在 `cellModifier` 上而不是 `modifier`：
+                            // `modifier` 里带着 `weight`，插在它前面会让列宽塌成内容宽
+                            // （见 [TableCell] 的注释）。这里已经在 Box 的修饰符链里，
+                            // 且在 `.padding(horizontal = 8.dp)` **之前**，所以底色铺满整格宽度。
+                            //
+                            // 编辑中的那一格**不画**待提交底色：它已经有编辑框自己的底色，
+                            // 两层叠在一起会看不清当前是不是在改这一格。
+                            if (isCellPending(row, column) && editingKey != column.key) {
+                                base.background(theme.cellPendingBackground)
+                            } else {
+                                base
+                            }
                         },
                 )
             }
         }
     }
 
-    if (editingColumn == null) {
+    // 判 [editingKey] 而不是 remember 出来的 [editingColumn]：后者可能因为这一列
+    // 变成不可编辑而已经失效（见其上方注释），拿它判会让整行永远停在「编辑态」分支上。
+    if (editingKey == null) {
         // 只读态：保留 [SelectionContainer] 让用户拖拽选择单元格文本。
         SelectionContainer {
             Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
+                if (rowSelectable) {
+                    RowSelectionBox(checked = isRowChecked, onToggle = onToggleRowChecked)
+                    VerticalDivider(color = theme.borderColor, modifier = Modifier.height(20.dp))
+                }
                 rowContent()
             }
         }
@@ -881,6 +1131,12 @@ private fun TableRowView(
         // 双击/单击因此到不了单元格（实测报 "Failed to inject touch input"）。
         // 这不损失什么：用户此时要做的是「改值」，编辑框自带光标，静态文本本来就不该被选中。
         Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
+            // 复选框**不受**编辑态影响：它是这一行唯一的「选中」入口，
+            // 拿掉它就等于在可编辑的表上完全没法多选，也就做不了批量删除。
+            if (rowSelectable) {
+                RowSelectionBox(checked = isRowChecked, onToggle = onToggleRowChecked)
+                VerticalDivider(color = theme.borderColor, modifier = Modifier.height(20.dp))
+            }
             rowContent()
         }
     }
@@ -901,10 +1157,12 @@ private fun TableRowView(
  */
 @Composable
 private fun CellEditor(
-    initial: String,
+    initial: String?,
     theme: DataTableTheme,
+    /** 该列能否取 NULL —— 为 `false` 时不画 `∅` 开关（往 `NOT NULL` 列写 NULL 必然失败）。 */
+    nullable: Boolean,
     onCancel: () -> Unit,
-    onCommit: (String) -> Unit,
+    onCommit: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var text by remember { mutableStateOf(initial) }
@@ -921,32 +1179,20 @@ private fun CellEditor(
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    // 用 `TextField`（单行样式）而不是 `BasicTextField`：
-    // `BasicTextField` + `decorationBox` 虽然能画占位符，但**不会**把 `SetText` 语义
-    // 挂到外层节点上 —— 读屏软件与 UI 测试都找不到「这个框能输字」。
-    // `TextField` 的 `singleLine` 变体正是为「表格内联编辑」这种窄场景设计的。
-    TextField(
+    // 取值控件本身在 [CellValueField]（表内编辑与「新增行」弹窗共用同一套 NULL 约定）。
+    // 焦点与 `SetText` 语义挂在**外层**而不是 TextField 上：列宽约束来自
+    // `TableRowCells`，与 TextField 的内部节点不在同一层，挂错地方读屏软件
+    // 会认为这格「只是个文字」。
+    CellValueField(
         value = text,
+        nullable = nullable,
+        theme = theme,
         onValueChange = { text = it },
-        singleLine = true,
-        textStyle = theme.cellText,
-        colors =
-            TextFieldDefaults.colors(
-                focusedContainerColor = theme.cellEditingBackground,
-                unfocusedContainerColor = theme.cellEditingBackground,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
+        onSubmit = { onCommit(text) },
         modifier =
             modifier
                 .focusRequester(focusRequester)
                 .onFocusChanged { focused = it.isFocused }
-                // 显式补 `SetText` 语义。
-                //
-                // `TextField` 内部把输入语义挂在**它自己的**子节点上，而这里的
-                // `modifier`（列宽约束）来自 `TableRowCells`，两者不在同一层 ——
-                // 于是从表格这一侧用 `hasSetTextAction()` 找不到可编辑目标，
-                // 读屏软件同样会认为这格「只是个文字」。
                 .semantics {
                     setText { new ->
                         // 入参是 AnnotatedString（与 `TextField` 内部同名回调一致），

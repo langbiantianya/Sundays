@@ -174,7 +174,9 @@ import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.editor.ui.rememberCodeEditorState
 import com.langbiantianya.sundays.settings.formatBytes
 import com.langbiantianya.sundays.table.CellEdit
+import com.langbiantianya.sundays.table.CellValueField
 import com.langbiantianya.sundays.table.DataTable
+import com.langbiantianya.sundays.table.DataTableTheme
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.table.TableColumn
 import com.langbiantianya.sundays.table.TableRow
@@ -197,6 +199,7 @@ import com.langbiantianya.sundays.ui.str
 import com.langbiantianya.sundays.ui.tabStripContainerColor
 import com.langbiantianya.sundays.ui.winShape
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -2918,16 +2921,22 @@ private fun PreviewTabArea(
                     tab = current,
                     onPageChange = { page -> state.goToTabPage(current, page) },
                     onPageSizeChange = { size -> state.changeTabPageSize(current, size) },
-                    // 编辑回调只在 [DatabaseBrowserState.isTableEditable] 为真时挂上 ——
-                    // 它依赖引擎回传主键列名，而 `DATA.LIST` 目前不回（见该函数 KDoc）。
-                    // 失败文案写回 tab.error：错误条已经在预览顶部，位置现成，
-                    // 不必为此再引入一个弹窗。
+                    // 编辑回调**只把改动放进暂存缓冲**，不发任何请求 ——
+                    // 真正写库发生在用户点「提交」时，整批走一个事务（见
+                    // [DatabaseBrowserState.applyCellEdits]）。
+                    //
+                    // 它是同步的，所以不需要 `scope.launch`：原先每次改一格就起一个协程发
+                    // 请求，现在只是往 Map 里塞一条，20 次编辑不该换来 20 个协程。
+                    //
+                    // 失败文案走 `notice` 而不是 `error`：`error` 的渲染分支会把**整块表格**
+                    // 换成「读取失败」面板 —— 而暂存被拒时数据是好的、表格也该继续显示，
+                    // 用户还要看着它把值改对。两者语义不同，见 [TablePreviewTab.notice]。
                     onCellEdit =
                         if (state.isTableEditable(current)) {
                             { edit ->
-                                scope.launch {
-                                    val err = state.updateCell(current, edit)
-                                    if (err != null) current.error = err
+                                state.stageCellEdit(current, edit)?.let {
+                                    current.notice = it
+                                    current.noticeIsError = true
                                 }
                             }
                         } else {
@@ -2936,6 +2945,53 @@ private fun PreviewTabArea(
                     // 与 onCellEdit 同源但**独立**传：行级「选中行」的 clickable 只在
                     // 真能编辑时才让位，否则只读浏览会整行点不动。
                     cellEditable = state.isTableEditable(current),
+                    // 主键列与二进制列逐个关掉 —— 表级开关管不了它们（见该谓词 KDoc）。
+                    isColumnEditable = { column -> state.isColumnEditable(current, column) },
+                    // 该列能否取 NULL —— 决定编辑框里画不画「设为 NULL」的开关。
+                    isColumnNullable = { column -> state.isColumnNullable(current, column) },
+                    // 待提交高亮：值在状态机的缓冲里，组件只负责画。
+                    isCellPending = { row, column -> state.isCellPending(current, row, column) },
+                    // 已标记删除的整行要画成删除态底色，否则用户提交前不知道哪几行会消失。
+                    isRowDeleted = { row -> state.isRowDeleted(current, row) },
+                    // 多选只在「能删」时开：不能删的表摆一列复选框而点了没反应，
+                    // 比不给更让人困惑。
+                    rowSelectable = state.canDeleteRows(current),
+                    selectedRowIds = current.selectedRowIds,
+                    onSelectedRowIdsChange = { ids -> current.selectedRowIds = ids },
+                    canInsert = state.canInsertRows(current),
+                    onDeleteSelected = {
+                        val picked = current.selectedRowIds.size
+                        val err = state.stageRowDeletes(current, current.selectedRowIds)
+                        current.notice = err ?: Msg.format(StrKey.EDIT_DELETED_MARKED, picked)
+                        current.noticeIsError = false
+                    },
+                    onInsertRows = { rows ->
+                        val before = current.pendingOps.size
+                        val msg = state.stageRowInserts(current, rows)
+                        current.notice = msg
+                        // 消息有两种含义：一行都没进缓冲（错误）与只跳过了几行（提示）。
+                        // 用「缓冲有没有变长」区分，比让状态机多返回一个标志位更难写错。
+                        current.noticeIsError = msg != null && current.pendingOps.size == before
+                    },
+                    insertableColumns = current.insertableColumns,
+                    nullableColumns = current.nullableColumns,
+                    onApplyEdits = {
+                        scope.launch {
+                            val count = current.pendingOps.size
+                            val err = state.applyCellEdits(current)
+                            // 同样走 notice：提交失败时数据库已经回滚了，但**数据是好的**，
+                            // 表格必须继续显示 —— 用户要看着那几行改掉冲突值再重试。
+                            current.notice =
+                                err ?: Msg.format(StrKey.EDIT_APPLIED, count)
+                            current.noticeIsError = err != null
+                        }
+                    },
+                    onDiscardEdits = {
+                        state.discardCellEdits(current)?.let {
+                            current.notice = it
+                            current.noticeIsError = false
+                        }
+                    },
                     onFilterChange = { state.setTabFilter(current, it) },
                     onOrderByChange = { state.setTabOrderBy(current, it) },
                     onSearchChange = { state.setTabSearch(current, it) },
@@ -3837,6 +3893,17 @@ internal const val TABLE_FILTER_BTN_TAG = "tableFilterBtn"
 internal const val TABLE_FILTER_FIELD_TAG = "tableFilterField"
 internal const val TABLE_ORDER_BTN_TAG = "tableOrderBtn"
 
+/** 表预览「新增行」「删除选中行」工具条的 UI 测试 tag。 */
+internal const val TABLE_INSERT_ROWS_BTN_TAG = "tableInsertRowsBtn"
+internal const val TABLE_DELETE_ROWS_BTN_TAG = "tableDeleteRowsBtn"
+
+/** 新增行弹窗的 UI 测试 tag。行内 tag 后缀是 0 起的行号。 */
+internal const val TABLE_INSERT_DIALOG_TAG = "tableInsertDialog"
+internal const val TABLE_INSERT_ROW_TAG = "tableInsertRow"
+internal const val TABLE_INSERT_ADD_ROW_BTN_TAG = "tableInsertAddRowBtn"
+internal const val TABLE_INSERT_REMOVE_ROW_BTN_TAG = "tableInsertRemoveRowBtn"
+internal const val TABLE_INSERT_CONFIRM_BTN_TAG = "tableInsertConfirmBtn"
+
 @Composable
 private fun PreviewTabContent(
     tab: TablePreviewTab,
@@ -3844,6 +3911,27 @@ private fun PreviewTabContent(
     onPageSizeChange: (PageSize) -> Unit,
     onCellEdit: ((CellEdit) -> Unit)? = null,
     cellEditable: Boolean = onCellEdit != null,
+    isColumnEditable: (TableColumn) -> Boolean = { true },
+    isColumnNullable: (TableColumn) -> Boolean = { true },
+    isCellPending: (TableRow, TableColumn) -> Boolean = { _, _ -> false },
+    isRowDeleted: (TableRow) -> Boolean = { false },
+    rowSelectable: Boolean = false,
+    selectedRowIds: Set<Any> = emptySet(),
+    onSelectedRowIdsChange: (Set<Any>) -> Unit = {},
+    /** 引擎判定这张表能新增（且当前不是只读）。false = 不画「新增行」入口。 */
+    canInsert: Boolean = false,
+    /** 点「删除选中行」—— 把复选框选中的行**标记**为待删除（真正删发生在提交时）。 */
+    onDeleteSelected: (() -> Unit)? = null,
+    /** 点「新增行」—— 打开填行弹窗；回调参数是待新增的行（列 → 值，`null` = SQL NULL）。 */
+    onInsertRows: ((List<Map<String, String?>>) -> Unit)? = null,
+    /** 弹窗里可填的列（引擎已剔除自增列与二进制列），**按列序**。 */
+    insertableColumns: List<String> = emptyList(),
+    /** 弹窗里允许取 NULL 的列。 */
+    nullableColumns: Set<String> = emptySet(),
+    /** 点「提交修改」—— 把暂存缓冲整批送进一个事务（见 [DatabaseBrowserState.applyCellEdits]）。 */
+    onApplyEdits: (() -> Unit)? = null,
+    /** 点「放弃修改」—— 只清缓冲，不发请求。 */
+    onDiscardEdits: (() -> Unit)? = null,
     onFilterChange: (String) -> Unit = {},
     onOrderByChange: (String) -> Unit = {},
     onSearchChange: (String) -> Unit = {},
@@ -3851,6 +3939,9 @@ private fun PreviewTabContent(
     onExport: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // 弹窗的开关状态放这里而不是 `InsertRowsDialog` 内部：弹窗是模态浮层，它的内容要拿到
+    // **每次翻页后刷新的** `insertableColumns`，放在外面就不会有一份记过期的列名。
+    var insertDialogOpen by remember { mutableStateOf(false) }
     Column(modifier = modifier) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -3942,7 +4033,49 @@ private fun PreviewTabContent(
             onSearchChange = onSearchChange,
             onExport = onExport,
         )
-        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        // 「新增行 / 删除选中行」工具条：**只画引擎说能用**的那几个。
+        //
+        // 为什么不给就别画：一个点了必然报错的按钮，比没有这个按钮更糟 —— 用户会以为
+        // 是数据库出问题了。反过来，给了却用不了（比如只读模式）同样是噪音。
+        // 判据是引擎随 DATA.LIST 回的能力位，不是前端猜的（见 [TablePreviewTab.canInsert]）。
+        if (canInsert || (rowSelectable && selectedRowIds.isNotEmpty())) {
+            RowToolsBar(
+                canInsert = canInsert,
+                selectedCount = selectedRowIds.size,
+                busy = tab.applyingEdits,
+                onInsert = { insertDialogOpen = true },
+                onDeleteSelected = onDeleteSelected,
+            )
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        // 待提交工具条：只在**确实有待提交改动**时占一行。
+        //
+        // 为什么不常驻：一条永远显示「0 处待提交 / 提交 / 放弃」的工具条会占掉一行高度，
+        // 而这个高度在表格密集时是实打实的；更要紧的是它会让人以为「改一格就得点一次提交」，
+        // 从而在只有一处改动时也走完整套流程。零状态不出现，改动状态必然出现。
+        if (tab.pendingOps.isNotEmpty()) {
+            PendingEditsBar(
+                count = tab.pendingOps.size,
+                busy = tab.applyingEdits,
+                onApply = onApplyEdits,
+                onDiscard = onDiscardEdits,
+            )
+            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        // 新增行弹窗挂在这一层而不是 composable 内部 remember：它要跨 pane 切换吗？
+        // 不用 —— 但它的内容要能拿到最新的 [insertableColumns]，而那些每翻一页都会刷新。
+        // 放在这里就没有「记住了一份过期列名」的问题。
+        if (insertDialogOpen && onInsertRows != null && insertableColumns.isNotEmpty()) {
+            InsertRowsDialog(
+                columns = insertableColumns,
+                nullableColumns = nullableColumns,
+                onDismiss = { insertDialogOpen = false },
+                onConfirm = { rows ->
+                    insertDialogOpen = false
+                    onInsertRows(rows)
+                },
+            )
+        }
         when {
             // 错误分支**必须排在最前**：翻页失败时 columns 仍留着上一页的、rows 已清空，
             // 若按「有列就画表格」的顺序判断，用户看到的是一张有表头但零行的空表，
@@ -3959,7 +4092,9 @@ private fun PreviewTabContent(
             tab.columns.isNotEmpty() || tab.rows.isNotEmpty() -> {
                 DataTable(
                     columns = tab.columns,
-                    rows = tab.rows,
+                    // 渲染用**叠加了暂存修改**的行；`tab.rows` 始终是数据库里的真值，
+                    // 这样「放弃修改」不必回滚任何本地数据（见 [TablePreviewTab.displayRows]）。
+                    rows = tab.displayRows(),
                     modifier = Modifier.fillMaxSize(),
                     pageSize = tab.pageSize.toPageSize(),
                     onPageSizeChange = onPageSizeChange,
@@ -3975,6 +4110,15 @@ private fun PreviewTabContent(
                     // 传 null = 只读。什么时候能传非 null，见 [DatabaseBrowserState.isTableEditable]
                     onCellEdit = onCellEdit,
                     cellEditable = cellEditable,
+                    isColumnEditable = isColumnEditable,
+                    isCellPending = isCellPending,
+                    // 三件与「能不能写」有关的都逐项传下去，组件只负责画：
+                    // NULL 开关、待删除行底色、复选框列。
+                    isColumnNullable = isColumnNullable,
+                    isRowDeleted = isRowDeleted,
+                    rowSelectable = rowSelectable,
+                    selectedRowIds = selectedRowIds,
+                    onSelectedRowIdsChange = onSelectedRowIdsChange,
                 )
             }
 
@@ -3988,6 +4132,311 @@ private fun PreviewTabContent(
 
             else -> {
                 Spacer(Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+/**
+ * 待提交修改的工具条 —— 「待提交 N 处修改」+ 提交 / 放弃。
+ *
+ * ## 为什么需要显式提交，而不是改一格写一格
+ *
+ * 改一格立刻发 `UPDATE` 的话，批量改 20 行会变成 20 条**各自独立提交**的语句。
+ * 第 13 行撞上唯一索引时，前 12 行已经落库 —— 用户没有任何手段把它们一起撤回。
+ * 攒起来一次提交，这 20 条就落进**同一个事务**，失败整批回滚。
+ *
+ * ## 提交中为什么要禁用两个按钮
+ *
+ * 事务期间 `SYSTEM.BEGIN` 已经开、连接已经被引擎钉住。再点一次「提交」会开出
+ * **第二个**事务会话，而第一个在用户看不见的地方悬着 —— 连接池被长期占用，
+ * 数据库里还多了一个没人会提交的锁。所以 [busy] 把两个按钮一起关掉，
+ * 而不只是关掉「提交」：提交中清空缓冲会让「正在写的值」凭空消失。
+ */
+@Composable
+private fun PendingEditsBar(
+    count: Int,
+    busy: Boolean,
+    onApply: (() -> Unit)?,
+    onDiscard: (() -> Unit)?,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (busy) {
+                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(2.dp))
+            }
+            Text(
+                text = str(StrKey.EDIT_PENDING_COUNT, count),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            onDiscard?.let {
+                WinButton(
+                    onClick = it,
+                    enabled = !busy,
+                    shape = SundaysPalette.buttonShape,
+                ) {
+                    Text(str(StrKey.EDIT_DISCARD), maxLines = 1, softWrap = false)
+                }
+            }
+            onApply?.let {
+                WinButton(
+                    onClick = it,
+                    enabled = !busy,
+                    shape = SundaysPalette.buttonShape,
+                ) {
+                    Text(str(StrKey.EDIT_APPLY), maxLines = 1, softWrap = false)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 表预览里的「新增行 / 删除选中行」工具条。
+ *
+ * ## 为什么这两个按钮的**可见性**不由「能不能编辑」决定
+ *
+ * 能编辑的表一定也能勾选行，但反过来不成立：一张没有主键的表可以随便改单元格
+ * （按行号定位不了没关系，编辑靠的是整行匹配）却**删不掉**——`DELETE` 的
+ * `WHERE` 只能由主键拼。所以 [canInsert] 与 [selectedCount] 各自独立决定画不画，
+ * 不能合成一个 `if (editable)`。
+ *
+ * ## 为什么删除按钮永远在，只是没选中时禁用
+ *
+ * 按钮不出现的话，用户根本不知道「这里可以删行」；而复选框列就在它左边，
+ * 选中之后按钮自然可点。隐藏 + 突然出现比一直灰着更难扫视。
+ *
+ * ## 为什么删的是「标记」而不是数据
+ *
+ * 删数据不可逆，而 `WHERE` 只有主键条件。标记 + 提交给了用户一次确认，
+ * 也让整批删除能和其它改动落进同一个事务（见 [DatabaseBrowserState.stageRowDeletes]）。
+ */
+@Composable
+private fun RowToolsBar(
+    canInsert: Boolean,
+    selectedCount: Int,
+    busy: Boolean,
+    onInsert: () -> Unit,
+    onDeleteSelected: (() -> Unit)?,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (canInsert) {
+                WinButton(
+                    onClick = onInsert,
+                    // 提交中禁用：此刻连接已被事务钉住，再发插入会开出第二个事务会话。
+                    enabled = !busy,
+                    shape = SundaysPalette.buttonShape,
+                    modifier = Modifier.testTag(TABLE_INSERT_ROWS_BTN_TAG),
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(str(StrKey.EDIT_INSERT_ROWS), maxLines = 1, softWrap = false)
+                }
+            }
+            if (onDeleteSelected != null) {
+                WinButton(
+                    onClick = onDeleteSelected,
+                    enabled = !busy && selectedCount > 0,
+                    shape = SundaysPalette.buttonShape,
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                            disabledContentColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
+                    modifier = Modifier.testTag(TABLE_DELETE_ROWS_BTN_TAG),
+                ) {
+                    Text(
+                        text = str(StrKey.EDIT_DELETE_ROWS, selectedCount),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+                // 说明只跟着「已选中」出现：没选中时说「标记后可一起提交」纯属噪音。
+                if (selectedCount > 0) {
+                    Text(
+                        text = str(StrKey.EDIT_DELETE_CONFIRM_HINT),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 「新增数据行」弹窗 —— 一张可以随时增删行的小表格。
+ *
+ * ## 为什么是弹窗里的一张表，而不是「在主表上直接加空行」
+ *
+ * 主表是**分页的服务端数据**：当前页末尾加的那一行不属于任何一页，引擎也没有
+ * 「临时行」这个概念，页码、总数、翻页都会与它对不上。弹窗把这批数据与主表
+ * 完全隔开，确认后才进暂存缓冲 —— 那时它才变成一次真正的 `INSERT`。
+ *
+ * ## 为什么每格都用自己的 [CellValueField]
+ *
+ * 因为「空串 ≠ NULL」这条约定在新增场景同样成立，而用户在这里**没有任何已有数据
+ * 可以参照**，最需要的就是那个显式开关。共用同一套控件还顺带保证了「新增」与
+ * 「编辑」在 NULL 语义上不会漂移。
+ *
+ * ## 为什么默认先摆一行空的
+ *
+ * 弹窗一打开就是空的，用户会以为它坏了。一行空的输入框既表明「这里可以填」，
+ * 也让「不填直接确认」成为一次有意义的操作（此时按 [onConfirm] 传出去的那一行
+ * 会被暂存层当空行跳过，见 [DatabaseBrowserState.stageRowInserts]）。
+ */
+@Composable
+private fun InsertRowsDialog(
+    columns: List<String>,
+    nullableColumns: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<Map<String, String?>>) -> Unit,
+) {
+    // 每行一个 `Map<列名, 值>`；值为 null 就是这一格要写 SQL NULL。
+    var rows by remember { mutableStateOf(listOf(emptyMap<String, String?>())) }
+    val theme = DataTableTheme.themed()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(TABLE_INSERT_DIALOG_TAG),
+        title = { Text(str(StrKey.EDIT_INSERT_TITLE)) },
+        text = {
+            Column {
+                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    rows.forEachIndexed { index, row ->
+                        InsertRowEditor(
+                            index = index,
+                            removable = rows.size > 1,
+                            row = row,
+                            columns = columns,
+                            nullableColumns = nullableColumns,
+                            theme = theme,
+                            onChange = { changed ->
+                                rows = rows.toMutableList().also { it[index] = changed }
+                            },
+                            onRemove = {
+                                rows = rows.filterIndexed { i, _ -> i != index }
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    WinTextButton(
+                        onClick = { rows = rows + emptyMap() },
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(TABLE_INSERT_ADD_ROW_BTN_TAG),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(str(StrKey.EDIT_INSERT_ADD_ROW), maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            WinButton(
+                onClick = { onConfirm(rows) },
+                shape = SundaysPalette.buttonShape,
+                modifier = Modifier.testTag(TABLE_INSERT_CONFIRM_BTN_TAG),
+            ) {
+                Text(str(StrKey.EDIT_INSERT_CONFIRM), maxLines = 1, softWrap = false)
+            }
+        },
+        dismissButton = {
+            WinTextButton(onClick = onDismiss, shape = SundaysPalette.buttonShape) {
+                Text(str(StrKey.EDIT_DISCARD), maxLines = 1, softWrap = false)
+            }
+        },
+    )
+}
+
+/** 弹窗里的**一行**输入 —— 一行列名 + 一行输入框，左边挂个移除按钮。 */
+@Composable
+private fun InsertRowEditor(
+    index: Int,
+    removable: Boolean,
+    row: Map<String, String?>,
+    columns: List<String>,
+    nullableColumns: Set<String>,
+    theme: DataTableTheme,
+    onChange: (Map<String, String?>) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(modifier = Modifier.padding(bottom = 8.dp).testTag(TABLE_INSERT_ROW_TAG + index)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 列名列：不占宽度的那一格写列名，宽列写行号 —— 列多的时候整行会被
+            // 挤到屏外，看不出哪一格是哪一列。
+            Text(
+                text = "${index + 1}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(24.dp),
+            )
+            Text(
+                text = columns.joinToString(", "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (removable) {
+                // 只在多于一行时才给移除按钮：唯一一行时移除会让弹窗变成一张空表，
+                // 用户除了关掉再打开没有别的出路。
+                WinIconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.testTag(TABLE_INSERT_REMOVE_ROW_BTN_TAG + index),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = str(StrKey.EDIT_INSERT_REMOVE_ROW),
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            columns.forEach { column ->
+                CellValueField(
+                    // 缺键 = 还没填过 = 空串，**不是 NULL**。弹窗里画不出 NULL 的行，
+                    // 只有用户点了 ∅ 那一格才是 null —— 这正是约定的核心。
+                    value = row[column].orEmpty(),
+                    nullable = column in nullableColumns,
+                    theme = theme,
+                    onValueChange = { value -> onChange(row + (column to value)) },
+                    modifier = Modifier.weight(1f).padding(end = 4.dp),
+                    textStyle = theme.cellText,
+                )
             }
         }
     }
@@ -5129,17 +5578,158 @@ class TablePreviewTab(
     var pageSize: Int by mutableStateOf(100)
 
     /**
-     * 本表的主键列名；`null` = **未知** ⇒ 该表不可编辑（见 [DatabaseBrowserState.isTableEditable]）。
+     * 本表主键列名（**按列序**）。空列表 = 没有主键 / 引擎还没给 ⇒ 该表不可编辑 / 不可删除
+     * （见 [DatabaseBrowserState.isTableEditable]）。
      *
-     * 之所以现在恒为 `null`：`DATA.LIST` 的响应里只有 `rows`，**没有列定义**，
-     * 而 `ColumnDef.is_primary_key` 只在 `TABLE.CREATE` / `TABLE.UPDATE` 的请求侧出现。
-     * 前端拿不到「哪一列是主键」这个信息。
+     * ## 为什么是**列表**而不是单个字符串
      *
-     * 填上它不需要改 `DataTable`、也不需要改 `updateCell` —— 只差引擎在
-     * `DataListPagedResponse` 里多回一个 `primary_key` 字段。**宁可先不给编辑，
-     * 也不能用行索引或「猜测的 id 列」去发 `UPDATE`** —— 后者会静默改错行。
+     * 复合主键（`PRIMARY KEY (tenant_id, id)`）在真实库里非常常见。而 `DATA.UPDATE`
+     * 的 `where` 本来就是 `map<string, string>`，多列定位**不需要引擎做任何改动**。
+     * 反过来，只取其中一列是**错的**：`tenant_id` 单独看完全可能重复，
+     * 拿它去 `WHERE` 会一次改掉一整批行 —— 比「没有主键就不给编辑」严重得多。
+     * 所以要么全带上，要么不给。
+     *
+     * 数据来自 `DATA.LIST` 响应里的 `TableCapabilities`（引擎算好一起回）。
      */
-    var primaryKeyColumn: String? by mutableStateOf(null)
+    var primaryKeyColumns: List<String> by mutableStateOf(emptyList())
+
+    /**
+     * 引擎回传的**写能力** —— 决定「编辑 / 新增 / 删除」三个入口能不能用。
+     *
+     * ## 为什么整个入口由引擎说了算
+     *
+     * 能不能写取决于**列定义**（有没有主键、哪些是自增、哪些是二进制）与
+     * **对象类型**（视图即使部分可写也不放行）。前端要么自己发一次
+     * `TABLE.COLUMN_LIST` 去推导，要么就等着用户点下去撞引擎报错 ——
+     * 后者正是这个功能上线前的老毛病。
+     *
+     * 于是引擎在 `DATA.LIST` 里把它算好一起回（见 `buildTableCapabilities`）。
+     * 拿不到（老引擎 / 元数据查询失败）时**一律收紧**：三个开关全 `false`，
+     * 写入口全部禁用。「宁可先不给编辑」这条边界不能因为版本兼容而破。
+     */
+    var canUpdate: Boolean by mutableStateOf(false)
+    var canInsert: Boolean by mutableStateOf(false)
+    var canDelete: Boolean by mutableStateOf(false)
+
+    /**
+     * **不可编辑**的列 key 集合 —— 主键列 + 二进制列。渲染时只问「这一格能不能改」，
+     * 不该每次都重新推导一遍规则。
+     *
+     * - **主键列不可改**：它同时是定位这一行的 `WHERE` 条件。让用户改它，就得处理
+     *   「第一条把主键改了，后面几条的 `WHERE` 还命不命中」这种自相矛盾的序列。
+     *   事务能保证「全改或全不改」，但保证不了「每条都改对」—— 后者是谓词的事。
+     * - **二进制列不可改**：`DATA.LIST` 对它们返回 `"[LOB Data]"` 占位串而不是真实内容，
+     *   拿占位串写回去等于**用一句提示语覆盖掉用户的二进制数据**，且不可逆。
+     */
+    var readOnlyColumns: Set<String> by mutableStateOf(emptySet())
+
+    /** 允许取 SQL NULL 的列 —— 决定编辑框里画不画「设为 NULL」的开关。 */
+    var nullableColumns: Set<String> by mutableStateOf(emptySet())
+
+    /** 新增行时可填的列（引擎已剔除自增列与二进制列），**按列序**。 */
+    var insertableColumns: List<String> by mutableStateOf(emptyList())
+
+    /**
+     * 引擎声明的「空串语义」：当前恒为 `true`（空串就写空串）。
+     *
+     * 存成字段而不是在各处直接比枚举，是因为**约定要能变**：哪天引擎改成
+     * `EMPTY_AS_NULL`，界面必须跟着变（编辑框里的 `∅` 开关语义、提示文案），
+     * 而不能各处硬编码着旧行为、静默按错的约定写库。
+     */
+    var emptyValueIsString: Boolean by mutableStateOf(true)
+
+    /**
+     * 能力是否已经随本页数据取到。
+     *
+     * 与「能不能写」**刻意分开**：[canUpdate] 为 `false` 可能是因为真的不能写，
+     * 也可能是因为还没取到。渲染层需要区分这两种情况来给不同的提示文案 ——
+     * 合并成一个 `false` 会让「表不可写」和「还没加载完」显示成同一个错误。
+     */
+    var capabilitiesLoaded: Boolean by mutableStateOf(false)
+
+    /**
+     * 一条**待提交**的改动。
+     *
+     * ## 为什么把三种操作收进一个列表
+     *
+     * 「改两格 + 删一行 + 插一行」是用户一次就能做出来的事。如果三种操作各有
+     * 各的暂存与各自的提交按钮，就会出现「改的提交了、删的还没提交」这种**用户
+     * 根本没法表达意图**的中间态 —— 而事务本来就能一次性覆盖它们。
+     *
+     * 收成一个列表还带来一个正确性好处：提交顺序是确定的（暂存顺序），
+     * 出错时能准确告诉用户「第几条失败」，而不是三套互不相干的计数。
+     */
+    sealed interface PendingOp {
+        /** 改一行的若干格。`changes` 的值为 `null` 表示写 SQL NULL。 */
+        data class Update(
+            val rowId: Any,
+            val changes: Map<String, String?>,
+        ) : PendingOp
+
+        /** 删一行。[rowId] 只用于回显，真正定位靠主键单元格值（见 [DatabaseBrowserState.applyCellEdits]）。 */
+        data class Delete(
+            val rowId: Any,
+        ) : PendingOp
+
+        /** 插一行。`values` 的值为 `null` 表示写 SQL NULL。 */
+        data class Insert(
+            val values: Map<String, String?>,
+        ) : PendingOp
+    }
+
+    /**
+     * **暂存**但还没发给引擎的改动（编辑 / 删除 / 新增），按暂存先后排序。
+     *
+     * ## 为什么不是「改完立刻写库」
+     *
+     * 用户改一列就发一条 `UPDATE` 的话，批量改 20 行会变成 20 条独立提交 ——
+     * 第 13 行撞上唯一索引时，前 12 行已经落库了，只能靠用户自己手工撤。
+     * 暂存 + 一次提交把这 12 条收进**一个事务**，失败整批回滚（见 [DatabaseBrowserState.applyCellEdits]）。
+     * 引擎的 `SYSTEM.BEGIN` / `COMMIT` / `ROLLBACK` + `Request.session_id` 早就能做到这件事，
+     * 缺的只是「先把改动攒起来」这一层。
+     *
+     * ## 用 List 而不是 Map
+     *
+     * 更新项在**写入缓冲时**就按 `(rowId, columnKey)` 合并好了（见
+     * [DatabaseBrowserState.stageCellEdit]），所以这里不需要 Map 去重；
+     * 而删除与新增本来就没有「同一目标去重」的问题，用 List 才能保留**顺序** ——
+     * 出错时要能准确说出「第几条失败」，而顺序正是提交顺序。
+     */
+    var pendingOps: List<PendingOp> by mutableStateOf(emptyList())
+
+    /** 行首复选框选中的行 —— 批量删除的来源。翻页后不保留（选中的行已经不在屏幕上）。 */
+    var selectedRowIds: Set<Any> by mutableStateOf(emptySet())
+
+    /** 提交进行中 —— 期间禁用提交/放弃按钮，避免重复点出两个事务。 */
+    var applyingEdits: Boolean by mutableStateOf(false)
+
+    /**
+     * 叠加了待提交修改后的行 —— **渲染用**。
+     *
+     * [rows] 始终是数据库里的真值，不做乐观更新。这样「放弃修改」只要清空
+     * [pendingOps] 就能精确还原；反过来若提交前就改了 [rows]，一旦提交失败
+     * 本地值已经和库里不一致了，还得专门写一套回滚 UI 去把它改回来。
+     *
+     * 已标记删除的行**照常显示原值**：删除是整行的事，把它的格子清空会让用户
+     * 在提交前就无法确认「到底删的是哪几行、内容是什么」。
+     *
+     * 没有待提交修改时**原样返回 [rows]**本身（不复制）：这是最常见的路径，
+     * 没必要为它每帧分配一份新的 List。
+     */
+    fun displayRows(): List<TableRow> {
+        if (pendingOps.none { it is PendingOp.Update }) return rows
+        return rows.map { row ->
+            val overlay =
+                pendingOps
+                    .filterIsInstance<PendingOp.Update>()
+                    .filter { it.rowId == row.id }
+                    // `associate` 而不是 `+ overlay`：更新项的 `changes` 已经是「列名 → 新值」，
+                    // 而 `cells` 也是同一套键，可以直接并进去。
+                    .flatMap { it.changes.entries }
+                    .associate { it.key to it.value }
+            if (overlay.isEmpty()) row else row.copy(cells = row.cells + overlay)
+        }
+    }
 
     /**
      * 过滤条件（`WHERE` 子句的**内容**，不含 `WHERE` 关键字）。
@@ -6113,28 +6703,489 @@ class DatabaseBrowserState(
     // ------------------------------------------------------------------------
 
     /**
-     * 该表预览是否**可编辑** —— 当前一律 `false`。
+     * 该表预览是否**可编辑**。
      *
-     * ## 为什么默认关着（这是本轮最重要的一条判断）
+     * ## 判据：引擎说能改，且当前不是只读
      *
-     * [DataTable] 的编辑需要一个能**唯一定位行**的 `where` 条件。浏览屏拿不到主键：
-     * `DATA.LIST` 的 `DataListPagedResponse` 只回 `rows`、**不回列定义**，而
-     * `ColumnDef.is_primary_key` 只出现在 `TABLE.CREATE` / `TABLE.UPDATE` 里 ——
-     * 前端无从知道哪一列是主键。
+     * [DataTable] 的编辑需要一个能**唯一定位行**的 `WHERE` 条件，所以必须有主键。
+     * 这个事实由引擎算好随 `DATA.LIST` 一起回（见 [TablePreviewTab.canUpdate]）。
      *
-     * 唯一能立刻拿到的候选是 `id` 列（[TablePreviewTab] 的行 id 就取自它），但
-     * **「有 id 列」不等于「id 是主键」**：一张表的 `id` 完全可能只是个普通可重复列。
-     * 那时发出去的 `WHERE id = ?` 会**同时改掉多行** —— 静默的数据损坏，
-     * 比「不能编辑」严重得多。
+     * 这里仍然坚持「宁可先不给编辑」：唯一能立刻拿到的候选是 `id` 列
+     * （[TablePreviewTab] 的行 id 就取自它），但**「有 id 列」不等于「id 是主键」** ——
+     * 一张表的 `id` 完全可能只是个普通可重复列。那时发出去的 `WHERE id = ?` 会
+     * **同时改掉多行**，静默的数据损坏比「不能编辑」严重得多。
      *
-     * 所以这里**明确关着**，而不是「先能用着」。解锁条件是引擎在 `DATA.LIST` 响应里
-     * 回主键列名（见 [TablePreviewTab.primaryKeyColumn]），届时只需把它接上，
-     * `DataTable` 与本方法都不必改。
-     *
-     * 引擎侧的 `DATA.UPDATE` / `DATA.CREATE` / `DATA.DELETE` **早已实现**且是参数化的
-     * （`map<string, string>`，没有注入面），缺的只是这一个主键信息。
+     * [readOnly] 也在这里挡：用户的只读开关是**意图**而不是权限，在点第一格之前
+     * 就该让它点不动 —— 让人先改半天再告诉「只读模式不能提交」是在浪费他的时间。
      */
-    fun isTableEditable(tab: TablePreviewTab): Boolean = tab.primaryKeyColumn != null
+    fun isTableEditable(tab: TablePreviewTab): Boolean = tab.canUpdate && !readOnly
+
+    /** 能不能新增行 —— [readOnly] 与引擎能力都要放行。 */
+    fun canInsertRows(tab: TablePreviewTab): Boolean = tab.canInsert && !readOnly
+
+    /** 能不能删除行 —— 没有主键就定位不到行，所以和编辑同一条硬边界。 */
+    fun canDeleteRows(tab: TablePreviewTab): Boolean = tab.canDelete && !readOnly
+
+    /**
+     * 某一列能不能在单元格里改 —— [DataTable.isColumnEditable] 的实现。
+     *
+     * 除了表级开关，还查 [TablePreviewTab.readOnlyColumns]（主键列 + 二进制列）。
+     * 之所以在**渲染层**而不是提交时再拒：提交时才发现不可改，用户已经白填了半天。
+     */
+    fun isColumnEditable(
+        tab: TablePreviewTab,
+        column: TableColumn,
+    ): Boolean = isTableEditable(tab) && column.key !in tab.readOnlyColumns
+
+    /** 该列能不能取 SQL NULL —— 决定编辑框里画不画「设为 NULL」的开关。 */
+    fun isColumnNullable(
+        tab: TablePreviewTab,
+        column: TableColumn,
+    ): Boolean = column.key in tab.nullableColumns
+
+    /** 某一格是不是「已改但还没提交」—— [DataTable.isCellPending] 的实现。 */
+    fun isCellPending(
+        tab: TablePreviewTab,
+        row: TableRow,
+        column: TableColumn,
+    ): Boolean =
+        tab.pendingOps.any {
+            it is TablePreviewTab.PendingOp.Update && it.rowId == row.id && column.key in it.changes
+        }
+
+    /** 某一行是不是已标记待删除 —— [DataTable.isRowDeleted] 的实现。 */
+    fun isRowDeleted(
+        tab: TablePreviewTab,
+        row: TableRow,
+    ): Boolean = tab.pendingOps.any { it is TablePreviewTab.PendingOp.Delete && it.rowId == row.id }
+
+    /**
+     * 把一次单元格编辑**暂存**起来 —— 不发任何请求。
+     *
+     * 真正的写库发生在 [applyCellEdits]，那时整批改动才会被包进一个事务。
+     *
+     * 同一行已有暂存改动时**合并**进那一条而不是新增一条：同一行的两处改动本
+     * 来就该合成一条 `UPDATE`（少一次往返、少一次行锁），而让缓冲里出现两条同行的
+     * 更新会让「这一行到底改了哪些列」变得要靠合并才能回答。
+     *
+     * @return `null` = 已暂存；非空 = 该给用户看的拒绝理由。
+     */
+    fun stageCellEdit(
+        tab: TablePreviewTab,
+        edit: CellEdit,
+    ): String? {
+        if (!isTableEditable(tab)) return Msg.text(StrKey.NO_PRIMARY_KEY_EDIT_DISABLED)
+        if (edit.columnKey in tab.readOnlyColumns) {
+            // 两种只读列的原因不同，挨着说才有意义：改主键会毁掉后续定位，
+            // 改二进制列会毁掉数据本身 —— 不是一回事。
+            val reason =
+                if (tab.primaryKeyColumns.any { it.equals(edit.columnKey, ignoreCase = true) }) {
+                    Msg.text(StrKey.EDIT_REASON_PRIMARY_KEY)
+                } else {
+                    Msg.text(StrKey.EDIT_REASON_BINARY)
+                }
+            return Msg.format(StrKey.EDIT_COLUMN_READ_ONLY, edit.columnKey) + "：" + reason
+        }
+        // 行必须还在当前页：`WHERE` 用的是这一行的主键单元格值，
+        // 而值是从当前页的 [TablePreviewTab.rows] 里取的。
+        if (tab.rows.none { it.id == edit.rowId }) return Msg.text(StrKey.ROW_NOT_ON_PAGE)
+
+        val sameRow =
+            tab.pendingOps.filterIsInstance<TablePreviewTab.PendingOp.Update>().filter { it.rowId == edit.rowId }
+        tab.pendingOps =
+            if (sameRow.isEmpty()) {
+                tab.pendingOps + TablePreviewTab.PendingOp.Update(edit.rowId, mapOf(edit.columnKey to edit.newValue))
+            } else {
+                // 合并进**第一条**同行的更新（缓冲里不会存在两条同行的更新，见上）。
+                var merged = false
+                tab.pendingOps.map { op ->
+                    if (!merged && op is TablePreviewTab.PendingOp.Update && op.rowId == edit.rowId) {
+                        merged = true
+                        op.copy(changes = op.changes + (edit.columnKey to edit.newValue))
+                    } else {
+                        op
+                    }
+                }
+            }
+        return null
+    }
+
+    /**
+     * 把选中的若干行**标记**为待删除 —— 同样只是暂存，不发请求。
+     *
+     * ## 为什么是「标记」而不是「立刻删」
+     *
+     * 删数据不可逆。立刻删就意味着「用户手一抖，这一页里选错的那 5 行永久没了」——
+     * 而 `WHERE` 只由主键定位，用户在提交前根本没有机会看到「即将执行的到底是什么」。
+     * 标记 + 提交给了那一次确认，也让整批删除能和其它改动落进同一个事务。
+     *
+     * @return `null` = 已暂存；非空 = 拒绝理由。
+     */
+    fun stageRowDeletes(
+        tab: TablePreviewTab,
+        rowIds: Collection<Any>,
+    ): String? {
+        if (!canDeleteRows(tab)) return Msg.text(StrKey.NO_PRIMARY_KEY_EDIT_DISABLED)
+        val known = tab.rows.map { it.id }.toSet()
+        // 只取当前页里真实存在的行：不在这一页的行一旦被标记，之后拿不到它的主键
+        // 单元格值去拼 WHERE，最后会以「0 行被更新」的形式失败 —— 而失败原因
+        // （「你删的是一页之前的行」）在那时已经无从推断。
+        val targets = rowIds.filter { it in known }
+        if (targets.isEmpty()) return Msg.text(StrKey.EDIT_DELETE_NONE)
+        val alreadyMarked =
+            tab.pendingOps
+                .filterIsInstance<TablePreviewTab.PendingOp.Delete>()
+                .map { it.rowId }
+                .toSet()
+        tab.pendingOps =
+            tab.pendingOps +
+            targets.filter { it !in alreadyMarked }.map {
+                TablePreviewTab.PendingOp.Delete(it)
+            }
+        tab.selectedRowIds = emptySet()
+        return null
+    }
+
+    /**
+     * 把若干行**待新增**的数据暂存进来（值 `null` 表示写 SQL NULL）。
+     *
+     * ## 「空行」的判据是**一个键都没有**，不是「值都是 null」
+     *
+     * 弹窗每行初始是空 map，用户碰过哪一格才会多出哪个键。所以：
+     * - `{}` —— 用户碰都没碰，等于「这一行不存在」，跳过（送进提交只会拖垮整批事务）。
+     * - `{"nick": null}` —— 用户**逐格点了 ∅**，那就是「这一行我要的全是 NULL」。
+     *   丢掉它等于让显式开关在最关键的场合失效：整行全 NULL 的行正是那个开关存在的理由。
+     * - `{"nick": ""}` —— 空串是真值，照样保留。
+     *
+     * 三者只有按「键集合是否为空」才分得开；按值判（`values.none { it != null }`）
+     * 会把第二类和第一类混成一处 —— 这是实现时最容易写错的一处。
+     *
+     * ## 跳过的条数一定要说出来
+     *
+     * 悄悄丢掉更糟：用户以为加了 3 行，实际只有 2 行会进库，提交后他才发现少了一行。
+     * 所以无论整批被跳过还是只跳掉其中几行，都返回一句话。
+     *
+     * @return `null` = 全部暂存成功；非空 = 给用户看的说明（**可能是错误，也可能是提示**，
+     *   区分办法是看 [TablePreviewTab.pendingOps] 的条数有没有变，调用方自己判断）。
+     */
+    fun stageRowInserts(
+        tab: TablePreviewTab,
+        values: List<Map<String, String?>>,
+    ): String? {
+        if (!canInsertRows(tab)) return Msg.text(StrKey.EDIT_INSERT_DISABLED)
+        val usable = values.filter { it.isNotEmpty() }
+        val skipped = values.size - usable.size
+        if (usable.isEmpty()) return Msg.format(StrKey.EDIT_INSERT_ALL_NULL, skipped)
+        tab.pendingOps = tab.pendingOps + usable.map { TablePreviewTab.PendingOp.Insert(it) }
+        return if (skipped > 0) Msg.format(StrKey.EDIT_INSERT_ALL_NULL, skipped) else null
+    }
+
+    /** 放弃全部暂存改动 —— 只清缓冲，不发请求（数据库里本来就没动过）。 */
+    fun discardCellEdits(tab: TablePreviewTab): String? {
+        val count = tab.pendingOps.size
+        if (count == 0) return Msg.text(StrKey.EDIT_NOTHING_PENDING)
+        tab.pendingOps = emptyList()
+        tab.selectedRowIds = emptySet()
+        return Msg.format(StrKey.EDIT_DISCARDED, count)
+    }
+
+    /**
+     * 把暂存的全部修改**在一个事务里**提交出去。
+     *
+     * ## 流程
+     *
+     * 1. `SYSTEM.BEGIN` —— 引擎钉住一条 `autocommit=false` 的连接并返回 `session_id`
+     * 2. 同一行的多个格子的改动**合并成一条** `UPDATE`（少一次往返，也少一次行锁获取）
+     * 3. 每条 `DATA.UPDATE` 都带同一个 `session_id`，全部落在那条连接上
+     * 4. 任何一条失败 → `SYSTEM.ROLLBACK`，整批不落盘
+     * 5. 全部成功 → `SYSTEM.COMMIT`
+     *
+     * ## 为什么失败时**保留**暂存内容
+     *
+     * 回滚之后数据库回到提交前的状态，但用户改的东西未必都是错的 —— 典型的是
+     * 「20 行里有一行撞了唯一索引」。把暂存清空等于逼用户把那 19 行重敲一遍；
+     * 保留下来，他改掉那一个冲突值就能重试。为此这里在回滚后**重新载入当前页**，
+     * 让 [TablePreviewTab.rows] 与库里的真值重新对齐（缓冲还在，[displayRows] 继续叠加）。
+     *
+     * ## 为什么 `affectedRows == 0` 算**失败**
+     *
+     * `WHERE` 没命中意味着这一行已经被别人删掉或改了主键。若当成功处理，用户会
+     * 看到「已提交 5 处修改」而其中一条其实什么都没发生 —— 这正是当初把编辑整个
+     * 关掉要防的那类静默错误，宁可报错也不假装成功。
+     *
+     * @return `null` = 提交成功（调用方自己写成功提示）；非空 = 失败文案。
+     */
+    suspend fun applyCellEdits(tab: TablePreviewTab): String? {
+        if (tab.pendingOps.isEmpty()) return Msg.text(StrKey.EDIT_NOTHING_PENDING)
+        if (readOnly) return Msg.text(StrKey.EDIT_BLOCKED_READ_ONLY)
+        if (tab.applyingEdits) return null
+
+        // 先把每一条都换算成「行 → (列, 新值)」，并校验行还在当前页。
+        // 放到发请求之前全做完：一边发一边校验的话，校验失败时已经有几条落库了。
+        val ops = tab.pendingOps
+        for (op in ops) {
+            val rowId =
+                when (op) {
+                    is TablePreviewTab.PendingOp.Update -> op.rowId
+                    is TablePreviewTab.PendingOp.Delete -> op.rowId
+                    is TablePreviewTab.PendingOp.Insert -> null
+                }
+            if (rowId != null && tab.rows.none { it.id == rowId }) return Msg.text(StrKey.ROW_NOT_ON_PAGE)
+        }
+
+        tab.applyingEdits = true
+        try {
+            val catalog = tab.schema.ifBlank { currentSchema() }
+            activeDatabases.add(catalog)
+            val (sessionId, beginError) = beginEditSession(catalog)
+            if (sessionId == null) return beginError
+            var index = 0
+            val total = ops.size
+            for (op in ops) {
+                index++
+                val failure =
+                    when (op) {
+                        is TablePreviewTab.PendingOp.Update -> {
+                            val row = tab.rows.first { it.id == op.rowId }
+                            applyOneCellRow(catalog, sessionId, tab, row, op.changes)
+                        }
+
+                        is TablePreviewTab.PendingOp.Delete -> {
+                            val row = tab.rows.first { it.id == op.rowId }
+                            applyOneDelete(catalog, sessionId, tab, row)
+                        }
+
+                        is TablePreviewTab.PendingOp.Insert -> {
+                            applyOneInsert(catalog, sessionId, tab, op.values)
+                        }
+                    }
+                if (failure != null) {
+                    val rollback = rollbackEditSession(catalog, sessionId)
+                    loadTabPreview(tab)
+                    return if (rollback != null) {
+                        Msg.format(StrKey.EDIT_ROLLBACK_FAILED, rollback)
+                    } else {
+                        Msg.format(StrKey.EDIT_APPLY_ROLLED_BACK, index, total, failure)
+                    }
+                }
+            }
+            val commit = commitEditSession(catalog, sessionId)
+            if (commit != null) return Msg.format(StrKey.EDIT_ROLLBACK_FAILED, commit)
+            tab.pendingOps = emptyList()
+            tab.selectedRowIds = emptySet()
+            loadTabPreview(tab)
+            return null
+        } finally {
+            tab.applyingEdits = false
+        }
+    }
+
+    /**
+     * 取这一行的主键 `WHERE` 子句 —— 复合主键逐列都带上（见
+     * [TablePreviewTab.primaryKeyColumns]）：少带一列就不是唯一条件了。
+     *
+     * 刻意**从行数据现取**，而不是从暂存缓冲取：主键列本来就不允许编辑，
+     * 缓冲里永远不会出现它，所以现取到的就是数据库里的真值。
+     */
+    private fun primaryKeyWhere(
+        tab: TablePreviewTab,
+        row: TableRow,
+    ): Map<String, String>? {
+        val where = LinkedHashMap<String, String>()
+        for (pk in tab.primaryKeyColumns) {
+            val raw = row.cells[pk] ?: return null
+            where[pk] = raw.toString()
+        }
+        return where
+    }
+
+    /**
+     * 发一条 `DATA.UPDATE` —— 成功返回 `null`，失败返回引擎给的错误文案。
+     *
+     * `changes` 里值为 `null` 的列走 `null_columns`：协议的 `map<string, string>`
+     * 装不下 null（proto3 的 map 值不能为 null），所以「这一格是 NULL」必须用
+     * 独立的列名清单表达 —— 这也正是界面里「设为 NULL」那个显式开关存在的理由。
+     */
+    private suspend fun applyOneCellRow(
+        catalog: String,
+        // 同 [runEditSessionEnd]：不叫 `sessionId`，否则下面 `sessionId = sessionId`
+        // 的左边会解析到形参而不是 proto builder 的字段。
+        editSessionId: String,
+        tab: TablePreviewTab,
+        row: TableRow,
+        changes: Map<String, String?>,
+    ): String? {
+        val where =
+            primaryKeyWhere(tab, row)
+                ?: return Msg.format(StrKey.PRIMARY_KEY_NOT_IN_ROW, tab.primaryKeyColumns.joinToString())
+        // 局部变量叫 `nulls` 而不是 `nullColumns`：后者是 DSL 生成的 builder 属性，
+        // 同名会把 `nullColumns.forEach` 解析到 builder 上，读代码时看不出在遍历谁。
+        val nulls = changes.filterValues { it == null }.keys.toList()
+        // 同老 `updateCell` 踩过的坑：先在**内层 DSL 之外**把 update 请求构造好。
+        //
+        // 为什么不内联：`dataUpdateRequest { }` 的 lambda 接收者会被外层
+        // `dataRequest { }` 的同名兄弟字段（`schema` / `where` / `tableName`）遮蔽 ——
+        // 内层写 `schema = ""` 会解析到外层去，编译报「val cannot be reassigned」。
+        // Kotlin 的内联 lambda 没有标签可用来消歧（`this@xxx` 对内行 lambda 不可用），
+        // 所以把构造提到外面是唯一干净的做法。
+        val updateReq =
+            com.langbiantianya.grpc.dataUpdateRequest {
+                tableName = tab.tableName
+                // catalog 走 engineConnFor 的 database 维度，schema 字段留空
+                // —— 写进去会让 H2 执行 `SET SCHEMA "<库名>"` 而报「Schema not found」，
+                // 见 engineConnFor 的 KDoc。
+                schema = ""
+                // map 字段用 `put(k, v)`（DslMap 的扩展函数），不是 `=` 赋值。
+                // 显式写 `this.changes` / `this.where` 是为了在两个同名字段面前
+                // 不产生任何歧义 —— 这里它们恰好也是内层 builder 的字段名。
+                changes.forEach { (k, v) -> this.changes.put(k, v.orEmpty()) }
+                where.forEach { (k, v) -> this.where.put(k, v) }
+                // 生成的 Kotlin DSL 把 repeated 字段暴露成 `DslList`，靠它的 `add`
+                // 追加 —— 不是 builder 上的 `addNullColumns` 方法（那个只在 Java 侧可见）。
+                nulls.forEach { this.nullColumns.add(it) }
+            }
+        val resp =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, catalog)) {
+                    category = Category.DATA
+                    action = Action.UPDATE
+                    // 关键一行：非空时引擎把这次更新钉在 BEGIN 开的那条连接上，
+                    // autocommit=false，整批改动在 COMMIT 之前都不落盘。
+                    sessionId = editSessionId
+                    dataRequest = dataRequest { update = updateReq }
+                }
+            }.getOrNull()
+                ?: return Msg.format(
+                    StrKey.OP_NO_ENGINE_RESPONSE,
+                    Msg.text(StrKey.UPDATE_FAILED),
+                )
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.UPDATE_FAILED) }
+        val affected = resp.data.update.affectedRows
+        return if (affected == 0) Msg.text(StrKey.UPDATE_FAILED) else null
+    }
+
+    /**
+     * 发一条 `DATA.DELETE` —— 同样带主键 `WHERE`，同样落在事务会话的那条连接上。
+     *
+     * `affected_rows == 0` 算失败：说明这一行已经被别人删掉了。当成功处理的话，
+     * 用户会看到「已删除 N 行」而其中一条其实什么都没发生 —— 宁可报错也不假装成功。
+     */
+    private suspend fun applyOneDelete(
+        catalog: String,
+        editSessionId: String,
+        tab: TablePreviewTab,
+        row: TableRow,
+    ): String? {
+        val where =
+            primaryKeyWhere(tab, row)
+                ?: return Msg.format(StrKey.PRIMARY_KEY_NOT_IN_ROW, tab.primaryKeyColumns.joinToString())
+        val deleteReq =
+            com.langbiantianya.grpc.dataDeleteRequest {
+                tableName = tab.tableName
+                schema = ""
+                where.forEach { (k, v) -> this.where.put(k, v) }
+            }
+        val resp =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, catalog)) {
+                    category = Category.DATA
+                    action = Action.DELETE
+                    sessionId = editSessionId
+                    dataRequest = dataRequest { delete = deleteReq }
+                }
+            }.getOrNull()
+                ?: return Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, Msg.text(StrKey.DELETE_FAILED))
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.DELETE_FAILED) }
+        return if (resp.data.delete.affectedRows == 0) Msg.text(StrKey.DELETE_FAILED) else null
+    }
+
+    /** 发一条 `DATA.CREATE`。值为 `null` 的列走 `null_columns`（同 [applyOneCellRow]）。 */
+    private suspend fun applyOneInsert(
+        catalog: String,
+        editSessionId: String,
+        tab: TablePreviewTab,
+        values: Map<String, String?>,
+    ): String? {
+        val nulls = values.filterValues { it == null }.keys.toList()
+        val createReq =
+            com.langbiantianya.grpc.dataCreateRequest {
+                tableName = tab.tableName
+                schema = ""
+                values.forEach { (k, v) -> this.values.put(k, v.orEmpty()) }
+                nulls.forEach { this.nullColumns.add(it) }
+            }
+        val resp =
+            runCatching {
+                engine.invoke(engineConnFor(currentConnection, catalog)) {
+                    category = Category.DATA
+                    action = Action.CREATE
+                    sessionId = editSessionId
+                    dataRequest = dataRequest { create = createReq }
+                }
+            }.getOrNull()
+                ?: return Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, Msg.text(StrKey.INSERT_FAILED))
+        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.INSERT_FAILED) }
+        return if (resp.data.create.affectedRows == 0) Msg.text(StrKey.INSERT_FAILED) else null
+    }
+
+    /** `SYSTEM.BEGIN` —— 成功返回 `(sessionId, null)`，失败返回 `(null, 该给用户看的文案)`。 */
+    private suspend fun beginEditSession(catalog: String): Pair<String?, String?> {
+        val resp =
+            runCatching {
+                engine.invoke(engineConn(database = catalog)) {
+                    category = Category.SYSTEM
+                    action = Action.BEGIN
+                    systemRequest = systemRequest { sessionId = UUID.randomUUID().toString() }
+                }
+            }.getOrNull()
+        if (resp == null || !resp.success) {
+            val reason = resp?.error?.ifBlank { null } ?: Msg.text(StrKey.BEGIN_TRANSACTION_FAILED)
+            return null to Msg.format(StrKey.EDIT_BEGIN_FAILED, reason)
+        }
+        // 引擎回显 session id；拿不到就当失败 —— 前端**必须**持有它，
+        // 后续每条 DATA.UPDATE 靠它找到那条被钉住的连接，拿不到等于事务没开。
+        val sid =
+            resp.system
+                ?.begin
+                ?.sessionId
+                .orEmpty()
+        if (sid.isBlank()) return null to Msg.format(StrKey.EDIT_BEGIN_FAILED, Msg.text(StrKey.NO_SESSION_ID))
+        return sid to null
+    }
+
+    /** `SYSTEM.COMMIT`。 */
+    private suspend fun commitEditSession(
+        catalog: String,
+        sessionId: String,
+    ): String? = runEditSessionEnd(catalog, sessionId, Action.COMMIT)
+
+    /** `SYSTEM.ROLLBACK`。 */
+    private suspend fun rollbackEditSession(
+        catalog: String,
+        sessionId: String,
+    ): String? = runEditSessionEnd(catalog, sessionId, Action.ROLLBACK)
+
+    private suspend fun runEditSessionEnd(
+        catalog: String,
+        // 刻意**不叫** `sessionId`：形参与 proto builder 的字段同名时，
+        // `systemRequest { sessionId = sessionId }` 的左边会解析到形参（一个 val），
+        // 编译直接报「val cannot be reassigned」。既有的 `endTransaction` 也是这么绕开的。
+        editSessionId: String,
+        action: com.langbiantianya.grpc.Action,
+    ): String? {
+        val resp =
+            runCatching {
+                engine.invoke(engineConn(database = catalog)) {
+                    category = Category.SYSTEM
+                    this.action = action
+                    systemRequest = systemRequest { sessionId = editSessionId }
+                }
+            }.getOrNull()
+        if (resp == null || !resp.success) {
+            return resp?.error?.ifBlank { null } ?: Msg.format(StrKey.OP_NO_ENGINE_RESPONSE, action.name)
+        }
+        return null
+    }
 
     // ------------------------------------------------------------------------
     // 导出（引擎 v2.16 已实现，此前前端未接线）
@@ -6570,62 +7621,11 @@ class DatabaseBrowserState(
         }
     }
 
-    /**
-     * 改一个单元格 —— 发 `DATA.UPDATE`（参数化，无注入面）。
-     *
-     * @return 失败时返回引擎的错误文案（供 UI 显示）；成功返回 `null`。
-     *
-     * **调用方必须先校验** [isTableEditable]：这里 `where` 为空 map 时，引擎会把它当成
-     * 「无条件更新」，等于改写整张表。
-     */
-    suspend fun updateCell(
-        tab: TablePreviewTab,
-        edit: CellEdit,
-    ): String? {
-        val pk = tab.primaryKeyColumn ?: return Msg.text(StrKey.NO_PRIMARY_KEY_EDIT_DISABLED)
-        val row = tab.rows.firstOrNull { it.id == edit.rowId } ?: return Msg.text(StrKey.ROW_NOT_ON_PAGE)
-        val old = row.cells[pk]?.toString() ?: return Msg.format(StrKey.PRIMARY_KEY_NOT_IN_ROW, pk)
-
-        val catalog = tab.schema.ifBlank { currentSchema() }
-        activeDatabases.add(catalog)
-        // 先在**内层 DSL 之外**把 update 请求构造好。
-        //
-        // 为什么不直接内联：`dataUpdateRequest { }` 的 lambda 接收者会被外层
-        // `dataRequest { }` 的同名兄弟字段（`schema` / `where` / `tableName`）遮蔽 ——
-        // 内层写 `schema = ""` 会解析到外层去，编译报「val cannot be reassigned」。
-        // Kotlin 的内联 lambda 没有标签可用来消歧（`this@xxx` 对内联 lambda 不可用），
-        // 所以把构造提到外面是唯一干净的做法。
-        val updateReq =
-            com.langbiantianya.grpc.dataUpdateRequest {
-                tableName = tab.tableName
-                // catalog 走 engineConnFor 的 database 维度，schema 字段留空
-                // —— 写进去会让 H2 执行 `SET SCHEMA "<库名>"` 而报「Schema not found」，
-                // 见 engineConnFor 的 KDoc。
-                //
-                // 局部变量刻意叫 `catalog` 而不是 `schema`：同名的话这里的 `schema = ""`
-                // 会解析到那个 val 上（仍是「val cannot be reassigned」），只是换了张脸。
-                schema = ""
-                // map 字段用 `put(k, v)`（DslMap 的扩展函数），不是 `=` 赋值
-                changes.put(edit.columnKey, edit.newValue)
-                where.put(pk, old)
-            }
-        val result =
-            runCatching {
-                engine.invoke(engineConnFor(currentConnection, catalog)) {
-                    category = Category.DATA
-                    action = Action.UPDATE
-                    dataRequest = dataRequest { update = updateReq }
-                }
-            }
-        val resp = result.getOrNull() ?: return result.exceptionOrNull()?.message ?: Msg.text(StrKey.UPDATE_FAILED)
-        if (!resp.success) return resp.error.ifBlank { Msg.text(StrKey.UPDATE_FAILED) }
-        // 本地也改一份：否则用户改完看到还是旧值，会以为没生效而再改一次。
-        tab.rows =
-            tab.rows.map { r ->
-                if (r.id != edit.rowId) r else r.copy(cells = r.cells + (edit.columnKey to edit.newValue))
-            }
-        return null
-    }
+    // 改单元格只有两个入口：`stageCellEdit` 只进暂存缓冲，`applyCellEdits` 才把
+    // 整批改动放进一个事务发出去。这里原本还有一个「改一格立刻发一条 DATA.UPDATE」
+    // 的 `updateCell`，已删掉 —— 只要还留着它，将来一定会有人顺手用它做「保存按钮」，
+    // 把事务兜底绕过去。（写成注释而不是 KDoc：KDoc 挂在没有声明的前面会被
+    // ktlint 判成「class_body 里的野 KDoc」。）
 
     /**
      * **只读模式** —— 开着时本屏发往引擎的一切写请求一律拒绝。
@@ -7566,6 +8566,9 @@ class DatabaseBrowserState(
         tab.page = page
         // 换页后旧页的选中行不再存在于本页，清掉避免详情面板显示上一批数据
         tab.rows = emptyList()
+        // 同理清掉「待删除的勾选」：那些行已经不在屏幕上了，保留它们等于让用户
+        // 在看不见的地方攒一批删除 —— 点「删除选中行」时会删掉一批他根本没检查过的行。
+        tab.selectedRowIds = emptySet()
         loadTabPreview(tab, page)
     }
 
@@ -7583,6 +8586,8 @@ class DatabaseBrowserState(
         tab.pageSize = next
         tab.page = 1
         tab.rows = emptyList()
+        // 同 goToTabPage：旧页的勾选在新页里不存在，见那里的说明。
+        tab.selectedRowIds = emptySet()
         loadTabPreview(tab, targetPage = 1)
     }
 
@@ -7599,6 +8604,8 @@ class DatabaseBrowserState(
         if (tab.whereClause == where) return
         tab.whereClause = where
         tab.page = 1
+        // 过滤一变结果集就整个换了，勾选的行没有对应的「这一页」了（同 goToTabPage）。
+        tab.selectedRowIds = emptySet()
         loadTabPreview(tab, targetPage = 1)
     }
 
@@ -7609,6 +8616,8 @@ class DatabaseBrowserState(
         if (tab.orderByClause == orderBy) return
         tab.orderByClause = orderBy
         tab.page = 1
+        // 换排序会换掉「第 N 行」对应的数据 —— 之前勾的选中行是另一批行。
+        tab.selectedRowIds = emptySet()
         loadTabPreview(tab, targetPage = 1)
     }
 
@@ -7619,6 +8628,7 @@ class DatabaseBrowserState(
         if (tab.searchTerm == term) return
         tab.searchTerm = term
         tab.page = 1
+        tab.selectedRowIds = emptySet()
         loadTabPreview(tab, targetPage = 1)
     }
 
@@ -7645,6 +8655,8 @@ class DatabaseBrowserState(
         tab.error = null
         activeDatabases.add(tab.schema) // 预览用的池绑定在 tab.schema 这个 catalog 上
         scope.launch {
+            // 表结构只取一次：它不随翻页变化，而翻页是高频动作。
+            // 与数据请求并行发出，避免每次打开 tab 都串行多等一个往返。
             val result =
                 runCatching {
                     engine.invoke(engineConn(database = tab.schema)) {
@@ -7686,28 +8698,123 @@ class DatabaseBrowserState(
                         tab.total = paged.total
                         tab.page = paged.page
                         tab.pageSize = paged.pageSize
+                        // 写能力随数据一起回 —— 前端不再自己发 TABLE.COLUMN_LIST 去猜主键。
+                        applyCapabilities(tab, if (paged.hasCapabilities()) paged.capabilities else null)
                         // 表可能为空 —— 此时 rowsList 为空, 退化到无列预览
                         val columnNames =
                             paged.rowsList
                                 .flatMap { it.valuesMap.keys }
                                 .distinct()
-                        tab.columns = columnNames.map { TableColumn(key = it, header = it) }
+                        // 列顺序按引擎给的能力来（insertable / editable 都是按列序的），
+                        // 表为空时也有表头 —— 否则空表就是一片白，连「这张表有哪些列」都看不到。
+                        val orderedColumns =
+                            (tab.insertableColumns + tab.readOnlyColumns + tab.primaryKeyColumns + columnNames)
+                                .distinct()
+                        tab.columns = orderedColumns.map { TableColumn(key = it, header = it) }
                         tab.rows =
-                            paged.rowsList.mapIndexed { idx, row ->
-                                // 主键承载: 大小写不敏感查找 "id" / "ID" / "Id" —— 不同方言
-                                // (H2 大写 / MySQL 小写) 列名归一策略不同; 找不到则退化为行号.
-                                val idCell = row.valuesMap.entries.firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
-                                TableRow(
-                                    id = idCell?.let { cellValueAsId(it.value) } ?: idx,
-                                    cells = row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
-                                )
-                            }
+                            paged.rowsList
+                                .mapIndexed { idx, row ->
+                                    // 主键承载: 大小写不敏感查找 "id" / "ID" / "Id" —— 不同方言
+                                    // (H2 大写 / MySQL 小写) 列名归一策略不同; 找不到则退化为行号.
+                                    val idCell = row.valuesMap.entries.firstOrNull { (k, _) -> k.equals("id", ignoreCase = true) }
+                                    TableRow(
+                                        id = idCell?.let { cellValueAsId(it.value) } ?: idx,
+                                        cells = row.valuesMap.mapValues { (_, v) -> cellValueToAny(v) },
+                                    )
+                                }.let { ensureUniqueRowIds(it) }
                     }
                 },
                 onFailure = { tab.error = it.message ?: "Unknown error" },
             )
             tab.loading = false
         }
+    }
+
+    /**
+     * 保证本页每一行的 [TableRow.id] 互不相同 —— 重复的改用**行号**。
+     *
+     * ## 为什么需要这一步
+     *
+     * 行 id 取自 `id` 列，而 **`id` 列未必是主键，更未必唯一**：
+     * 一张 `t(id INT, code VARCHAR PRIMARY KEY)` 表里完全可以有 `(1,'a')` 和 `(1,'b')` 两行。
+     * 这时会同时坏掉两处：
+     *
+     * - `DataTable` 的 `itemsIndexed(key = { row.id })` 会因为 key 重复**直接抛异常** ——
+     *   整张表渲染不出来。
+     * - 编辑暂存缓冲以 `rowId + 列名` 为键：两行撞成同一行，第二处改动会把第一处
+     *   **静默覆盖**掉，用户看着「改了没反应」。
+     *
+     * 全部改用行号又不行 —— 翻页后行号会变，`selectedRowId` 就对不上了。
+     * 所以只在**检测到重复时**才把重复的那些行换成行号，其余保持原样：
+     * 绝大多数表（`id` 就是主键）行为完全不变。
+     *
+     * 行号只在本页内唯一，而行标识的全部用途（选中、暂存定位）都发生在本页，
+     * 所以这已经足够。真正用来发 `UPDATE` 的 `WHERE` 走的是主键**单元格值**
+     * （见 [applyOneCellRow]），跟行标识无关 —— 这里换成行号不影响正确性。
+     */
+    private fun ensureUniqueRowIds(rows: List<TableRow>): List<TableRow> {
+        val duplicates =
+            rows
+                .groupingBy { it.id }
+                .eachCount()
+                .filterValues { it > 1 }
+                .keys
+        if (duplicates.isEmpty()) return rows
+        return rows.mapIndexed { idx, row -> if (row.id in duplicates) row.copy(id = idx) else row }
+    }
+
+    /**
+     * 把引擎随 `DATA.LIST` 回的 [com.langbiantianya.grpc.TableCapabilities] 落到 tab 上。
+     *
+     * ## 为什么不用前端自己发 `TABLE.COLUMN_LIST` 去推导
+     *
+     * 推导要三样东西：主键（拼 `WHERE`）、自增列（新增时不能填）、二进制列（不能编辑）。
+     * 前端手里只有 `DATA.LIST` 的行数据，推不出任何一样 —— 而「拿 `id` 列当主键」
+     * 这种猜法一旦猜错就是**静默改错行**，比不给编辑严重得多。
+     *
+     * 引擎那边已经为了填能力去查了一遍同一份列定义，再让前端并行发第二次查询，
+     * 等于同一份元数据取两次、还可能两次结果不一致（比如中途 DDL 了）。
+     * 所以宁可让引擎把结论直接算好随数据一起回。
+     *
+     * ## 缺字段（老引擎）时一律收紧
+     *
+     * `capabilities` 是 `optional`：老引擎不填时前端**不能**退回到「按主键存在就当能改」
+     * —— 那正是当初把编辑整个关掉要防的误改。三个开关保持 `false`，
+     * 写入口全部禁用，并在 [TablePreviewTab.notice] 上留一句说明。
+     *
+     * 不是 `private`：这条「老引擎 ⇒ 一律只读」的分支无法用正常流程测到 ——
+     * 本机引擎一定会填 [com.langbiantianya.grpc.TableCapabilities]，
+     * 只有直接喂 `null` 才走得到。
+     */
+    internal fun applyCapabilities(
+        tab: TablePreviewTab,
+        caps: com.langbiantianya.grpc.TableCapabilities?,
+    ) {
+        if (caps == null) {
+            tab.capabilitiesLoaded = false
+            tab.canUpdate = false
+            tab.canInsert = false
+            tab.canDelete = false
+            tab.readOnlyColumns = emptySet()
+            tab.nullableColumns = emptySet()
+            tab.insertableColumns = emptyList()
+            tab.primaryKeyColumns = emptyList()
+            tab.notice = Msg.text(StrKey.EDIT_CAPABILITIES_MISSING)
+            tab.noticeIsError = true
+            return
+        }
+        tab.canUpdate = caps.canUpdate
+        tab.canInsert = caps.canInsert
+        tab.canDelete = caps.canDelete
+        tab.readOnlyColumns = caps.readOnlyColumnsList.toSet()
+        tab.nullableColumns = caps.nullableColumnsList.toSet()
+        tab.insertableColumns = caps.insertableColumnsList.toList()
+        tab.primaryKeyColumns = caps.primaryKeyColumnsList.toList()
+        // 引擎把「空串 ≠ NULL」这件事显式声明出来了（`EMPTY_AS_STRING`）。前端据此
+        // 决定编辑框里画不画「设为 NULL」的开关 —— 若哪天引擎改成 `EMPTY_AS_NULL`，
+        // 界面会跟着变，而不会静默按旧约定写库。
+        tab.emptyValueIsString = caps.emptyValuePolicy == com.langbiantianya.grpc.EmptyValuePolicy.EMPTY_AS_STRING
+        tab.capabilitiesLoaded = true
     }
 
     // ------------------------------------------------------------------------
