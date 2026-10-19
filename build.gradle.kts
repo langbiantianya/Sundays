@@ -67,18 +67,23 @@ subprojects {
     // 本机没装 JDK 25 也不至于卡死：settings.gradle.kts 装了
     // `org.gradle.toolchains.foojay-resolver-convention`，foojay 会自动拉一个。
     //
-    // ⚠️ 这一条只管**编译目标**，不管打包：Compose Desktop 的 jlink / jpackage
-    // 用的是 **Gradle 运行时自己的 JVM**（`java -version` 那个），不是这里的
-    // toolchain。要让安装包里的运行时也是 25，得让 Gradle 本身跑在 25 上 ——
-    // 本机与五条 CI 流水线目前都恰好满足。
+    // ⚠️ 这条只管**编译目标**。运行与打包的 JDK 在 :desktopApp 里单独指定（
+    // run 的 javaLauncher + jlink/jpackage 的 javaHome）—— 三处同版本才不会出现「编译 25 但跑不起来」。
+    //
+    // 为什么不能只靠「让 Gradle daemon 跑在 25 上」：daemon 的 JDK 由「谁启动了 Gradle」决定（JAVA_HOME /
+    // org.gradle.java.home），不是仓库能声明的事 —— 本机上就曾因为一次实验请求 JDK 21，
+    // 留下一个 21 的 daemon，而它被后面的构建复用了。
+    // JDK 版本从 gradle.properties 读（单点来源）—— 改它只要改一处。
+    val jdkVersion = providers.gradleProperty("sundaysJdkVersion").get().toInt()
+
     plugins.withId("org.jetbrains.kotlin.jvm") {
         project.extensions.configure<KotlinProjectExtension> {
-            jvmToolchain(25)
+            jvmToolchain(jdkVersion)
         }
     }
     plugins.withId("org.jetbrains.kotlin.multiplatform") {
         project.extensions.configure<KotlinProjectExtension> {
-            jvmToolchain(25)
+            jvmToolchain(jdkVersion)
         }
     }
 

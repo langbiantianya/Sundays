@@ -6,6 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -87,9 +88,37 @@ dependencies {
     testImplementation(project(":api"))
 }
 
+// 运行与打包用的 JDK —— 与根 build.gradle.kts 的 jvmToolchain 是**同一个版本**。
+//
+// 版本取自 gradle.properties 的 `sundaysJdkVersion`（全仓库单点来源）。
+val jdkVersion = providers.gradleProperty("sundaysJdkVersion").get().toInt()
+
 compose.desktop {
     application {
         mainClass = "com.langbiantianya.sundays.MainKt"
+
+        // ------------------------------------------------------------------
+        // 运行与打包用的 JDK —— 与根 build.gradle.kts 的 jvmToolchain 同版本。
+        //
+        // 为什么必须显式给：Compose 的 `javaHome` 默认指向 **Gradle daemon 的 JVM**，
+        // 而 daemon 的 JDK 由「谁启动了 Gradle」决定（JAVA_HOME / org.gradle.java.home）——
+        // 仓库无法声明。而编译目标已经被 jvmToolchain 钉在 25，两者脱钩就要出事：
+        //
+        //   · run：UnsupportedClassVersionError: class file version 69.0, 运行时只认到 65.0
+        //   · 打包：用 21 的 jlink 去链接 25 的字节码 → 安装包**装得进去却启不了**
+        //
+        // 这个属性同时驱动三件事（compose-gradle-plugin 1.11.1 的源码）：
+        //   · `run` task → exec.executable(javaExecutable(app.javaHome))
+        //   · jlink     → jdkHome.set(app.javaHomeProvider)
+        //   · jpackage  → javaHome.set(app.javaHomeProvider)
+        //
+        // 另外：设了它之后 Gradle 会从 executable 反推 toolchain，javaLauncher 自动跟随，
+        // 不会再报「Toolchain from `executable` property does not match toolchain from
+        // `javaLauncher` property」。
+        // ------------------------------------------------------------------
+        javaHome = javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(jdkVersion))
+        }.get().metadata.installationPath.asFile.absolutePath
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
