@@ -6,6 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
+import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
@@ -51,6 +52,35 @@ val ktlintVersion = libs.versions.ktlint.get()
 subprojects {
     // 插件只在子项目真的挂了 Kotlin 插件时才激活——不为不编译的代码做检查。
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
+
+    // ── JDK 25：全仓库统一钉住 ──────────────────────────
+    //
+    // 以前**没有任何声明**：编译目标完全跟着「跑 Gradle 的那个 JVM」走 ——
+    // 本机是 Zulu 25.0.4.1，CI 靠各流水线自己的 `java-version: '25'` 保证。
+    // 于是「用哪个版本编」是一件谁都没写下来的事：本机升级 JDK、CI 换镜像，
+    // 字节码目标就静默漂移，而仓库里没有任何东西能证明它变过。
+    //
+    // 为什么写在根上而不是各模块自己声明：11 个模块分散写，迟早会漏掉一个；
+    // 漏掉的那个会跟别的模块编出**不同版本**的字节码，而这种差异到运行时才暴露
+    // （UnsupportedClassVersionError，且只在用到新 API 时才炸）。
+    //
+    // 本机没装 JDK 25 也不至于卡死：settings.gradle.kts 装了
+    // `org.gradle.toolchains.foojay-resolver-convention`，foojay 会自动拉一个。
+    //
+    // ⚠️ 这一条只管**编译目标**，不管打包：Compose Desktop 的 jlink / jpackage
+    // 用的是 **Gradle 运行时自己的 JVM**（`java -version` 那个），不是这里的
+    // toolchain。要让安装包里的运行时也是 25，得让 Gradle 本身跑在 25 上 ——
+    // 本机与五条 CI 流水线目前都恰好满足。
+    plugins.withId("org.jetbrains.kotlin.jvm") {
+        project.extensions.configure<KotlinProjectExtension> {
+            jvmToolchain(25)
+        }
+    }
+    plugins.withId("org.jetbrains.kotlin.multiplatform") {
+        project.extensions.configure<KotlinProjectExtension> {
+            jvmToolchain(25)
+        }
+    }
 
     configure<KtlintExtension> {
         version.set(ktlintVersion)

@@ -65,8 +65,8 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          # 25 与另外四条流水线保持一致。仓库里没有 jvmToolchain 声明，
-          # 编译跟着跑它的 JDK 走。
+          # 25 与另外四条流水线保持一致，也与根 build.gradle.kts 里统一的
+          # jvmToolchain(25) 对齐。
           #
           # ⚠️ 这一步不是可有可无的：Kotlin 编译器要求运行时 JDK ≥ 语言版本要求，
           # 用低版本 JDK 会直接编译失败，而 CodeQL 的报错会藏在抽取阶段里，

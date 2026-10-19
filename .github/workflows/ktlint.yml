@@ -57,8 +57,8 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          # 25 与三条打包流水线保持一致。仓库里没有 jvmToolchain 声明，
-          # 构建跟着跑它的 JDK 走 —— 本地是 zulu 25.0.4.1，这里用 Temurin 25，
+          # 25 与三条打包流水线保持一致，也与根 build.gradle.kts 里统一的
+          # jvmToolchain(25) 对齐 —— 本地是 zulu 25.0.4.1，这里用 Temurin 25，
           # 同一大版本。ktlint 插件本身对 JDK 无特殊要求，但让整个构建跑在
           # 与打包相同的 JDK 上，可以排除「本地过了、CI 因为 JDK 差异而炸」。
           java-version: '25'

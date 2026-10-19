@@ -18,7 +18,7 @@
 | `./gradlew :desktopApp:distributable` | 打包发布版，生成 `.dmg` / `.msi` / `.deb`，产物在 `desktopApp/build/compose/binaries/` |
 | `./gradlew :desktopApp:test` | 端到端 / UI 测试：Compose UI 测试 + 真引擎 + H2 内存库，**无需外部数据库**（测试把 `user.home` 指向临时目录） |
 
-前置条件：JDK 25、Kotlin 2.4.0、Compose Multiplatform 插件已就绪。
+前置条件：JDK 25、Kotlin 2.4.20、Compose Multiplatform 插件已就绪。
 
 ---
 
@@ -72,7 +72,7 @@ Direct 模式下 `engine` 是 JVM 内的 library 对象而非独立进程入口�
 
 ## 4. 技术栈
 
-- **Kotlin 2.4.0 / JDK 25**、Kotlin Multiplatform + Compose Multiplatform Desktop（`jvmMain` 单平台目标）
+- **Kotlin 2.4.20 / JDK 25**、Kotlin Multiplatform + Compose Multiplatform Desktop（`jvmMain` 单平台目标）
 - **Material 3**（`androidx.compose.material3`）、**kotlinx-coroutines 1.11.0**（含 `coroutines-swing`）
 - **`:shared`**（界面组件）+ **`:engine` / `:engine-grpc-client`**（`EngineClient` 的两个实现）+ **`:engine-protocol`**（调用层契约）
 - **protobuf-java / protobuf-kotlin-lite**（集成层需要 typed proto 才能调 facade 的 Direct 模式 API）

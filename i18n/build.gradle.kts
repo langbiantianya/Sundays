@@ -13,9 +13,16 @@ plugins {
 group = "com.langbiantianya"
 version = "1.0-SNAPSHOT"
 
-// 刻意**不**声明 `jvmToolchain(…)` / `sourceCompatibility` —— 与 :api / :engine 保持一致，
-// 直接用 Gradle 运行时自己的 JVM。写死 toolchain 会让「本机没装那个版本 + foojay 拉不动」
-// 的机器直接配不出任务图，而文案表是纯 Kotlin 源码，对字节码版本没有任何要求。
+// JDK 25 由根构建统一声明（见根 `build.gradle.kts` 的 `subprojects` 块）——
+// 本模块**不单独**声明 `jvmToolchain(…)` / `sourceCompatibility`。
+//
+// 这里曾经刻意「不写死」：担心「本机没装那个版本 + foojay 拉不动」的机器配不出
+// 任务图。那条顾虑已经不存在了 —— 根构建统一声明后，foojay resolver
+// （settings.gradle.kts）在任何机器上都会先把 JDK 25 备齐，而分散声明只会漏掉某个模块、
+// 让它跟别的模块编出不同版本的字节码。
+//
+// ⚠️ 但**`sourceCompatibility` 仍然不适用**：那会把「编译目标」与「语言特性级别」绑死，
+// 而文案表是纯 Kotlin 源码，对字节码版本没有任何要求。
 
 // ============================================================================
 // 这个模块**刻意不依赖任何东西**
