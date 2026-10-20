@@ -441,6 +441,45 @@ body{
   font-size:12px; color:var(--on-surface); cursor:pointer;
 }
 .fold .caret{ font-size:10px; color:var(--on-surface-variant); }
+
+/* ---------- 11. 画面 6：组件复用对照（v0.3 新增） ---------- */
+/* 这一屏不是「另一个界面」，而是本设计的自证：
+   把「每个界面区域由哪个现成组件渲染」摊开成一张表。 */
+.cmp-body{ display:flex; flex-direction:column; }
+/* 这一屏是完整的一张对照表 —— 设计图是静态产物，不能靠滚动才能看全，
+   所以这里让窗口按内容生长，而不是给一个固定高度 + overflow:auto。 */
+.cmp-head{
+  display:flex; align-items:center; gap:12px; padding:10px 14px;
+  border-bottom:1px solid var(--outline-variant); background:var(--surface);
+}
+.cmp-head-title{ font-size:14px; line-height:20px; font-weight:600; color:var(--on-surface); }
+.cmp-head-sub{ font-size:11px; line-height:15px; color:var(--on-surface-variant); }
+.cmp-stat{ margin-left:auto; display:flex; align-items:center; gap:8px; font-size:11px; color:var(--on-surface-variant); }
+.cmp-scroll{ flex:1 1 auto; background:var(--surface); }
+.cmp-group{
+  padding:9px 14px 4px; font-size:11px; line-height:15px; font-weight:600;
+  letter-spacing:.04em; color:var(--on-surface-variant);
+  background:var(--surface-variant); border-bottom:1px solid var(--outline-variant);
+}
+/* 四列：界面区域 / 复用的组件 / 落在哪个文件 / 状态 */
+.cmp-row{
+  display:grid; grid-template-columns:132px minmax(0,1fr) minmax(0,1.05fr) 56px;
+  gap:12px; align-items:center; padding:5px 14px;
+  font-size:12px; line-height:17px; color:var(--on-surface);
+  border-bottom:1px solid var(--outline-variant);
+}
+.cmp-row.head{
+  font-size:11px; line-height:15px; font-weight:600; color:var(--on-surface-variant);
+  background:var(--surface);
+}
+.cmp-comp{ font-family:var(--font-mono); font-size:11px; color:var(--on-surface); overflow-wrap:anywhere; }
+.cmp-path{ font-family:var(--font-mono); font-size:11px; color:var(--on-surface-variant); overflow-wrap:anywhere; }
+.cmp-flag{ justify-self:start; }
+.cmp-foot{
+  padding:9px 14px; font-size:11px; line-height:16px; color:var(--on-surface-variant);
+  background:var(--surface-variant); border-top:1px solid var(--outline-variant);
+}
+.cmp-foot b{ color:var(--on-surface); font-weight:600; }
 </style>
 </head>
 <body>
@@ -471,6 +510,7 @@ body{
     <button class="ctl-btn" type="button" data-screen="report">报表设计器</button>
     <button class="ctl-btn" type="button" data-screen="conn">连接管理器</button>
     <button class="ctl-btn" type="button" data-screen="wizard">新增连接向导</button>
+  <button class="ctl-btn" type="button" data-screen="cmp">组件复用对照</button>
   </div>
 
   <span class="ctl-note">配色与明暗为全局状态，切换画面时保持不变。</span>
@@ -873,6 +913,72 @@ body{
     </div>
   </section>
 
+  <!-- ===================== 画面 6：组件复用对照（v0.3 新增） ===================== -->
+  <section class="screen" data-screen="cmp">
+    <div class="window">
+      <header class="appbar">
+        <div class="brand"><span class="brand-mark"></span>sundays</div>
+        <nav class="nav-chips">
+          <span class="nav-chip">连接管理</span>
+          <span class="nav-chip is-selected">数据分析</span>
+        </nav>
+        <div class="appbar-right">
+          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
+          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+        </div>
+      </header>
+
+      <div class="cmp-body">
+        <div class="cmp-head">
+          <span class="cmp-head-title">组件复用对照</span>
+          <span class="cmp-head-sub">每个界面区域由哪个现成组件渲染</span>
+          <span class="cmp-stat">
+            <span class="tag-xs">零改动复用 18 项</span>
+            <span class="tag-tertiary">新增 6 个</span>
+            <span>全部落在 :shared 的 commonMain</span>
+          </span>
+        </div>
+
+        <div class="cmp-scroll">
+          <div class="cmp-row head">
+            <span>界面区域</span><span>复用的组件</span><span>落在哪个文件</span><span>状态</span>
+          </div>
+
+          <div class="cmp-group">② 分析工作区</div>
+          <div class="cmp-row"><span class="cmp-area">顶栏按钮</span><span class="cmp-comp">WinButton / WinOutlinedButton / WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">只读徽标</span><span class="cmp-comp">ReadOnlyBadge</span><span class="cmp-path">shared/…/analysis/ReadOnlyBadge.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">SourceTree</span><span class="cmp-path">shared/…/analysis/SourceTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">面板分隔条</span><span class="cmp-comp">DragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">右键菜单</span><span class="cmp-comp">ContextMenuState / onRightClick</span><span class="cmp-path">shared/…/ui/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">拉取进度</span><span class="cmp-comp">PullStageIndicator</span><span class="cmp-path">shared/…/analysis/PullStageIndicator.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+
+          <div class="cmp-group">③ 报表设计器</div>
+          <div class="cmp-row"><span class="cmp-area">区块列表</span><span class="cmp-comp">ReportBlockList</span><span class="cmp-path">shared/…/analysis/ReportBlockList.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">列规格行</span><span class="cmp-comp">ReportColumnSpecRow</span><span class="cmp-path">shared/…/analysis/ReportColumnSpecRow.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">数字格式下拉</span><span class="cmp-comp">WinDropdown</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">Excel 预览</span><span class="cmp-comp">DataTable（只读用法）</span><span class="cmp-path">shared/…/table/DataTable.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+
+          <div class="cmp-group">④ 连接管理器 / ⑤ 新增连接向导</div>
+          <div class="cmp-row"><span class="cmp-area">整屏</span><span class="cmp-comp">ConnectionManagerScreen / AddConnectionDialog</span><span class="cmp-path">shared/…/connection/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">认证方式下拉</span><span class="cmp-comp">WinDropdown</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+
+          <div class="cmp-group">全部画面</div>
+          <div class="cmp-row"><span class="cmp-area">主题 / 圆角 / 立体边</span><span class="cmp-comp">SundaysTheme / UiThemeTokens / winShape</span><span class="cmp-path">shared/…/ui/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">文案</span><span class="cmp-comp">str(StrKey) + i18n 六语言表</span><span class="cmp-path">shared/…/ui/LocalStrings.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">紧凑档</span><span class="cmp-comp">LocalCompactMode / compactDensity</span><span class="cmp-path">shared/…/ui/CompactMode.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+        </div>
+
+        <div class="cmp-foot">
+          <b>判据（三条同时满足才叫复用）</b>：① 平台无关（不 import <span class="cmp-comp">java.*</span> / <span class="cmp-comp">desktopApp</span>）；
+          ② 状态无关（不依赖 <span class="cmp-comp">DatabaseBrowserState</span>）；③ 可寻址（说得出它在哪一屏的哪个位置）。
+          <br><b>只读由引擎与方言保证</b>，组件层只做表达 —— 徽标不可关闭、结果表不提供编辑入口；组件<b>不</b>自己判断「这条 SQL 算不算写」。
+        </div>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <script>
@@ -1101,7 +1207,7 @@ function readHash(){
   for (var i = 0; i < parts.length; i++){
     var kv = parts[i].split("=");
     var k = decodeURIComponent(kv[0] || ""), v = decodeURIComponent(kv[1] || "");
-    if (k === "screen" && ["nav","work","report","conn","wizard"].indexOf(v) >= 0) state.screen = v;
+    if (k === "screen" && ["nav","work","report","conn","wizard","cmp"].indexOf(v) >= 0) state.screen = v;
     else if (k === "palette" && FAMILIES[v]) state.family = v;
     else if (k === "mode" && (v === "light" || v === "dark")) state.mode = v;
   }

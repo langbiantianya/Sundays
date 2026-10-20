@@ -169,7 +169,7 @@ SQL 注入这一块由 CodeQL 的 `java/sql-injection` 查询集覆盖（它对 
 | 文档 | 内容 |
 | --- | --- |
 | [`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md) | **功能文档** —— 能力总览、与 DataGrip & Navicat 的差距矩阵、路线建议 |
-| [`docs/analysis-mode/README.md`](./docs/analysis-mode/README.md) | **数据分析模式设计文档** —— 独立只读分析模式、DuckDB / Hive / Impala 引擎、Excel 报表模型、迭代拆分（附 [UI 设计图](./docs/analysis-mode/ui-mockup.html)） |
+| [`docs/analysis-mode/README.md`](./docs/analysis-mode/README.md) | **数据分析模式设计文档** —— 独立只读分析模式、连接与设置复用、**组件复用与通用化**、DuckDB / Hive / Impala 引擎、Excel 报表模型、迭代拆分（附 [UI 设计图](./docs/analysis-mode/ui-mockup.html)） |
 | [`desktopApp/TEST_CASES.md`](./desktopApp/TEST_CASES.md) | GUI 走查用例的**覆盖矩阵**（用例详情在各测试函数的 KDoc 里） |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | **架构导航** —— 调用层、分层依赖、方言矩阵 |
 | [`engine/README.md`](./engine/README.md) / [`engine/ARCHITECTURE.md`](./engine/ARCHITECTURE.md) | 引擎模块：CLI、handler 路由、导入导出、IPC、连接池 |

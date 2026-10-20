@@ -1,6 +1,19 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v0.2** · 2026-10-21
+> **状态**：设计冻结待评审 · **v0.3** · 2026-10-21
+>
+> **v0.3 相对 v0.2 的修改**（评审意见：*组件和控件也尽量复用，可以优化组件更加通用*）：
+>
+> 1. **新增「组件复用与通用化」整节（§6）** —— 给出三条复用判据、**零改动的直接复用清单**、
+>    **5 项通用化改造**、**6 个确需新建的组件**（附「为什么现有的不够用」）。
+> 2. **原 §6~§13 顺延为 §7~§14** —— 本节插在「连接管理器通用化」之后，
+>    因为两者是**同一件事的两半**：连接管理器通用化管「**表单**怎么描述」，
+>    本节管「**控件**怎么描述」。
+> 3. **§9（界面设计）补「界面区域 ↔ 复用组件」映射**，并新增设计图第 6 画面
+>    **「组件复用对照」**（[`ui-mockup.html`](./ui-mockup.html)）。
+> 4. **§11（迭代）M1 扩容**：方言档位**注册表化**、前端方言元数据**收进一处**、
+>    `WinDropdown` 补齐 —— 三项都是「先通用化再接方言」的一部分。
+> 5. **§12 新增 R12**（组件复用退化）、**§13 新增 Q9**（要不要顺手上移 `desktopApp` 的 UI 组件）。
 >
 > **v0.2 相对 v0.1 的三处结构性修改**（评审意见：*设置复用，连接管理器复用；需要一个更通用的连接管理器*）：
 >
@@ -27,13 +40,14 @@
 | **远程数据源** | **恒为只读**——而且是**方言级**保证：Hive / Impala 在引擎里**根本没有写入路径**，与从哪个模式进来无关（§3）。 |
 | **计算引擎** | **默认 DuckDB**（本地嵌入式分析引擎），可选 **Hive** / **Impala**。 |
 | **当前阶段交付** | **Excel 报表**（.xlsx）。 |
-| **后续迭代** | 接入 **AI** 做智能分析与报表生成（见 §7）。 |
+| **后续迭代** | 接入 **AI** 做智能分析与报表生成（见 §8）。 |
 | **复用什么** | **连接配置 + 连接管理器 + 连接向导 + 设置页**（同一份 `connection.json`，同一个设置界面）。 |
-| **不���用什么** | 浏览屏的 sheet 标签条 / `DatabaseBrowserState` / 对象树 / 预览标签页 / SQL 工作台**屏幕**。 |
-| **前置条件** | **连接管理器必须先通用化**（§5）—— 否则 Hive / Impala 会把专用表单的 if-else 再加两轮。 |
-| **样式** | **完全复用**现有主题系统：5 套配色 × 明暗 2 档，一行新样式代码都不写（见 §8）。 |
+| **组件** | **通用控件全部来自 `:shared` 的 `commonMain`**（`CodeEditor` / `DataTable` / `DragHandle` / `EmptyHint` / `WinControls` / `ContextMenuState` / `DangerousSql` …），**零改动**；本模式**只新增 6 个组件**，且全部落在 `:shared`（见 §6）。 |
+| **不复用什么** | 浏览屏的 sheet 标签条 / `DatabaseBrowserState` / 对象树 / 预览标签页 / SQL 工作台**屏幕**。 |
+| **前置条件** | **连接管理器必须先通用化**（§5）—— 否则 Hive / Impala 会把专用表单的 if-else 再加两轮。**组件侧同样要先通用化**（§6.3）：方言档位注册表化、前端方言元数据收进一处。 |
+| **样式** | **完全复用**现有主题系统：5 套配色 × 明暗 2 档，一行新样式代码都不写（见 §9.1）。 |
 | **引擎侧改动** | 复用已有的 `EXPORT.RUN_EXPORT` / `IMPORT.RUN_IMPORT` / `ExportFormat.EXCEL` 链路；**新增** `Category.ANALYSIS` / `Category.REPORT` 两条只读路由。 |
-| **最大风险** | `hive-jdbc` 依赖树与仓库现有 `hadoop-common 3.5.0` 的版本冲突（见 §11 R1），必须先做 spike。 |
+| **最大风险** | `hive-jdbc` 依赖树与仓库现有 `hadoop-common 3.5.0` 的版本冲突（见 §12 R1），必须先做 spike。 |
 
 ---
 
@@ -71,7 +85,7 @@
 - ❌ **不做独立的连接管理器**，也不做独立的设置页 —— 一律复用现有的（§1.3）。
 - ❌ **不在分析模式里提供任何写入能力**——包括「建临时表到远端」「往本地 DuckDB 写东西」之外的一切。
   （本地 DuckDB 工作区**可以**写：那是分析产物，不是数据源。这条边界很重要，见 §3.4。）
-- ❌ 不把 AI 能力混进 v1 的交付范围（只留接口与入口占位，见 §7）。
+- ❌ 不把 AI 能力混进 v1 的交付范围（只留接口与入口占位，见 §8）。
 
 ### 1.3 与现有浏览流程的关系：**屏幕独立，连接与设置复用**
 
@@ -96,7 +110,7 @@
 | `ConnectionSession` / `DatabaseBrowserState` | 那套状态机是「一个连接 = 一个**可写**浏览器」，与分析工作流不匹配 |
 | sheet 标签条（多连接标签） | 分析模式的工作单位是「**一次分析**」，不是「一个连接」 |
 | 对象树 / 预览标签页 | 分析模式的对象是「数据集 + 报表区块」，不是「库表 + 预览」 |
-| SQL 工作台**屏幕** | 但**组件**复用：`CodeEditor` / `DataTable` / `DangerousSql` 都直接用（§9.1） |
+| SQL 工作台**屏幕** | 但**组件**复用：`CodeEditor` / `DataTable` / `DangerousSql` 都直接用（§10.1） |
 
 **两个模式怎么共用一份连接？** 靠**能力位**筛选，不靠复制配置（§5.6）：
 
@@ -120,7 +134,7 @@ DuckDB 两组都在 —— 它既能当管理用的本地库，也能当分析�
 | 方言元数据**有两处** | 前端 `DialectType.supportedConnectionTypes` vs 引擎 `DatabaseDialect.connectionType` | 仓库已有 `DialectNameContractTest` 在防漂移 —— 说明这块**确实脆** |
 | 连接类型只有 4 种 | `ConnectionType` | 没有「直接填 JDBC URL」的逃生舱；而引擎**已经支持**按 URL 前缀反查方言（`DialectLoader.getDialectByJdbcUrl`） |
 
-反过来做（先加方言、后补通用化）会把 if-else 再加两轮，而这两轮里每一处都是**只有加方言的人才看得懂**的分支。所以顺序是：**先通用化 → 再接方言**（§10 迭代）。
+反过来做（先加方言、后补通用化）会把 if-else 再加两轮，而这两轮里每一处都是**只有加方言的人才看得懂**的分支。所以顺序是：**先通用化 → 再接方言**（§11 迭代）。
 
 ---
 
@@ -184,7 +198,7 @@ DuckDB 两组都在 —— 它既能当管理用的本地库，也能当分析�
 ```
 
 **④ 的关键约束**：报表的每个数字都必须来自**一条用户看得见的 SQL**。
-AI 也不例外——AI 只能产出 `ReportSpec`（含 SQL），不能直接产出文件（见 §7）。
+AI 也不例外——AI 只能产出 `ReportSpec`（含 SQL），不能直接产出文件（见 §8）。
 
 ### 2.4 拉取链路：为什么先走 CSV 中转
 
@@ -314,7 +328,7 @@ L4 的落法：
 1. **方言级**：对一个只读方言发 `TABLE.CREATE` / `DATA.INSERT` / `USER.CREATE` → 被拒；
 2. **会话级**：在一个 `read_only = true` 的会话里发写请求 → **不进入 handler** 就被拒。
 
-> 📌 **本仓库的教训**（见 `desktopApp/TEST_CASES.md` §6）：测试的判据要落在
+> 📌 **本仓库的教训**（见 `desktopApp/TEST_CASES.md` §7）：测试的判据要落在
 > 「**发出去的那条语句**」上。「只读模式下写操作被拦」这个判据，必须真的发一条
 > `INSERT` 给引擎、并断言引擎**在进入 handler 之前**就拒了它 —— 而不是断言
 > 「某个 UI 按钮是 disabled」。后者在 UI 重构后依然绿，而功能其实已经漏了。
@@ -327,7 +341,7 @@ L4 的落法：
 
 | 目标 | 驱动 | 说明 |
 |---|---|---|
-| Hive | `org.apache.hive:hive-jdbc`（standalone 分类） | 走 HiveServer2 的 Thrift 协议。仓库现有 `hadoop-common 3.5.0` 已铺了 Thrift/HDFS 的底，但版本与 `hive-jdbc` 的 Hadoop 依赖**可能打架**（见 §11 R1）。 |
+| Hive | `org.apache.hive:hive-jdbc`（standalone 分类） | 走 HiveServer2 的 Thrift 协议。仓库现有 `hadoop-common 3.5.0` 已铺了 Thrift/HDFS 的底，但版本与 `hive-jdbc` 的 Hadoop 依赖**可能打架**（见 §12 R1）。 |
 | Impala | **同一个** `hive-jdbc` | Cloudera Impala 兼容 **HiveServer2 协议**，所以同一个驱动能连 —— ⚠️ **这是假设，必须先验证**（见 §4.2）。 |
 | DuckDB | `org.duckdb:duckdb_jdbc` | **仓库已有**（`libs.versions.toml` 的 `duckdb = 1.5.5.1`），`dialect-duckdb` 也已有，**零新增**。 |
 
@@ -404,7 +418,7 @@ L4 的落法：
 
 ## 5. 连接管理器通用化（前置条件）★
 
-> 完整背景见 §1.4。这一节是 §10 迭代里的 **M1**。
+> 完整背景见 §1.4。这一节是 §11 迭代里的 **M1**。
 
 ### 5.1 目标与判据
 
@@ -533,9 +547,270 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 
 ---
 
-## 6. 报表模型与 Excel 输出
+## 6. 组件复用与通用化 ★
 
-### 6.1 为什么不能直接复用 `ExportEngine`
+> 本节回答评审意见的第三条：**组件和控件也尽量复用，可以优化组件更加通用**。
+>
+> **结论先行**：分析模式**不新写一套控件**。所有颜色 / 圆角 / 字号来自现有主题系统（§9.1），
+> 所有通用控件来自 `:shared` 的 `commonMain`；本模式**只新增 6 个组件**，且**全部落在 `:shared`**
+> —— 这样浏览模式将来也能用。
+
+### 6.1 判据：什么叫「可以复用」
+
+一个组件要被分析模式复用，必须同时满足三条：
+
+| # | 判据 | 为什么是它 |
+|---|---|---|
+| 1 | **平台无关** | 不 import `java.*` / `javax.*`，也不 import `desktopApp` 包里的任何类型 —— 否则它进不了 `:shared` 的 `commonMain`（`:shared` 的定位是「commonMain 单一 source set 承载所有业务组件」，**不引入 expect/actual**，见 `shared/ARCHITECTURE.md`） |
+| 2 | **状态无关** | 不直接依赖 `DatabaseBrowserState` 这类**大而具体**的状态机 —— 依赖它就等于把整个浏览模式拖进分析模式 |
+| 3 | **可寻址** | 能说清「它出现在分析模式的哪一屏的哪个位置」—— 否则「复用」只是把代码搬了个地方 |
+
+不满足第 2 条的组件**先解耦再复用**，而不是复制一份到 `desktopApp`。
+
+### 6.2 直接复用清单（零改动）
+
+下表每一项都**不需要改一行代码**：
+
+| 组件 | 位置 | 用在哪 | 为什么够用 |
+|---|---|---|---|
+| `CodeEditor` / `CodeEditorWithToolbar` | `shared/.../editor/ui/CodeEditor.kt:246` / `:699` | 工作区 SQL 编辑区 | 组件只认 `languageId`；方言差异全在 `SqlDialectProfile` 里（§6.3.1） |
+| `CodeEditorState` / `rememberCodeEditorState` | `shared/.../editor/ui/CodeEditor.kt` | 编辑器状态 | 纯状态持有者，与业务无关 |
+| `DataTable` | `shared/.../table/DataTable.kt:187` | 查询结果表 | 已是通用键值模型，聚合结果的列天然可用（§6.3.3） |
+| `TableColumn` / `TableRow` | `shared/.../table/TableModels.kt:52` / `:88` | 结果表的列与行 | `TableColumn(key, header, …)` + `TableRow(id, cells)` 不含「库表」语义 |
+| `PageSize` | `shared/.../table/TableModels.kt:121` | 结果表分页 | `PageSize.ALL` 的 KDoc 明说「一次性渲染所有行（依赖 LazyColumn 虚拟滚动）」 |
+| `DataTableTheme` | `shared/.../table/TableModels.kt:195` | 表格配色 | 已有「编辑 / 待提交 / 待删除」三种单元格状态色，只读场景一个都用不到 |
+| `EmptyHint` | `shared/.../ui/EmptyHint.kt` | 所有空态 | 已是「标题 + 说明 + 可选居中」的通用形态 |
+| `FocusRing` / `uiBevel` / `winShape` / `controlShape` / `selectionColorsFor` | `shared/.../ui/UiChrome.kt` | 焦点环 / 立体边 / 圆角 / 选中色 | 经典档与现代档的差异全在这一个文件里 |
+| `WinButton` / `WinOutlinedButton` / `WinTextButton` / `WinTextField` / `WinIconButton` / `WinSwitch` / `WinMenuItem` / `WinSurface` / `WinProgressIndicator` / `WinDivider` | `shared/.../ui/WinControls.kt` | 全部按钮 / 输入框 / 开关 / 菜单项 / 进度条 | 现有控件集已覆盖分析模式的绝大多数控件，**唯独缺下拉**（§6.3.4） |
+| `ContextMenuState` / `onRightClick` | `shared/.../ui/ContextMenuState.kt` / `RightClick.kt` | 右键菜单 | 泛型 `ContextMenuState<T>`；表格与编辑器各有一个类型别名 |
+| `ColumnBadge` | `shared/.../ui/ColumnBadge.kt` | 数据源类型小徽标 | `surfaceVariant` 底的小徽标，正好是「类型标签」的视觉 |
+| `DragHandle` | `shared/.../ui/DragHandle.kt` | 面板宽度拖拽 | 已支持 `hoverIcon`（指针图标由平台侧注入，桌面端 `PointerIcons.kt`） |
+| `DangerousSql` / `DangerousSqlConfirmDialog` | `shared/.../sql/DangerousSql.kt` / `DangerousSqlConfirmDialog.kt` | SQL 执行前的只读校验 | `isReadOnlyQuery` 已能剥注释、识别 SELECT / WITH / 多语句写操作 |
+| `SundaysTheme` / `ThemePalette` / `SundaysPalette` | `shared/.../ui/` | 主题 | 5 套配色 × 明暗 × 紧凑档，分析模式**一行新样式都不写** |
+| `str` / `LocalStrings` / `ProvideStrings` | `shared/.../ui/LocalStrings.kt` | 国际化 | 新增文案键走 `i18n` 的 6 语言表，UI 里不写死中文 |
+| `CompactMode` / `LocalCompactMode` / `compactDensity` | `shared/.../ui/CompactMode.kt` | 紧凑档 | 与主题一起继承 |
+| `SqlFormatter` / `CodeFormatterRegistry` | `shared/.../editor/formatter/` | SQL 格式化 | 格式化按钮按 `languageId` 找 formatter，Hive / Impala 档位注册后自动可用 |
+| `TabRenameDialog` | `shared/.../ui/TabRenameDialog.kt` | 报表区块改名 | 已是通用的「重命名一个字符串」弹窗 |
+
+### 6.3 通用化之后复用的（5 项）
+
+#### 6.3.1 SQL 方言档位：注册表化（**必做**）
+
+**现状**：`shared/.../editor/language/SqlDialectProfile.kt:341` 是一行硬编码：
+
+```kotlin
+val ALL: List<SqlDialectProfile> = listOf(STANDARD, MYSQL, POSTGRESQL, H2, DUCKDB, SQLITE)
+```
+
+它被两处消费：
+
+- `shared/.../editor/formatter/SqlFormatter.kt:179-187` —— `register()` 遍历 `ALL`，
+  为每个档位注册「语言 + formatter」配对
+- `shared/src/commonTest/.../editor/SqlDialectProfileTest.kt` —— 遍历 `ALL`
+  校验「档位即语言」「三类词互斥」两条不变量
+
+**问题**：加 Hive / Impala 就要改 `:shared` 的核心文件 —— 这**直接违反** §5.7
+「新增方言零前端改动」的判据。
+
+更关键的是它**违背了仓库已有的设计**：`CodeLanguageRegistry`
+（`shared/.../editor/CodeLanguage.kt:94`）的 KDoc 明确写着
+「第三方语言可在应用启动后调用 `register` 注入，**不需要修改编辑器组件源码**」
+—— SQL 家族只是走了 `ALL` 这条旁路，没享受这个机制。
+
+**方案**：新增 `SqlDialectProfileRegistry`，与 `CodeLanguageRegistry` / `CodeFormatterRegistry`
+**同构**（同样的 `synchronized` 守护 + `get` / `all` / `unregister`）：
+
+```kotlin
+object SqlDialectProfileRegistry {
+    /** 注册一个方言档位 —— 同时注册语言与 formatter，保证「只高亮不能格式化」的中间态不会出现。 */
+    fun register(profile: SqlDialectProfile)
+    fun get(languageId: String): SqlDialectProfile?
+    fun all(): List<SqlDialectProfile>
+}
+```
+
+`ALL` **保留但降级**为「内置档位的快照」，仅为不破坏现有测试；**生产路径不再读它**。
+`SqlFormatter.register()` 改成遍历注册表。
+
+**验收**：
+
+- 运行时注册一个假档位 → `CodeEditor(languageId = "sql-fake")` **立刻有高亮**、
+  格式化按钮**可用**；且 `SqlDialectProfileTest` 的两条不变量对它**自动成立**
+  （因为测试改成遍历注册表）
+- 现有 5 个方言的注册结果与改造前**逐项相同**（顺序、id、词表）
+
+**顺带修一处重复**：`desktopApp/.../DatabaseBrowserState.kt:149-157` 的
+`DialectType.toSqlDialectProfile()` 是**又一份**方言 if-else ——
+与 `ALL` 的硬编码是同一个问题的两个副本。通用化后它应从「方言 → 档位」的映射表读，
+而不是各自维护一份。
+
+#### 6.3.2 前端方言元数据：收进一处（**必做**）
+
+**现状**：`DialectType`（`shared/.../connection/ConnectionConfig.kt:103`）在前端有**四处**硬编码 `when`：
+
+| 位置 | 内容 |
+|---|---|
+| `ConnectionConfig.kt:72-80` `defaultsFor` | 方言 → 默认连接类型 + 默认端口 |
+| `ConnectionConfig.kt:117-125` `supportedConnectionTypes` | 方言可选的连接类型 |
+| `ConnectionConfig.kt:140-155` `engineDriverName` | 方言 → 引擎 `driver` 名 |
+| `shared/.../table/DialectCapabilities.kt:52-101` `of(dialect)` | 方言 → 前端能力判断 |
+
+**问题**：每加一个方言要改**四个地方**，漏一个就是「界面说能连、引擎说没这个驱动」这类错。
+仓库已经有 `DialectNameContractTest` 在防漂移 —— 说明这块**确实脆**。
+
+**方案**：与 §5.2 的 `ConnectionFormSpec` 合并成**一份**方言前端元数据：
+
+```
+DialectType.HIVE → ConnectionFormSpec(
+    displayName = "Hive",
+    authMethods = listOf(AuthMethod.PASSWORD, AuthMethod.KERBEROS),
+    defaultConnectionType = ConnectionType.CLIENT_SERVER,
+    defaultPort = 10000,
+    engineDriverName = "Hive",
+    frontendFeatures = DialectFeatures(...),
+    fields = listOf(ConnectionField("host", ...), ConnectionField("principal", ...)),
+)
+```
+
+四处 `when` 全部改成查这张表。**判据不变**：加一个方言，前端**只加一条元数据**，不再改分支。
+
+#### 6.3.3 `DataTable`：只读与分页都**零改动**
+
+`DataTable`（`shared/.../table/DataTable.kt:187`）的签名里有 20 多个参数，
+其中**一半是写入相关**的。分析模式是只读的，用法必须写死成下面这样，**不加新参数**：
+
+| 参数 | 分析模式传什么 | 为什么 |
+|---|---|---|
+| `onCellEdit` | `null` | 触发 `cellEditable` 的默认值 `= onCellEdit != null` → 自动为 `false`（KDoc 已写明这条默认联动） |
+| `isColumnEditable` / `isCellPending` / `isRowDeleted` | 保持默认 | 只读场景这三种状态不出现 |
+| `pageSize` | `PageSize.ALL` | 分析结果集是一次查询返回的**完整**集合，分页是**客户端**的；`PageSize.ALL` 的 KDoc 明说依赖 `LazyColumn` 虚拟滚动 |
+| `serverSidePaging` | `false` | 同上 |
+| `totalCount` | `rows.size` | 默认值即可 |
+| `contextMenuItems` | 复制 / 导出为 CSV | 只读但**可取走** —— 复制与导出不是写 |
+
+**结论**：`DataTable` **一行都不用改**。这是本节最省事的一处复用 —— 因为它当初就是按
+「键值对 + 一张表」设计的，聚合结果的列（`sum_amt` / `cnt` / `ratio`）
+与库表的列在它眼里**没有区别**。
+
+> ⚠️ 一条必须写清的边界：**10 万行结果的「渲染」靠虚拟滚动，「导出」走引擎侧**（§7.1），
+> 两者都不是 UI 的活。不要因为「预览要渲染 10 万行」就去改 `DataTable` 的分页语义 ——
+> 那会把「浏览模式的分页」和「分析结果的完整集」搅成一件事。
+
+#### 6.3.4 `WinControls`：补一个下拉
+
+**现状**：`shared/.../ui/WinControls.kt` 提供了 16 个控件 —— 按钮 3 种、输入框、图标按钮、
+表面、开关、菜单项、进度条、分隔线，加上形状 / 选中色解析。
+**唯独没有「下拉选择器」**：`WinMenuItem` 是 `DropdownMenuItem` 的**外观包装**（菜单里的一项），
+不是「点开一个列表选一个值」的选择器。
+
+**为什么分析模式必须要**：连接向导要选**认证方式**（账密 / Kerberos / 自定义 URL），
+报表设计器要选**数字格式**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）。
+在现代三套配色下 Material3 的 `ExposedDropdownMenuBox` 能用；
+但在 **Win2000 / WinXP** 两套经典配色下它**不会**自动变成 Win 控件外观 ——
+而这两个配色在本项目里是一等公民（§9.1）。
+
+**方案**：在 `WinControls.kt` 里**加** `WinDropdown`（配套 `WinDropdownMenu`），
+沿用文件里既有的写法（`resolveControlShape` 取形状、`WinSurface` 画边框、经典档走 3D 斜面）。
+这是**扩充现有控件集**，不是另起一套。
+
+#### 6.3.5 `desktopApp` 的 UI 组件：不复用，但记一条先例
+
+**一个必须知道的事实**：`desktopApp` 里的 8 个 UI 文件
+（`SchemaTree` / `BrowserChrome` / `BrowserToolBar` / `TablePreview` / `SqlWorkbench` /
+`ExportDialogs` / `GenerateWorkbench` / `DatabaseBrowserScreen`）
+**没有一个 import `java.*`** —— 它们**已经是平台无关的 Compose 代码**。
+它们留在 `desktopApp` 的真正原因不是平台依赖，而是**耦合 `DatabaseBrowserState`**（3952 行）。
+
+耦合程度分级：
+
+| 文件 | 对 `DatabaseBrowserState` 的耦合 | 能否上移 `:shared` |
+|---|---|---|
+| `BrowserToolBar.kt` | **0 处**引用 | ✅ 可直接上移（`internal` → `public`） |
+| `BrowserChrome.kt` | 只有 `DatabaseBrowserState.BackgroundTask`（`:808`）一个小类型 | ⚠️ 抽出该类型后可上移 |
+| `SchemaTree.kt` | 多处 `state: DatabaseBrowserState`（`:296` / `:445`） | ❌ 需先抽接口 |
+| `TablePreview.kt` | `state: DatabaseBrowserState`（`:156`） | ❌ |
+| `ExportDialogs.kt` | `state: DatabaseBrowserState`（`:267`） | ❌ |
+| `GenerateWorkbench.kt` | `state: DatabaseBrowserState`（`:157` / `:303`） | ❌ |
+
+**本项目的先例**：`desktopApp/.../main.kt:78-79` 的 KDoc 明确写着 ——
+「导航条本体 (`TopNavBar` / `AppDestination`) 与应用主题 (`SundaysTheme`) 是平台无关的纯 UI，
+**已上移到 `:shared` 的 `commonMain`** —— 本文件只剩『平台窗口 + 引擎实现装配』」。
+所以「平台无关的纯 UI 上移到 `:shared`」在本项目是**既定做法**，不是新规矩。
+
+**v1 的决定**：分析模式**不依赖**任何 `desktopApp` 组件上移。理由是：
+
+- 分析模式要的是**数据源树**，而 `SchemaTree` 渲染的是「库 → 表 → 列」+ 右键菜单
+  （建表 / 改表 / 删表）—— 分析模式这些写操作**一个都不要**（§3）。
+- `ExportDialogs` 的 `ExportFormat` 是「一行流式追加」的单表导出（§7.1），不是报表。
+
+→ 分析模式**自建** `SourceTree`（§6.4），但它**用** `:shared` 的 `EmptyHint` / `ColumnBadge` /
+`focusRing` / `onRightClick` / `winShape` 拼出来 —— **不是**从零画一套。
+
+**留下的问题**（→ Q9）：要不要顺手把 `BrowserToolBar` / `BrowserChrome` 上移？
+本设计的立场是**不夹带** —— 那是浏览模式的内部重构，与数据分析模式无关，
+混进来会让本设计的大范围改动更难评审。
+
+### 6.4 确需新建的组件（6 个，全部落在 `:shared`）
+
+| # | 组件 | 位置 | 为什么现有的不够用 |
+|---|---|---|---|
+| 1 | `SourceTree` | `shared/.../analysis/SourceTree.kt` | `desktopApp/SchemaTree.kt` 的语义是**可写浏览**（含建表 / 改表 / 删表的右键菜单），分析模式一个都不要；且它深度耦合 `DatabaseBrowserState`（§6.3.5） |
+| 2 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
+| 3 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
+| 4 | `ReadOnlyBadge` | `shared/.../analysis/ReadOnlyBadge.kt` | `ColumnBadge` 是「类型小标签」（`surfaceVariant` 底、11px 字），只读徽标要 **tertiary 底 + 不可关闭 + ⓘ 说明** —— 语义与视觉都不同 |
+| 5 | `PullStageIndicator` | `shared/.../analysis/PullStageIndicator.kt` | 拉取是**三段**（EXPORT → CSV → IMPORT）跨进程的长任务；`WinProgressIndicator` 是单条进度条，画不出「现在卡在哪一段」 |
+| 6 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
+
+**共同的底线**：这 6 个组件
+
+- 一律落在 `:shared` 的 `commonMain`（**不引入 expect/actual**）
+- 只用 `UiChrome.kt` 的 token（`winShape` / `controlShape` / `uiBevel` / `selectionColorsFor`）
+  与 `SundaysPalette` 的 `ColorScheme`，**不新增任何颜色**
+- 文字一律走 `str(StrKey)`，不写死中文
+- 全部带 KDoc，写清「**为什么**这么设计」而不是复述代码在做什么
+
+### 6.5 组件层怎么表达「只读」
+
+只读的**保证在引擎与方言层**（§3 的 L3 / L4），组件层只做**表达**，不做**判断**。
+
+| 层 | 做什么 | 不做什么 |
+|---|---|---|
+| 引擎 / 方言（L3 / L4） | 真正拦住写操作 | —— |
+| 组件层 | 不提供写入口：`DataTable` 的 `onCellEdit = null`；SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句；徽标**不可关闭** | **不自己判断「这条 SQL 算不算写」** |
+
+> 为什么组件层不判断：同一个判据写两遍，迟早会不一致。而「界面拦住了、引擎放行了」这种不一致，
+> 会让用户以为「这条语句不安全」—— 其实引擎是拦得住的。这是**降低**而非提高安全性，
+> 与 §3.2「主防线必须在方言级」是同一条道理。
+
+### 6.6 组件复用的可验证判据
+
+「尽量复用」不能只靠自觉，加一条**结构测试**钉住：
+
+`AnalysisModuleBoundaryTest`（`shared/src/commonTest/.../analysis/`）断言：
+
+1. `shared/.../analysis/` 下的所有 `.kt` **不 import** `desktopApp` 包里的任何类型
+2. `shared/.../analysis/` 下的所有 `.kt` **不 import** `java.*` / `javax.*`
+3. 新文件里不出现**字面量颜色**（`Color(0x…)` / `"#RRGGBB"`）—— 颜色只能来自
+   `MaterialTheme` / `LocalUiTokens`
+
+这三条把「组件复用」从口号变成**可跑的检查**。
+
+### 6.7 本节与迭代的对应
+
+| 里程碑 | 本节对应的动作 |
+|---|---|
+| **M1** | §6.3.1（方言档位注册表化）、§6.3.2（前端方言元数据收进一处）、§6.3.4（`WinDropdown`） |
+| **M2** | §6.5 的组件层表达（只读徽标、编辑器只读判据） |
+| **M3** | Hive / Impala 档位**注册**进档位注册表 —— 前端零改动（这是 §6.3.1 的验收现场） |
+| **M4** | `SourceTree` + `DataTable` 的只读用法（§6.3.3） |
+| **M5 / M6** | `ReportBlockList` / `ReportColumnSpecRow` / `PullStageIndicator` |
+| **横向** | §6.6 的结构测试，每个里程碑都跑 |
+
+---
+
+## 7. 报表模型与 Excel 输出
+
+### 7.1 为什么不能直接复用 `ExportEngine`
 
 仓库**已经有** Excel 导出：
 [`engine/src/main/kotlin/com/langbiantianya/export/ExcelWriter.kt`](../../engine/src/main/kotlin/com/langbiantianya/export/ExcelWriter.kt)
@@ -560,7 +835,7 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 **要复用的部分**：类型分派（`BigDecimal` / `Date` / `Timestamp` / `LocalDate` / `LocalDateTime`
 → 单元格）抽成共享的 `CellValueWriter`，两边都用。
 
-### 6.2 `ReportSpec`（纯数据，不含 POI）
+### 7.2 `ReportSpec`（纯数据，不含 POI）
 
 放在 `:shared` 的 `commonMain`（平台无关，且 UI 与引擎都要读它）。
 
@@ -609,7 +884,7 @@ data class ReportStyle(
 > UI 的报表设计器（构造/编辑）、引擎的 `ReportBuilder`（渲染）、以及将来的 AI（生成）。
 > 放在 `desktopApp` 会让引擎反过来依赖 UI 模块。
 
-### 6.3 `ReportBuilder`（引擎侧，POI）
+### 7.3 `ReportBuilder`（引擎侧，POI）
 
 `engine/src/main/kotlin/com/langbiantianya/report/`：
 
@@ -621,7 +896,7 @@ data class ReportStyle(
 > 报表的列数有限（通常 < 30），按「列类型 × 样式」缓存几十个 style 即可 ——
 > 这条要写进 `ReportCellStyler` 的 KDoc，否则下一个人会 inline 写 `createCellStyle()`。
 
-### 6.4 协议
+### 7.4 协议
 
 ```
 Category.ANALYSIS = 15    // v2.29
@@ -653,12 +928,12 @@ message ReportRequest {
 
 ---
 
-## 7. AI 洞察：扩展点怎么留
+## 8. AI 洞察：扩展点怎么留
 
 > 用户要求「后续迭代接入 ai 实现智能分析制作报表」。v1 不做，但**接口要留对**——
 > 留错了将来要动执行链路，那就是大改。
 
-### 7.1 唯一的一条铁律
+### 8.1 唯一的一条铁律
 
 > **AI 只产出 `ReportSpec`，不产出文件。**
 
@@ -670,7 +945,7 @@ message ReportRequest {
    AI 若是直接写文件，用户就永远不知道那些数字是怎么来的 —— **报表的可信度就断了**。
 4. **可测试**：`ReportSpec` 是纯数据，AI 的产出可以直接断言「它选了哪张表、用了什么聚合」。
 
-### 7.2 接口
+### 8.2 接口
 
 ```kotlin
 // engine/src/main/kotlin/com/langbiantianya/analysis/InsightProvider.kt
@@ -685,27 +960,27 @@ interface InsightProvider {
 - 生成的 SQL 同样过 §3.4 的只读闸门。
 - 引擎侧预留路由 `ANALYSIS.SUGGEST`（v1 不实现，返回「未启用」）。
 
-### 7.3 配置落在共享设置页
+### 8.3 配置落在共享设置页
 
 AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增「数据分析」分类里**（§1.3），
 不另起一个设置界面 —— 复用是本轮评审意见的主旨之一。
 
 > 🔐 凭据怎么存：与现有连接配置同级的明文存储是**现状**，
 > 但 AI 的 API Key 比数据库口令更敏感。v1 不做 AI，所以**这一项留到 M7 决定**，
-> 不要在设计阶段假装它不存在（见 §12 Q8）。
+> 不要在设计阶段假装它不存在（见 §13 Q8）。
 
-### 7.4 UI 占位
+### 8.4 UI 占位
 
 分析工作台工具条右侧放一个「AI 洞察」按钮：v1 **禁用** + tooltip「后续迭代提供」。
 位置摆在那里，是为了让 v1 的布局**不因 M7 而重排**。
 
 ---
 
-## 8. 界面设计
+## 9. 界面设计
 
-完整设计图：[`ui-mockup.html`](./ui-mockup.html)（浏览器直接打开，顶部可切 5 套配色 × 明暗 × 4 个画面）。
+完整设计图：[`ui-mockup.html`](./ui-mockup.html)（浏览器直接打开，顶部可切 5 套配色 × 明暗 × 6 个画面）。
 
-### 8.1 样式完全复用现有资源
+### 9.1 样式完全复用现有资源
 
 **一行新样式代码都不写。** 依据：
 
@@ -716,11 +991,10 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - 真实色值见 [`theme-tokens.json`](./theme-tokens.json) —— 这是**从
   `SundaysPalette.kt` 脚本抽取**的快照（10 套 × 28 个 Material3 角色 + 9 条字号阶梯），
   不是手抄的。设计图里的每一个颜色都能在这个文件里找到出处。
-- 组件复用：`CodeEditor`（SQL 编辑）、`DataTable`（结果表）、`DragHandle`（面板宽度）、
-  `EmptyHint`（空态）、`ContextMenuState`（右键菜单）—— 全在 `:shared` 的 `commonMain`，
-  直接用。
+- 组件复用清单见 §6.2；控件外观统一走 `UiChrome.kt` 的 token
+  （`winShape` / `controlShape` / `uiBevel` / `selectionColorsFor`）。
 
-### 8.2 设计约束（与现有界面一致）
+### 9.2 设计约束（与现有界面一致）
 
 来自 `SundaysPalette.kt` 的 KDoc，设计图必须体现：
 
@@ -729,7 +1003,33 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 3. **字号比 M3 默认小 1sp**（`bodyMedium` 13sp / `labelSmall` 11sp）—— 信息密集的桌面观感。
 4. **WCAG AA**（≥4.5:1）由 `SundaysPaletteTest` 逐对钉住，设计图不得引入新配色破坏它。
 
-### 8.3 五个画面
+### 9.3 每个界面区域 ↔ 复用的组件
+
+**这张表是本节与 §6 的接口** —— 设计图上看到的每一块，都能在这里查到它由哪个现成组件渲染。
+
+| 画面 | 界面区域 | 复用的组件（`:shared` commonMain） | 新增？ |
+|---|---|---|---|
+| ② 分析工作区 | 顶栏按钮 | `WinButton` / `WinOutlinedButton` / `WinIconButton` | —— |
+| ② 分析工作区 | 顶栏「⊘ 只读」徽标 | `ReadOnlyBadge` | ★ 新增（§6.4-4） |
+| ② 分析工作区 | 左侧数据源树 | `SourceTree`（内部用 `EmptyHint` / `ColumnBadge` / `focusRing` / `onRightClick` / `winShape`） | ★ 新增（§6.4-1） |
+| ② 分析工作区 | 中间 SQL 编辑器 | `CodeEditorWithToolbar` / `CodeEditorState` / `SqlFormatter` | —— |
+| ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
+| ② 分析工作区 | 中右分隔条 | `DragHandle`（`hoverIcon` 由桌面端注入） | —— |
+| ② 分析工作区 | 底部状态条 | `WinProgressIndicator` / `WinTextField`（只读展示） | —— |
+| ② 分析工作区 | 右键菜单 | `ContextMenuState` + `onRightClick` | —— |
+| ③ 报表设计器 | 左侧区块列表 | `ReportBlockList` | ★ 新增（§6.4-2） |
+| ③ 报表设计器 | 中间列规格 | `ReportColumnSpecRow` + `WinDropdown` | ★ 新增（§6.4-3、§6.3.4） |
+| ③ 报表设计器 | 右侧 Excel 预览 | `DataTable`（只读）+ `WinSurface` | —— |
+| ④ 连接管理器 | **整屏** | `ConnectionManagerScreen`（**同一个**，只换分组方式） | —— |
+| ⑤ 连接向导 | **整屏** | `AddConnectionDialog` / `ConnectionWizardContent`（**同一个**） | —— |
+| ⑤ 连接向导 | 认证方式下拉 | `WinDropdown` | ★ 新增（§6.3.4） |
+| 全部 | 主题 / 圆角 / 立体边 / 选中色 | `SundaysTheme` / `UiChrome` token | —— |
+| 全部 | 文案 | `str(StrKey)` + `i18n` 的 6 语言表 | —— |
+
+> **统计**：本模式**零改动复用的组件 18 项**，**新增组件 6 项**（其中 1 项是扩充 `WinControls`）。
+> 没有一项是「另写一套看起来差不多的」。
+
+### 9.4 六个画面
 
 | 画面 | 内容 |
 |---|---|
@@ -738,19 +1038,30 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **③ 报表设计器** | 左：区块列表（可增删排序）。中：区块配置（列规格 / 类型 / 数字格式 / 样式）。右：Excel 观感预览（标题 + 元信息 + 表头 + 斑马纹）。 |
 | **④ 连接管理器（复用 + 通用化后）** | **同一个**连接管理器：列表按「可浏览 / 可分析」分组、只读方言带 ⓘ 徽标；右侧是选中连接的详情（含「只读方言」说明与「在数据分析中打开」）。 |
 | **⑤ 新增连接向导（复用 + 通用化后）** | **同一个**添加连接弹窗，但表单由**方言自描述**渲染：认证方式下拉（账密 / Kerberos）、方言特有字段、「高级属性」折叠区、以及**自定义 JDBC URL** 逃生舱。 |
+| **⑥ 组件复用对照（v0.3 新增）** | 一张对照表：每个界面区域 → 复用的现成组件 / 新增的组件，并标出各自落在 `:shared` 的哪个文件。它把 §6 与 §9.3 变成**能看见的东西**。 |
 
 > ⚠️ 画面 ④⑤ 与 v0.1 的差别：v0.1 画的是一个**专属的**「添加分析数据源」弹窗，
-> v0.2 改成**复用的**连接管理器与向导 —— 这是本轮评审意见的直接结果。
+> v0.2 改成**复用的**连接管理器与向导 —— 这是第二轮评审意见的直接结果。
+>
+> ⚠️ 画面 ⑥ 是 v0.3 新增的：它不是「另一个界面」，而是**本设计的自证** ——
+> 第三轮评审意见说「组件和控件也尽量复用」，这一屏就是「复用了哪些」的答案。
 
 ---
 
-## 9. 代码落点
+## 10. 代码落点
 
-### 9.1 新增模块
+### 10.1 新增模块
 
 | 路径 | 内容 |
 |---|---|
 | `shared/src/commonMain/.../analysis/` | `ReportSpec.kt`（报表规格）、`AnalysisScreen.kt`、`ReportDesignerScreen.kt` |
+| `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/6**，§6.4） |
+| `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/6**） |
+| `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/6**） |
+| `shared/src/commonMain/.../analysis/ReadOnlyBadge.kt` | 不可关闭的只读徽标（**新增组件 4/6**） |
+| `shared/src/commonMain/.../analysis/PullStageIndicator.kt` | 拉取三段进度（**新增组件 5/6**） |
+| `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
+| `shared/src/commonTest/.../analysis/AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6） |
 | `desktopApp/src/main/.../AnalysisSession.kt` | 分析模式的会话与状态机（与 `ConnectionSession` / `DatabaseBrowserState` **并列**，不继承） |
 | `engine/src/main/.../analysis/AnalysisHandler.kt` | `Category.ANALYSIS` 的路由实现 |
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
@@ -760,16 +1071,21 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `dialect-hive/` | Hive 只读方言（SPI 注册照抄 `dialect-duckdb` 的 `META-INF/services`） |
 | `dialect-impala/` | Impala 只读方言（**自定义 URL 前缀**，见 §4.3） |
 
-### 9.2 改动既有文件
+### 10.2 改动既有文件
 
 | 文件 | 改动 |
 |---|---|
 | `shared/.../navigation/AppDestination.kt` | 加 `ANALYSIS(StrKey.NAV_ANALYSIS)` |
 | `desktopApp/.../main.kt` | `MainScreen` 的 destination 分支加分析模式 |
-| `shared/.../connection/ConnectionConfig.kt` | 加 `authMethod` / `properties`；`DialectType` 加 `HIVE` / `IMPALA`（含 `defaultsFor` 默认端口 10000 / 21050）；`ConnectionType` 加 `CUSTOM_URL` |
+| `shared/.../connection/ConnectionConfig.kt` | 加 `authMethod` / `properties`；`DialectType` 加 `HIVE` / `IMPALA`（含 `defaultsFor` 默认端口 10000 / 21050）；`ConnectionType` 加 `CUSTOM_URL`；**四处硬编码 `when` 收进方言元数据表**（§6.3.2） |
 | `shared/.../connection/AddConnectionDialog.kt` | 表单渲染改为**优先读方言的 `connectionForm`**，读不到才回退旧分支 |
 | `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段 |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
+| `shared/.../ui/WinControls.kt` | **加** `WinDropdown` / `WinDropdownMenu`（**新增组件 6/6**，§6.3.4） |
+| `shared/.../editor/language/SqlDialectProfile.kt` | `ALL` 降级为快照；新增 `SqlDialectProfileRegistry`（§6.3.1） |
+| `shared/.../editor/formatter/SqlFormatter.kt` | `register()` 改成遍历**注册表**而非 `ALL`（§6.3.1） |
+| `shared/.../table/DialectCapabilities.kt` | `of(dialect)` 改查方言元数据表（§6.3.2） |
+| `desktopApp/.../DatabaseBrowserState.kt` | `toSqlDialectProfile()` 改从「方言 → 档位」映射表读（§6.3.1） |
 | `api/.../DatabaseDialect.kt` | 加 `connectionForm` 属性 + `buildJdbcUrl(spec)` 新重载 |
 | `api/.../DialectCapability.kt` | 加 `BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT` |
 | `engine-protocol/.../idb_engine.proto` | `Category.ANALYSIS/REPORT` + 新 Action + `ReportRequest` + `ConnectionConfig.read_only` |
@@ -780,7 +1096,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖 |
 | `gradle/libs.versions.toml` | `hive-jdbc` 版本（spike 结论出来后定） |
 
-### 9.3 打包要留意
+### 10.3 打包要留意
 
 `desktopApp/build.gradle.kts` 的 jlink `modules(...)` 清单是**手工枚举**的（12 个），
 注释里写明「升级依赖后要重算一遍」。Hive 驱动会引入 Thrift / SLF4J / 可能的 SSL 依赖，
@@ -788,21 +1104,25 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 ---
 
-## 10. 迭代任务拆分
+## 11. 迭代任务拆分
 
 > 每个里程碑都以「**用户能看见的东西**」结束，不以「代码写完了」结束。
 > 每条验收标准都写成**可判定**的（能跑出一条命令 / 能点出一个现象），
 > 避免「基本能用」这种没法验收的说法。
 
-### M0 —— 设计冻结 ✅（v0.1 + v0.2）
+### M0 —— 设计冻结 ✅（v0.1 + v0.2 + v0.3）
 
 - **交付**：[本文](./README.md) + [UI 设计图](./ui-mockup.html) + [主题色值快照](./theme-tokens.json)
-- **验收**：本文的每条「现状」陈述都能在仓库里找到对应文件；UI 设计图在 10 种配色 × 4 个画面下都能读。
-- **产出**：待定问题（§12）逐条有结论。
+- **验收**：本文的每条「现状」陈述都能在仓库里找到对应文件；UI 设计图在 10 种配色 × 6 个画面下都能读。
+- **产出**：待定问题（§13）逐条有结论。
 
-### M1 —— 连接管理器通用化 ★（前置）
+### M1 —— 连接管理器与组件通用化 ★（前置）
 
-- **交付**
+> 标题从「连接管理器通用化」改成「连接管理器**与组件**通用化」：
+> §5 通用化的是「**表单**怎么描述」，§6 通用化的是「**控件**怎么描述」——
+> 两者是同一件事的两半，拆成两个里程碑反而会让「先通用化再接方言」这件事只做一半。
+
+- **交付 —— §5 连接管理器侧**
   - `api`：`ConnectionFormSpec` / `ConnectionField` / `AuthMethod`；`DatabaseDialect.connectionForm`；
     `buildJdbcUrl(spec)` 新重载（**旧方法保留**）
   - `api`：`DialectCapability` 加 `BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT`
@@ -811,6 +1131,11 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `shared`：连接向导按 `connectionForm` 渲染（优先读 spec，回退旧分支）
   - `shared`：连接持久化 v2 → v3 + 迁移
   - `shared`：连接管理器按能力位分组 + 只读徽标
+- **交付 —— §6 组件侧**
+  - `shared`：`SqlDialectProfileRegistry`（§6.3.1）；`SqlFormatter.register()` 改遍历注册表
+  - `shared`：`DialectType` 的**四处**硬编码 `when` 收进方言元数据表（§6.3.2）
+  - `shared`：`WinControls.kt` 加 `WinDropdown` / `WinDropdownMenu`（§6.3.4）
+  - `shared`：`AnalysisModuleBoundaryTest` 结构测试（§6.6）
 - **验收**
   - **加一个假方言**（3 个自定义字段 + 2 种认证方式）→ 连接管理器**自动**渲染出这 3 个字段与认证下拉，
     **前端零改动**（§5.7）
@@ -818,15 +1143,21 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `CUSTOM_URL`：填认识的 URL → 正确反查方言；填不认识的 → 明确报错
   - v2 的 `connection.json` 加载后自动补齐新字段
   - `properties` 里的 secret 字段在 UI 脱敏、在导出配置时剔除
+  - **运行时注册一个假方言档位** → `CodeEditor(languageId = "sql-fake")` 立刻有高亮、
+    格式化按钮可用（§6.3.1）
+  - `WinDropdown` 在 **10 种配色**下都不出现 Material3 圆角（现代三套 6px / Win2000 全 0 / WinXP 递增）
+  - `AnalysisModuleBoundaryTest` 绿（无 `desktopApp` 依赖、无 `java.*`、无字面量颜色）
 - **依赖**：无
-- **风险**：R9（前端表单迁移期的新旧两套渲染分叉 —— 用「优先读 spec + 回退」控制）
+- **风险**：R9（前端表单迁移期的新旧两套渲染分叉 —— 用「优先读 spec + 回退」控制）、
+  R12（组件复用退化 —— 用 §6.6 的结构测试钉住）
 
 ### M2 —— 只读地基
 
 - **交付**
   - proto：`Category.ANALYSIS` / `Category.REPORT` / 新 Action / `ConnectionConfig.read_only`
   - 引擎：`RequestDispatcher` 的只读闸门（L4）；`ANALYSIS.LIST_SOURCES` / `RUN_QUERY` 两条只读路由
-  - UI：`AppDestination.ANALYSIS` + 空壳主屏 + **不可关闭**的只读徽标
+  - UI：`AppDestination.ANALYSIS` + 空壳主屏 + **不可关闭**的只读徽标（§6.4-4）
+  - 组件层只读表达（§6.5）：SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句
   - 测试：§3.6 的两类回归测试（方言级 + 会话级）
 - **验收**
   - 在只读会话里发 `TABLE.CREATE` / `DATA.INSERT` / `IMPORT.RUN_IMPORT` / `SQL.EXECUTE("INSERT …")`
@@ -840,6 +1171,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - **交付**
   - **3.0 spike（先做，不产出功能代码）**：§4.2 的四条假设各给出一条**可复现**的结论
   - `dialect-hive` / `dialect-impala`（只读子集 + 各自的 `connectionForm`）
+  - Hive / Impala 的 `SqlDialectProfile` **注册**进档位注册表（§6.3.1）——
+    **前端零改动**：编辑器高亮、格式化按钮自动可用
   - `AnalysisSourceConfig` → **不需要**（复用 `ConnectionConfig`）
 - **验收**
   - 对着**真实** HiveServer2：能列出库 → 表 → 列，列名与类型正确
@@ -849,6 +1182,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `jdbcUrlPrefix` 无歧义（§4.3 的问题已解决并有测试钉住）
   - **同一个 Hive 连接在浏览模式与分析模式里都能看到**（复用验证），
     且在**浏览模式**里也**不能写**（L3 方言级验证）
+  - **加 Hive 档位时 `:shared` 的编辑器模块零改动**（§6.3.1 的验收现场 ——
+    这条是「组件也通用化」的全部意义所在）
 - **依赖**：M1、M2
 - **风险**：R1（依赖冲突）、R2（HS2 兼容性）、R3（URL 前缀撞车）
 
@@ -857,7 +1192,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - **交付**
   - DuckDB 工作区（**复用 `dialect-duckdb`，零新方言**）
   - 拉取链路：远端 `EXPORT` → CSV → DuckDB `IMPORT`（§2.4 的方案 C）
-  - SQL 编辑（复用 `CodeEditor`）+ 结果表（复用 `DataTable`）
+  - SQL 编辑（复用 `CodeEditor`）+ 结果表（复用 `DataTable`，**只读用法见 §6.3.3**）
+  - `SourceTree`（§6.4-1）+ `PullStageIndicator`（§6.4-5，三段式拉取进度）
   - 拉取面板显示**预计占用**与临时文件清理时机
 - **验收**
   - 拉一张 **10 万行**的表进 DuckDB（用 `sundays_smoke` 或本地造的等价数据），
@@ -865,6 +1201,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - 在工作区里跑一条**窗口函数**聚合（`OVER (PARTITION BY …)`），结果正确
   - 工作区里 `CREATE TABLE tmp AS SELECT …` **可以成功**（本地写允许，远端写禁止）
   - 拉取产生的临时 CSV 在**成功/失败/取消**三条路径上都被清理
+  - 结果表**没有**任何编辑入口（双击单元格不进入编辑态）—— §6.3.3 的 `onCellEdit = null`
 - **依赖**：M3
 
 ### M5 —— 报表模型与 Excel 输出
@@ -884,11 +1221,13 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 ### M6 —— 报表设计器 UI
 
-- **交付**：区块列表 / 区块配置（列规格、类型、数字格式、样式）/ Excel 预览 / 导出
+- **交付**：`ReportBlockList`（§6.4-2）/ `ReportColumnSpecRow`（§6.4-3）+ 区块配置
+  （列规格、类型、数字格式、样式）/ Excel 预览 / 导出
 - **验收**
   - 在设计器里把某一列的类型从 `DECIMAL` 改成 `PERCENT` → **预览立即变** → 导出的文件也一致
   - 增删区块 / 调区块顺序 → 导出文件的区块顺序一致
   - 预览与导出文件的**内容**逐格一致（预览不是另画一套，是同一份 spec 的渲染）
+  - 数字格式下拉在 **10 种配色**下都是 Win 控件外观（§6.3.4）
 - **依赖**：M5
 
 ### M7 —— AI 洞察（后续迭代，不在 v1 范围）
@@ -907,11 +1246,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **i18n 六语言** | 新文案键必须**六张表同步**（简 / 繁 / EN / RU / JA / DE），仓库有文案一致性测试盯着 |
 | **文档同步** | `ARCHITECTURE.md` / `FEATURES.md` / `TEST_CASES.md` / 各模块 README —— 文档是契约 |
 | **行尾与格式** | `ktlintFormat` → `fix-crlf.ps1` → **按字节校验**（`.sh` 保持 LF，其余 CRLF 无 BOM） |
-| **打包** | 新依赖进来后**重算 jlink modules 清单**（见 §9.3 的坑） |
+| **打包** | 新依赖进来后**重算 jlink modules 清单**（见 §10.3 的坑） |
+| **组件边界** | `AnalysisModuleBoundaryTest`（§6.6）每个里程碑都跑：新组件不许 import `desktopApp`、不许 import `java.*`、不许写字面量颜色 |
 
 ---
 
-## 11. 风险登记
+## 12. 风险登记
 
 | # | 风险 | 等级 | 应对 |
 |---|---|---|---|
@@ -925,11 +1265,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **R8** | jlink 模块清单漏项 → 装得上启不来 | **低** | 新依赖进来后用 `jdeps` **重算**（`desktopApp/build.gradle.kts` 注释里有完整命令） |
 | **R9** | **通用化迁移期新旧两套表单渲染分叉** | **中** | 「优先读 spec、读不到才回退」的单向迁移；**旧方言不改**；M1 验收里钉住「旧方言测试全绿且未修改」 |
 | **R10** | **连接管理器复用后，用户可能期望在浏览模式里编辑 Hive 表** | **中** | 连接列表给只读方言加 ⓘ 徽标 + 明确的「此连接为只读方言」文案；浏览模式不渲染写入口 |
-| **R11** | AI 接入时的模型服务与凭据管理 | **低**（M7） | v1 不做；`InsightContext` 不含原始数据，只给摘要；API Key 存法留到 M7 决定（§7.3） |
+| **R11** | AI 接入时的模型服务与凭据管理 | **低**（M7） | v1 不做；`InsightContext` 不含原始数据，只给摘要；API Key 存法留到 M7 决定（§8.3） |
+| **R12** | **组件复用退化** —— 实现时图省事，在 `desktopApp` 里另写一套外观相近的控件，导致「复用」名存实亡 | **中** | ① §6.6 的 `AnalysisModuleBoundaryTest` 把「不许 import `desktopApp` / 不许 import `java.*` / 不许写字面量颜色」钉成可跑的检查；② 新组件一律落在 `:shared` 的 `commonMain`；③ 评审时对着 §9.3 的映射表逐行核 |
 
 ---
 
-## 12. 待定问题（**M0 结束前要逐条有结论**）
+## 13. 待定问题（**M0 结束前要逐条有结论**）
 
 | # | 问题 | 为什么重要 | 建议默认 |
 |---|---|---|---|
@@ -941,13 +1282,14 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **Q6** | 通用化后，**要不要保留旧的枚举分支**作为回退？ | 决定 M1 的迁移策略与 R9 的处理 | **保留**（单向迁移：优先读 spec，读不到回退） |
 | **Q7** | 报表模板（样式预设）要不要内置几套？ | 影响 M6 的 `ReportStyle` 设计 | 先做 1 套默认 + 用户可调 |
 | **Q8** | AI 的 API Key **怎么存**？（明文同连接配置 / 系统钥匙串 / 加密） | AI 凭据比数据库口令敏感 | **M7 决定**；v1 不做 AI，不要现在假装有方案 |
+| **Q9** | 要不要**顺手上移** `desktopApp` 的 UI 组件到 `:shared`？（`BrowserToolBar` 零耦合可直接上移；`BrowserChrome` 抽出 `BackgroundTask` 后可上移） | 能让「平台无关的纯 UI 一律在 `:shared`」这条规矩更彻底 | **不夹带**（§6.3.5）—— 那是浏览模式的内部重构，与本设计无关，混进来会让本轮的大范围改动更难评审。将来单独开一轮做 |
 | ~~Q6（旧）~~ | ~~分析数据源要不要复用浏览模式的连接？~~ | —— | ✅ **已定：复用**（v0.2 采纳评审意见） |
 
 ---
 
-## 13. 附录
+## 14. 附录
 
-### 13.1 主题色值快照
+### 14.1 主题色值快照
 
 [`theme-tokens.json`](./theme-tokens.json) —— 10 套 `ColorScheme` × 28 个 Material3 角色 +
 9 条字号阶梯，由脚本从
@@ -970,7 +1312,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `tertiary` | `#177A6A` | `#4FB6A5` |
 | `error` | `#B3261E` | `#E5715F` |
 
-### 13.2 本文档引用的仓库事实
+### 14.2 本文档引用的仓库事实
 
 | 事实 | 出处 |
 |---|---|
@@ -994,3 +1336,17 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | 方言靠 `META-INF/services` 注册 | `dialect-duckdb/src/main/resources/META-INF/services/…` |
 | jlink 模块清单是手工枚举的（12 个） | `desktopApp/build.gradle.kts`（注释里有 `jdeps` 重算命令） |
 | 导入支持格式仅 CSV / JSON_LINES | `engine/.../importer/ImportFormat.kt` |
+| **方言档位 `ALL` 是硬编码 list**（加 Hive/Impala 必改 `:shared` 核心文件） | `shared/.../editor/language/SqlDialectProfile.kt:341` |
+| `SqlFormatter.register()` 遍历 `ALL` 注册「语言 + formatter」配对 | `shared/.../editor/formatter/SqlFormatter.kt:179-187` |
+| `CodeLanguageRegistry` 已是**运行时可注册**的（KDoc 明说「不需要修改编辑器组件源码」） | `shared/.../editor/CodeLanguage.kt:94` |
+| `DialectType` 在前端有**四处**硬编码 `when` | `shared/.../connection/ConnectionConfig.kt:72-80` `:117-125` `:140-155`、`shared/.../table/DialectCapabilities.kt:52-101` |
+| `DialectType` → 方言档位的又一份 if-else | `desktopApp/.../DatabaseBrowserState.kt:149-157` |
+| `TableColumn` / `TableRow` 是**通用键值模型**（不含「库表」语义） | `shared/.../table/TableModels.kt:52` `:88` |
+| `DataTable` 的 `cellEditable` 默认跟随 `onCellEdit != null`（只读用法零改动） | `shared/.../table/DataTable.kt:187` 的 KDoc |
+| `WinControls.kt` 有 16 个控件，**唯独没有下拉选择器** | `shared/.../ui/WinControls.kt` |
+| `ColumnTypeCatalog` 是**数据库类型**目录（与报表的「呈现类型」不是一回事） | `shared/.../table/ColumnTypeCatalog.kt` |
+| **`desktopApp` 的 8 个 UI 文件没有一个 import `java.*`** —— 已是平台无关代码 | `desktopApp/.../SchemaTree.kt` / `BrowserChrome.kt` / `BrowserToolBar.kt` / `TablePreview.kt` / `SqlWorkbench.kt` / `ExportDialogs.kt` / `GenerateWorkbench.kt` / `DatabaseBrowserScreen.kt` |
+| `BrowserToolBar.kt` 对 `DatabaseBrowserState` **零引用** | `desktopApp/.../BrowserToolBar.kt` |
+| `BrowserChrome.kt` 只耦合 `DatabaseBrowserState.BackgroundTask` | `desktopApp/.../BrowserChrome.kt:808` |
+| `SchemaTree` / `TablePreview` / `ExportDialogs` / `GenerateWorkbench` 深度耦合 `DatabaseBrowserState` | `desktopApp/.../SchemaTree.kt:296` `:445`、`TablePreview.kt:156`、`ExportDialogs.kt:267`、`GenerateWorkbench.kt:157` `:303` |
+| 「平台无关的纯 UI 上移到 `:shared`」是本项目**既定做法** | `desktopApp/.../main.kt:78-79` 的 KDoc（`TopNavBar` / `SundaysTheme` 已上移） |
