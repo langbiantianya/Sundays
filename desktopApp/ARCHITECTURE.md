@@ -68,6 +68,8 @@ desktopApp （本模块）
 
    ├── Notifications.kt         通知中心（去重 / 已读 / 原文不截断）
 
+   ├── PointerIcons.kt          平台专属指针图标（左右拉伸箭头）
+
    └── ClipboardWriter.kt       AWT 剪贴板唯一出口
 
         ↓ 只依赖 ↓
@@ -169,6 +171,8 @@ desktopApp （本模块）
 | [`Notifications.kt`](./src/main/kotlin/com/langbiantianya/sundays/Notifications.kt) | 通知中心：屏级共享、按来源去重、原文不截断 |
 
 | [`ClipboardWriter.kt`](./src/main/kotlin/com/langbiantianya/sundays/ClipboardWriter.kt) | AWT 剪贴板唯一出口，失败返回 `false` 而不是抛 |
+
+| [`PointerIcons.kt`](./src/main/kotlin/com/langbiantianya/sundays/PointerIcons.kt) | 平台专属指针图标（左右拉伸箭头）。**`:shared` 只决定「什么时候用」，这里决定「长什么样」**；造不出来（无头 AWT）时返回 `null` 退回默认箭头，不抛 |
 
 
 

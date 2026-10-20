@@ -499,6 +499,9 @@ internal fun ActiveSheetContent(
                     maxWidth = maxPanelWidth,
                     color = MaterialTheme.colorScheme.outlineVariant,
                     highlightColor = MaterialTheme.colorScheme.primary,
+                    // 悬停时换「左右拉伸」指针：分隔条在鼠标下必须看起来可拖，
+                    // 否则拖拽功能「存在但没人发现」—— 指针始终是箭头时没人会去试。
+                    hoverIcon = ewResizePointerIcon(),
                     // testTag：分隔条画出来只有 1dp 宽，没有 tag 的话测试只能靠坐标猜
                     modifier = Modifier.testTag(SCHEMA_DRAG_HANDLE_TAG),
                 )

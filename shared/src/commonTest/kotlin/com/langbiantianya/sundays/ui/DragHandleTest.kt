@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 分隔条拖拽数学 —— [nextPaneWidth] / [clampPaneWidth] 的纯函数契约。
@@ -146,6 +148,49 @@ class DragHandleTest {
             300.dp,
             clampPaneWidth(value = 320.dp, minWidth = min, maxWidth = 300.dp),
             message = "双击复位后的默认值同样要过钳位",
+        )
+    }
+
+    // ───────────────────────── 「还能不能拖」的判据 ─────────────────────────
+    //
+    // 这段判据的唯一用途是**指针图标**：分隔条被顶死在两端时若还摆着
+    // 「左右拉伸」箭头，就是在骗用户说这里能拖。这种缺陷比「图标没有」更难查 ——
+    // 用户会以为是拖拽坏了，不会想到是图标没跟着状态走。
+
+    @Test
+    fun a_pane_inside_the_range_can_move_in_at_least_one_direction() {
+        assertTrue(
+            canPaneWidthMove(width = 320.dp, minWidth = min, maxWidth = max),
+            message = "区间内的宽度至少还能往一边走，指针就该是左右拉伸",
+        )
+    }
+
+    @Test
+    fun a_pane_at_the_minimum_can_still_be_widened() {
+        // 顶到下限只是「不能再变窄」，还能往右拖 —— 所以**仍然**是可拖的。
+        // 写成「到边界就不可拖」是常见误解：那样一来，拖到最左的那一帧
+        // 指针会突然变回箭头，拖拽手感像断了一下。
+        assertTrue(
+            canPaneWidthMove(width = min, minWidth = min, maxWidth = max),
+            message = "顶到下限只是不能再变窄，还能变宽，指针应当仍是左右拉伸",
+        )
+    }
+
+    @Test
+    fun a_pane_at_the_maximum_can_still_be_narrowed() {
+        assertTrue(
+            canPaneWidthMove(width = max, minWidth = min, maxWidth = max),
+            message = "顶到上限只是不能再变宽，还能变窄，指针应当仍是左右拉伸",
+        )
+    }
+
+    @Test
+    fun a_pane_pinned_at_both_ends_cannot_move() {
+        // 窗口极窄时 `maxWidth` 会退化成与 `minWidth` 相等 —— 这时是真的动不了，
+        // 指针必须换回箭头，否则就是骗人。
+        assertFalse(
+            canPaneWidthMove(width = 180.dp, minWidth = 180.dp, maxWidth = 180.dp),
+            message = "上下限相同时宽度动不了，指针不该再是左右拉伸",
         )
     }
 }

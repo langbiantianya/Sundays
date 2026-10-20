@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.27（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.28（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -200,7 +200,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `DangerousSqlConfirmDialog` | 危险语句二次确认框 | 导出预览与 SQL 执行共用同一个弹窗；识别与转义都是纯字符串遍历，因此能留在 `commonMain` | [`sql/DangerousSqlConfirmDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSqlConfirmDialog.kt) |
 | `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenuState.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenuState.kt) |
 | `Modifier.onRightClick` | 右键检测 | 只在主指针通道消费；不复用 Foundation 的 `internal onRightClickDown`（跨模块不可见） | [`ui/RightClick.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/RightClick.kt) |
-| `DragHandle` | 可拖拽分隔条 | 受控组件（宽度归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位** | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
+| `DragHandle` | 可拖拽分隔条 | 受控组件（宽度归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位**；悬停指针图标**由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」） | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
 | `FocusRing` | 可见焦点环 | 给「自带焦点能力、默认不画焦点指示」的容器补一圈焦点环 | [`ui/FocusRing.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/FocusRing.kt) |
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
@@ -256,7 +256,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `TableModelsTest` / `CellEditTest` | 列 / 行 / 分页 / 主题模型；单元格编辑只报不执行 |
 | `JdbcUrlTest` / `SqlIdentifierQuoteTest` | 字段 ↔ URL 折算与回解析；引号风格与 5 个真实方言逐一比对 |
 | `SundaysPaletteTest` / `UiTokensTest` | 文字对比度达 WCAG AA；逐主题 × 明暗断言经典档全开、现代档全关 |
-| `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算 |
+| `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算；**「还能不能拖」的判据**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄、上下限相等才不可拖） |
 | `SettingsStorageTest` / `ConnectionStorageTest` | 逐档往返、原子写、损坏降级 + 自愈、v1 → v2 迁移 |
 | `ConnectionStoragePermissionsTest` | POSIX 权限位（0600）。**Windows 上是 `assumeTrue` skip 而非断言失败** —— 那里访问控制走 ACL，断言失败等于要求 Windows 做不到的事 |
 | `DangerousSqlTest` / `SqlLiteralsTest` | 危险写操作识别与**逐句**只读判定；WHERE 字面量转义 / CAST 目标类型逐方言 |
@@ -315,3 +315,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.14 | **① 顶层导航与应用主题上移**：新增 `navigation/`（`AppDestination`）与 `ui/Theme.kt`（`SundaysTheme`），均自 `desktopApp` 提取；`ConnectionSession` / `DatabaseBrowserState` 因直连 `IdbEngine` 仍留在 `desktopApp`（见 §1.3）。**② 模块整理**：删除 KMP 脚手架样板与 `composeResources` logo，清理死代码与无调用方的兼容层。**③ 文档纠偏**：KDoc 中与实现不符的描述、失效链接，以及本文中「过度记录实现细节」的章节，按实现改正并把细节迁回源码 KDoc |
 | v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖） |
 | v2.27 | **① `TableStructureDialog` 保存失败时必须显示错误** —— 早先把 `state.error` 记成 `remember(state.draft)` 的快照，而保存失败时 `state.draft` 并不变，remember 的 key 也就没变，快照永远停在初始值；再叠加一层 `if (state.loading) state.error else draft.validate()` 的门控，失败原因被彻底吞掉。改为每次重组都从 `state.error` 读，弹窗里那行红字才真的会出现。**② 读回表结构时「长度」要按类型过滤**（`ColumnTypeCatalog.lengthFor`）—— 引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）而不是长度，照搬进长度框就成了「BIGINT 长度 19」 |
+| v2.28 | **① 分隔条悬停要有「左右拉伸」指针** —— 此前 `DragHandle` 只管拖拽不管指针，鼠标停上去永远是默认箭头，拖拽功能「存在但没人发现」。新增 `hoverIcon: PointerIcon?` 参数：**图标由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」），因为 Compose 公共 API 只有默认 / 十字 / 文本 / 手型四种指针，左右拉伸箭头是平台专属资源 —— 与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker`）。**② 只在「真的拖得动」时才显示箭头**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄，只有上下限相等才是真动不了）—— 顶死还摆「可拖」箭头是在骗用户，而且这种「图标在骗人」的缺陷比「图标没有」更难查 |

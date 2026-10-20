@@ -87,6 +87,7 @@
 | [`ConnectedSourceEndToEndTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectedSourceEndToEndTest.kt) | **「连得上」与「连上之后能用」之间那道缝**：真引擎建库播种 → `ConnectionSession.connect()` 真连上 → 界面真点树与表 → 读数据 → 过滤/排序/搜索下推 → SQL 工作台执行 → 多语句/事务/只读 → 断开。**五个方言全过** |
 | [`ColumnInfoDisplayTest`](./src/test/kotlin/com/langbiantianya/sundays/ColumnInfoDisplayTest.kt) | 字段展示：带长度拼类型 / 长度为 0 不加括号 / 字段名与类型独立 / 约束标记不混进类型 / 默认可空不标「非空」 |
 | [`SchemaPanelWidthTest`](./src/test/kotlin/com/langbiantianya/sundays/SchemaPanelWidthTest.kt) | 树面板宽度：拖拽 / 双击复位 / 钳在 `[180dp, 容器宽 × 62%]` |
+| [`PointerIconsTest`](./src/test/kotlin/com/langbiantianya/sundays/PointerIconsTest.kt) | 平台专属指针图标：「左右拉伸」箭头造得出来、就是 `java.awt.Cursor.E_RESIZE_CURSOR`（**AWT 里没有 `EW_RESIZE_CURSOR`**）、且是**稳定单例**（每次重组新建 AWT 光标会让 modifier 节点反复比对，表现为光标抖一下） |
 | [`TreeContextMenuStateTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuStateTest.kt) | 对象树右键菜单状态机：复制名称 / 复制引用名（按方言）/ 复制建表 DDL 的可见性与文案；PG 三段式与四段式、字段节点无 DDL 项、剪贴板注入 |
 | [`TreeContextMenuUiTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuUiTest.kt) | 右键菜单真点击：菜单项点完菜单消失 / 焦点环 / 字段行复制引用 |
 | [`CrossDatabaseQueryTest`](./src/test/kotlin/com/langbiantianya/sundays/CrossDatabaseQueryTest.kt) | 跨库浏览（真 MySQL）：非默认库独有的表能查到 / **同名表读到的是选中库的内容** / 配置指定的库仍然正常 |
@@ -207,6 +208,25 @@
 
 逐点采样确认：悬停表节点与不悬停时，x=12/60/300/405 四处颜色**完全相同**。而 `TableLeaf` / `DatabaseNode` 早就是 `clickable` 了 —— 是这版 Compose（1.11.1）在 Desktop 上不给 indication，不是某处写漏了。
 项目里已有成熟解法（`reportsHover` 监听 `PointerEventType.Enter/Exit` @ `PointerEventPass.Initial` + 手型指针 + `surfaceVariant` 底色 + 文字转 `onSurface`），但**给哪一层加尚未决定**，故未动。
+
+### 4.5 指针形状探针：读得到光标，但读到的可能不是自己的光标
+
+「鼠标停在分隔条上指针还是箭头」这类缺陷，界面截图里**根本看不出来**（光标不进 `CopyFromScreen`），只能读系统光标句柄：
+
+```powershell
+$ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
+[Cur]::GetCursorInfo([ref]$ci)          # $ci.hCursor 就是当前光标句柄
+[Cur]::LoadCursor([IntPtr]::Zero, 32644) # 32644 = IDC_SIZEWE（左右拉伸 ↔）
+# 两个句柄相等 → 当前就是「左右拉伸」指针
+```
+
+坑有三层，前两层是**探针骗人**，第三层是**环境骗人**，症状全都长得像「修复没生效」：
+
+1. **AWT 自建的光标是独立 native handle**，与系统 `IDC_*` 共享句柄**不是同一个**（实测 AWT 默认箭头 = `65561`，`LoadCursor(NULL, IDC_ARROW)` 匹配不上）。于是「匹配不上」只说明「这是 AWT 造的」，**不能**推出「不是拉伸箭头」。真要判形状，得先看 AWT 造出来的是哪一个。
+2. **必须先把鼠标「抖一下」**。`SetCursorPos` 到**当前所在坐标**时不产生任何事件，读到的是上一次残留的光标 —— 表现为「同一个点两次读数不一样」。探针要先挪开 60px 再移回来。
+3. **必须同时报告光标下的窗口**（`WindowFromPoint` + 类名 + pid）。桌面不是只跑着被测程序：本次先后撞上「设置」应用窗口、系统的「你要如何打开这个文件?」模态框（带 `Shell_LightDismissOverlay` 透明浮层）、以及被隐藏的 app 窗口 —— 三者都让**鼠标事件根本没进到被测窗口**，探针忠实地报告了「别人的光标」。症状：同一支脚本，改窗口位置前测得到 `IDC_SIZEWE`，改完之后就再也测不到了。
+
+> 结论：「探针测不到」**不等于**「功能没生效」。判据只能是**先把探针自己的坐标系与遮挡关系钉死**，再让代码去迎合探针。
 
 ---
 

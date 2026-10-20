@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -45,11 +47,25 @@ import androidx.compose.ui.unit.dp
  * - **双击**复位到 [defaultWidth] —— 拖乱了之后最快的回退方式
  * - 宽度被钳在 [minWidth] 与 [maxWidth] 之间：太窄看不到表名，太宽把右栏挤没
  *
- * ## 手感上的两个刻意选择
+ * ## 手感上的三个刻意选择
  *
  * 1. **命中区比视觉宽度宽**（[hitWidth] = 8dp，画线 1dp）。1dp 的线在鼠标下极难点中，
  *    这是所有 IDE 分隔条的通行做法。
  * 2. **拖动时高亮**。让用户知道「抓住了」，否则拖到一半不知道从哪松手。
+ * 3. **悬停时换指针**（[hoverIcon]）。见下面「指针为什么由调用方给」。
+ *
+ * ## 指针为什么由调用方给
+ *
+ * 分隔条在鼠标下必须**看起来可拖** —— 指针始终是默认的箭头时，用户根本不知道
+ * 那里能拖（实测：这条链路做出来之后，鼠标停在分隔条上仍是箭头，
+ * 拖拽功能「存在但没人发现」）。
+ *
+ * 但「左右拉伸箭头」这种图标是**平台专属**的：Compose 的公共 API 只提供
+ * 默认 / 十字 / 文本 / 手型四种指针，左右拉伸箭头得由平台侧造
+ * （桌面端是 `java.awt.Cursor.E_RESIZE_CURSOR` —— 注意 AWT 里**没有**
+ * `EW_RESIZE_CURSOR` 这个常量，东西向双箭头只有 `E_` / `W_` 这两个同形不同热区的名字）。
+ * 而本组件住在 `commonMain`，不能引用任何平台类型 —— 所以图标由**调用方**
+ * （平台所在的那一层）传进来。
  *
  * ## 宽度该存在哪一层 —— 本组件不持有宽度
  *
@@ -62,6 +78,8 @@ import androidx.compose.ui.unit.dp
  * （对照：树本身的展开 / 滚动 / 已加载表仍由每 sheet 的 `DatabaseBrowserState` 持有，
  * 那是真正的 per-sheet 状态，两回事。）
  *
+ * @param hoverIcon 悬停时显示的指针图标。`null` = 不改指针（平台没有指针概念的移动端）。
+ *   桌面端应传**左右拉伸**箭头。
  * @param width 当前宽度，由调用方持有（这样切视图 / 切 sheet 时能保持）
  * @param onWidthChange 拖动过程中的实时回调
  * @param defaultWidth 双击复位到的宽度
@@ -81,6 +99,7 @@ fun DragHandle(
     color: Color,
     highlightColor: Color,
     hitWidth: Dp = 8.dp,
+    hoverIcon: PointerIcon? = null,
 ) {
     val density = LocalDensity.current
     var dragging by remember { mutableStateOf(false) }
@@ -92,12 +111,27 @@ fun DragHandle(
     val currentMaxWidth by rememberUpdatedState(maxWidth)
     val currentMinWidth by rememberUpdatedState(minWidth)
 
+    // 指针只在「**真的拖得动**」时才是左右拉伸箭头。
+    //
+    // 为什么要有这个条件：分隔条被钳在 [minWidth] 与 [maxWidth] 之间，两端都可能顶死。
+    // 顶死还摆着「可拖」的箭头，就是在**骗**用户说这里能拖 —— 而拖下去纹丝不动。
+    // （绝大多数情况下两端不会同时顶死，所以这条几乎总是成立；它挡的是
+    //   窗口极窄、`maxWidth` 退化成与 `minWidth` 相等的那种退化布局。）
+    val canMove = canPaneWidthMove(width, minWidth, maxWidth)
+    val cursorModifier =
+        if (hoverIcon != null && canMove) {
+            Modifier.pointerHoverIcon(hoverIcon)
+        } else {
+            Modifier
+        }
+
     Box(
         modifier =
             modifier
                 .width(hitWidth)
                 .fillMaxHeight()
                 .background(if (dragging) highlightColor else Color.Transparent)
+                .then(cursorModifier)
                 .pointerInput(density) {
                     detectDragGestures(
                         onDragStart = { dragging = true },
@@ -137,6 +171,37 @@ fun DragHandle(
         )
     }
 }
+
+/**
+ * 分隔条此刻**还能不能拖动**。
+ *
+ * ## 判据
+ *
+ * 宽度被钳在 `[minWidth, maxWidth]` 之间，所以「还能动」等价于
+ * 「至少还有一边能走」：
+ *
+ * - `width > minWidth` —— 还能往左拖（变窄）
+ * - `width < maxWidth` —— 还能往右拖（变宽）
+ *
+ * ## 为什么值得单独抽出来
+ *
+ * 指针图标要用它：分隔条被顶死在两端时若还摆着「左右拉伸」箭头，就是在骗用户
+ * 说这里能拖，而拖下去纹丝不动。这种「图标在骗人」的缺陷比「图标没有」更难查 ——
+ * 用户会以为是拖拽坏了，不会想到是图标没跟着状态走。
+ *
+ * 抽成纯函数是为了能单测：指针图标本身在 UI 测试里量不出来
+ * （`pointerHoverIcon` 的节点是 Compose 的 internal），但「能不能动」这段判据
+ * 是这段逻辑里唯一会写错的地方。
+ *
+ * @param width 当前宽度
+ * @param minWidth 下限
+ * @param maxWidth 上限
+ */
+fun canPaneWidthMove(
+    width: Dp,
+    minWidth: Dp,
+    maxWidth: Dp,
+): Boolean = width > minWidth || width < maxWidth
 
 /**
  * 把宽度钳进 `[minWidth, maxWidth]`。

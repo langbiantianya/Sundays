@@ -81,7 +81,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **过滤 / 排序 / 表内搜索**（全部下推给引擎，零本地筛） | `setTabFilter` / `setTabOrderBy` / `setTabSearch` |
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
-| | 树面板宽度**可拖拽**（双击复位，范围钳位） | `shared/ui/DragHandle.kt` |
+| | 树面板宽度**可拖拽**（双击复位，范围钳位），悬停显示**左右拉伸指针** | `shared/ui/DragHandle.kt` |
 | | **对象树右键菜单**：复制名称 / 复制引用名（按方言限定）/ 复制建表 DDL | `SqlIdentifier` + `TABLE.GET_DDL` |
 | **SQL 工作台** | 多 sheet，各自独立文本 / 光标 / 滚动 / 结果 | `SqlSheet` |
 | | 语法高亮，**随连接方言切换词表** | `SqlDialectProfile` → `CodeEditor` |
