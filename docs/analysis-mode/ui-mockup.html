@@ -120,9 +120,9 @@ body{
   box-shadow: inset 0 -2px 0 0 var(--primary);
 }
 .appbar-right{ margin-left:auto; display:flex; align-items:center; gap:4px; }
-.appbar-action{ display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 8px; border-radius:var(--r-sm);
-  font-size:13px; line-height:17px; color:var(--on-surface-variant); }
-.appbar-action:hover{ background:var(--surface-variant); }
+/* 右上角只有一个 ⚙ 设置入口（图标按钮，与真实实现的 SettingsEntryButton 一致）。
+   主题 / 语言**不放在顶栏** —— 真实应用里明暗与配色只在设置页「个性化」分类切换，
+   顶栏放「外观」「语言」会让人以为点一下就能换配色，实际却只能进设置页。 */
 .glyph{ font-size:14px; line-height:1; }
 
 /* ---------- 5. 通用控件 ---------- */
@@ -528,8 +528,7 @@ body{
           <span class="nav-chip is-selected">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -591,8 +590,7 @@ body{
           <span class="nav-chip is-selected">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -678,8 +676,7 @@ body{
           <span class="nav-chip is-selected">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -765,8 +762,7 @@ body{
           <span class="nav-chip">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -826,8 +822,7 @@ body{
           <span class="nav-chip">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -923,8 +918,7 @@ body{
           <span class="nav-chip is-selected">数据分析</span>
         </nav>
         <div class="appbar-right">
-          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
-          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+          <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
       </header>
 
@@ -933,7 +927,7 @@ body{
           <span class="cmp-head-title">组件复用对照</span>
           <span class="cmp-head-sub">每个界面区域由哪个现成组件渲染</span>
           <span class="cmp-stat">
-            <span class="tag-xs">零改动复用 18 项</span>
+            <span class="tag-xs">零改动复用 19 项</span>
             <span class="tag-tertiary">新增 6 个</span>
             <span>全部落在 :shared 的 commonMain</span>
           </span>
@@ -965,6 +959,7 @@ body{
           <div class="cmp-row"><span class="cmp-area">认证方式下拉</span><span class="cmp-comp">WinDropdown</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
 
           <div class="cmp-group">全部画面</div>
+          <div class="cmp-row"><span class="cmp-area">顶栏右上角</span><span class="cmp-comp">SettingsEntryButton（⚙ 图标）</span><span class="cmp-path">shared/…/ui/ThemeModeToggle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">主题 / 圆角 / 立体边</span><span class="cmp-comp">SundaysTheme / UiThemeTokens / winShape</span><span class="cmp-path">shared/…/ui/</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">文案</span><span class="cmp-comp">str(StrKey) + i18n 六语言表</span><span class="cmp-path">shared/…/ui/LocalStrings.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">紧凑档</span><span class="cmp-comp">LocalCompactMode / compactDensity</span><span class="cmp-path">shared/…/ui/CompactMode.kt</span><span class="cmp-flag tag-xs">复用</span></div>
@@ -974,6 +969,7 @@ body{
           <b>判据（三条同时满足才叫复用）</b>：① 平台无关（不 import <span class="cmp-comp">java.*</span> / <span class="cmp-comp">desktopApp</span>）；
           ② 状态无关（不依赖 <span class="cmp-comp">DatabaseBrowserState</span>）；③ 可寻址（说得出它在哪一屏的哪个位置）。
           <br><b>只读由引擎与方言保证</b>，组件层只做表达 —— 徽标不可关闭、结果表不提供编辑入口；组件<b>不</b>自己判断「这条 SQL 算不算写」。
+          <br><b>顶栏右上角只留一个 ⚙ 设置入口</b>：主题与语言都在设置页「个性化」里，顶栏不放 —— 与浏览模式同一个 SettingsEntryButton。
         </div>
       </div>
     </div>

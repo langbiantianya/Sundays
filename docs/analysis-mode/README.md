@@ -14,6 +14,8 @@
 > 4. **§11（迭代）M1 扩容**：方言档位**注册表化**、前端方言元数据**收进一处**、
 >    `WinDropdown` 补齐 —— 三项都是「先通用化再接方言」的一部分。
 > 5. **§12 新增 R12**（组件复用退化）、**§13 新增 Q9**（要不要顺手上移 `desktopApp` 的 UI 组件）。
+> 6. **顶栏右上角只留一个 ⚙ 设置入口**（§9.3）—— 去掉主题与语言两个入口，
+>    与真实实现对齐（明暗与配色**只在设置页**切换，见 `main.kt` 的 KDoc）。
 >
 > **v0.2 相对 v0.1 的三处结构性修改**（评审意见：*设置复用，连接管理器复用；需要一个更通用的连接管理器*）：
 >
@@ -589,6 +591,7 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 | `SundaysTheme` / `ThemePalette` / `SundaysPalette` | `shared/.../ui/` | 主题 | 5 套配色 × 明暗 × 紧凑档，分析模式**一行新样式都不写** |
 | `str` / `LocalStrings` / `ProvideStrings` | `shared/.../ui/LocalStrings.kt` | 国际化 | 新增文案键走 `i18n` 的 6 语言表，UI 里不写死中文 |
 | `CompactMode` / `LocalCompactMode` / `compactDensity` | `shared/.../ui/CompactMode.kt` | 紧凑档 | 与主题一起继承 |
+| `SettingsEntryButton` | `shared/.../ui/ThemeModeToggle.kt` | 顶栏右上角的 ⚙ 设置入口 | 图标按钮（`Icons.Filled.Settings`），与浏览模式的设置入口**同一个组件** |
 | `SqlFormatter` / `CodeFormatterRegistry` | `shared/.../editor/formatter/` | SQL 格式化 | 格式化按钮按 `languageId` 找 formatter，Hive / Impala 档位注册后自动可用 |
 | `TabRenameDialog` | `shared/.../ui/TabRenameDialog.kt` | 报表区块改名 | 已是通用的「重命名一个字符串」弹窗 |
 
@@ -1023,11 +1026,20 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ④ 连接管理器 | **整屏** | `ConnectionManagerScreen`（**同一个**，只换分组方式） | —— |
 | ⑤ 连接向导 | **整屏** | `AddConnectionDialog` / `ConnectionWizardContent`（**同一个**） | —— |
 | ⑤ 连接向导 | 认证方式下拉 | `WinDropdown` | ★ 新增（§6.3.4） |
+| 全部 | 顶栏右上角 | `SettingsEntryButton`（⚙ 图标按钮） | —— |
 | 全部 | 主题 / 圆角 / 立体边 / 选中色 | `SundaysTheme` / `UiChrome` token | —— |
 | 全部 | 文案 | `str(StrKey)` + `i18n` 的 6 语言表 | —— |
 
-> **统计**：本模式**零改动复用的组件 18 项**，**新增组件 6 项**（其中 1 项是扩充 `WinControls`）。
+> **统计**：本模式**零改动复用的组件 19 项**，**新增组件 6 项**（其中 1 项是扩充 `WinControls`）。
 > 没有一项是「另写一套看起来差不多的」。
+
+> ⚠️ **顶栏右上角只放一个 ⚙ 设置入口**（与浏览模式同一个 `SettingsEntryButton`），
+> **不放主题切换、不放语言切换**。理由跟真实应用一致：
+> `desktopApp/.../main.kt` 的 KDoc 写明「外观切换……**只在设置页**渲染明暗切换与配色选择」，
+> `ConnectionManagerScreen.kt` 的 KDoc 也写着「『个性化 → 明暗档位』单选组里，
+> 标题行**不再放应用级外观按钮**」。
+> 顶栏挂「外观」「语言」两个入口，会让人以为点一下就能换配色，实际却只能先进设置页 ——
+> 多出来的两个按钮既不兑现承诺，又和「明暗档位在设置页里」这条唯一真相源打架。
 
 ### 9.4 六个画面
 
