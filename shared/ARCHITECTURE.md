@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.26（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.27（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -313,4 +313,5 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.x | 新增 `editor/` + `table/` + `ui/`；`CodeEditor` 支持高亮 / 工具栏 / 右键菜单；`DataTable` 支持虚拟滚动 / 分页 / 详情面板 |
 | v2.9 | **高度策略统一**：`CodeEditor.maxLines` 默认 `null`、`DataTable.fillParentHeight` 默认 `true`（均填父容器剩余高度）；新增 `ConnectionManagerScreen` + `ConnectionStorage` |
 | v2.14 | **① 顶层导航与应用主题上移**：新增 `navigation/`（`AppDestination`）与 `ui/Theme.kt`（`SundaysTheme`），均自 `desktopApp` 提取；`ConnectionSession` / `DatabaseBrowserState` 因直连 `IdbEngine` 仍留在 `desktopApp`（见 §1.3）。**② 模块整理**：删除 KMP 脚手架样板与 `composeResources` logo，清理死代码与无调用方的兼容层。**③ 文档纠偏**：KDoc 中与实现不符的描述、失效链接，以及本文中「过度记录实现细节」的章节，按实现改正并把细节迁回源码 KDoc |
-| v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖）
+| v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖） |
+| v2.27 | **① `TableStructureDialog` 保存失败时必须显示错误** —— 早先把 `state.error` 记成 `remember(state.draft)` 的快照，而保存失败时 `state.draft` 并不变，remember 的 key 也就没变，快照永远停在初始值；再叠加一层 `if (state.loading) state.error else draft.validate()` 的门控，失败原因被彻底吞掉。改为每次重组都从 `state.error` 读，弹窗里那行红字才真的会出现。**② 读回表结构时「长度」要按类型过滤**（`ColumnTypeCatalog.lengthFor`）—— 引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）而不是长度，照搬进长度框就成了「BIGINT 长度 19」 |

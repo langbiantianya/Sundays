@@ -52,6 +52,7 @@
 |---|---|
 | [`DialectSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectSmokeTest.kt) | **五个方言**（H2 / SQLite / DuckDB / MySQL / PostgreSQL）× 7 项：连通 / 写读闭环 / 过滤排序搜索下推 / 对象浏览 / 取 DDL / 多语句 / 事务可见性 |
 | [`DuckDbFileSourceTest`](./src/test/kotlin/com/langbiantianya/sundays/DuckDbFileSourceTest.kt) | **文件型数据源**：CSV / JSON Lines / Parquet / Excel |
+| [`TablePrimaryKeyDdlTest`](../engine/src/test/kotlin/com/langbiantianya/integration/TablePrimaryKeyDdlTest.kt)（在 `:engine`） | **建表 DDL 契约**：DuckDB 的自增主键表**必须真的有 PRIMARY KEY**（只断言「表建出来了」抓不住 —— DuckDB 建得出来的只是一张没主键的表）/ 重复主键被拒 / 自增序列照旧填值；SQLite 的**内联**主键不与表级约束打架 |
 
 ---
 
@@ -80,7 +81,7 @@
 | 测试类 | 覆盖的能力 |
 |---|---|
 | [`FeatureWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/FeatureWalkthroughTest.kt) | **`TC-OB1/OB2`、`TC-DQ1/DQ2/DQ3`、`TC-MS1`、`TC-TX1/TX2/TX3`、`TC-RO1/RO2`** —— 对象浏览 / 过滤·排序·搜索下推 / 多语句 / 事务 / 只读，H2 × SQLite 双方言 × 5 条 |
-| [`DatabaseBrowserFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/DatabaseBrowserFlowTest.kt) | 浏览状态机全量：拉库 → 展开表 → 预览行数据 → 标签页去重 → `closeTab` 选中回退 / 三个 pane / `executeSql` SELECT+DDL / SQL 多 sheet 增删与逐 sheet 结果隔离 / 方言档位随连接变 / 造数落库与统计 / 补全候选覆盖库·表·已访问表的字段 / 缓存签名只跟 columns 不跟 rows / `releasePools` 清全部 in-flight running 标志 |
+| [`DatabaseBrowserFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/DatabaseBrowserFlowTest.kt) | 浏览状态机全量：拉库 → 展开表 → 预览行数据 → 标签页去重 → `closeTab` 选中回退 / 三个 pane / `executeSql` SELECT+DDL / SQL 多 sheet 增删与逐 sheet 结果隔离 / 方言档位随连接变 / 造数落库与统计 / 补全候选覆盖库·表·已访问表的字段 / 缓存签名只跟 columns 不跟 rows / `releasePools` 清全部 in-flight running 标志 / **建表**：多列一次 CREATE 成功且真落库、建完表树里能看到新表且库**不**被折叠掉 |
 | [`DatabaseBrowserUiTest`](./src/test/kotlin/com/langbiantianya/sundays/DatabaseBrowserUiTest.kt) | 真点击：双击开标签页且 `Role=TAB` 数恒为 1 / SQL 工作台执行 + ＋ 新建 sheet / 切 sheet 显示各自文本与结果 / ✎ 重命名（确定提交、取消放弃）/ × 关闭 / 滚轮横向滚动 / 标题条方言档位与「格式化」可用性 / 造数工作台执行 / 切 pane 后文本·光标·滚动·结果回显 |
 | [`DatabaseBrowserSheetsTest`](./src/test/kotlin/com/langbiantianya/sundays/DatabaseBrowserSheetsTest.kt) | 多 sheet 生命周期：增删、激活、切换不丢浏览进度 |
 | [`ConnectedSourceEndToEndTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectedSourceEndToEndTest.kt) | **「连得上」与「连上之后能用」之间那道缝**：真引擎建库播种 → `ConnectionSession.connect()` 真连上 → 界面真点树与表 → 读数据 → 过滤/排序/搜索下推 → SQL 工作台执行 → 多语句/事务/只读 → 断开。**五个方言全过** |
@@ -94,6 +95,7 @@
 | [`MySQLRoutineTriggerQueryTest`](./src/test/kotlin/com/langbiantianya/sundays/MySQLRoutineTriggerQueryTest.kt) | 真 MySQL 的触发器 / 过程列表：列名必须是 `ROUTINE_COMMENT` 而不是 H2 的 `REMARKS`，且过程注释要**原样**读回 |
 | [`DialectNameContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectNameContractTest.kt) | `DialectType.engineDriverName` 与引擎 `SYSTEM.LIST_DRIVERS` 注册名逐一比对（防 `MYSQL` vs `Mysql` 漂移） |
 | [`TableStructureDiffTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/table/TableStructureDiffTest.kt) | 表结构草稿的校验与差分（弹窗本体在 `:shared`）：断言全钉在**不能少算**那一侧 —— 改名不能退化成「删 + 加」（中途失败就真的丢整列数据），外键改名 / 改内容必须落到 DROP + ADD |
+| [`ColumnTypeCatalogLengthTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/table/ColumnTypeCatalogLengthTest.kt) | 读回表结构时「长度」的取值：引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）不是长度 —— 照搬就成了「BIGINT 长度 19」；还要挡掉 JDBC 的「不限长度」哨兵（PG 的无界 varchar = 2147483647） |
 
 ### 2.3 表格与分页
 

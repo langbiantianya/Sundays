@@ -263,4 +263,55 @@ object ColumnTypeCatalog {
         val wanted = typeName.trim().uppercase()
         return flatFor(dialect).firstOrNull { it.name.uppercase() == wanted }
     }
+
+    /**
+     * 读回表结构时，**长度**该显示成什么 —— 引擎给的 `size` **不是**长度。
+     *
+     * ## 为什么不能照搬
+     *
+     * 引擎从 JDBC 元数据取的那个数字，对不同类型含义完全不同：
+     *
+     * | 实际类型 | 引擎给的 `size` | 是不是长度 |
+     * |---|---|---|
+     * | `VARCHAR(64)` | 64 | **是** |
+     * | `BIGINT` | 19 | **不是** —— 那是十进制位数 |
+     * | `INT` | 10 | 不是 —— 位数 |
+     * | PostgreSQL 的无界 `varchar` | 2147483647 | 不是 —— JDBC 的「不限」哨兵 |
+     *
+     * 照搬进「长度」框，用户就会看到「BIGINT 长度 19」这种莫名其妙的东西；
+     * 改别的列再保存，这个 19 还会被当成真的长度写回去。
+     *
+     * ## 判据
+     *
+     * 1. `size <= 0` → 没有长度。
+     * 2. `size >=` [UNLIMITED_LENGTH_THRESHOLD] → 视为「不限长度」（JDBC 的哨兵值）→ 没有长度。
+     * 3. 类型在清单里且 [ColumnTypeSpec.takesLength] 为 `false` → 这个类型不接受长度参数 → 没有长度。
+     * 4. 类型在清单里且接受长度 → 就是它。
+     * 5. 类型**不在**清单里（各家方言的大量扩展类型）→ 保守保留 —— 扩展类型里
+     *    `VARCHAR(30)` 这类带长度的很常见，宁可多显示一个数，也不要把真实长度吞掉。
+     *
+     * @param typeName 库里读出来的原始类型名 —— 可能是 `INT UNSIGNED`、`DECIMAL(10,2)`
+     *   这种带修饰的写法，比较时只取**基名**（空格与括号之前的那一段）。
+     */
+    fun lengthFor(
+        dialect: DialectType,
+        typeName: String,
+        size: Int,
+    ): String {
+        if (size <= 0 || size >= UNLIMITED_LENGTH_THRESHOLD) return ""
+        val base = typeName.trim().substringBefore(' ').substringBefore('(')
+        val spec = specFor(dialect, base)
+        if (spec != null && !spec.takesLength) return ""
+        return size.toString()
+    }
+
+    /**
+     * JDBC 用来表示「长度不限」的哨兵值的下界。
+     *
+     * PostgreSQL 的无界 `varchar` 在 `getColumns` 里回 `COLUMN_SIZE = 2147483647`
+     * （`Integer.MAX_VALUE`）。真实的字符类型长度在实践中远小于这个量级
+     * （MySQL 的 `VARCHAR` 上限 65535，`DECIMAL` 精度上限 65），
+     * 所以拿它当分界线是安全的。
+     */
+    private const val UNLIMITED_LENGTH_THRESHOLD = 1_000_000
 }

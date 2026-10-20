@@ -26,6 +26,7 @@
 | [`engine/`](./src/main/kotlin/com/langbiantianya/engine/IdbEngine.kt) | `IdbEngine`（`EngineClient` 的同进程实现）、`StatementRegistry`（取消通道）、`SqlScriptSplitter`（多语句分句）、`EngineLanguageContext`（请求语言上下文） |
 | [`dispatcher/`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) | `RequestDispatcher`：`(Category, Action)` → handler 的薄路由；dryRun 短路、超时、语言上下文、异常兜底都在这里 |
 | [`handlers/`](./src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt) | 14 个业务 handler，typed proto 进 / typed proto 出（System / Schema / User / Table / Data / SQL / Function / View / Index / ForeignKey / Trigger / Export / Import / Generate） |
+| [`metadata/`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) | JDBC `getColumns` 的列元数据读取 —— **自增标记**的唯一来源（各方言的 `listColumns` 都不吐这一项） |
 | [`pool/`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) | `PoolManager`（SHA-256 keyed HikariCP 连接池）与 `TransactionManager`（事务会话钉连接） |
 | [`loader/`](./src/main/kotlin/com/langbiantianya/loader/DialectLoader.kt) | JDBC 驱动与方言 SPI 的双通道加载（应用类路径 + `dialects/` 目录） |
 | [`ipc/`](./src/main/kotlin/com/langbiantianya/ipc/IpcTransport.kt) | IPC Transport SPI 与 CLI 配置解析；[`ipc/impl/`](./src/main/kotlin/com/langbiantianya/ipc/impl/TcpIpcTransport.kt) 是 TCP / UDS / Named Pipe 三种实现 |
@@ -78,6 +79,8 @@
 | 34 | `--mode` 归 server 解析 | `IpcConfig.fromArgs` 显式跳过 `--mode` 及其取值；缺取值时仍显式报错 | [`IpcConfig.kt`](./src/main/kotlin/com/langbiantianya/ipc/IpcConfig.kt) |
 | 35 | 优雅关闭顺序 | shutdown hook 依次 transport cleanup → 关会话与连接池 → 关驱动与方言类加载器 | [`IdbEngineServer.kt`](./src/main/kotlin/com/langbiantianya/server/IdbEngineServer.kt) |
 | 36 | SQL 注入防护 | DATA 强制 `PreparedStatement`；`where` / `orderBy` 原始片段由方言 `validateSqlFragment` / `validateOrderBy` 校验 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) |
+| 37 | 主键写在哪由方言自报 | 建表时列定义与表级 `PRIMARY KEY` 只能留一个；判据是「主键写在哪」而不是「有没有自增列」—— 按后者判会把 DuckDB / MySQL 的主键一并弄丢 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) · [`TableHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/TableHandler.kt) |
+| 38 | 自增标记只认 JDBC 元数据 | 各方言的 `listColumns` 都不吐 `autoIncrement`，读回表结构时必须从 `getColumns` 的 `IS_AUTOINCREMENT` 补，否则用户改别的列再保存会悄悄丢掉自增 | [`JdbcColumnMetadata.kt`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) |
 
 ## 4. 请求处理链路
 

@@ -36,6 +36,7 @@ import com.langbiantianya.grpc.tableRenameResponse
 import com.langbiantianya.grpc.tableTruncateResponse
 import com.langbiantianya.grpc.tableUpdateResponse
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.metadata.JdbcColumnMetadata
 import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -105,8 +106,19 @@ object TableHandler {
 
             return@withContext connection.use { conn ->
                 val cols = dialect.listColumns(conn, config.database, schema, req.tableName)
+                // 自增标记来自 JDBC 元数据：各方言的 listColumns 都不吐这一项
+                // （MySQL / PG 走默认实现，H2 / DuckDB / SQLite 走各自覆写），
+                // 而界面上的「自增」复选框要靠它 —— 不补的话读回结构时自增不勾，
+                // 用户改别的列再保存，自增就**悄悄丢了**。
+                val jdbcColumns = JdbcColumnMetadata.load(conn, config.driver, config.database, schema, req.tableName)
                 tableColumnListResponse {
-                    cols.forEach { col -> this.items += buildColumnDef(col) }
+                    cols.forEach { col ->
+                        val name = col["name"]?.toString() ?: ""
+                        val autoIncrement =
+                            jdbcColumns[name.lowercase()]?.autoIncrement
+                                ?: (col["autoIncrement"] as? Boolean ?: false)
+                        this.items += buildColumnDef(col, autoIncrement)
+                    }
                 }
             }
         }
@@ -117,30 +129,37 @@ object TableHandler {
      * `nullable` / `defaultValue` 用**有则设、无则不设**的方式写入：它们在 proto3 里带
      * presence（`optional` / 字符串非空判定），无条件写会把「方言没给这个信息」和
      * 「方言说它是 null」混成同一个值，调用方无法区分。
+     *
+     * @param autoIncrement 自增标记 —— 由 JDBC 元数据补齐（见 [columnList]）。
      */
-    private fun buildColumnDef(col: Map<String, Any?>) =
-        columnDef {
-            name = col["name"]?.toString() ?: ""
-            type = col["type"]?.toString() ?: ""
-            size = (col["size"] as? Number)?.toInt() ?: 0
-            isPrimaryKey = col["isPrimaryKey"] as? Boolean ?: false
-            autoIncrement = col["autoIncrement"] as? Boolean ?: false
-            // `nullable` is `optional` in proto3; preserve presence
-            val nullable = col["nullable"] as? Boolean
-            if (nullable != null) this.nullable = nullable
-            val defaultValue = col["defaultValue"]?.toString()
-            if (defaultValue != null) this.defaultValue = defaultValue
-        }
+    private fun buildColumnDef(
+        col: Map<String, Any?>,
+        autoIncrement: Boolean,
+    ) = columnDef {
+        name = col["name"]?.toString() ?: ""
+        type = col["type"]?.toString() ?: ""
+        size = (col["size"] as? Number)?.toInt() ?: 0
+        isPrimaryKey = col["isPrimaryKey"] as? Boolean ?: false
+        this.autoIncrement = autoIncrement
+        // `nullable` is `optional` in proto3; preserve presence
+        val nullable = col["nullable"] as? Boolean
+        if (nullable != null) this.nullable = nullable
+        val defaultValue = col["defaultValue"]?.toString()
+        if (defaultValue != null) this.defaultValue = defaultValue
+    }
 
     /**
      * CREATE —— 建表。`tableName` + `columns[]` 必填。
      *
      * ## 自增主键为什么可能不追加表级 `PRIMARY KEY`
      *
-     * 方言在处理自增列时已经**内联**输出了主键（SQLite 的 `INTEGER PRIMARY KEY AUTOINCREMENT`、
-     * DuckDB 的 `SEQUENCE + DEFAULT nextval`），此时再追加 `PRIMARY KEY (cols)` 会得到
-     * “more than one primary key”。因此只要存在 `isPrimaryKey && autoIncrement` 的列，
-     * 就以方言的内联形式为准。
+     * 只有**方言的列定义里已经内联了主键**时（SQLite 的 `INTEGER PRIMARY KEY AUTOINCREMENT`），
+     * 再追加 `PRIMARY KEY (cols)` 才会得到 “more than one primary key”。
+     *
+     * ⚠️ 判据是「主键写在哪」（见 `DatabaseDialect.emitsInlinePrimaryKey`），**不是**
+     * 「有没有自增主键列」：DuckDB 走 `SEQUENCE + DEFAULT nextval` + **表级** PRIMARY KEY，
+     * MySQL 走 `AUTO_INCREMENT` + **表级** PRIMARY KEY。早先按「有自增主键列就算内联」
+     * 判断，把这两个方言的主键一并弄丢了。
      *
      * `options` 由方言翻译（MySQL `engine`/`charset`/`collate`/`comment`；
      * PostgreSQL 只认 `comment`，走 `COMMENT ON TABLE`）。
@@ -195,9 +214,19 @@ object TableHandler {
                     req.columnsList.mapNotNull { col ->
                         if (col.isPrimaryKey && col.autoIncrement) col.name else null
                     }
-                // SQLite / DuckDB 等方言在 autoIncrement 主键的列定义里已 inline 输出 PRIMARY KEY，
-                // 此时不能再追加表级 PRIMARY KEY (会触发 "more than one primary key")。
-                val dialectEmitsInlinePK = autoIncrementColumns.isNotEmpty()
+                // SQLite 的自增主键是 `INTEGER PRIMARY KEY AUTOINCREMENT` —— **主键内联在列定义里**，
+                // 此时再追加表级 PRIMARY KEY 会触发 "more than one primary key"。
+                //
+                // ⚠️ 判据是「主键写在哪」，**不是**「有没有自增主键列」：
+                // DuckDB 走 `SEQUENCE + DEFAULT nextval` + **表级** PRIMARY KEY，
+                // MySQL 走 `AUTO_INCREMENT` + **表级** PRIMARY KEY —— 这两个的列定义里
+                // 并没有主键，漏掉表级约束就等于没建主键（MySQL 直接拒绝建表，
+                // DuckDB 则会建出一张没有主键的表，而界面上照样显示为主键列）。
+                //
+                // 还要**全部主键列**都被内联覆盖才能省略表级约束：方言只内联
+                // `autoIncrement && isPrimaryKey` 的那几列，别的主键列仍需表级约束兜着。
+                val dialectEmitsInlinePK =
+                    dialect.emitsInlinePrimaryKey() && autoIncrementColumns.containsAll(primaryKeys)
 
                 for (stmt in dialect.buildPreCreateStatements(dialect.quoteIdentifier(req.tableName), autoIncrementColumns)) {
                     conn.createStatement().use { it.execute(stmt) }

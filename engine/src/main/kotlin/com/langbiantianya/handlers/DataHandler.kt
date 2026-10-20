@@ -33,6 +33,8 @@ import com.langbiantianya.grpc.dataUpdateResponse
 import com.langbiantianya.grpc.row
 import com.langbiantianya.grpc.tableCapabilities
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.metadata.JdbcColumnMeta
+import com.langbiantianya.metadata.JdbcColumnMetadata
 import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -316,7 +318,7 @@ object DataHandler {
             // 自增与二进制类型码来自 JDBC 元数据：各方言的 listColumns 目前没有统一吐出
             // autoIncrement，且 H2 走 INFORMATION_SCHEMA 时类型名是 SQL 标准名（如
             // `BINARY VARYING`）而非驱动类型名，只靠类型名会漏判二进制列。
-            val jdbcColumns = loadJdbcColumnMeta(conn, config, schema, tableName)
+            val jdbcColumns = JdbcColumnMetadata.load(conn, config.driver, config.database, schema, tableName)
 
             val readOnly = mutableListOf<String>()
             val editable = mutableListOf<String>()
@@ -381,50 +383,6 @@ object DataHandler {
         }
 
     /**
-     * JDBC `DatabaseMetaData.getColumns` 抽出的列元数据 —— 自增标记与二进制类型码的来源。
-     *
-     * 查不到（部分驱动不支持）时返回空 map，调用方退回方言给的类型名判定；
-     * **任何异常都只丢这一项**，不影响其余能力计算。
-     */
-    private fun loadJdbcColumnMeta(
-        conn: Connection,
-        config: ConnectionConfig,
-        schema: String,
-        tableName: String,
-    ): Map<String, JdbcColumnMeta> {
-        val result = LinkedHashMap<String, JdbcColumnMeta>()
-        val (catalog, lookupSchema) = metadataLookupScope(config.driver, config.database, schema)
-        for (cand in metadataLookupNames(config.driver, tableName)) {
-            try {
-                conn.metaData.getColumns(catalog, lookupSchema, cand, "%").use { rs ->
-                    // 老驱动可能根本没有 IS_AUTOINCREMENT 列 —— 先问一次，别在每行里试错
-                    val hasAutoIncrement =
-                        runCatching {
-                            (1..rs.metaData.columnCount).any { i ->
-                                rs.metaData.getColumnName(i).equals("IS_AUTOINCREMENT", ignoreCase = true)
-                            }
-                        }.getOrDefault(false)
-                    while (rs.next()) {
-                        val name = rs.getString("COLUMN_NAME") ?: continue
-                        val typeCode = rs.getInt("DATA_TYPE")
-                        val typeName = rs.getString("TYPE_NAME")
-                        val autoIncrement =
-                            hasAutoIncrement &&
-                                "YES".equals(rs.getString("IS_AUTOINCREMENT"), ignoreCase = true)
-                        result.putIfAbsent(name.lowercase(), JdbcColumnMeta(typeCode, typeName ?: "", autoIncrement))
-                    }
-                }
-            } catch (e: Exception) {
-                logger.warn(
-                    "getColumns failed for driver=${config.driver} table=$cand: ${e.message}",
-                    e,
-                )
-            }
-        }
-        return result
-    }
-
-    /**
      * 判断对象是**真表**而非视图 —— `getTables` 里存在 `TABLE_TYPE` 为表的记录才算。
      *
      * 不用「不是 VIEW 就是表」：临时表、系统表、厂商自造类型（`SYSTEM TABLE`、`FOREIGN TABLE`）
@@ -440,8 +398,8 @@ object DataHandler {
         schema: String,
         tableName: String,
     ): Boolean {
-        val (catalog, lookupSchema) = metadataLookupScope(config.driver, config.database, schema)
-        for (cand in metadataLookupNames(config.driver, tableName)) {
+        val (catalog, lookupSchema) = JdbcColumnMetadata.lookupScope(config.driver, config.database, schema)
+        for (cand in JdbcColumnMetadata.lookupNames(config.driver, tableName)) {
             conn.metaData.getTables(catalog, lookupSchema, cand, null).use { rs ->
                 while (rs.next()) {
                     if (BASE_TABLE_TYPES.any { it.equals(rs.getString("TABLE_TYPE"), ignoreCase = true) }) return true
@@ -450,41 +408,6 @@ object DataHandler {
         }
         return false
     }
-
-    /**
-     * 元数据查表名的候选名 —— 照抄 `DatabaseDialect.listColumns` 默认实现的口径。
-     *
-     * H2 把未加引号的标识符存成大写，直接拿前端传来的小写名查 `getTables` 会得到空结果，
-     * 于是真表被当成视图（写入口全灭）。加上大写候选即可，两边口径不一致会出现
-     * 「列查得到、表查不到」的半吊子状态。
-     */
-    private fun metadataLookupNames(
-        driver: String,
-        tableName: String,
-    ): List<String> =
-        buildList {
-            add(tableName)
-            if (driver.equals("H2", ignoreCase = true)) add(tableName.uppercase())
-        }.distinct()
-
-    /** 元数据查询的 (catalog, schema) —— H2 不吃 catalog 且空 schema 要补 PUBLIC，其余原样传。 */
-    private fun metadataLookupScope(
-        driver: String,
-        database: String?,
-        schema: String,
-    ): Pair<String?, String> =
-        if (driver.equals("H2", ignoreCase = true)) {
-            null to schema.ifBlank { "PUBLIC" }
-        } else {
-            database?.takeIf { it.isNotBlank() } to schema
-        }
-
-    /** JDBC 元数据里的单列信息。 */
-    private data class JdbcColumnMeta(
-        val typeCode: Int,
-        val typeName: String,
-        val autoIncrement: Boolean,
-    )
 
     /**
      * 本次要写进 SQL 的列清单 —— `values/changes` 的键 ∪ `null_columns`。

@@ -78,6 +78,55 @@ class SQLiteHandlerIntegrationTest : SQLiteFixture() {
             assertTrue(tableExists("products"))
         }
 
+    /**
+     * SQLite 的自增主键是**内联**在列定义里的（`INTEGER PRIMARY KEY AUTOINCREMENT`），
+     * 建表时不能再追加表级 `PRIMARY KEY (id)` —— 两者同时出现会得到
+     * "more than one primary key"。
+     *
+     * 这条用例守着「内联方言**不**加表级主键」这一侧；
+     * 反过来的一侧（DuckDB / MySQL 必须加）见 `TablePrimaryKeyDdlTest`。
+     */
+    @Test
+    fun `TABLE CREATE with autoIncrement PK really has a primary key and no duplicate constraint`() =
+        runBlocking {
+            TableHandler.create(
+                config,
+                tableCreateRequest {
+                    tableName = "products"
+                    columns.add(
+                        com.langbiantianya.grpc.columnDef {
+                            name = "id"
+                            type = "INT"
+                            nullable = false
+                            isPrimaryKey = true
+                            autoIncrement = true
+                        },
+                    )
+                    columns.add(
+                        com.langbiantianya.grpc.columnDef {
+                            name = "name"
+                            type = "TEXT"
+                            nullable = false
+                        },
+                    )
+                },
+            )
+            // `PRAGMA table_info` 的 `pk` 列给出该列在主键里的序号（非主键列是 0）
+            val pkColumns =
+                withConnection { conn ->
+                    conn.createStatement().use { stmt ->
+                        stmt.executeQuery("PRAGMA table_info(products)").use { rs ->
+                            buildList {
+                                while (rs.next()) {
+                                    if (rs.getInt("pk") > 0) add(rs.getString("name"))
+                                }
+                            }
+                        }
+                    }
+                }
+            assertEquals(listOf("id"), pkColumns, "products 的主键应当且仅当是 id")
+        }
+
     @Test
     fun `TABLE LIST returns created tables`() =
         runBlocking {

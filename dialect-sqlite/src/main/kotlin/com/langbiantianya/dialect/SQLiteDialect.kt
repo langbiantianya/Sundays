@@ -313,6 +313,12 @@ class SQLiteDialect : DatabaseDialect {
 
     // region DDL 构建
 
+    /**
+     * SQLite 的自增主键是 `INTEGER PRIMARY KEY AUTOINCREMENT` —— **主键内联在列定义里**，
+     * 建表时不能再追加表级 `PRIMARY KEY (id)`（会得到 "more than one primary key"）。
+     */
+    override fun emitsInlinePrimaryKey(): Boolean = true
+
     override fun buildColumnDefinition(
         name: String,
         type: String,

@@ -483,6 +483,35 @@ interface DatabaseDialect {
     ): String
 
     /**
+     * 本方言的**列定义**里是否已经内联了 `PRIMARY KEY`。
+     *
+     * ## 为什么必须问方言自己
+     *
+     * 建表语句由两部分拼成：每列的列定义（[buildColumnDefinition]）+ 可选的表级
+     * `PRIMARY KEY (cols)`。两者只能留一个 —— 一起写会得到 "more than one primary key"。
+     *
+     * 判据**不能**是「有没有自增主键列」，因为差别不在「有没有自增」，而在
+     * **「主键写在哪」**：
+     *
+     * | 方言 | 自增主键的写法 | 主键在哪 |
+     * |---|---|---|
+     * | SQLite | `INTEGER PRIMARY KEY AUTOINCREMENT` | **列定义内联** |
+     * | DuckDB | `BIGINT DEFAULT nextval('seq')` + 表级 `PRIMARY KEY (id)` | **表级** |
+     * | MySQL | `BIGINT NOT NULL AUTO_INCREMENT` + 表级 `PRIMARY KEY (id)` | **表级** |
+     * | H2 / PostgreSQL | 各自的序列/identity + 表级 `PRIMARY KEY (id)` | **表级** |
+     *
+     * 早先的判据是「存在 `isPrimaryKey && autoIncrement` 的列就以方言内联形式为准」，
+     * 于是把 **DuckDB 与 MySQL 的主键一并弄丢了**：
+     *
+     * - MySQL 直接建不出表：`Incorrect table definition; there can be only one auto
+     *   column and it must be defined as a key`（有 AUTO_INCREMENT 却没有键）
+     * - DuckDB 更隐蔽：表能建出来，但**没有主键**，而界面上照样显示为主键列
+     *
+     * @return `true` = 列定义里已有 `PRIMARY KEY`，建表时**不要**再追加表级主键约束
+     */
+    fun emitsInlinePrimaryKey(): Boolean = false
+
+    /**
      * Build ALTER TABLE ADD COLUMN statement
      */
     fun buildAddColumnSQL(

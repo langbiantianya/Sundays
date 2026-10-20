@@ -23,7 +23,7 @@ OLAP） / **SQLite**（本地嵌入式关系型），通过 `ServiceLoader` 动�
 系统语言预选，随时可在设置里改；引擎的错误消息也跟随界面语言。见
 [`i18n/README.md`](./i18n/README.md)。
 
-> **当前版本：v2.26**
+> **当前版本：v2.27**
 >
 > 📖 **功能文档：[`desktopApp/FEATURES.md`](./desktopApp/FEATURES.md)** —— 这个工具现在能干什么、
 > 引擎已实现但前端尚未接线的部分、以及与 **DataGrip / Navicat** 的逐项差距矩阵。
@@ -216,6 +216,7 @@ SQL 注入这一块由 CodeQL 的 `java/sql-injection` 查询集覆盖（它对 
 | v2.24 | 修复代码编辑器不跟随主题系统（根因在明暗档而非配色），顺带修掉三个自己写的假绿测试 |
 | v2.25 | **11 项长期红测归零** —— 根因是「Windows 上存不下任何连接配置」的产品缺陷 |
 | v2.26 | **表格内数据操作与表结构管理** —— 批量删除 / 批量添加、NULL 写入约定、引擎 `TableCapabilities`；右键菜单新增表 / 编辑表结构 / 删除表并接入事务会话（**实测纠正 H2 对 DDL 隐式提交**，能力位标「软」）；9605 行的 `DatabaseBrowserScreen.kt` 拆成 10 个文件，平台无关部分上移 `:shared`（新增 `sql/` 包） |
+| v2.27 | **真窗口实测揪出的 7 个建表缺陷** —— ① 建表时**主键写在哪由方言自报**：早先按「有没有自增列」判断，把 DuckDB / MySQL 的主键一并弄丢（MySQL 直接建不出表，DuckDB 建出一张没主键的表）；② 建表是**一条** CREATE 带全部列（逐列发的话第二列必然 `Table 'x' already exists`）；③ `createTable` 里 `runDdl(...) ?: 失败文案` 的反向 elvis 把「成功」翻译成「失败」——表建出来了，界面却报建表失败；④ 保存失败时弹窗**不显示错误**（`state.error` 被 remember 成快照，key 不变就停在初始值）；⑤ 读回表结构丢**自增标记**（各方言 `listColumns` 都不吐它，改为从 JDBC `IS_AUTOINCREMENT` 补）；⑥ 树的表列表是会话初期快照（展开库不重拉，且 `refreshTables` 还会把树折叠掉）；⑦ 读回表结构时「长度」照搬了引擎的**十进制位数**（`BIGINT` 显示成「长度 19」） |
 
 ## 许可证
 

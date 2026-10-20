@@ -116,9 +116,15 @@ compose.desktop {
         // 不会再报「Toolchain from `executable` property does not match toolchain from
         // `javaLauncher` property」。
         // ------------------------------------------------------------------
-        javaHome = javaToolchains.launcherFor {
-            languageVersion.set(JavaLanguageVersion.of(jdkVersion))
-        }.get().metadata.installationPath.asFile.absolutePath
+        javaHome =
+            javaToolchains
+                .launcherFor {
+                    languageVersion.set(JavaLanguageVersion.of(jdkVersion))
+                }.get()
+                .metadata
+                .installationPath
+                .asFile
+                .absolutePath
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)

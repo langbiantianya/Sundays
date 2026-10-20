@@ -57,6 +57,79 @@ class TableHandlerIntegrationTest : H2Fixture() {
             assertEquals(false, id.nullable)
         }
 
+    /**
+     * 读回表结构时**自增标记不能丢**。
+     *
+     * 各方言的 `listColumns` 都不吐 `autoIncrement`（MySQL / PG 走默认实现，
+     * H2 / DuckDB / SQLite 走各自覆写），而界面上的「自增」复选框要靠它 ——
+     * 不补的话读回结构时自增不勾，用户改别的列再保存，**自增就悄悄没了**。
+     *
+     * 来源是 JDBC `getColumns` 的 `IS_AUTOINCREMENT` 列
+     * （见 `JdbcColumnMetadata`）。
+     */
+    @Test
+    fun `LIST with tableName reports autoIncrement for identity columns`() =
+        runBlocking {
+            executeUpdate("CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(50))")
+            val result =
+                TableHandler.columnList(
+                    config,
+                    tableColumnListRequest { tableName = "users" },
+                )
+            val id = result.itemsList.first { it.name.equals("id", ignoreCase = true) }
+            assertTrue(id.autoIncrement, "自增列的 autoIncrement 应当为 true")
+            val name = result.itemsList.first { it.name.equals("name", ignoreCase = true) }
+            assertFalse(name.autoIncrement, "普通列的 autoIncrement 应当为 false")
+        }
+
+    /**
+     * 建表时带自增主键，建出来的表要**真的有主键**。
+     *
+     * 只断言「表建出来了」抓不住「主键被漏掉」—— H2 允许无主键表，
+     * 建表照样成功，缺主键要到约束层面才看得出来。
+     */
+    @Test
+    fun `CREATE with autoIncrement PK produces a table that really has a primary key`() =
+        runBlocking {
+            TableHandler.create(
+                config,
+                TableCreateRequest
+                    .newBuilder()
+                    .setTableName("products")
+                    .addColumns(
+                        ColumnDef
+                            .newBuilder()
+                            .setName("id")
+                            .setType("INT")
+                            .setNullable(false)
+                            .setIsPrimaryKey(true)
+                            .setAutoIncrement(true)
+                            .build(),
+                    ).addColumns(
+                        ColumnDef
+                            .newBuilder()
+                            .setName("name")
+                            .setType("VARCHAR")
+                            .setSize(100)
+                            .setNullable(false)
+                            .build(),
+                    ).build(),
+            )
+            assertTrue(tableExists("products"))
+            val pkColumns =
+                withConnection { conn ->
+                    conn.metaData.getPrimaryKeys(null, "PUBLIC", "PRODUCTS").use { rs ->
+                        buildList {
+                            while (rs.next()) add(rs.getString("COLUMN_NAME"))
+                        }
+                    }
+                }
+            assertTrue(
+                pkColumns.any { it.equals("id", ignoreCase = true) },
+                "products 应当有 id 主键，实际主键列：$pkColumns",
+            )
+        }
+
     @Test
     fun `CREATE table with columns including autoIncrement PK`() =
         runBlocking {

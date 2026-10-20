@@ -105,6 +105,7 @@ import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.sql.SqlLiterals
 import com.langbiantianya.sundays.table.CellEdit
 import com.langbiantianya.sundays.table.ColumnDraft
+import com.langbiantianya.sundays.table.ColumnTypeCatalog
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.ForeignKeyDraft
 import com.langbiantianya.sundays.table.PageSize
@@ -1076,6 +1077,8 @@ class DatabaseBrowserState(
                 resolveSchemas(target.database).firstOrNull() ?: ""
             }
         val config = engineConnFor(currentConnection, target.database)
+        // 「长度要不要显示」按**当前连接的方言**判 —— 同一个 `size` 在不同方言下含义不同。
+        val dialect = currentConnection?.dialect ?: DialectType.UNKNOWN
 
         val columnsResp =
             runCatching {
@@ -1126,7 +1129,9 @@ class DatabaseBrowserState(
                     originalName = col.name,
                     name = col.name,
                     type = col.type,
-                    length = if (col.size > 0) col.size.toString() else "",
+                    // 引擎给的 `size` 对数值列是「十进制位数」（BIGINT 是 19）而不是长度 ——
+                    // 照搬进长度框会显示成「BIGINT 长度 19」。按类型是否接受长度参数过滤。
+                    length = ColumnTypeCatalog.lengthFor(dialect, col.type, col.size),
                     primaryKey = col.isPrimaryKey,
                     // `nullable` 是 proto3 的 optional：没给就是 null，按「可空」处理，
                     // 与引擎 mapper 的默认一致（见 TableHandler.columnList 的同名注释）。
@@ -1238,27 +1243,42 @@ class DatabaseBrowserState(
         val (sessionId, beginError) = beginEditSession(draft.database)
         if (sessionId == null) return beginError
 
-        var index = 0
-        val total = draft.columns.size + draft.foreignKeys.count { !it.isReadOnly }
-        for (column in draft.columns) {
-            index++
-            val failure =
-                runDdl(config, sessionId) {
-                    category = Category.TABLE
-                    action = Action.CREATE
-                    this.sessionId = sessionId
-                    tableRequest =
-                        tableRequest {
-                            create =
-                                tableCreateRequest {
-                                    tableName = name
-                                    this.schema = draft.schema
-                                    columns += column.toProto()
-                                }
-                        }
-                } ?: Msg.format(StrKey.TABLE_CREATE_FAILED, "$name")
-            if (failure != null) return rollbackDdlBatch(draft.database, sessionId, index, total, failure)
-        }
+        // 建表是**一条** `CREATE TABLE` 带全部列 —— 引擎的 TableCreateRequest 本来就是
+        // `columns` 数组。逐列发 CREATE 的话，第二条必然 `Table 'x' already exists`，
+        // 于是「两列以上的表」永远建不出来（单列表恰好能过，把这个 bug 藏住了）。
+        val total = 1 + draft.foreignKeys.count { !it.isReadOnly }
+        // ⚠️ 这里**不能**再套一层 `?: 失败文案`。
+        //
+        // [runDdl] 的契约是「成功返回 null，失败返回引擎原文」—— **null 才是成功**。
+        // 早先写成 `runDdl(...) ?: Msg.format(TABLE_CREATE_FAILED, name)`，
+        // 于是 elvis 把「成功(null)」翻译成了「建表失败」：
+        //
+        //   · CREATE 明明执行成功、表真的建出来了
+        //   · 紧接着走进 [rollbackDdlBatch] → 回滚事务会话
+        //   · MySQL 的 DDL 是隐式提交的，回滚**撤不掉**那张表
+        //   · 用户看到的是「表建好了，但界面报建表失败，弹窗不关」
+        //
+        // 而「单列无自增主键」的建表恰好能过（早期逐列 CREATE 的写法），
+        // 多列表却被这条反向 elvis 判死 —— 两者叠在一起，让「建表」这条链路
+        // 在界面上表现为「有时成功有时失败」，极难定位。
+        val createFailure =
+            runDdl(config, sessionId) {
+                category = Category.TABLE
+                action = Action.CREATE
+                this.sessionId = sessionId
+                tableRequest =
+                    tableRequest {
+                        create =
+                            tableCreateRequest {
+                                tableName = name
+                                this.schema = draft.schema
+                                draft.columns.forEach { columns += it.toProto() }
+                            }
+                    }
+            }
+        if (createFailure != null) return rollbackDdlBatch(draft.database, sessionId, 1, total, createFailure)
+
+        var index = 1
         for (fk in draft.foreignKeys.filter { !it.isReadOnly }) {
             index++
             val failure = runDdl(config, sessionId) { fkRequest(name, fk, draft.schema, sessionId) }
@@ -1419,9 +1439,25 @@ class DatabaseBrowserState(
         return null
     }
 
-    /** 删表成功后刷新树 —— 直接调 [refreshTables] 之外的东西会漏掉折叠状态。 */
+    /**
+     * 删表 / 改表结构 / 建表之后刷新树。
+     *
+     * ## ⚠️ 早先这里调的是 [toggleDatabase] —— 那是**错的**
+     *
+     * `toggleDatabase` 的语义是「切换展开态」：库本来就展开着的时候调用它，
+     * 效果是**把树折叠起来**。于是「建完表 → 树合上了 → 新表也不在列表里」，
+     * 用户看到的就是「表建了，界面却像什么都没发生，还把我摊开的树收走了」。
+     *
+     * 现在改成：保持展开态不变，并**重新拉一次表列表**。
+     * 不刷新的话，库里已经有那张表了，树里却是旧的快照。
+     */
     private fun refreshTables(database: String) {
-        toggleDatabase(database)
+        if (!expandedDatabases.contains(database)) {
+            expandedDatabases.add(database)
+        }
+        if (!loadingTables.contains(database)) {
+            loadTables(database)
+        }
     }
 
     /**
@@ -3461,15 +3497,19 @@ class DatabaseBrowserState(
             expandedDatabases.remove(name)
         } else {
             expandedDatabases.add(name)
-            if (_tablesByDatabase[name] == null && !loadingTables.contains(name)) {
+            // 表列表**每次展开都重新拉**，不做「拉过就跳过」——
+            // 用户在**别处**（SQL 工作台、造数、另一个客户端）建的表，这里若不重拉就永远看不到，
+            // 而「树里看不到刚建的表」正是用户最不能接受的一种「列表不更新」。
+            //
+            // 早先的判据是 `_tablesByDatabase[name] == null`（只在第一次展开时拉），
+            // 与下面那段注释自相矛盾：结果就是外部建了表，树上永远是那份会话初期的快照。
+            // 展开是低频动作，多三次往返换来正确性，划算。
+            //
+            // 只在「当前没有在飞的拉取」时发起，避免连点展开时堆一串重复请求。
+            if (!loadingTables.contains(name)) {
                 loadTables(name)
             }
             // 库级对象与表**并发**拉：它们互不依赖，串行会让展开一棵库慢一倍。
-            //
-            // 每次展开都重新拉，不做「拉过就跳过」：用户在**别处**（SQL 工作台、造数）
-            // 建的视图 / 触发器，这里若不重拉就永远看不到 —— 而「树里看不到刚建的
-            // 对象」正是用户最不能接受的一种「列表不更新」。展开是低频动作，
-            // 多三次往返换来正确性，划算。
             loadDatabaseObjects(name)
         }
     }

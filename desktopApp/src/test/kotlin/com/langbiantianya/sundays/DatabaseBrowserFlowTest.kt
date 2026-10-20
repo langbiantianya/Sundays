@@ -17,9 +17,11 @@ import com.langbiantianya.sundays.editor.CompletionKind
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.sql.SqlLiterals
 import com.langbiantianya.sundays.table.CellEdit
+import com.langbiantianya.sundays.table.ColumnDraft
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.table.TableColumn
 import com.langbiantianya.sundays.table.TableRow
+import com.langbiantianya.sundays.table.TableStructureDraft
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -210,6 +212,105 @@ class DatabaseBrowserFlowTest {
             val alice = usersTab.rows.first { (it.cells["NAME"] as? String) == "Alice" }
             // 引擎 DataHandler.buildRow 对非 LOB 列一律走 rs.getString —— 单元格值是字符串.
             assertEquals("1", alice.id.toString(), "Alice's id should be 1")
+        }
+
+    /**
+     * 「新增表」的成功路径 —— 回归用例。
+     *
+     * ## 这条用例在防什么
+     *
+     * 早先 `createTable` 里写的是
+     *
+     * ```kotlin
+     * val createFailure = runDdl(...) ?: Msg.format(StrKey.TABLE_CREATE_FAILED, name)
+     * ```
+     *
+     * 而 `runDdl` 的契约是「**成功返回 null**，失败返回引擎原文」——
+     * elvis 于是把「成功(null)」翻译成了「失败」：表**真的建出来了**，界面却报
+     * 「建表失败」，弹窗不关，保存按钮又变回可点。用户看到的现象是
+     * 「表建好了，但界面说没建好」，比直接报错还难查。
+     *
+     * 另一处（逐列发 `CREATE TABLE`）让**多列表**根本建不出来 ——
+     * 第二条 CREATE 必然 `Table 'x' already exists`。所以这条用例用**两列**：
+     * 少一列就说明又退回逐列建表了。
+     */
+    @Test
+    fun `createTable 建多列表成功且表真的落到库里`() =
+        runBlocking {
+            val state = newBrowser()
+            state.refreshDatabases()
+            val db = state.firstLoadedDatabase()
+            state.toggleDatabase(db)
+            withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+
+            val draft =
+                TableStructureDraft(
+                    database = db,
+                    schema = "",
+                    tableName = "made_by_ui",
+                    isNew = true,
+                    columns =
+                        listOf(
+                            ColumnDraft(
+                                name = "id",
+                                type = "INT",
+                                primaryKey = true,
+                                nullable = false,
+                                autoIncrement = true,
+                            ),
+                            ColumnDraft(
+                                name = "name",
+                                type = "VARCHAR",
+                                length = "64",
+                                nullable = false,
+                            ),
+                        ),
+                )
+            val failure = state.createTable(draft)
+            assertNull(failure, "建表不应失败，实际错误：$failure")
+
+            // 库里真的有两列 —— 只建出一列就说明又退回「逐列发 CREATE」了
+            DriverManager.getConnection(jdbcUrl, "sa", "").use { conn ->
+                conn.metaData.getColumns(null, "PUBLIC", "MADE_BY_UI", "%").use { rs ->
+                    val names = mutableListOf<String>()
+                    while (rs.next()) names += rs.getString("COLUMN_NAME")
+                    assertEquals(2, names.size, "应当建出两列，实际：$names")
+                }
+            }
+        }
+
+    /**
+     * 建完表，**树里的表列表要能看到它**。
+     *
+     * 早先 `refreshTables` 调的是 `toggleDatabase` —— 那是「切换展开态」，
+     * 库本来就展开着的时候调它，效果是**把树折叠起来**；而且它只在
+     * 「还没拉过表列表」时才重拉，于是树上永远是一份会话初期的快照：
+     * 库里已经有那张表了，用户却要在树里找不到。
+     */
+    @Test
+    fun `建表后树里的表列表刷新出新表且不折叠`() =
+        runBlocking {
+            val state = newBrowser()
+            state.refreshDatabases()
+            val db = state.firstLoadedDatabase()
+            state.toggleDatabase(db)
+            withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+            assertTrue(db in state.expandedDatabases, "建表前库应当是展开的")
+
+            val draft =
+                TableStructureDraft(
+                    database = db,
+                    schema = "",
+                    tableName = "made_by_ui",
+                    isNew = true,
+                    columns = listOf(ColumnDraft(name = "id", type = "INT", primaryKey = true, nullable = false)),
+                )
+            assertNull(state.createTable(draft), "建表不应失败")
+
+            withTimeout(5_000) { while (db in state.loadingTables) delay(50) }
+            assertTrue(db in state.expandedDatabases, "建表后库**不能**被折叠掉")
+            val tables = state.tablesByDatabase[db].orEmpty().map { it.uppercase() }
+            assertTrue("MADE_BY_UI" in tables, "树里应当出现新建的表，实际：$tables")
         }
 
     @Test

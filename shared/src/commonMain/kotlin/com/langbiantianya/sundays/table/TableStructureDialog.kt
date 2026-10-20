@@ -121,13 +121,28 @@ fun TableStructureDialog(
     // keyed on draft：读表结构回来时 draft 会换一份（占位 → 真实结构），
     // 这正是应该重置的时机；用户后续的敲字只改本地这份，不触发重置。
     var draft by remember(state.draft) { mutableStateOf(state.draft) }
-    var error by remember(state.draft) { mutableStateOf(state.error) }
     val features = DialectCapabilities.of(dialect)
     val coroutineScope = rememberCoroutineScope()
 
+    // 两条错误来源，**都要**显示出来：
+    //   · [state.error] —— 已经发生的失败（读结构失败 / 保存失败）
+    //   · [TableStructureDraft.validate] —— 提交前的即时校验
+    //
+    // 顺序很重要：保存失败时 [state.error] 才是用户唯一能看到的反馈 ——
+    // 草稿本身是合法的，validate() 返回 null，而错误文案必须显示出来。
+    //
+    // ⚠️ 这里的错误**必须每次重组都从 [state.error] 读**，不能 remember 成快照：
+    // 保存失败时 [state.draft] 没变（还是同一份），`remember(state.draft)` 的 key
+    // 也就没变 —— 快照会永远停在初始值，于是用户点了保存、什么都没发生、
+    // 连**为什么**失败都看不到（实测：MySQL 报「表已存在」，界面上只有一片安静）。
+    //
     // 提交前的即时校验：不通过就把按钮变灰 + 显示原因，而不是等点下去才弹通知。
     // 保存中 disable，是为了防止连点两次发出两批 DDL —— 事务会话会互相打架。
-    val localError = if (state.loading) state.error else draft.validate()
+    //
+    // ⚠️ 加载中**不算**校验：那时草稿还是占位内容（表名空、字段空），
+    // `validate()` 的结论（「表名不能为空」「至少要一个字段」）对用户没有意义，
+    // 显示出来只是噪声。但加载**失败**是另一回事 —— 那是 [state.error]，必须显示。
+    val localError = if (state.loading) null else draft.validate()
     val canSave = localError == null && !state.saving && !state.loading
 
     Dialog(
@@ -266,7 +281,7 @@ fun TableStructureDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                val errorText = localError ?: error
+                val errorText = state.error ?: localError
                 if (errorText != null) {
                     Text(
                         text = errorText,
@@ -291,7 +306,8 @@ fun TableStructureDialog(
                     Spacer(Modifier.width(8.dp))
                     WinButton(
                         onClick = {
-                            error = null
+                            // 不在这里清错误：状态机在**开始保存**时就把 error 清成
+                            // null（saving = true, error = null），清两遍反而要维护两份状态。
                             onSave(draft)
                         },
                         enabled = canSave,
