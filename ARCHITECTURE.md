@@ -108,6 +108,12 @@ gRPC 模式:
 | **`desktopApp/`** | [`README.md`](./desktopApp/README.md) · [`ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览屏 / 生命周期 |
 | **`packaging/flatpak/`** | [`README.md`](./packaging/flatpak/README.md) | Flatpak 选型结论索引 |
 
+> **规划中：数据分析模式** —— 一个**独立于「连接管理 → 数据库浏览」**的新顶层模式：
+> 远程数据源**恒为只读**（五层防线，不是可关的开关），计算引擎默认 **DuckDB**（可切
+> Hive / Impala），当前阶段做 **Excel 报表**，后续迭代接入 AI 做智能分析。
+> 设计文档（只读防线、报表模型、迭代拆分、风险登记）与可交互 UI 设计图见
+> [`docs/analysis-mode/README.md`](./docs/analysis-mode/README.md)。
+
 ---
 
 ## 5. 方言矩阵
