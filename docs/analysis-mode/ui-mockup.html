@@ -219,7 +219,10 @@ body{
 .tree-head{
   padding:6px 10px; font-size:11px; line-height:14px; font-weight:600; letter-spacing:.04em;
   color:var(--on-surface-variant); border-bottom:1px solid var(--outline-variant);
+  display:flex; align-items:center; justify-content:space-between;
 }
+/* 「来自连接列表」—— 标明分析模式的数据源就是共享的那份连接，不是另建一套 */
+.tree-head-note{ font-weight:400; letter-spacing:0; opacity:.8; }
 .tree-list{ flex:1 1 auto; padding:5px 0; overflow:auto; }
 .tree-row{
   display:flex; align-items:center; gap:5px; height:24px;
@@ -389,6 +392,55 @@ body{
   display:flex; align-items:center; justify-content:flex-end; gap:8px;
   padding:10px 14px; border-top:1px solid var(--outline-variant);
 }
+
+/* ---------- 10. 画面 4：连接管理器（复用 + 通用化后） ---------- */
+/* 连接管理器本体：左侧按能力位分组的列表 + 右侧详情 */
+.cm-body{ display:flex; height:520px; }
+.cm-list{
+  width:252px; flex:none; display:flex; flex-direction:column;
+  border-right:1px solid var(--outline-variant); background:var(--surface);
+}
+.cm-list-head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 12px; border-bottom:1px solid var(--outline-variant);
+  font-size:12px; font-weight:600; color:var(--on-surface);
+}
+.cm-count{ font-size:11px; font-weight:400; color:var(--on-surface-variant); }
+/* 分组标题 —— 承载「按能力位分组」这条设计决定 */
+.cm-group{
+  padding:10px 12px 3px; font-size:11px; font-weight:600;
+  color:var(--on-surface-variant); letter-spacing:.03em;
+}
+.cm-item{
+  display:flex; align-items:center; gap:6px; padding:5px 12px;
+  font-size:12px; line-height:17px; color:var(--on-surface);
+}
+.cm-item.is-on{ background:var(--primary-container); color:var(--on-primary-container); }
+.cm-item.is-on .tag-xs{ background:transparent; color:var(--on-primary-container); opacity:.75; }
+.cm-item .tag-xs{ margin-left:auto; }
+.cm-ro{ margin-left:4px; font-size:11px; color:var(--tertiary); }
+.cm-item.is-on .cm-ro{ color:var(--on-primary-container); }
+.cm-foot{
+  margin-top:auto; padding:8px 12px; font-size:11px; line-height:15px;
+  color:var(--on-surface-variant); background:var(--surface-variant);
+  border-top:1px solid var(--outline-variant);
+}
+.cm-detail{ flex:1 1 auto; padding:14px 16px; overflow:hidden; }
+.cm-detail-head{ font-size:15px; font-weight:600; color:var(--on-surface); margin-bottom:2px; }
+.cm-detail-sub{ font-size:12px; color:var(--on-surface-variant); margin-bottom:12px; }
+.kv{ display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0 0 14px; font-size:12px; }
+.kv dt{ color:var(--on-surface-variant); }
+.kv dd{ margin:0; color:var(--on-surface); }
+.cm-actions{ display:flex; gap:8px; margin-top:14px; }
+
+/* 新增连接向导（复用现有 AddConnectionDialog，表单由方言自描述渲染） */
+.dlg-hint{ margin:-4px 0 10px 56px; font-size:11px; line-height:15px; color:var(--on-surface-variant); }
+/* 「高级属性」折叠行 —— 承载 properties 这个通用扩展点 */
+.fold{
+  display:flex; align-items:center; gap:6px; padding:4px 0 8px;
+  font-size:12px; color:var(--on-surface); cursor:pointer;
+}
+.fold .caret{ font-size:10px; color:var(--on-surface-variant); }
 </style>
 </head>
 <body>
@@ -417,7 +469,8 @@ body{
     <button class="ctl-btn is-on" type="button" data-screen="nav">顶层导航</button>
     <button class="ctl-btn" type="button" data-screen="work">分析工作区</button>
     <button class="ctl-btn" type="button" data-screen="report">报表设计器</button>
-    <button class="ctl-btn" type="button" data-screen="conn">数据源连接</button>
+    <button class="ctl-btn" type="button" data-screen="conn">连接管理器</button>
+    <button class="ctl-btn" type="button" data-screen="wizard">新增连接向导</button>
   </div>
 
   <span class="ctl-note">配色与明暗为全局状态，切换画面时保持不变。</span>
@@ -444,11 +497,15 @@ body{
         <div class="intro-card">
           <h1>数据分析模式</h1>
           <p class="intro-lead">
-            一个<b>独立于「连接管理 → 数据库浏览」</b>的顶层模式：负责数据分析与报表制作，连接的远程数据库一律只读。
+            一个<b>独立于「连接管理 → 数据库浏览」</b>的顶层模式：负责数据分析与报表制作，远程数据源恒为只读；
+            <b>连接管理器与设置页直接复用</b>现有实现。
           </p>
           <ul class="bullet-list">
-            <li><b>与「连接管理 / 数据库浏览」完全独立</b>：不共用 sheet、不共用浏览状态机。</li>
-            <li><b>远程数据源恒为只读</b>：分析模式没有「关闭只读」这个开关。</li>
+            <li><b>工作台完全独立</b>：不共用 sheet、不共用浏览状态机。</li>
+            <li><b>连接与设置复用</b>：同一份 <code>connection.json</code>、同一个连接管理器、同一个设置页；
+              两个模式按<b>能力位</b>各取所需（可浏览 / 可分析）。</li>
+            <li><b>远程数据源恒为只读</b>，且是<b>方言级</b>：Hive / Impala 在引擎里根本没有写入路径，
+              从哪个模式进来都写不了。</li>
             <li><b>计算引擎默认 DuckDB</b>（本地嵌入式分析引擎），可切换 Hive / Impala。</li>
             <li><b>目标</b>：数据分析 → 制作 Excel 报表；后续迭代接入 AI 做智能分析。</li>
           </ul>
@@ -515,7 +572,7 @@ body{
         <div class="work-body">
           <!-- 左树 -->
           <aside class="tree">
-            <div class="tree-head">数据源</div>
+            <div class="tree-head">数据源<span class="tree-head-note">来自连接列表</span></div>
             <div class="tree-list">
               <div class="tree-row is-group lvl0"><span class="tw">▾</span><span class="name">本地工作区</span><span class="tag-tertiary">DuckDB</span></div>
               <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">orders</span></div>
@@ -528,7 +585,7 @@ body{
               <div class="tree-row is-group lvl0"><span class="tw">▸</span><span class="name">impala_crm</span><span class="tag-xs">Impala</span></div>
               <div class="tree-row lvl1"><span class="tw"></span><span class="name">contacts</span></div>
             </div>
-            <div class="tree-foot">远程数据源恒为只读 · 计算引擎 DuckDB</div>
+            <div class="tree-foot">远程数据源恒为只读（方言级）· 计算引擎 DuckDB</div>
           </aside>
 
           <!-- 右侧主区 -->
@@ -658,14 +715,75 @@ body{
     </div>
   </section>
 
-  <!-- ===================== 画面 4：数据源连接（只读） ===================== -->
+  <!-- ===================== 画面 4：连接管理器（复用 + 通用化后） ===================== -->
   <section class="screen" data-screen="conn">
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
         <nav class="nav-chips">
-          <span class="nav-chip">连接管理</span>
-          <span class="nav-chip is-selected">数据分析</span>
+          <span class="nav-chip is-selected">连接管理</span>
+          <span class="nav-chip">数据分析</span>
+        </nav>
+        <div class="appbar-right">
+          <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
+          <span class="appbar-action"><span class="glyph">🌐</span>语言</span>
+        </div>
+      </header>
+
+      <div class="cm-body">
+        <!-- 左侧：同一份连接列表，按能力位分成两组 -->
+        <aside class="cm-list">
+          <div class="cm-list-head"><span>连接</span><span class="cm-count">6 条</span></div>
+
+          <div class="cm-group">可浏览</div>
+          <div class="cm-item"><span class="name">生产 MySQL</span><span class="tag-xs">MySQL</span></div>
+          <div class="cm-item"><span class="name">分析 PG</span><span class="tag-xs">PostgreSQL</span></div>
+          <div class="cm-item"><span class="name">本地沙箱</span><span class="tag-xs">H2</span></div>
+
+          <div class="cm-group">可分析</div>
+          <div class="cm-item"><span class="name">DuckDB 工作区</span><span class="tag-tertiary">DuckDB</span></div>
+          <div class="cm-item is-on"><span class="name">hive_prod</span><span class="tag-xs">Hive</span><span class="cm-ro" title="只读方言">ⓘ</span></div>
+          <div class="cm-item"><span class="name">impala_crm</span><span class="tag-xs">Impala</span><span class="cm-ro" title="只读方言">ⓘ</span></div>
+
+          <div class="cm-foot">
+            同一份配置 · 两个模式按能力位各取所需<br>ⓘ = 只读方言
+          </div>
+        </aside>
+
+        <!-- 右侧：选中连接的详情 -->
+        <section class="cm-detail">
+          <div class="cm-detail-head">hive_prod</div>
+          <div class="cm-detail-sub">hive.internal:10000 / sales</div>
+          <dl class="kv">
+            <dt>类型</dt><dd>Hive（只读方言）</dd>
+            <dt>认证</dt><dd>Kerberos</dd>
+            <dt>用途</dt><dd>可分析（浏览模式仅列出，不提供写操作）</dd>
+            <dt>存储</dt><dd>与浏览模式同一份 connection.json</dd>
+          </dl>
+          <div class="notice">
+            <span class="glyph">ⓘ</span>
+            <div>
+              <div><b>只读方言</b>：引擎里没有往 Hive 写入的路径</div>
+              <div>它在浏览模式与分析模式里<b>都</b>不能写 —— 不是「忘了开只读」，是压根没有写。</div>
+            </div>
+          </div>
+          <div class="cm-actions">
+            <button class="btn btn-primary" type="button">在数据分析中打开</button>
+            <button class="btn" type="button">测试连接</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 画面 5：新增连接向导（复用 + 通用化后） ===================== -->
+  <section class="screen" data-screen="wizard">
+    <div class="window">
+      <header class="appbar">
+        <div class="brand"><span class="brand-mark"></span>sundays</div>
+        <nav class="nav-chips">
+          <span class="nav-chip is-selected">连接管理</span>
+          <span class="nav-chip">数据分析</span>
         </nav>
         <div class="appbar-right">
           <span class="appbar-action"><span class="glyph">⚙</span>外观</span>
@@ -693,18 +811,21 @@ body{
         </div>
         <div class="scrim"></div>
 
-        <div class="dialog" role="dialog" aria-label="添加分析数据源">
+        <div class="dialog" role="dialog" aria-label="添加连接">
           <div class="dlg-head">
-            <span class="title">添加分析数据源</span>
+            <span class="title">添加连接</span>
             <button class="icon-btn" type="button" title="关闭"><span class="glyph">✕</span></button>
           </div>
           <div class="dlg-body">
             <div class="dlg-row">
               <span class="dlg-label">类型</span>
               <span class="seg">
-                <span class="seg-btn is-on">DuckDB</span>
-                <span class="seg-btn">Hive</span>
+                <span class="seg-btn">DuckDB</span>
+                <span class="seg-btn is-on">Hive</span>
                 <span class="seg-btn">Impala</span>
+                <span class="seg-btn">MySQL</span>
+                <span class="seg-btn">…</span>
+                <span class="seg-btn">自定义 URL</span>
               </span>
             </div>
             <div class="dlg-row">
@@ -718,21 +839,27 @@ body{
               <input class="dlg-field sm" type="text" value="10000" readonly tabindex="-1" aria-label="端口">
             </div>
             <div class="dlg-row">
+              <span class="dlg-label">认证</span>
+              <span class="select-btn">Kerberos<span class="caret">▾</span></span>
+            </div>
+            <p class="dlg-hint">认证方式由<b>方言自己声明</b> —— 新增方言不需要改前端一行代码</p>
+            <div class="dlg-row">
               <span class="dlg-label">用户</span>
               <input class="dlg-field" type="text" value="analyst" readonly tabindex="-1" aria-label="用户">
-              <span class="dlg-label">密码</span>
-              <input class="dlg-field" type="text" value="••••••" readonly tabindex="-1" aria-label="密码">
+              <span class="dlg-label">主体</span>
+              <input class="dlg-field" type="text" value="analyst@EXAMPLE.COM" readonly tabindex="-1" aria-label="Kerberos 主体">
             </div>
             <div class="dlg-row">
               <span class="dlg-label">数据库</span>
               <input class="dlg-field" type="text" value="sales" readonly tabindex="-1" aria-label="数据库">
             </div>
+            <div class="fold"><span class="caret">▸</span>高级属性（Kerberos 主体 / ZooKeeper / SSL）</div>
 
             <div class="notice">
-              <span class="glyph">⊘</span>
+              <span class="glyph">ⓘ</span>
               <div>
-                <div>此连接仅用于分析，<b>恒为只读</b></div>
-                <div>引擎将拒绝一切写入操作；凭据只保存在本机。</div>
+                <div><b>Hive 是只读方言</b>：引擎里没有往它写入的路径</div>
+                <div>浏览模式与分析模式<b>都</b>写不了 —— 共用凭据不等于共用写权限。</div>
               </div>
             </div>
           </div>
@@ -974,7 +1101,7 @@ function readHash(){
   for (var i = 0; i < parts.length; i++){
     var kv = parts[i].split("=");
     var k = decodeURIComponent(kv[0] || ""), v = decodeURIComponent(kv[1] || "");
-    if (k === "screen" && ["nav","work","report","conn"].indexOf(v) >= 0) state.screen = v;
+    if (k === "screen" && ["nav","work","report","conn","wizard"].indexOf(v) >= 0) state.screen = v;
     else if (k === "palette" && FAMILIES[v]) state.family = v;
     else if (k === "mode" && (v === "light" || v === "dark")) state.mode = v;
   }
