@@ -167,6 +167,15 @@ enum class StrKey {
     AUTH_METHOD_KERBEROS,
     AUTH_METHOD_NONE,
 
+    // ──────────────── 连接表单 · 方言特有字段 ────────────────
+    //
+    // 这一组是「**方言特有**的连接参数」的标签 —— 主机 / 端口 / 库名 / 账密那些
+    // 通用字段的键在上面（HOST / PORT / …），这一组是**每个方言不一样**的那些
+    // （数仓那边的服务名、Kerberos 主体、keytab 路径…）。
+    FIELD_SERVICE_NAME,
+    FIELD_KERBEROS_PRINCIPAL,
+    FIELD_KEYTAB_PATH,
+
     TEST_AND_SAVE,
     CONNECTION_SUMMARY,
     TESTING,

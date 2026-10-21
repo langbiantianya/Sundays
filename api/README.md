@@ -2,7 +2,7 @@
 
 **零外部依赖的公共 SPI 模块** —— 定义方言插件必须实现的接口 + 连接元数据扩展枚举。引擎通过 `ServiceLoader<DatabaseDialect>` 自动发现并注册方言。
 
-> **当前版本**：v2.11。v2.8 起 11 个连接元数据属性纳入 SPI（前端据此动态渲染连接表单）；v2.11 起 `jdbcUrlPrefix` 让引擎仅凭 JDBC URL 反查方言。
+> **当前版本**：v2.12。v2.8 起 11 个连接元数据属性纳入 SPI（前端据此动态渲染连接表单）；v2.11 起 `jdbcUrlPrefix` 让引擎仅凭 JDBC URL 反查方言；v2.12 起 `connectionForm` 让方言自描述**完整的表单规格**（不只是布尔）。
 
 ## 模块结构
 
@@ -23,6 +23,7 @@
 |---|---|
 | **驱动识别** | `driverName` / `jdbcDriverClassName` / `buildJdbcUrl(...)` / `jdbcUrlPrefix` |
 | **连接元数据（v2.8）** | `displayName` / `connectionType` / `requiresHost` / `requiresPort` / `defaultPort` / `supportsUser` / `supportsPassword` / `supportsSchema` / `supportsCrossDatabase` / `jdbcUrlExample` / `capabilities` |
+| **连接表单规格（v2.12）** | `connectionForm` —— 方言自描述「连得上要填什么」（字段、顺序、标签、认证方式）；默认返回**空 spec** = 「没声明」，前端据此回退旧的枚举分支。类型住在 [`:dialect-contract`](../dialect-contract/README.md) 模块 |
 | **流式查询配置** | `configureConnectionForStreaming` / `restoreConnectionAfterStreaming` |
 | **Schema 上下文 / 操作** | `setSearchPath` / `buildSetSearchPathSql`；`listDatabases` / `listSchemas` / `createSchema` / `deleteSchema` |
 | **Table / Column** | `listTables` / `listColumns` / `getCreateTableDDL` / `buildColumnDefinition` / `buildAddColumnSQL` / `buildDropColumnSQL` / `buildModifyColumnSQL` |
@@ -36,6 +37,8 @@
 每个方法的语义、默认值、必须覆盖的情形写在 [`DatabaseDialect.kt`](./src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) 的 KDoc 里，改接口时以那里为准。
 
 连接元数据属性的唯一用途：`SYSTEM.LIST_DRIVERS` 枚举已加载方言并返回 `repeated DialectInfo`，前端据此**动态渲染「新建连接」表单** —— 无需硬编码每个 driver 的字段需求。
+
+**`connectionForm`（v2.12）** 把这件事推进了一步：不再只给「需要主机 / 需要端口 / 支持账密」这类**布尔**，而是给出**完整的表单规格**（哪些字段、什么顺序、什么标签、哪些认证方式）。前端据此渲染，**新增一个方言的表单形状不需要改前端一行**。它随 `DialectInfo` 的 `connection_form` 字段下发（`SYSTEM.LIST_DRIVERS` 一次性返回，不是每次建连接都跑一趟）。
 
 ## `jdbcUrlPrefix` —— 凭 JDBC URL 反查方言（v2.11）
 

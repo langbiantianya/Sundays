@@ -81,6 +81,8 @@
 | 36 | SQL 注入防护 | DATA 强制 `PreparedStatement`；`where` / `orderBy` 原始片段由方言 `validateSqlFragment` / `validateOrderBy` 校验 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) |
 | 37 | 主键写在哪由方言自报 | 建表时列定义与表级 `PRIMARY KEY` 只能留一个；判据是「主键写在哪」而不是「有没有自增列」—— 按后者判会把 DuckDB / MySQL 的主键一并弄丢 | [`DatabaseDialect.kt`](../api/src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) · [`TableHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/TableHandler.kt) |
 | 38 | 自增标记只认 JDBC 元数据 | 各方言的 `listColumns` 都不吐 `autoIncrement`，读回表结构时必须从 `getColumns` 的 `IS_AUTOINCREMENT` 补，否则用户改别的列再保存会悄悄丢掉自增 | [`JdbcColumnMetadata.kt`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) |
+| 39 | 方言的连接表单规格随 `LIST_DRIVERS` 下发 | 规格是**静态**的（方言写死的），而 `LIST_DRIVERS` 是与 `INFO` 同性质的**一次性**纯元数据查询（不需要连接、不连库）—— 所以复用它既不违背「别让静态声明走运行时通道」那条，也不必新开 action。「没声明」用 proto3 消息字段的天然存在性表达，与「声明了但字段为空」分得开 | [`DialectInfoMapper.kt`](./src/main/kotlin/com/langbiantianya/engine/DialectInfoMapper.kt) · [`DialectFormMapping.kt`](../engine-protocol/src/main/kotlin/com/langbiantianya/grpc/DialectFormMapping.kt) |
+| 40 | 映射规则抽出来才可单测 | `listDrivers()` 原来把 13 个字段内联在 `dialectInfo { … }` 块里；加上表单规格会变成 20 多个字段的一大块 —— 读起来像一堵墙，而且**没法单测**（要测它得拉起一个引擎、注册方言）。抽成独立对象后，映射规则可以脱离引擎单测 | [`DialectInfoMapper.kt`](./src/main/kotlin/com/langbiantianya/engine/DialectInfoMapper.kt) |
 
 ## 4. 请求处理链路
 

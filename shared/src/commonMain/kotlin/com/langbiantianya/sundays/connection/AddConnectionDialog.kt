@@ -75,6 +75,12 @@ fun AddConnectionDialog(
     onConnect: (ConnectionConfig) -> Unit,
     onDisconnect: (ConnectionConfig) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
+    /**
+     * 方言 → 连接表单规格 的注册表（由装配点从引擎拉来）。
+     *
+     * 默认空注册表 = 全部回退旧的按连接类型分支 —— 弹窗因此**不依赖**引擎也能用。
+     */
+    dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
     onDismiss: () -> Unit,
 ) {
     Dialog(
@@ -129,6 +135,7 @@ fun AddConnectionDialog(
                     onTestConnection = onTestConnection,
                     onConnect = onConnect,
                     onDisconnect = onDisconnect,
+                    dialectForms = dialectForms,
                     modifier =
                         Modifier
                             .fillMaxWidth()

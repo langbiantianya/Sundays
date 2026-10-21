@@ -337,6 +337,15 @@ internal fun MainScreen(
 ) {
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
+
+    // 方言的连接表单规格 —— 引擎的 SYSTEM.LIST_DRIVERS **一次性**下发（纯元数据查询，
+    // 与 SYSTEM.INFO 同性质，不需要连接、不连库）。
+    //
+    // 拉失败时保持空注册表 = 凭据页回退旧的按连接类型分支，界面照常能用。
+    // 这条链路是**单向增强**：它只影响「字段长什么样」，不影响「能不能连」。
+    LaunchedEffect(engine) {
+        session.refreshDialectForms()
+    }
     // 浏览状态按 sheet id 各自持有（而非 DatabaseBrowserScreen 内部 remember）：
     // releasePools 的异步 disconnect 能跑在长生命周期 scope 上；sheet 关闭时 entry 被移除，
     // 否则 map 的强引用会让该 sheet 的编辑内容一直存活。
@@ -445,6 +454,7 @@ internal fun MainScreen(
                         },
                         onDisconnect = session::disconnect,
                         onOpenSettings = ::openSettings,
+                        dialectForms = session.dialectForms,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -568,6 +578,8 @@ internal fun MainScreen(
                             },
                             onDisconnect = session::disconnect,
                             onTestConnection = session::testConnection,
+                            // 弹窗与首屏共用同一份表单规格（同一个 session 持有）
+                            dialectForms = session.dialectForms,
                             onDismiss = {
                                 // 关闭弹窗 = 丢弃向导进度，回到 IDLE
                                 session.cancelEdit()

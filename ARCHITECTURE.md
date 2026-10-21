@@ -40,7 +40,9 @@
 ```
 desktopApp ──▶ shared            （UI 组件，与引擎无关）
 desktopApp ──▶ engine-protocol ──api──▶ engine           （同进程实现 + gRPC 服务端）
-                        │
+                        │                │
+                        │                └──▶ dialect-contract ──▶ i18n
+                        │            （连接表单契约：方言声明 / 前端渲染）
                         └───────api──▶ engine-grpc-client  （跨进程实现）
 ```
 
@@ -99,6 +101,7 @@ gRPC 模式:
 | **`engine-grpc-client/`** | [`README.md`](./engine-grpc-client/README.md) | `GrpcEngineClient` 跨进程实现 / 端点配置（TCP / UDS / pipe）/ 端到端测试 |
 | **`api/`** | [`README.md`](./api/README.md) | `DatabaseDialect` SPI / `ConnectionType` / `DialectCapability` / 扩展自定义方言流程 |
 | **`i18n/`** | [`README.md`](./i18n/README.md) | 六语言文案：键枚举 / 译文表 / 简繁判定 / 复数规则 / 降级链 |
+| **`dialect-contract/`** | [`README.md`](./dialect-contract/README.md) | 连接表单契约：`ConnectionFormSpec` / `ConnectionField` / `AuthMethod` —— 方言自描述「连得上要填什么」，`:api` 声明、`:shared` 渲染 |
 | **`dialect-mysql/`** | [`README.md`](./dialect-mysql/README.md) | MySQL 方言特性 / SQL 危险关键词 / 已知约束 |
 | **`dialect-postgresql/`** | [`README.md`](./dialect-postgresql/README.md) | PostgreSQL 方言特性 / search_path / DDL 事务 / 已知约束 |
 | **`dialect-h2/`** | [`README.md`](./dialect-h2/README.md) | H2 嵌入式 / 集成测试 fixture / 已知约束 |

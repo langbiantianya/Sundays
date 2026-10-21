@@ -12,6 +12,7 @@
 |---|---|
 | [`EngineClient.kt`](./src/main/kotlin/com/langbiantianya/client/EngineClient.kt) | 调用层契约接口 —— **逐方法语义、生命周期、线程安全约定以该文件 KDoc 为权威** |
 | [`RequestLanguage.kt`](./src/main/kotlin/com/langbiantianya/grpc/RequestLanguage.kt) | `Request.withLanguageTag(tag)` —— 出站请求的界面语言标记 |
+| [`DialectFormMapping.kt`](./src/main/kotlin/com/langbiantianya/grpc/DialectFormMapping.kt) | 连接表单规格 ⇄ proto 的**双向**映射（`ConnectionFormSpec.toProto()` / `DialectForm.toSpec()`）—— 两个方向**必须放一起**：填进去写 `StrKey` 的名字、读出来按名字反查，分开写没人保证它们互补 |
 | [`idb_engine.proto`](./src/main/proto/idb_engine.proto) | gRPC service + 全部 message schema（Category / Action + 各请求响应） |
 | [`idb_export.proto`](./src/main/proto/idb_export.proto) | 导出子进程 RPC（ExportHub） |
 

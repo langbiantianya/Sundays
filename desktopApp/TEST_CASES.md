@@ -75,6 +75,8 @@
 | [`EngineClientSelectionTest`](./src/test/kotlin/com/langbiantianya/sundays/EngineClientSelectionTest.kt) | 装配点实现选择：未设 / 空白属性 → `IdbEngine`；设 `host:port` / `unix://` → `GrpcEngineClient`；畸形端点 → `IllegalArgumentException`（**响亮失败，不静默回落**） |
 | [`WindowSizeTest`](./src/test/kotlin/com/langbiantianya/sundays/WindowSizeTest.kt) | 窗口契约：默认 ≥ 下限 / 默认高度放得下 768 屏 / 右栏放得下 6 列 / 引导页 960dp 内容列不换行 |
 | [`SystemInfoFetchTest`](./src/test/kotlin/com/langbiantianya/sundays/SystemInfoFetchTest.kt) | `SYSTEM.INFO` 用空 `ConnectionConfig` 不会被当成真实连接去解析方言 |
+| [`DialectFormSpecRenderingTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormSpecRenderingTest.kt) | **凭据页按方言自描述的规格渲染**：假方言声明 3 个自定义字段 + 2 种认证方式 → 界面**自动**出现那 3 个字段与认证下拉，而 MySQL 的内置字段**不出现**（同一个方言换一份 spec 就换一套字段 ⇒ 前端没有按方言写死字段清单）；Kerberos 专属字段只在切到 Kerberos 后出现；只有一种认证方式时不渲染下拉；**没有规格时回退旧的枚举分支**；端到端：引擎 `SYSTEM.LIST_DRIVERS` → session → 界面 |
+| [`DialectFormContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormContractTest.kt) | **连接类型名的三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）：拼写一字不差、契约认的类型前端都认得、引擎用的类型契约都认得、内置方言声明的 form 前端都查得到、同一份 form 的字段 id 不重复、约定字段 id 就那六个 —— 三处漂移的症状是**静默回退旧分支**（界面正常、spec 失效、无报错），只能靠测试钉住 |
 
 ### 2.2 浏览屏
 

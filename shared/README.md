@@ -1,6 +1,6 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。88 个源文件（`commonMain` 61 / `commonTest` 24 /
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。90 个源文件（`commonMain` 63 / `commonTest` 24 /
 `jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 
@@ -22,6 +22,7 @@
 | `ConnectionManagerScreen` | 连接管理（列表 + 引导式向导 + 连接总览 + 状态色点），**引擎调用全部由回调注入** | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
 | `ConnectionStorage` / `buildJdbcUrl` / `parseJdbcUrl` / `DialectType` | 连接配置持久化、字段 ↔ JDBC URL 折算、方言枚举 | [`connection/`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/) |
 | `DialectMetadata` | **前端方言元数据的唯一真相源**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— 加一个方言 = 加一条元数据 | [`connection/DialectMetadata.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/DialectMetadata.kt) |
+| `DialectFormRegistry` / `ConnectionFormFields` | **按方言自描述的规格渲染凭据页**（优先读 spec，读不到回退旧的枚举分支）—— 新增一个方言的表单形状不需要改前端一行 | [`connection/DialectFormRegistry.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/DialectFormRegistry.kt)、[`connection/ConnectionFormFields.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionFormFields.kt) |
 | `SqlDialectProfileRegistry` | SQL 方言档位注册表（**语言 + formatter 成对注册**，杜绝「只高亮不能格式化」的中间态） | [`editor/SqlDialectProfileRegistry.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/editor/SqlDialectProfileRegistry.kt) |
 | `SettingsScreen` / `SettingsStorage` / `SettingsCategory` | 设置页（左分类 / 右内容）、设置持久化、分类枚举 | [`settings/`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/) |
 | `SystemInfo` / `SystemInfoState` | 系统信息数据与四态（**刻意不用 proto 类型**） | [`settings/SystemInfo.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SystemInfo.kt) |

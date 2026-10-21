@@ -45,6 +45,12 @@ shared/
 
 `shared/` **没有任何对 `:engine` 或 gRPC/protobuf 的依赖**，依赖方向是单向的 `desktopApp → {engine, shared}`，`engine ↮ shared`。动机有四：组件能在无引擎进程 / 无数据库连接的情况下跑单测；`CodeEditor` / `DataTable` 是通用 UI，不必带 `:engine` 这颗大依赖；`:engine` 不需要任何 UI 因此不存在循环；`shared/build.gradle.kts` 不依赖任何引擎模块 —— 这是物理上的保证。
 
+> 📌 **唯一的 project 依赖有两个**（都是**叶子**模块，与引擎无关）：
+> `:i18n`（六语言文案）与 `:dialect-contract`（连接表单契约）。
+> 后者与 `:i18n` 是**同一个问题**（`:api` 与 `:shared` 彼此看不见对方），
+> 所以用**同一个解法** —— 下沉成独立模块，两边都依赖它。
+> 见 [`../dialect-contract/README.md`](../dialect-contract/README.md)。
+
 **「什么算可上移的共享代码」的判据**：
 
 | 代码 | 是否引用 `:engine` | 归属 |
@@ -136,6 +142,11 @@ shared/
 | 4.12 | **持久化 v3：新增 `authMethod` + `properties`** | 数仓的常态是 Kerberos，不是账密 —— 认证方式挂在**连接**上（不是方言上）才表达得出「这一条连接用哪种认证」。两个字段都带默认值，**v2 文件无需迁移也能读**，迁移只是顺手回写成 v3 | [`connection/ConnectionStorage.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionStorage.kt) |
 | 4.13 | **`ConnectionType.CUSTOM_URL` 是「连接方式」不是「方言」** | 用户仍先选方言（决定默认端口与表单形状），再把连接方式换成自定义 URL；此时**只给一个 URL 输入框**，不给主机/端口/库名 —— 避免两处真相源打架。切到该模式时**清空旧 URL**，否则用户会拿到一个「看着能用、其实还是上一条连接」的初值 | `ConnectionConfig.kt` 的 `withConnectionType` + `JdbcUrl.kt` 的 `buildJdbcUrl` |
 | 4.14 | **自定义 URL 靠「前缀对不上」识别** | 加载时若 URL 的 scheme 不是该方言的形状，就认成 `CUSTOM_URL` 而不是退回方言默认类型 —— 否则用户那条「我自己写的 URL」加载后变成「按主机/端口/库名连的另一种连接」 | `ConnectionStorage.kt` 的 `toConnectionConfig` |
+| 4.15 | **凭据页**优先读方言的规格**，读不到才回退旧的枚举分支** | 判据是「**有没有 spec**」，不是「方言是不是新的」：引擎比前端新、或者方言插件还没声明 `connectionForm`，都靠旧分支兜住。旧分支**不删**（spec 有 bug 时能立刻退回；老方言依然能用），但**只许修 bug、不许加功能** —— 两套渲染一旦分叉，「MySQL 的表单到底按哪套渲染」就没人说得清了 | `ConnectionManagerScreen.kt` 的 `CredentialsStep` + [`connection/DialectFormRegistry.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/DialectFormRegistry.kt) |
+| 4.16 | **注册表是注入的，组件不拉引擎** | `DialectFormRegistry` 的默认值是**空注册表** = 全走旧分支 —— 所以「接上引擎」是**可选**的，组件不接引擎也能照常工作。谁去拉、什么时候拉、拉失败怎么办，都是装配点（`desktopApp`）的事 | `DialectFormRegistry.kt` + `desktopApp/.../ConnectionSession.kt` |
+| 4.17 | **字段 id 决定它存到哪里** | 六个**约定 id**（host / port / database / username / password / jdbcUrl）对应 `ConnectionConfig` 的固定字段；**其余 id 一律落进 `properties`**（那个开放的键值容器）。前者是引擎建池时直接要的，后者是方言特有的 —— 固定字段的做法等于「每加一个方言改一次模型」 | [`connection/ConnectionFormFields.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionFormFields.kt) 的 `fieldValue` / `withFieldValue` |
+| 4.18 | **URL 形状**不**进 spec** | spec 描述「要填哪些字段」，不描述「URL 长什么样」—— 那是 4.11 的**同一条**例外：每种方言的 URL 语法真的不同，是行为不是元数据。spec 里那条 `jdbcUrl` 字段只声明「有一个 URL 输入框」，URL 怎么拼仍由 `JdbcUrl.kt` 的 `when` 决定 | `ConnectionFormFields.kt` + `JdbcUrl.kt` |
+| 4.19 | **嵌入式方言的 URL 是**只读展示**（`FieldType.DISPLAY`） | 嵌入式方言的 URL 完全由目标字段折算出来，让用户手改它只会与目标字段打架（改字段会重写 URL，改 URL 会覆盖字段）—— 两处真相源 | `ConnectionFormFields.kt` 的 `DisplayField` |
 
 **两种引导流程**：`WizardFlow.NORMAL`（`BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE`，4 步）与 `WizardFlow.QUICK_CONNECT`（`QUICK_CONNECT → CREDENTIALS → TEST_SAVE`，3 步）。调用方维护 `wizardFlow` 并在新建 / 快速连接 / 编辑三个入口同步设置；快速连接的「连接」**不落盘**。参考实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt)。
 

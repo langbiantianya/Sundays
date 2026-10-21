@@ -498,30 +498,37 @@ fun resolveDialect(jdbcUrl: String, driver: String?): DatabaseDialect? {
 
 ### 5.2 方言自描述的连接表单
 
-> ⚠️ **落点已改（v0.4）**：原计划把 `ConnectionFormSpec` 放进 `:api`，
-> 但**`:shared` 看不见 `:api`** —— 那条路行不通。改法见本节末尾的「落点修正」。
+> ✅ **M1 第二片已落地（v0.5）**：契约模块 `:dialect-contract` 已建，5 个内置方言已各自声明
+> 规格，前端已按「优先读 spec、读不到回退旧分支」渲染。**落点与原文有三处不同**，
+> 都写在下面 —— 每一处都有仓库事实支撑。
+
+契约模块（`dialect-contract/src/main/kotlin/com/langbiantianya/dialect/contract/`）：
 
 ```kotlin
-// dialect-contract/src/main/kotlin/com/langbiantianya/dialect/ConnectionFormSpec.kt
-@Serializable
 data class ConnectionFormSpec(
-    val fields: List<ConnectionField> = emptyList(),
+    val forms: List<ConnectionForm> = emptyList(),   // 每种连接类型一份
     val authMethods: List<AuthMethod> = listOf(AuthMethod.PASSWORD),
     val defaultPort: Int? = null,
 )
 
-@Serializable
+data class ConnectionForm(
+    val connectionType: String,                      // "CLIENT_SERVER" / "IN_MEMORY" / …
+    val fields: List<ConnectionField> = emptyList(),
+)
+
 data class ConnectionField(
-    val id: String,                 // "host" / "port" / "kerberosPrincipal" / "tpcService" …
+    val id: String,                 // "host" / "port" / "principal" / "serviceName" …
     val labelKey: StrKey,           // 文案键（i18n 六语言）
-    val type: FieldType,            // TEXT / PASSWORD / INT / CHOICE
+    val type: FieldType,            // TEXT / PASSWORD / INT / CHOICE / DISPLAY
     val required: Boolean = false,
     val secret: Boolean = false,    // 存进 properties 时要脱敏
     val choices: List<String> = emptyList(),
-    val placeholder: String? = null,
+    val placeholderKey: StrKey? = null,   // 占位提示（翻译过的）
+    val placeholder: String? = null,      // 占位提示（字面量，例如 JDBC URL 示例）
+    val authMethods: List<AuthMethod> = emptyList(),  // 空 = 所有认证方式下都出现
+    val separatorBefore: Boolean = false,
+    val multiline: Boolean = false,
 )
-
-enum class AuthMethod { NONE, PASSWORD, KERBEROS, TOKEN }
 ```
 
 `DatabaseDialect` 新增一个属性：
@@ -531,13 +538,39 @@ enum class AuthMethod { NONE, PASSWORD, KERBEROS, TOKEN }
 val connectionForm: ConnectionFormSpec get() = ConnectionFormSpec()
 ```
 
-**默认实现让现有五种方言照常工作**：它们的字段（host / port / user / password / database）
-刚好能用 `ConnectionField` 描述出来，所以前端只要改成**优先读 spec**、
-读不到才回退旧的枚举分支，既有方言**不需要改**。
+**默认实现是「空 spec」** —— 表示「我没声明」，前端据此**回退旧的枚举分支**。
+不默认给一套 host/port/database 的通用表单：那样「声明了」与「没声明」在数据上
+分不出来，前端会以为所有方言都归它管，内置方言的行为悄悄变了。
 
 > 💡 **为什么不一次性重写前端表单**：那会让 5 个方言的既有测试全红，
 > 而且「新旧两套渲染」在迁移期会分叉。判据是**新增方言零前端改动**，
 > 而不是**旧方言全改成新写法** —— 后者是纯收益为零的重构。
+
+#### 三处与原文不同的地方（v0.5 的修正）
+
+**① spec 是「多个 form」的列表，不是一份扁平的字段表。**
+
+同一个方言在不同**连接类型**下的形状是真的不同：H2 的内存库填「库名」、
+文件库填「文件路径」（连标签与占位提示都不同）。硬塞进一份扁平字段表，
+就只能取一个形状 —— 剩下那个连接类型要么显示错的标签，要么得在渲染层再写一次
+`when`（那就白做了）。
+
+**② 连接类型用**字符串**，不定义第三个枚举。**
+
+`:api`（引擎 SPI）与 `:shared`（持久化格式）各有一份 `ConnectionType` 枚举，
+契约模块若再定义第三份，就是**同一个概念三处定义** —— 那正是本仓库反复在消灭的东西。
+两边都用各自枚举的 `name`，由 `desktopApp` 的 `DialectFormContractTest` 钉住「同名集合一致」。
+
+**③ proto 通道**复用了已有的 `SYSTEM.LIST_DRIVERS`**，不新开 action。**
+
+原文那条「❌ 走 proto 把 spec 传给前端」反对的是**每次建连接**都白跑一趟序列化
+（spec 是静态的，而 proto 是运行时连接状态的通道）。但 `LIST_DRIVERS` 恰恰是
+**与 `SYSTEM.INFO` 同性质的纯元数据查询**（不需要连接、不连库），
+引擎 v2.8 就建好了这条通道（13 个字段的前端表单元数据）—— **前端一直不调用它**。
+复用它既不违背那条反对意见的本意，也省掉一个新 action。
+
+规格作为 `DialectInfo` 的**新字段**下发；「没声明」用 **proto3 消息字段的天然存在性**
+表达（`hasConnectionForm() == false`），与「声明了但字段为空」分得开。
 
 #### 落点修正：为什么不能放在 `:api`（v0.4）
 
@@ -545,8 +578,8 @@ val connectionForm: ConnectionFormSpec get() = ConnectionFormSpec()
 
 | 模块 | 是什么 | project 依赖 |
 |---|---|---|
-| `:api` | plain `kotlin-jvm`，方言插件 SPI（含 `java.sql.Connection`） | `:i18n` |
-| `:shared` | Kotlin Multiplatform（`jvm()` target），UI 层 | **只有** `:i18n` |
+| `:api` | plain `kotlin-jvm`，方言插件 SPI（含 `java.sql.Connection`） | `:i18n`、`:dialect-contract` |
+| `:shared` | Kotlin Multiplatform（`jvm()` target），UI 层 | `:i18n`、`:dialect-contract` |
 | `:engine` | 引擎实现 | `:api`、`:engine-protocol` |
 | `:desktopApp` | 桌面应用 | `:shared`、`:engine` |
 
@@ -556,10 +589,7 @@ val connectionForm: ConnectionFormSpec get() = ConnectionFormSpec()
 - ❌ **把 spec 放 `:api`、让 `:shared` 依赖它** —— 那是**层级倒置**
   （UI 层依赖引擎 SPI），且 `:api` 的公共 API 带 `java.sql`，
   一旦 `:shared` 将来加移动端 target 就会断（`:i18n` 的注释里已经写过这条）。
-- ❌ **走 proto 把 spec 传给前端** —— spec 是**静态**的、而且是**连上库之前**就要用的
-  （用户在选方言时就得看到表单）。proto 是**运行时连接状态**的通道，
-  用它传一个静态声明，既绕远又让每次连接都白跑一趟序列化。
-- ✅ **新建一个契约模块**（暂名 `:dialect-contract`，plain `kotlin-jvm`）——
+- ✅ **新建一个契约模块** `:dialect-contract`（plain `kotlin-jvm`）——
   **与 `:i18n` 完全同构**：`:api` 依赖它（声明 spec），`:shared` 依赖它（渲染 spec），
   它自己依赖 `:i18n`（`labelKey: StrKey` 要用文案键）。
 
@@ -568,8 +598,15 @@ val connectionForm: ConnectionFormSpec get() = ConnectionFormSpec()
 > 连接表单规格遇到的是**同一个问题**，所以用**同一个解法** ——
 > 而不是发明第二套机制。
 
-`AuthMethod` 同理：它现在住在 `:shared` 的 `ConnectionConfig.kt`，
-spec 要引用它，就得跟着搬进契约模块（或两侧各一份 + 一致性测试）。
+`AuthMethod` 同理：它原先住在 `:shared` 的 `ConnectionConfig.kt`，
+spec 要引用它，就得跟着搬进契约模块。**序列化名不变**
+（`PASSWORD` / `KERBEROS` / `NONE`），所以 `connection.json` 的存量记录照常读得出 ——
+磁盘格式没有变化，这条由契约模块的测试钉住。
+
+⚠️ **契约里只有 `AuthMethod` 是 `@Serializable`**：`StrKey` 在 `:i18n` 里
+**刻意不带** kotlinx.serialization（文案表是编译期常量），而 `ConnectionField.labelKey`
+持有 `StrKey` —— 所以 `ConnectionField` / `ConnectionFormSpec` 都**不**可序列化。
+它们走 proto 跨进程，proto 自带序列化。
 
 #### 契约的**边界**：spec 只描述「连得上」，不描述「写得动」
 
@@ -645,12 +682,23 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 
 ### 5.7 验收
 
-- 新增一个**测试用假方言**（`FakeDialect`）声明 3 个自定义字段 + 2 种认证方式，
-  断言：连接管理器**自动**渲染出这 3 个字段与认证下拉，**前端零改动**。
-- `CUSTOM_URL` 连接：填一个引擎认识的 URL → 方言被正确反查；填一个不认识的 → 明确报错。
-- v2 的 `connection.json` 加载后自动补齐新字段（迁移测试）。
-- `properties` 里的 secret 字段在 UI 脱敏、在「导出配置」时剔除。
-- **现有 5 个方言的连接向导测试全绿且未修改**（通用化没改变它们的行为）。
+> ✅ **M1 第二片已交付（v0.5）**。逐条对照：
+
+| 验收项 | 状态 | 落在哪 |
+|---|---|---|
+| **测试用假方言**（`FakeDialect`）声明 3 个自定义字段 + 2 种认证方式，连接管理器**自动**渲染出来，**前端零改动** | ✅ | `desktopApp` 的 `DialectFormSpecRenderingTest`（10 条） |
+| `CUSTOM_URL` 连接：填引擎认识的 URL → 方言被正确反查；不认识的 → 明确报错 | ✅（M1 第一片） | `ConnectionStorageTest` + `JdbcUrlTest` |
+| v2 的 `connection.json` 加载后自动补齐新字段 | ✅（M1 第一片） | `ConnectionStorageTest` |
+| `properties` 里的 secret 字段在 UI 脱敏、在「导出配置」时剔除 | ⏳ **未做** | secret 标记已在契约里，UI 脱敏与导出剔除留在 M3（那时才有真实的 Kerberos 字段要脱敏） |
+| **现有 5 个方言的连接向导测试全绿且未修改** | ✅ | `ConnectionManagerFlowTest` / `ConnectionWizardMouseKeyboardTest` **一行未改** |
+| **连接类型名的三处一致**（契约字符串 / `:api` 枚举 / `:shared` 枚举） | ✅ | `desktopApp` 的 `DialectFormContractTest`（6 条） |
+
+**「前端零改动」怎么证明？** 靠**反证**：假方言那三个字段的标签
+（服务名 / Kerberos 主体 / keytab 路径）在前端代码里**一个都没有**，
+只有 `FakeDialect` 声明了它们 —— 它们能出现在界面上，就只能是 spec 渲染出来的。
+
+而更狠的一条是「**MySQL 的内置字段不出现**」：同一个方言，换一份 spec，
+界面就换了一套字段 —— 这说明前端**没有**按方言写死的字段清单。
 
 #### ✅ Q6 已定（v0.4）：**保留旧的枚举分支**作为回退
 
@@ -665,8 +713,8 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 ```
 
 - **判据是「有没有 spec」，不是「方言是不是新的」** —— 现有 5 个方言在 M1
-  阶段**还没有** spec（它们要等 M1 第二片补上），所以整个 M1 期间走的都是回退分支，
-  **行为零变化**；M1 第二片给它们补上 spec 之后，才逐步切到 spec 分支。
+  第一片**还没有** spec，所以那一阶段走的都是回退分支，**行为零变化**；
+  M1 第二片给它们补上 spec 之后，才切到 spec 分支。
 - 旧分支**不删**。它的价值是：① spec 有 bug 时能立刻退回；② 老方言（引擎侧插件
   没有更新）依然能用；③ 迁移期两套渲染**分叉**的风险由 R9 盯着。
 - 代价要说清：**两套渲染会分叉**。所以约定是「spec 分支一旦接管某个方言，
@@ -674,6 +722,12 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
   否则半年后没人说得清「MySQL 的表单到底按哪套渲染」。
 - 什么时候能删旧分支？等**所有**方言都有 spec、且 spec 分支跑满一个版本之后，
   再单独开一轮清理 —— 不夹带在 M1 里（§6.3.5 记着同一条原则）。
+
+**M1 第二片落地后的实际状态**：5 个内置方言都有 spec，且**形状与旧分支逐格对齐**
+（字段、顺序、标签、占位符、只读 URL 展示、端口的默认端口占位）。
+两套分支在**内置方言上产出同一个界面** —— 这正是「行为零变化」的兑现方式。
+而 spec 分支的**独有**能力（认证方式下拉、按认证方式显隐的字段、
+方言特有字段）目前只有假方言在用，等 M3 的 Hive / Impala 落地才是它的正式用途。
 
 ---
 
@@ -1232,7 +1286,11 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
 | `engine/src/main/.../report/ReportBuilder.kt` | `ReportSpec` → .xlsx |
 | `engine/src/main/.../report/ReportCellStyler.kt` | 样式映射（**带缓存**） |
-| `dialect-contract/src/main/.../ConnectionFormSpec.kt` | **方言自描述的连接表单规格**（§5.2）—— ⚠️ **落点已改**：不在 `:api`（`:shared` 看不见它），而是一个新的契约模块，与 `:i18n` 同构 |
+| `dialect-contract/src/main/.../contract/ConnectionFormSpec.kt` | **方言自描述的连接表单规格**（§5.2）—— ⚠️ **落点已改**：不在 `:api`（`:shared` 看不见它），而是一个新的契约模块，与 `:i18n` 同构。含 `ConnectionFormSpec` / `ConnectionForm` / `ConnectionField` / `FieldType` / `ConnectionFieldIds` / `ConnectionFormTypes` |
+| `dialect-contract/src/main/.../contract/AuthMethod.kt` | 认证方式枚举（**从 `:shared` 搬来**；序列化名不变，磁盘格式无变化）+ `fromName` |
+| `dialect-contract/src/main/.../contract/DialectConnectionSpec.kt` | 一次连接尝试的**参数值**（host / port / database / properties）—— 与「形状」是一对，方向相反 |
+| `dialect-contract/src/main/.../contract/StandardForms.kt` | 常用形状的构造器（客户端/服务端六格、嵌入式两格）—— MySQL 与 PG 的形状完全相同，不该各写一遍 |
+| `dialect-contract/src/test/.../ConnectionFormSpecTest.kt` | 契约的纯逻辑测试（查表规则 / 认证方式往返 / **序列化名 = 常量名** / 常用形状的字段清单） |
 | `dialect-hive/` | Hive 只读方言（SPI 注册照抄 `dialect-duckdb` 的 `META-INF/services`） |
 | `dialect-impala/` | Impala 只读方言（**与 Hive 共用 `jdbc:hive2:` 与同一个 `hive-jdbc` 驱动**，消歧靠连接配置里的 `driver` 字段 —— §4.6 的 D2 / D4，**不**用自定义 URL 前缀） |
 
@@ -1244,6 +1302,14 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `desktopApp/.../main.kt` | `MainScreen` 的 destination 分支加分析模式 |
 | `shared/.../connection/ConnectionConfig.kt` | 加 `authMethod` / `properties`；`ConnectionType` 加 `CUSTOM_URL`；**八处硬编码 `when` 收进方言元数据表**（§6.3.2）。⚠️ `DialectType` 加 `HIVE` / `IMPALA` 是 **M3** 的事（§6.3.2 的边界说明） |
 | `shared/.../connection/AddConnectionDialog.kt` | 表单渲染改为**优先读方言的 `connectionForm`**，读不到才回退旧分支（M1 第二片） |
+| `shared/.../connection/DialectFormRegistry.kt` | **新增**：方言 → 表单规格的注册表。**可空** = 回退旧分支（Q6 的双向通道） |
+| `shared/.../connection/ConnectionFormFields.kt` | **新增**：按 spec 渲染字段（文本 / 密码 / 整数 / 下拉 / 只读展示）+ 认证方式下拉 + 字段值 ↔ 配置的读写 |
+| `engine-protocol/.../idb_engine.proto` | `DialectInfo.connection_form`（新消息 `DialectForm` / `DialectFormVariant` / `DialectFormField`） |
+| `engine-protocol/.../grpc/DialectFormMapping.kt` | **新增**：契约 ⇄ proto 的**双向**映射（两个方向必须放一起 —— 见 §5.2 的落点修正） |
+| `engine/.../engine/DialectInfoMapper.kt` | **新增**：方言 → proto `DialectInfo`（`listDrivers()` 原来内联 13 个字段，抽出来才可单测） |
+| `desktopApp/.../DialectFormRegistryFactory.kt` | **新增**：引擎的方言列表 → 前端注册表（换算只用已有的 `engineDriverName` 表，不另写一份映射） |
+| `desktopApp/src/test/.../DialectFormContractTest.kt` | **新增**：连接类型名的**三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）—— 漂移的症状是**静默回退旧分支**，只能靠测试钉住 |
+| `desktopApp/.../ConnectionSession.kt` | 持有 `dialectForms` + `refreshDialectForms()`（启动时拉一次，失败保持空注册表） |
 | `shared/.../connection/DialectMetadata.kt` | **新增**：前端方言元数据的唯一真相源（`mapOf` 表） |
 | `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
@@ -1313,17 +1379,37 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `DialectCapability` 三个能力位（**先只加枚举值，不声明** —— 声明了前端就会渲染出对应入口）
   - i18n：`MODE_CUSTOM_URL` / `DESC_CUSTOM_URL` **六语言同步**
   - ⚠️ **Hive / Impala 的 `DialectType` 与元数据行留给 M3**（§6.3.2 的边界说明）
+- **M1 已落地（v0.5，第二片）** ✅
+  - **新模块 `:dialect-contract`**（与 `:i18n` 同构）：`ConnectionFormSpec` / `ConnectionForm` /
+    `ConnectionField` / `FieldType` / `AuthMethod` / `DialectConnectionSpec` / `StandardForms`
+  - `api`：`DatabaseDialect.connectionForm`（默认**空 spec** = 「没声明」）
+    + `buildJdbcUrl(spec)` 新重载（旧方法原样保留）
+  - **5 个内置方言各自声明规格**（MySQL / PG 六格、H2 两份 form、DuckDB / SQLite 两格），
+    形状与旧分支**逐格对齐** → 两套分支产出同一个界面
+  - `engine-protocol`：`DialectInfo.connection_form`（新消息 `DialectForm` / `DialectFormField`）
+    + 契约 ⇄ proto 的双向映射（`DialectFormMapping.kt`）
+  - `engine`：`DialectInfoMapper`（方言 → `DialectInfo`），`listDrivers()` 瘦身
+  - `shared`：`DialectFormRegistry`（可空 = 回退旧分支）+ `ConnectionFormFields`（按 spec 渲染）
+  - `desktopApp`：启动时拉一次 `SYSTEM.LIST_DRIVERS` → 注册表 → 喂给向导与弹窗
+  - i18n：8 个新键（JDBC URL 标签 / 认证方式 ×3 / 认证方式标签 / 三个方言特有字段标签）
+    **六语言同步**
+- **M1 未做（留给 M3 或后续）**
+  - `properties` 里 secret 字段的 UI 脱敏与导出剔除
+  - 连接管理器按能力位分组 + 只读徽标（§5.5）—— 那要等 M3 的 `ANALYSIS_SOURCE` 真有成员
+  - `AnalysisModuleBoundaryTest`（§6.6）—— 要等 M2 的 `analysis/` 包真的建起来
 - **验收**
   - **加一个假方言**（3 个自定义字段 + 2 种认证方式）→ 连接管理器**自动**渲染出这 3 个字段与认证下拉，
-    **前端零改动**（§5.7）
-  - **现有 5 个方言的连接向导与 `connection.json` 测试全绿且未修改**
-  - `CUSTOM_URL`：填认识的 URL → 正确反查方言；填不认识的 → 明确报错
-  - v2 的 `connection.json` 加载后自动补齐新字段
-  - `properties` 里的 secret 字段在 UI 脱敏、在导出配置时剔除
+    **前端零改动**（§5.7）✅
+  - **现有 5 个方言的连接向导与 `connection.json` 测试全绿且未修改** ✅
+  - **连接类型名的三处一致**（契约字符串 / `:api` 枚举 / `:shared` 枚举）✅
+    （`DialectFormContractTest` —— 漂移时症状是**静默回退旧分支**，界面正常但 spec 失效）
+  - `CUSTOM_URL`：填认识的 URL → 正确反查方言；填不认识的 → 明确报错 ✅
+  - v2 的 `connection.json` 加载后自动补齐新字段 ✅
+  - `properties` 里的 secret 字段在 UI 脱敏、在导出配置时剔除 ⏳（M3）
   - **运行时注册一个假方言档位** → `CodeEditor(languageId = "sql-fake")` 立刻有高亮、
-    格式化按钮可用（§6.3.1）
-  - `WinDropdown` 在 **10 种配色**下都不出现 Material3 圆角（现代三套 6px / Win2000 全 0 / WinXP 递增）
-  - `AnalysisModuleBoundaryTest` 绿（无 `desktopApp` 依赖、无 `java.*`、无字面量颜色）
+    格式化按钮可用（§6.3.1）⏳（M2 的分析工作台用得上）
+  - `WinDropdown` 在 **10 种配色**下都不出现 Material3 圆角（现代三套 6px / Win2000 全 0 / WinXP 递增）✅
+  - `AnalysisModuleBoundaryTest` 绿（无 `desktopApp` 依赖、无 `java.*`、无字面量颜色）⏳（M2）
 - **依赖**：无
 - **风险**：R9（前端表单迁移期的新旧两套渲染分叉 —— 用「优先读 spec + 回退」控制）、
   R12（组件复用退化 —— 用 §6.6 的结构测试钉住）

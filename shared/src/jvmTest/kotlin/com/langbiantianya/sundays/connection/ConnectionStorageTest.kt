@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.connection
 
+import com.langbiantianya.dialect.contract.AuthMethod
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest

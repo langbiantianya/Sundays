@@ -68,6 +68,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 4 步引导 + 快速连接 | `ConnectionManagerScreen` |
 | | **自定义 JDBC URL 连接方式**（每个方言都能选；只给一个 URL 输入框，不给主机/端口/库名 —— 避免两处真相源打架） | `ConnectionType.CUSTOM_URL` → `ConnectionManagerScreen` |
 | | 认证方式（账密 / Kerberos / 无认证）与方言特有参数（Kerberos 主体、ZooKeeper 发现串…）随连接一起存 | `ConnectionConfig.authMethod` / `.properties` |
+| | **凭据页由方言自描述驱动**：字段、顺序、标签、占位符、认证方式下拉全由方言声明；**新增一个方言的表单形状不需要改前端** | `DatabaseDialect.connectionForm` → `SYSTEM.LIST_DRIVERS` → `DialectFormRegistry` → `ConnectionFormFields` |
 | | **文件当数据源**（DuckDB）：CSV / JSONL / Parquet 直开文件，Excel 经 POI 预转换；库名沿用文件名，表名取自 sheet 名 | `dialect-duckdb` |
 | | 测试连接 / 连接 / 断开（`SYSTEM.TEST_CONNECTION` / `SYSTEM.DISCONNECT`） | `ConnectionSession` |
 | | 保存 / 编辑 / 删除连接 | `ConnectionSession` |

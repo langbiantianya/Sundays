@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.langbiantianya.dialect.contract.ConnectionFieldIds
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.ui.SettingsEntryButton
 import com.langbiantianya.sundays.ui.SundaysPalette
@@ -139,6 +140,16 @@ fun ConnectionManagerScreen(
     connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     onConnect: (ConnectionConfig) -> Unit = {},
     onDisconnect: (ConnectionConfig) -> Unit = {},
+    /**
+     * 方言 → 连接表单规格 的注册表（由装配点从引擎的 `SYSTEM.LIST_DRIVERS` 拉来）。
+     *
+     * **默认值是空注册表** —— 那意味着「所有方言都走旧的按连接类型分支」，
+     * 也就是本组件**不接引擎也能照常工作**。
+     *
+     * 查不到规格时**回退旧分支**是设计好的双向通道（设计文档 §5.7 的 Q6 结论）：
+     * 引擎比前端新、或者方言插件还没声明 `connectionForm`，都靠它兜住。
+     */
+    dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
     // 嵌在模态弹窗（AddConnectionDialog）里时为 true —— 弹窗中不渲染 ⚙ 设置入口：
     // 模态弹窗里跳去改应用级设置会让人失去「当前处于什么界面」的判断。
     isEmbeddedInDialog: Boolean = false,
@@ -217,6 +228,7 @@ fun ConnectionManagerScreen(
             onDisconnect = onDisconnect,
             onEditConnection = onEditConnection,
             onDeleteConnection = requestDelete,
+            dialectForms = dialectForms,
             modifier =
                 Modifier
                     // ⚠️ 这里**曾经**试过改成 `fillMaxWidth()`：本意是「右栏是从属区域，
@@ -596,6 +608,7 @@ private fun ConnectionWizardPanel(
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
     onConnect: (ConnectionConfig) -> Unit = {},
     onDisconnect: (ConnectionConfig) -> Unit = {},
+    dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
     modifier: Modifier = Modifier,
 ) {
     ConnectionWizardContent(
@@ -609,6 +622,7 @@ private fun ConnectionWizardPanel(
         onWizardBack = onWizardBack,
         onUpdateEditingConnection = onUpdateEditingConnection,
         onTestConnection = onTestConnection,
+        dialectForms = dialectForms,
         modifier = modifier,
         idleContent = {
             // 全屏场景：IDLE 时若已选中连接显示总览，否则显示入口按钮
@@ -655,6 +669,7 @@ fun ConnectionWizardContent(
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     modifier: Modifier = Modifier,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
+    dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
     idleContent: @Composable () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
@@ -728,6 +743,7 @@ fun ConnectionWizardContent(
                         onBack = onWizardBack,
                         onCancel = onCancelEdit,
                         onUpdateEditingConnection = onUpdateEditingConnection,
+                        dialectForms = dialectForms,
                     )
                 }
             }
@@ -1322,6 +1338,7 @@ private fun CredentialsStep(
     onBack: () -> Unit,
     onCancel: () -> Unit,
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
+    dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
 ) {
     val canProceed = buildJdbcUrl(editingConnection).isNotBlank()
 
@@ -1347,139 +1364,167 @@ private fun CredentialsStep(
         totalSteps = totalSteps,
         onCancel = onCancel,
     ) {
-        when (editingConnection.connectionType) {
-            ConnectionType.CLIENT_SERVER -> {
-                WinTextField(
-                    value = editingConnection.host,
-                    onValueChange = { apply(editingConnection.copy(host = it)) },
-                    label = { Text(str(StrKey.HOST)) },
-                    placeholder = { Text(str(StrKey.HOST_HINT)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Wifi, null) },
-                )
+        // ── spec 分支优先，回退旧的枚举分支 ──
+        //
+        // 判据是「**有没有 spec**」，不是「方言是不是新的」：
+        // 引擎比前端新（前端还没拿到 spec）、或者方言插件还没声明
+        // `connectionForm`，都靠旧分支兜住（设计文档 §5.7 的 Q6 结论）。
+        //
+        // 旧分支**只许修 bug，不许加功能** —— 两套渲染一旦分叉，
+        // 「MySQL 的表单到底按哪套渲染」就没人说得清了。
+        val spec = dialectForms.of(editingConnection.dialect)
+        val specForm = dialectForms.formFor(editingConnection.dialect, editingConnection.connectionType)
 
-                Spacer(modifier = Modifier.height(12.dp))
+        if (spec != null && specForm != null) {
+            ConnectionFormFields(
+                form = specForm,
+                spec = spec,
+                connection = editingConnection,
+                onFieldChange = { fieldId, value ->
+                    if (fieldId == ConnectionFieldIds.JDBC_URL) {
+                        // URL 输入框走**反解析**：改 URL 会覆盖其它字段。
+                        applyUrl(value)
+                    } else {
+                        apply(editingConnection.withFieldValue(fieldId, value))
+                    }
+                },
+                onAuthMethodChange = { method -> apply(editingConnection.copy(authMethod = method)) },
+            )
+        } else {
+            when (editingConnection.connectionType) {
+                ConnectionType.CLIENT_SERVER -> {
+                    WinTextField(
+                        value = editingConnection.host,
+                        onValueChange = { apply(editingConnection.copy(host = it)) },
+                        label = { Text(str(StrKey.HOST)) },
+                        placeholder = { Text(str(StrKey.HOST_HINT)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Wifi, null) },
+                    )
 
-                WinTextField(
-                    value = editingConnection.port?.takeIf { it > 0 }?.toString() ?: "",
-                    onValueChange = { apply(editingConnection.copy(port = it.filter(Char::isDigit).toIntOrNull())) },
-                    label = { Text(str(StrKey.PORT)) },
-                    placeholder = { Text(editingConnection.displayPort.toString()) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    WinTextField(
+                        value = editingConnection.port?.takeIf { it > 0 }?.toString() ?: "",
+                        onValueChange = { apply(editingConnection.copy(port = it.filter(Char::isDigit).toIntOrNull())) },
+                        label = { Text(str(StrKey.PORT)) },
+                        placeholder = { Text(editingConnection.displayPort.toString()) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
 
-                WinTextField(
-                    value = editingConnection.database,
-                    onValueChange = { apply(editingConnection.copy(database = it)) },
-                    label = { Text(str(StrKey.DATABASE_NAME)) },
-                    placeholder = { Text(str(StrKey.DATABASE_NAME_HINT)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Storage, null) },
-                )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    WinTextField(
+                        value = editingConnection.database,
+                        onValueChange = { apply(editingConnection.copy(database = it)) },
+                        label = { Text(str(StrKey.DATABASE_NAME)) },
+                        placeholder = { Text(str(StrKey.DATABASE_NAME_HINT)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Storage, null) },
+                    )
 
-                WinTextField(
-                    value = editingConnection.username,
-                    onValueChange = { apply(editingConnection.copy(username = it)) },
-                    label = { Text(str(StrKey.USERNAME)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Person, null) },
-                )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    WinTextField(
+                        value = editingConnection.username,
+                        onValueChange = { apply(editingConnection.copy(username = it)) },
+                        label = { Text(str(StrKey.USERNAME)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Person, null) },
+                    )
 
-                WinTextField(
-                    value = editingConnection.password,
-                    onValueChange = { apply(editingConnection.copy(password = it)) },
-                    label = { Text(str(StrKey.PASSWORD)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Lock, null) },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                WinDivider(modifier = Modifier.padding(vertical = 16.dp))
+                    WinTextField(
+                        value = editingConnection.password,
+                        onValueChange = { apply(editingConnection.copy(password = it)) },
+                        label = { Text(str(StrKey.PASSWORD)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
 
-                WinTextField(
-                    value = editingConnection.jdbcUrl,
-                    onValueChange = ::applyUrl,
-                    label = { Text("JDBC URL") },
-                    placeholder = { Text("jdbc:mysql://host:3306/db?useSSL=false") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = false,
-                    minLines = 2,
-                    maxLines = 4,
-                    leadingIcon = { Icon(Icons.Default.Link, null) },
-                )
-            }
+                    WinDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED -> {
-                val (labelKey, placeholderKey, icon) = embeddedFieldSpec(editingConnection)
-
-                WinTextField(
-                    value = editingConnection.database,
-                    onValueChange = { apply(editingConnection.copy(database = it)) },
-                    label = { Text(labelKey?.let { str(it) } ?: DATABASE_NAME_LABEL_UNTRANSLATED) },
-                    placeholder = { Text(str(placeholderKey)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(icon, null) },
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(str(StrKey.JDBC_URL_DERIVED), style = MaterialTheme.typography.labelMedium)
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = winShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Text(
-                        text = editingConnection.jdbcUrl.ifBlank { str(StrKey.FIELDS_PENDING) },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(10.dp),
+                    WinTextField(
+                        value = editingConnection.jdbcUrl,
+                        onValueChange = ::applyUrl,
+                        label = { Text("JDBC URL") },
+                        placeholder = { Text("jdbc:mysql://host:3306/db?useSSL=false") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = false,
+                        minLines = 2,
+                        maxLines = 4,
+                        leadingIcon = { Icon(Icons.Default.Link, null) },
                     )
                 }
+
+                ConnectionType.IN_MEMORY, ConnectionType.EMBEDDED, ConnectionType.FILE_BASED -> {
+                    val (labelKey, placeholderKey, icon) = embeddedFieldSpec(editingConnection)
+
+                    WinTextField(
+                        value = editingConnection.database,
+                        onValueChange = { apply(editingConnection.copy(database = it)) },
+                        label = { Text(labelKey?.let { str(it) } ?: DATABASE_NAME_LABEL_UNTRANSLATED) },
+                        placeholder = { Text(str(placeholderKey)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(icon, null) },
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(str(StrKey.JDBC_URL_DERIVED), style = MaterialTheme.typography.labelMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = winShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Text(
+                            text = editingConnection.jdbcUrl.ifBlank { str(StrKey.FIELDS_PENDING) },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(10.dp),
+                        )
+                    }
+                }
+
+                // 自定义 JDBC URL 逃生舱：**只给一个 URL 输入框**。
+                //
+                // 为什么不给主机 / 端口 / 库名：这些字段在 CUSTOM_URL 模式下**没有意义** ——
+                // URL 本身就是连接的全部定义。给一套字段再让用户手工拼 URL，
+                // 等于让两处真相源打架（改字段会重写 URL，改 URL 会覆盖字段）。
+                // 这里只把 URL 交给用户，字段那套留给 CLIENT_SERVER 等类型。
+                ConnectionType.CUSTOM_URL -> {
+                    Text(
+                        text = str(StrKey.DESC_CUSTOM_URL),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    WinTextField(
+                        value = editingConnection.jdbcUrl,
+                        onValueChange = { onUpdateEditingConnection(editingConnection.copy(jdbcUrl = it)) },
+                        label = { Text("JDBC URL") },
+                        placeholder = { Text("jdbc:hive2://host:10000/db") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = false,
+                        minLines = 2,
+                        maxLines = 4,
+                        leadingIcon = { Icon(Icons.Default.Link, null) },
+                    )
+                }
+
+                ConnectionType.UNKNOWN -> {}
             }
-
-            // 自定义 JDBC URL 逃生舱：**只给一个 URL 输入框**。
-            //
-            // 为什么不给主机 / 端口 / 库名：这些字段在 CUSTOM_URL 模式下**没有意义** ——
-            // URL 本身就是连接的全部定义。给一套字段再让用户手工拼 URL，
-            // 等于让两处真相源打架（改字段会重写 URL，改 URL 会覆盖字段）。
-            // 这里只把 URL 交给用户，字段那套留给 CLIENT_SERVER 等类型。
-            ConnectionType.CUSTOM_URL -> {
-                Text(
-                    text = str(StrKey.DESC_CUSTOM_URL),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                WinTextField(
-                    value = editingConnection.jdbcUrl,
-                    onValueChange = { onUpdateEditingConnection(editingConnection.copy(jdbcUrl = it)) },
-                    label = { Text("JDBC URL") },
-                    placeholder = { Text("jdbc:hive2://host:10000/db") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = false,
-                    minLines = 2,
-                    maxLines = 4,
-                    leadingIcon = { Icon(Icons.Default.Link, null) },
-                )
-            }
-
-            ConnectionType.UNKNOWN -> {}
         }
 
         if (!canProceed) {

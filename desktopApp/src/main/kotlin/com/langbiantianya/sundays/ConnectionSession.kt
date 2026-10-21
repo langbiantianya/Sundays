@@ -19,6 +19,7 @@ import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.ConnectionStorage
+import com.langbiantianya.sundays.connection.DialectFormRegistry
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.TestResult
 import com.langbiantianya.sundays.connection.WizardFlow
@@ -79,6 +80,26 @@ class ConnectionSession(
     /** 各连接（按 id）的引擎侧会话状态 */
     var statuses by mutableStateOf<Map<String, ConnectionStatus>>(emptyMap())
         private set
+
+    /**
+     * 方言 → 连接表单规格 的注册表（引擎的 `SYSTEM.LIST_DRIVERS` 下发的）。
+     *
+     * 凭据页**优先**按它渲染；查不到就回退旧的按连接类型分支
+     * （设计文档 §5.7 的 Q6 结论）。默认是空注册表 —— 也就是「老样子」。
+     */
+    var dialectForms by mutableStateOf(DialectFormRegistry.EMPTY)
+        private set
+
+    /**
+     * 向引擎要一次方言列表，把连接表单规格收进 [dialectForms]。
+     *
+     * 失败时保持空注册表（= 全走旧分支），**不抛** —— 见
+     * [fetchDialectForms] 的 KDoc：连接管理器的第一个用途恰恰是去连一个
+     * 还没连上的库，那时引擎可能正忙。
+     */
+    suspend fun refreshDialectForms() {
+        dialectForms = runCatching { fetchDialectForms(engine) }.getOrDefault(DialectFormRegistry.EMPTY)
+    }
 
     /**
      * 各连接的状态代次 —— [connect] / [disconnect] 都用它做「结果是否仍然有效」的判定。

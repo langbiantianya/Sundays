@@ -33,6 +33,7 @@ OLAP） / **SQLite**（本地嵌入式关系型），通过 `ServiceLoader` 动�
 | 模块 | 职责 |
 | --- | --- |
 | `api/` | 公共 SPI：`DatabaseDialect` / `ConnectionType` / `DialectCapability` |
+| `dialect-contract/` | 连接表单契约：`ConnectionFormSpec` / `ConnectionField` / `AuthMethod`（**与 `:i18n` 同构** —— `:api` 声明、`:shared` 渲染，两边彼此看不见） |
 | `dialect-{mysql,postgresql,h2,duckdb,sqlite}/` | 5 个方言插件，各自打成独立 JAR，经 `ServiceLoader` 加载 |
 | `engine-protocol/` | 调用层契约：proto 协议 + `EngineClient` 接口 + `RequestLanguage`。零业务逻辑，依赖以 `api` 导出 |
 | `engine/` | 引擎实现：请求路由（`dispatcher/`）、SQL 执行与查询取消、连接池与事务、导入导出、IPC、插件加载、gRPC 服务端 |
@@ -179,6 +180,7 @@ SQL 注入这一块由 CodeQL 的 `java/sql-injection` 查询集覆盖（它对 
 | [`shared/README.md`](./shared/README.md) / [`shared/ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | 共享 UI 组件（CodeEditor / DataTable / 连接管理 / 主题） |
 | [`desktopApp/README.md`](./desktopApp/README.md) / [`desktopApp/ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | 桌面端：浏览屏 / 连接管理的状态机与契约 |
 | [`i18n/README.md`](./i18n/README.md) | 六语言文案：键枚举、译文表、简繁判定、复数规则 |
+| [`dialect-contract/README.md`](./dialect-contract/README.md) | 连接表单契约：方言自描述「连得上要填什么」，`:api` 声明 / `:shared` 渲染 |
 | [`packaging/flatpak/README.md`](./packaging/flatpak/README.md) | Flatpak 选型结论索引 |
 
 各模块文档只写大纲；**具体契约、边界与设计理由都在对应类/函数的 KDoc 里**，改代码前先读那里。
