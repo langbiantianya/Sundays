@@ -478,15 +478,7 @@ private fun ConnectionListItem(
         ) {
             // 数据库类型图标
             Icon(
-                imageVector =
-                    when (connection.dialect) {
-                        DialectType.MYSQL -> Icons.Default.Storage
-                        DialectType.POSTGRESQL -> Icons.Default.Storage
-                        DialectType.H2 -> Icons.Default.Memory
-                        DialectType.DUCKDB -> Icons.Default.Analytics
-                        DialectType.SQLITE -> Icons.Default.FolderOpen
-                        DialectType.UNKNOWN -> Icons.Default.QuestionMark
-                    },
+                imageVector = DialectMetadata.of(connection.dialect).icon,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.primary,
@@ -1237,17 +1229,11 @@ private fun DialectOption(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val descriptionKey = DialectMetadata.of(dialect).descriptionKey
+    val description = descriptionKey?.let { str(it) } ?: ""
     SelectableOptionRow(
         title = dialect.name,
-        description =
-            when (dialect) {
-                DialectType.MYSQL -> str(StrKey.DIALECT_MYSQL_DESC)
-                DialectType.POSTGRESQL -> str(StrKey.DIALECT_POSTGRESQL_DESC)
-                DialectType.H2 -> str(StrKey.DIALECT_H2_DESC)
-                DialectType.DUCKDB -> str(StrKey.DIALECT_DUCKDB_DESC)
-                DialectType.SQLITE -> str(StrKey.DIALECT_SQLITE_DESC)
-                DialectType.UNKNOWN -> ""
-            },
+        description = description,
         isSelected = isSelected,
         onClick = onClick,
     )
@@ -1309,22 +1295,8 @@ private fun ConnectionTypeOption(
     onClick: () -> Unit,
 ) {
     SelectableOptionRow(
-        title =
-            when (connectionType) {
-                ConnectionType.CLIENT_SERVER -> str(StrKey.MODE_CLIENT_SERVER)
-                ConnectionType.EMBEDDED -> str(StrKey.MODE_EMBEDDED)
-                ConnectionType.IN_MEMORY -> str(StrKey.CONN_TYPE_IN_MEMORY)
-                ConnectionType.FILE_BASED -> str(StrKey.CONN_TYPE_FILE)
-                ConnectionType.UNKNOWN -> str(StrKey.MODE_UNKNOWN)
-            },
-        description =
-            when (connectionType) {
-                ConnectionType.CLIENT_SERVER -> str(StrKey.DESC_NEEDS_HOST_PORT)
-                ConnectionType.EMBEDDED -> str(StrKey.DESC_EMBEDDED_IN_APP)
-                ConnectionType.IN_MEMORY -> str(StrKey.DESC_IN_MEMORY_VOLATILE)
-                ConnectionType.FILE_BASED -> str(StrKey.DESC_SINGLE_FILE)
-                ConnectionType.UNKNOWN -> ""
-            },
+        title = str(connectionType.titleKey),
+        description = connectionType.descriptionKey?.let { str(it) }.orEmpty(),
         isSelected = isSelected,
         onClick = onClick,
     )
@@ -1477,6 +1449,34 @@ private fun CredentialsStep(
                         modifier = Modifier.padding(10.dp),
                     )
                 }
+            }
+
+            // 自定义 JDBC URL 逃生舱：**只给一个 URL 输入框**。
+            //
+            // 为什么不给主机 / 端口 / 库名：这些字段在 CUSTOM_URL 模式下**没有意义** ——
+            // URL 本身就是连接的全部定义。给一套字段再让用户手工拼 URL，
+            // 等于让两处真相源打架（改字段会重写 URL，改 URL 会覆盖字段）。
+            // 这里只把 URL 交给用户，字段那套留给 CLIENT_SERVER 等类型。
+            ConnectionType.CUSTOM_URL -> {
+                Text(
+                    text = str(StrKey.DESC_CUSTOM_URL),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                WinTextField(
+                    value = editingConnection.jdbcUrl,
+                    onValueChange = { onUpdateEditingConnection(editingConnection.copy(jdbcUrl = it)) },
+                    label = { Text("JDBC URL") },
+                    placeholder = { Text("jdbc:hive2://host:10000/db") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    minLines = 2,
+                    maxLines = 4,
+                    leadingIcon = { Icon(Icons.Default.Link, null) },
+                )
             }
 
             ConnectionType.UNKNOWN -> {}

@@ -38,7 +38,7 @@ OLAP） / **SQLite**（本地嵌入式关系型），通过 `ServiceLoader` 动�
 | `engine/` | 引擎实现：请求路由（`dispatcher/`）、SQL 执行与查询取消、连接池与事务、导入导出、IPC、插件加载、gRPC 服务端 |
 | `engine-grpc-client/` | `EngineClient` 的跨进程 gRPC 实现（TCP / UDS / 命名管道），**不拖入** Hadoop / POI / LuaJIT |
 | `i18n/` | 六语言文案：键枚举 + 六份译文表 + 简繁判定 + 复数规则 |
-| `shared/` | KMP 共享代码：CodeEditor / DataTable / ConnectionManagerScreen / 表结构编辑弹窗 / SQL 文本工具 / 主题等，全部与引擎无关 |
+| `shared/` | KMP 共享代码：CodeEditor / DataTable / ConnectionManagerScreen / 表结构编辑弹窗 / SQL 文本工具 / **方言元数据表** / 主题等，全部与引擎无关 |
 | `desktopApp/` | Compose Desktop 应用：窗口、连接会话状态机、数据库浏览屏 |
 | `packaging/flatpak/` | Flatpak manifest 与桌面项 |
 

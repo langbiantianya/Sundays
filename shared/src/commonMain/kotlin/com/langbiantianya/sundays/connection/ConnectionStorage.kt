@@ -30,13 +30,15 @@ import java.nio.file.attribute.PosixFilePermissions
  * 重建 —— 简化数据模型，确保 URL 始终是真相源。
  *
  * 加载时按文件中的 `version` 分派：
- * - **v2**（当前格式）→ [PersistedConnectionList]
+ * - **v3**（当前格式）→ [PersistedConnectionList]
+ * - **v2**（仅缺 `authMethod` / `properties` 两个字段）→ 记录结构与 v3 **兼容**
+ *   （两个字段都带默认值，缺了取默认值），加载后**回写为 v3**
  * - **v1**（历史格式，含 `host` / `port` / `database` / `filePath` 等完整字段）→ [LegacyConnectionList]，
- *   迁移时用 [buildJdbcUrl] 把派生字段折算成 URL（v1 的 `filePath` 参与折算），随后**回写为 v2**
+ *   迁移时用 [buildJdbcUrl] 把派生字段折算成 URL（v1 的 `filePath` 参与折算），随后**回写为 v3**
  */
 object ConnectionStorage {
     /** 当前持久化格式版本（[PersistedConnectionList] 的 version） */
-    private const val PERSISTED_VERSION = 2
+    private const val PERSISTED_VERSION = 3
 
     /** 凭据目录权限：`rwx------` —— 文件内含明文口令，不给 group / other 任何访问。 */
     private const val OWNER_ONLY_DIR = "rwx------"
@@ -60,7 +62,7 @@ object ConnectionStorage {
     /** 获取配置文件路径 */
     private fun configFile(): Path = configDir().resolve("connection.json")
 
-    /** 读取文件中的 `version` 字段；缺失 / 非数字时按当前格式（v2）处理 */
+    /** 读取文件中的 `version` 字段；缺失 / 非数字时按当前格式（v3）处理 */
     private fun detectVersion(content: String): Int =
         try {
             val version =
@@ -91,6 +93,15 @@ object ConnectionStorage {
         val normalizedUrl = normalizeJdbcUrl(jdbcUrl, dialect)
         val parts = parseJdbcUrl(normalizedUrl, dialect)
         val (defaultType, _) = ConnectionConfig.defaultsFor(dialect)
+        // 自定义 URL 的连接类型**推不出来** —— URL 不是该方言的形状时，
+        // [parseJdbcUrl] 只能给出 UNKNOWN（见 [UrlParts.connectionType]）。
+        // 这时必须认成 [ConnectionType.CUSTOM_URL]：
+        // 认成方言默认类型的话，用户那条「我自己写的 URL」的连接
+        // 加载后就变成了「按主机/端口/库名连的另一种连接」——
+        // 而自定义 URL 下的主机/端口/库名**本来就没有意义**（字段是空的）。
+        val isCustomUrl =
+            normalizedUrl.isNotBlank() &&
+                !normalizedUrl.startsWith(dialect.jdbcUrlPrefix, ignoreCase = true)
         return ConnectionConfig(
             id = id,
             name = name,
@@ -100,8 +111,15 @@ object ConnectionStorage {
             database = parts.database,
             username = username,
             password = password,
-            connectionType = parts.connectionType.takeIf { it != ConnectionType.UNKNOWN } ?: defaultType,
+            connectionType =
+                if (isCustomUrl) {
+                    ConnectionType.CUSTOM_URL
+                } else {
+                    parts.connectionType.takeIf { it != ConnectionType.UNKNOWN } ?: defaultType
+                },
             jdbcUrl = normalizedUrl,
+            authMethod = authMethod,
+            properties = properties,
             createdAt = createdAt,
             updatedAt = updatedAt,
         )
@@ -116,6 +134,8 @@ object ConnectionStorage {
             jdbcUrl = jdbcUrl,
             username = username,
             password = password,
+            authMethod = authMethod,
+            properties = properties,
             createdAt = createdAt,
             updatedAt = updatedAt,
         )
@@ -152,7 +172,8 @@ object ConnectionStorage {
      * 加载所有保存的连接配置.
      * @return 连接列表 (如果文件不存在或解析失败, 返回空列表)
      *
-     * 同时支持 v1 (含完整字段) 和 v2 (仅 jdbcUrl) 两种 JSON 结构；v1 文件加载后自动迁移回写为 v2。
+     * 同时支持 v1 (含完整字段) 和 v2 / v3 (仅 jdbcUrl) 两种 JSON 结构；
+     * v1 / v2 文件加载后自动迁移回写为 v3。
      */
     fun load(): ConnectionList {
         val file = configFile()
@@ -160,22 +181,44 @@ object ConnectionStorage {
             if (!Files.exists(file)) return ConnectionList()
             val content = Files.readString(file)
 
-            if (detectVersion(content) >= PERSISTED_VERSION) {
-                val persisted = json.decodeFromString<PersistedConnectionList>(content)
-                return ConnectionList(
-                    connections = persisted.connections.map { it.toConnectionConfig() },
-                    version = PERSISTED_VERSION,
-                )
-            }
+            when (detectVersion(content)) {
+                PERSISTED_VERSION -> {
+                    val persisted = json.decodeFromString<PersistedConnectionList>(content)
+                    return ConnectionList(
+                        connections = persisted.connections.map { it.toConnectionConfig() },
+                        version = PERSISTED_VERSION,
+                    )
+                }
 
-            // v1：完整字段格式 → 折算 URL 后迁移为 v2
-            val legacy = json.decodeFromString<LegacyConnectionList>(content)
-            val migrated = legacy.connections.map { it.toPersisted() }
-            savePersisted(PersistedConnectionList(connections = migrated))
-            ConnectionList(
-                connections = migrated.map { it.toConnectionConfig() },
-                version = PERSISTED_VERSION,
-            )
+                // v2 → v3：记录结构**兼容**（v3 = v2 + 两个带默认值的可选字段），
+                // 缺的字段由默认值补齐，随后回写为 v3 —— 免得下次又按 v2 读一遍。
+                2 -> {
+                    val persisted = json.decodeFromString<PersistedConnectionList>(content)
+                    val migrated =
+                        persisted.connections.map {
+                            it.copy(
+                                authMethod = AuthMethod.PASSWORD,
+                                properties = emptyMap(),
+                            )
+                        }
+                    savePersisted(PersistedConnectionList(connections = migrated, version = PERSISTED_VERSION))
+                    return ConnectionList(
+                        connections = migrated.map { it.toConnectionConfig() },
+                        version = PERSISTED_VERSION,
+                    )
+                }
+
+                // v1：完整字段格式 → 折算 URL 后迁移为 v2/v3
+                else -> {
+                    val legacy = json.decodeFromString<LegacyConnectionList>(content)
+                    val migrated = legacy.connections.map { it.toPersisted() }
+                    savePersisted(PersistedConnectionList(connections = migrated, version = PERSISTED_VERSION))
+                    ConnectionList(
+                        connections = migrated.map { it.toConnectionConfig() },
+                        version = PERSISTED_VERSION,
+                    )
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             ConnectionList()

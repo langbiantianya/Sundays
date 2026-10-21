@@ -337,7 +337,287 @@ data class SqlDialectProfile(
                     ),
             )
 
-        /** 全部档位 —— 注册顺序即 [STANDARD] 在前（`"sql"` 为基集语言）。 */
-        val ALL: List<SqlDialectProfile> = listOf(STANDARD, MYSQL, POSTGRESQL, H2, DUCKDB, SQLITE)
+        /**
+         * Hive 2.x / 3.x / 4.x 共有子集 —— 数仓侧最常见的大数据方言。
+         *
+         * ## 词表为什么是「共有子集」而不是某个版本的全集
+         *
+         * Hive 的关键字在版本间是**增量的**（4.0 加了 `CUBE` / `ROLLUP` 之类），
+         * 而 `hive-jdbc` 客户端要同时伺候好几个服务端版本 —— 词表取**交集**，
+         * 高亮才不会在老服务端上把普通标识符染成关键字。
+         *
+         * 三类词必须与基线**互斥**（同一个词不能既算 keyword 又算 builtin），
+         * 否则高亮颜色会被静默改变 —— 这条由 `SqlDialectProfileTest` 钉住。
+         */
+        val HIVE =
+            SqlDialectProfile(
+                languageId = "sql-hive",
+                displayName = "Hive",
+                keywords =
+                    setOf(
+                        // 数据仓库管理
+                        "MSCK",
+                        "REPAIR",
+                        "DESCRIBE",
+                        "SHOW",
+                        "USE",
+                        "RESET",
+                        "EXPORT",
+                        "IMPORT",
+                        "LOAD",
+                        "REFRESH",
+                        "CACHE",
+                        "UNCACHED",
+                        "REINDEX",
+                        "COMPACT",
+                        // 建表子句（Hive 特有）
+                        "PARTITIONED",
+                        "CLUSTERED",
+                        "SORTED",
+                        "STORED",
+                        "FIELDS",
+                        "TERMINATED",
+                        "LOCATION",
+                        "TBLPROPERTIES",
+                        "SERDE",
+                        "SERDEPROPERTIES",
+                        "DELIMITED",
+                        "COLLECTION",
+                        "ITEMS",
+                        "EXTERNAL",
+                        // 写入
+                        "OVERWRITE",
+                        "INTO",
+                        // 权限
+                        "PRINCIPALS",
+                        "ROLE",
+                        "ROLES",
+                        "PRIVILEGE",
+                        "SECURITY",
+                        // 其他
+                        "CLUSTER",
+                        "BUCKET",
+                        "BUCKETS",
+                        "SORT",
+                        "DISTRIBUTE",
+                        "REPLICATION",
+                        "SKEWED",
+                        "FORMATTED",
+                        "UNSET",
+                        "SETS",
+                        "LANGUAGE",
+                        "EXTENDED",
+                        "RELOAD",
+                        "DFS",
+                        "CHMOD",
+                        "OWNER",
+                        "TABLES",
+                        "VIEWS",
+                        "PARTITIONS",
+                        "METADATA",
+                        "REBUILD",
+                        "DISABLE",
+                        "ENABLE",
+                        "LOCK",
+                        "UNLOCK",
+                        "KILL",
+                        "INSTALLED",
+                        "TRANSACTIONS",
+                    ),
+                types =
+                    setOf(
+                        // 基线已含 ARRAY / BINARY / TIMESTAMP / INTERVAL / BOOLEAN，这里不重复声明
+                        "STRING",
+                        "MAP",
+                        "STRUCT",
+                        "UNIONTYPE",
+                    ),
+                builtins =
+                    setOf(
+                        // 空值处理
+                        "NVL",
+                        "NVL2",
+                        // 集合
+                        "COLLECT_LIST",
+                        "COLLECT_SET",
+                        "EXPLODE",
+                        "INLINE",
+                        "POSEXPLODE",
+                        "SIZE",
+                        // 字符串
+                        "REGEXP_REPLACE",
+                        "REGEXP_EXTRACT",
+                        "PARSE_URL",
+                        "PARSE_URL_TUPLE",
+                        "REFLECT",
+                        "SENTENCE",
+                        "SENTENCES",
+                        "NGRAMS",
+                        "CONTEXT_NGRAMS",
+                        "GET_JSON_OBJECT",
+                        // 数学
+                        "PERCENTILE",
+                        "PERCENTILE_APPROX",
+                        "HYPOT",
+                        "SQRT",
+                        "SIGN",
+                        "RAND",
+                        "CRC32",
+                        "BIN",
+                        "PI",
+                        "E",
+                        "LOG",
+                        "LOG2",
+                        "LOG10",
+                        "EXP",
+                        "ACOS",
+                        "ASIN",
+                        "ATAN",
+                        "ATAN2",
+                        "COS",
+                        "SIN",
+                        "TAN",
+                        "CBRT",
+                        "DEGREES",
+                        "RADIANS",
+                        "TRUNC",
+                        // 时间
+                        "FROM_UNIXTIME",
+                        "UNIX_TIMESTAMP",
+                        "DATE_DIFF",
+                        "MONTHS_ADD",
+                        "DAYS_ADD",
+                        // 窗口
+                        "CUME_DIST",
+                        // 脱敏
+                        "MASK",
+                        "MASK_FIRST_N",
+                        "MASK_LAST_N",
+                        "MURMUR_HASH",
+                    ),
+            )
+
+        /**
+         * Impala 2.x / 4.x 共有子集 —— 走 HiveServer2 协议，SQL 语法与 Hive 大面积重叠。
+         *
+         * ## 为什么不直接复用 Hive 档位
+         *
+         * 两者语法重叠但**不是同一门语言**：Impala 有 `COMPUTE STATS` / `INVALIDATE METADATA`
+         * 这类自己独有的管理语句，也有自己的一批内置函数。共用一个档位的话，
+         * 连 Impala 库的工作台也会把 `COMPUTE` 高亮成关键字 —— 反过来，
+         * 连 Hive 库时 `NANVL` 这类 Impala 函数就不该被认出来。
+         *
+         * 与 Hive 档位一样，词表取**共有子集**：Impala 的 `hive-jdbc` 客户端
+         * 要同时伺候 2.x 与 4.x 服务端。
+         */
+        val IMPALA =
+            SqlDialectProfile(
+                languageId = "sql-impala",
+                displayName = "Impala",
+                keywords =
+                    setOf(
+                        // Impala 独有的管理语句
+                        "COMPUTE",
+                        "STATS",
+                        "INVALIDATE",
+                        "AGGREGATE",
+                        "SYNC",
+                        "SLOW",
+                        "UNLIMITED",
+                        "INCREMENTAL",
+                        "FILES",
+                        "REFRESH",
+                        "FORMATTED",
+                        "LOAD",
+                        "DATA",
+                    ),
+                types =
+                    setOf(
+                        // 基线已含 DECIMAL / TIMESTAMP / BOOLEAN / INT 家族，这里不重复声明
+                        "STRING",
+                    ),
+                builtins =
+                    setOf(
+                        // 空值处理
+                        "NANVL",
+                        "ZEROIFNULL",
+                        // 集合
+                        "ARRAY_AGG",
+                        "COLLECT_LIST",
+                        "COLLECT_SET",
+                        "EXPLODE",
+                        "INLINE",
+                        "POSEXPLODE",
+                        "SIZE",
+                        "SORT_ARRAY",
+                        "REVERSE",
+                        "ARRAY_JOIN",
+                        // 统计
+                        "STDDEV",
+                        "STDDEV_POP",
+                        "STDDEV_SAMP",
+                        "VARIANCE",
+                        "VAR_POP",
+                        "VAR_SAMP",
+                        "NDV",
+                        "PERCENTILE",
+                        // 时间
+                        "TO_TIMESTAMP",
+                        "FROM_TIMESTAMP",
+                        "UTC_TIMESTAMP",
+                        "FROM_UTC_TIMESTAMP",
+                        "ADD_MONTHS",
+                        "DAYS_ADD",
+                        "MONTHS_ADD",
+                        "MONTH",
+                        "DAY",
+                        "HOUR",
+                        "MINUTE",
+                        "SECOND",
+                        // 字符串
+                        "SPLIT_PART",
+                        "BASE64ENCODE",
+                        "BASE64DECODE",
+                        "REGEXP_REPLACE",
+                        "REGEXP_EXTRACT",
+                        "GET_JSON_OBJECT",
+                        "CONV",
+                        // 数学
+                        "SCALE",
+                        "SQRT",
+                        "SIGN",
+                        "RAND",
+                        "PI",
+                        "LOG",
+                        "LOG2",
+                        "LOG10",
+                        "TRUNC",
+                        "SIN",
+                        "COS",
+                        "TAN",
+                        "ASIN",
+                        "ACOS",
+                        "ATAN",
+                        "ATAN2",
+                        "CBRT",
+                        // 其他
+                        "SLEEP",
+                        "SHELL",
+                    ),
+            )
+
+        /**
+         * 全部档位 —— 注册顺序即 [STANDARD] 在前（`"sql"` 为基集语言）。
+         *
+         * ## 它现在是「内置档位清单」，不再是运行时的真相源
+         *
+         * 运行时真相源是 [com.langbiantianya.sundays.editor.SqlDialectProfileRegistry]
+         * —— 方言档位可以在运行时注册（新增方言不必改 `:shared` 的核心文件）。
+         * 本清单保留，是因为它同时是「**内置**档位有哪些」的答案，
+         * 也是 [com.langbiantianya.sundays.editor.formatter.SqlFormatter.register]
+         * 的注册来源。
+         */
+        val ALL: List<SqlDialectProfile> =
+            listOf(STANDARD, MYSQL, POSTGRESQL, H2, DUCKDB, SQLITE, HIVE, IMPALA)
     }
 }

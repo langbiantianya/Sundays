@@ -237,10 +237,20 @@ object ColumnTypeCatalog {
         val extra =
             when (dialect) {
                 DialectType.MYSQL -> MYSQL_ONLY
+
                 DialectType.POSTGRESQL -> PG_ONLY
+
                 DialectType.H2 -> H2_ONLY
+
                 DialectType.DUCKDB -> DUCKDB_ONLY
+
                 DialectType.SQLITE -> SQLITE_ONLY
+
+                // M3 会在这里加 Hive / Impala：只读数仓方言，引擎里没有写入路径，
+                // 「表结构编辑」这条界面根本不该出现在它们身上。
+                // 届时给一个空清单（而不是共用段）—— 清单非空就意味着「可以选类型建表」，
+                // 那是在给一个必然失败的入口发通行证。
+
                 DialectType.UNKNOWN -> emptyList()
             }
         // 方言专有段插在共用段**之后**：共用段都是安全选择，专有段是「这个库特有的」，

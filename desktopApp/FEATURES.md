@@ -66,11 +66,13 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 |---|---|---|
 | **连接** | 5 个方言：MySQL / PostgreSQL / H2 / DuckDB / SQLite | `dialect-*` SPI 插件 |
 | | 4 步引导 + 快速连接 | `ConnectionManagerScreen` |
+| | **自定义 JDBC URL 连接方式**（每个方言都能选；只给一个 URL 输入框，不给主机/端口/库名 —— 避免两处真相源打架） | `ConnectionType.CUSTOM_URL` → `ConnectionManagerScreen` |
+| | 认证方式（账密 / Kerberos / 无认证）与方言特有参数（Kerberos 主体、ZooKeeper 发现串…）随连接一起存 | `ConnectionConfig.authMethod` / `.properties` |
 | | **文件当数据源**（DuckDB）：CSV / JSONL / Parquet 直开文件，Excel 经 POI 预转换；库名沿用文件名，表名取自 sheet 名 | `dialect-duckdb` |
 | | 测试连接 / 连接 / 断开（`SYSTEM.TEST_CONNECTION` / `SYSTEM.DISCONNECT`） | `ConnectionSession` |
 | | 保存 / 编辑 / 删除连接 | `ConnectionSession` |
 | | 连接总览（名称 / 方言 / 主机 / 端口 / 用户 / 状态） | `ConnectionManagerScreen` |
-| | 凭据落盘 `~/.config/sundays/connection.json`（v1→v2 迁移，文件权限 0600） | `ConnectionStorage` |
+| | 凭据落盘 `~/.config/sundays/connection.json`（**v1→v2→v3** 迁移，文件权限 0600） | `ConnectionStorage` |
 | | **多 sheet**：一个连接一个 sheet，各自持有独立浏览状态 | `SheetDescriptor` |
 | **浏览** | 库列表（`SCHEMA.LIST`） | `SchemaTreePanel` |
 | | 表列表懒加载（展开时才 `TABLE.LIST`） | `loadTables` |
@@ -85,6 +87,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **对象树右键菜单**：复制名称 / 复制引用名（按方言限定）/ 复制建表 DDL | `SqlIdentifier` + `TABLE.GET_DDL` |
 | **SQL 工作台** | 多 sheet，各自独立文本 / 光标 / 滚动 / 结果 | `SqlSheet` |
 | | 语法高亮，**随连接方言切换词表** | `SqlDialectProfile` → `CodeEditor` |
+| | SQL 方言档位**注册表化**：语言与 formatter **成对**注册，杜绝「只高亮不能格式化」的中间态 | `SqlDialectProfileRegistry` |
 | | 补全：关键字 / 类型 / 内置函数 | `CodeLanguage.completionCandidates` |
 | | 补全：**库 / 表 / 字段**（schema 感知，零额外请求） | `sqlSchemaCompletions` |
 | | 补全：1 字符即触发，**上下文候选优先于关键字** | `CompletionTest` |
@@ -114,6 +117,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 引擎报错跟随界面语言（语言随请求过 proto 传到引擎进程） | `RequestOptions.language` |
 | **工程** | Windows / macOS / Linux 原生安装包（`.msi` / `.dmg` / `.deb`） | `compose.desktop` |
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
+| | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 

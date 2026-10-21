@@ -104,7 +104,7 @@ gRPC 模式:
 | **`dialect-h2/`** | [`README.md`](./dialect-h2/README.md) | H2 嵌入式 / 集成测试 fixture / 已知约束 |
 | **`dialect-duckdb/`** | [`README.md`](./dialect-duckdb/README.md) | DuckDB 嵌入式 OLAP / Excel 预转换 / FK table-rebuild / 已知约束 |
 | **`dialect-sqlite/`** | [`README.md`](./dialect-sqlite/README.md) | SQLite 嵌入式 / INTEGER PRIMARY KEY / FK table-rebuild / ATTACH/DETACH / 已知约束 |
-| **`shared/`** | [`README.md`](./shared/README.md) · [`ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | CodeEditor / DataTable / ConnectionManagerScreen / 表结构编辑弹窗 / SQL 文本工具 / 右键菜单 / 主题与视觉规范 / 与引擎解耦的边界 |
+| **`shared/`** | [`README.md`](./shared/README.md) · [`ARCHITECTURE.md`](./shared/ARCHITECTURE.md) | CodeEditor / DataTable / ConnectionManagerScreen / **方言元数据表** / 表结构编辑弹窗 / SQL 文本工具 / 右键菜单 / 主题与视觉规范 / 与引擎解耦的边界 |
 | **`desktopApp/`** | [`README.md`](./desktopApp/README.md) · [`ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览屏 / 生命周期 |
 | **`packaging/flatpak/`** | [`README.md`](./packaging/flatpak/README.md) | Flatpak 选型结论索引 |
 
@@ -115,6 +115,13 @@ gRPC 模式:
 > **通用控件也全部复用 `:shared` 的 `commonMain`**（分析模式只新增 6 个组件）。
 > 设计文档（只读防线、连接与组件通用化、报表模型、迭代拆分、风险登记）与可交互 UI 设计图见
 > [`docs/analysis-mode/README.md`](./docs/analysis-mode/README.md)。
+>
+> **M1 第一片已落地**（通用化的「机制」部分）：前端方言元数据收进**一张表**
+> （`shared/.../connection/DialectMetadata.kt`，原先散落成**八处**硬编码 `when`）、
+> SQL 方言档位**注册表化**（语言与 formatter 成对注册）、`WinControls` 补 `WinDropdown`、
+> 连接配置持久化升到 v3（新增 `authMethod` / `properties`）与 `ConnectionType.CUSTOM_URL`。
+> **方言本体（Hive / Impala）留到 M3 与引擎方言同一个提交落地** ——
+> `DialectNameContractTest` 是那道闸门：前端枚举里的每个方言，引擎都得真的实现了。
 
 ---
 

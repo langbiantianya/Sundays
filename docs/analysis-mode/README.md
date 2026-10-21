@@ -351,7 +351,7 @@ L4 的落法：
 > Impala 自带的 JDBC 驱动（Cloudera 分发，许可与获取渠道另议），
 > 或把 Impala 降级为「通过 Hive Metastore + Parquet 直读」——那会重新引入 extension 下载问题。
 >
-> 💡 **还有一条通用退路**：`ConnectionType.CUSTOM_URL`（§5.5）——
+> 💡 **还有一条通用退路**：`ConnectionType.CUSTOM_URL`（§5.4）——
 > 用户自己填 JDBC URL，方言由 URL 前缀反查。**大数据环境的 URL 形状千奇百怪**，
 > 这条逃生舱让「专用方言写不出来」不至于卡死整个功能。
 
@@ -366,6 +366,14 @@ L4 的落法：
 > ④ 目标环境是 CDH / HDP / Cloudera / EMR / 自建？**版本号是多少？**
 
 **这四条里任何一条答不上来，M3 的方案就要改。** 在此之前写出来的 `dialect-hive` 可能是白写。
+
+> ✅ **④ 的兼容策略已在 v0.4 落定**（§4.6）：Hive「最近的几个大版本尽量向下兼容」、
+> Impala「从兼容 hive jdbc 的版本开始支持」—— 由此推出四条工程决策 D1~D4，
+> 并把 §4.3 的 `jdbcUrlPrefix` 撞车解法从「造自定义前缀」改成「靠 `driver` 消歧」。
+>
+> ⚠️ 但**具体发行版与版本号仍未落定**（用户尚未给出目标环境）——
+> 它只影响 §12 R1 的**版本取舍**（用哪个 `hive-jdbc` 客户端版本），不影响 §4.6 的架构决策。
+> ①②③ 仍然是 M3.0 spike 的必答项。
 
 ### 4.3 方言实现面
 
@@ -385,14 +393,18 @@ L4 的落法：
 > （`jdbc:hive2://host:port/db`），而引擎靠 URL 前缀反查方言
 > （`PoolManager.resolveDialect`）。两个方言抢同一个前缀会让「按 URL 反查」**必然歧义**。
 >
-> 解法（spike 要一并验）：给 Impala 用一个**自定义 URL 形状**（例如
-> `jdbc:impala2://…`），由 `dialect-impala` 把它翻译成驱动认识的 `jdbc:hive2://…`；
-> 这样 `jdbcUrlPrefix` 唯一，`driverName` 仍分别是 `Hive` / `Impala`。
-> **这条不能等到写代码时才发现。**
+> ✅ **v0.4 已定解法（§4.6 的 D2 + D4）**：**不**给 Impala 造自定义前缀
+> （`jdbc:impala2://` 那条路作废 —— 用户口径明确「Impala 从兼容 hive jdbc 的版本起」），
+> 而是让**连接配置里的显式 `driver` 字段**承担消歧：
+> 前端保留用户已选的方言，proto 的 `ConnectionConfig.driver` 分别填 `Hive` / `Impala`，
+> 引擎在 URL 前缀命中**多个**方言时改用 `driver` 消歧。
+> `driverName` 仍是各自的 `Hive` / `Impala`（`DialectLoader` 的注册键）。
+>
+> **M3 必须改 `PoolManager.resolveDialect`**，让「URL 前缀唯一」不再是它的前置假设。
 
 ### 4.4 连接表单规格（通用化之后长什么样）
 
-两个方言在**通用化后的连接管理器**里声明自己的表单（§5.3）：
+两个方言在**通用化后的连接管理器**里声明自己的表单（§5.2）：
 
 | 字段 | Hive | Impala |
 |---|---|---|
@@ -410,11 +422,62 @@ L4 的落法：
 ### 4.5 配置与凭据
 
 - 存储：`~/.config/sundays/connection.json`（**与浏览模式同一份**，§1.3）
-- 模型：`ConnectionConfig`（**同一个**），新增 `authMethod` 与 `properties`（§5.4）
+- 模型：`ConnectionConfig`（**同一个**），新增 `authMethod` 与 `properties`（§5.3）
 - 明文口令与现状同级，**不因为新功能引入更差的存储**；
   但**不能**因此在文档里说「已加密」——没有。
 - 凭据**只用于只读分析**时，也可以在同一份配置里被浏览模式看到（同一个 Hive 连接两边都在）——
   这正是 L3 方言级只读存在的理由：**共用凭据不再意味着共用写权限**。
+
+### 4.6 Q1 的结论：版本兼容策略（v0.4 落定）★
+
+> 用户给出的口径（Q1）：
+> **Hive「最近的几个大版本尽量向下兼容」**；
+> **Impala「从兼容 hive jdbc 的版本开始支持」**。
+> 这一节把口径翻成**四条可执行的工程决策**，并交代它们各自的边界。
+
+| # | 决策 | 依据 | 影响面 |
+|---|---|---|---|
+| **D1** | **单一驱动**：`org.apache.hive:hive-jdbc`（standalone 分类），**Hive 与 Impala 共用同一个** | Impala 的 HS2 端点实现的就是 HiveServer2 协议 —— 同一个驱动能连 | §4.1 表、`libs.versions.toml` |
+| **D2** | **单一 URL 前缀** `jdbc:hive2:` —— **不**给 Impala 造 `jdbc:impala2://` | 「Impala 从兼容 hive jdbc 的版本起」这句话本身就指向 HS2 兼容，而不是指向另一套协议 | §4.3 撞车问题（**改 R3 解法**） |
+| **D3** | **客户端版本向前兼容**：用**较新**的 `hive-jdbc` 客户端连**较老**的 HiveServer2；反过来不保证 | HS2 的 Thrift 接口在 Hive 各大版本间保持稳定；新客户端带的新特性（SASL 协商、ZooKeeper 发现、`hive.server2.thrift.*` 参数）在老服务端上按「不认识就降级」处理 | §12 R1 的版本取舍 |
+| **D4** | **消歧靠连接配置里的显式 `dialect` / `driver` 字段**，不靠 URL | D2 之后 URL 形状真的相同；而**用户意图的真相源是他在界面上选的方言**，不是 URL | `PoolManager.resolveDialect` 必须改 |
+
+#### 「向下兼容」具体兼容什么
+
+| 方向 | 兼容性 | 依据与后果 |
+|---|---|---|
+| 新客户端 → 老服务端 | ✅ **保证**（这是 D3 的主力方向） | HiveServer2 的 Thrift 接口在各大版本间基本稳定。`hive-jdbc` 的 `standalone` 分类自带依赖，客户端只依赖协议不依赖服务端实现 |
+| 老客户端 → 新服务端 | ⚠️ **不保证** | 新服务端可能启用老客户端不认识的能力（新的 SASL 机制、新的 `hive.server2.*` 参数）。所以**客户端版本宁可新**——这一条直接否掉「为了兼容老环境而钉死老驱动」的做法 |
+| Impala 的 HS2 → `hive-jdbc` 客户端 | ⚠️ **待 spike 验**（§4.2 的 ②） | Impala 从提供 HS2 的那个版本线起与 HiveServer2 协议兼容；「兼容 hive jdbc 的版本」= **Impala 的 HS2 实现与 `hive-jdbc` 客户端握手兼容的那条版本线**。**具体是哪条线，取决于目标环境的 CDH / EMR 版本号**——而版本号还没定（§4.2 的 ④） |
+
+#### D4 的具体改法（引擎侧，M3 的活）
+
+```kotlin
+// engine/PoolManager.kt —— 现在是「URL 前缀唯一 → 唯一方言」的假设
+// 改成：URL 前缀命中**多个**方言时，用连接配置里的 driver 字段消歧
+fun resolveDialect(jdbcUrl: String, driver: String?): DatabaseDialect? {
+    val byPrefix = dialects.filter { jdbcUrl.startsWith(it.jdbcUrlPrefix) }
+    return when {
+        byPrefix.size == 1 -> byPrefix.first()
+        // ← D4 的分支：Hive / Impala 共用 jdbc:hive2:，靠 driver 定
+        driver != null -> byPrefix.firstOrNull { it.driverName.equals(driver, ignoreCase = true) }
+        else -> null // 歧义且无 driver → 明确失败，不要瞎猜
+    }
+}
+```
+
+- 前端已有 `DialectType.engineDriverName`（§6.3.2 的元数据表提供），值分别是 `Hive` / `Impala`。
+- proto 的 `ConnectionConfig.driver` 字段**已经存在**，前端 `ConnectionManagerScreen` 一直在填 —— 不需要新增协议字段。
+- ⚠️ 消歧失败时**明确报错**，不要「随便挑一个」。挑错的症状是
+  「连上了 Hive 但列名/类型全不对」，比连不上更难排查。
+
+#### 这四条决策**没有**回答什么
+
+- ❌ **目标环境的发行版与版本号**（§4.2 的 ④）—— 仍然待定。
+  它只影响 `hive-jdbc` **客户端版本**的取舍（D3），**不影响** D1~D4 本身。
+- ❌ `hive-jdbc` 与仓库现有 Hadoop 依赖是否冲突（§12 R1）—— 仍然是 M3.0 spike 的必答项。
+  倾向：`hive-jdbc:standalone` 分类（自带依赖，规避传递冲突，且天然兼容老服务端）。
+- ❌ Impala 的 HS2 实测兼容性（§12 R2）—— 同上。
 
 ---
 
@@ -435,8 +498,11 @@ L4 的落法：
 
 ### 5.2 方言自描述的连接表单
 
+> ⚠️ **落点已改（v0.4）**：原计划把 `ConnectionFormSpec` 放进 `:api`，
+> 但**`:shared` 看不见 `:api`** —— 那条路行不通。改法见本节末尾的「落点修正」。
+
 ```kotlin
-// api/src/main/kotlin/com/langbiantianya/dialect/ConnectionFormSpec.kt
+// dialect-contract/src/main/kotlin/com/langbiantianya/dialect/ConnectionFormSpec.kt
 @Serializable
 data class ConnectionFormSpec(
     val fields: List<ConnectionField> = emptyList(),
@@ -472,6 +538,45 @@ val connectionForm: ConnectionFormSpec get() = ConnectionFormSpec()
 > 💡 **为什么不一次性重写前端表单**：那会让 5 个方言的既有测试全红，
 > 而且「新旧两套渲染」在迁移期会分叉。判据是**新增方言零前端改动**，
 > 而不是**旧方言全改成新写法** —— 后者是纯收益为零的重构。
+
+#### 落点修正：为什么不能放在 `:api`（v0.4）
+
+**仓库事实**（已查证，不是推测）：
+
+| 模块 | 是什么 | project 依赖 |
+|---|---|---|
+| `:api` | plain `kotlin-jvm`，方言插件 SPI（含 `java.sql.Connection`） | `:i18n` |
+| `:shared` | Kotlin Multiplatform（`jvm()` target），UI 层 | **只有** `:i18n` |
+| `:engine` | 引擎实现 | `:api`、`:engine-protocol` |
+| `:desktopApp` | 桌面应用 | `:shared`、`:engine` |
+
+依赖方向是 `engine → api`、`desktopApp → engine`、`desktopApp → shared` ——
+**`:shared` 看不到 `:api`**。所以：
+
+- ❌ **把 spec 放 `:api`、让 `:shared` 依赖它** —— 那是**层级倒置**
+  （UI 层依赖引擎 SPI），且 `:api` 的公共 API 带 `java.sql`，
+  一旦 `:shared` 将来加移动端 target 就会断（`:i18n` 的注释里已经写过这条）。
+- ❌ **走 proto 把 spec 传给前端** —— spec 是**静态**的、而且是**连上库之前**就要用的
+  （用户在选方言时就得看到表单）。proto 是**运行时连接状态**的通道，
+  用它传一个静态声明，既绕远又让每次连接都白跑一趟序列化。
+- ✅ **新建一个契约模块**（暂名 `:dialect-contract`，plain `kotlin-jvm`）——
+  **与 `:i18n` 完全同构**：`:api` 依赖它（声明 spec），`:shared` 依赖它（渲染 spec），
+  它自己依赖 `:i18n`（`labelKey: StrKey` 要用文案键）。
+
+> 💡 **这个先例仓库里已经有了**：`:i18n` 正是为了「两边都要用、但彼此看不见」
+> 才从 `:shared` 里下沉出来的（见 `shared/build.gradle.kts` 的注释）。
+> 连接表单规格遇到的是**同一个问题**，所以用**同一个解法** ——
+> 而不是发明第二套机制。
+
+`AuthMethod` 同理：它现在住在 `:shared` 的 `ConnectionConfig.kt`，
+spec 要引用它，就得跟着搬进契约模块（或两侧各一份 + 一致性测试）。
+
+#### 契约的**边界**：spec 只描述「连得上」，不描述「写得动」
+
+`ConnectionFormSpec` 描述的是**连接参数**（主机/端口/库名/凭据/认证方式），
+**不包括**「这个方言能不能写」。后者是**方言级只读**（§3.3 L3）的职责，
+由引擎的 `DatabaseDialect` 负责 —— 前端**不判断**「这条 SQL 算不算写」。
+两件事混在一份 spec 里，就会出现「表单说能填，引擎说不能写」的错配。
 
 ### 5.3 `ConnectionConfig` 的扩展
 
@@ -649,33 +754,53 @@ object SqlDialectProfileRegistry {
 
 #### 6.3.2 前端方言元数据：收进一处（**必做**）
 
-**现状**：`DialectType`（`shared/.../connection/ConnectionConfig.kt:103`）在前端有**四处**硬编码 `when`：
+**现状**：`DialectType`（`shared/.../connection/ConnectionConfig.kt:103`）在前端有**八处**硬编码 `when`
+（比 v0.3 估的四处更多 —— 写文档时只数了 `:shared` 里的三处 + 引擎侧那份，
+漏了 `desktopApp` 的第五份与 `ConnectionManagerScreen` / `SqlIdentifier` 的第六七八份）：
 
 | 位置 | 内容 |
 |---|---|
-| `ConnectionConfig.kt:72-80` `defaultsFor` | 方言 → 默认连接类型 + 默认端口 |
-| `ConnectionConfig.kt:117-125` `supportedConnectionTypes` | 方言可选的连接类型 |
-| `ConnectionConfig.kt:140-155` `engineDriverName` | 方言 → 引擎 `driver` 名 |
-| `shared/.../table/DialectCapabilities.kt:52-101` `of(dialect)` | 方言 → 前端能力判断 |
+| `ConnectionConfig.kt` `defaultsFor` | 方言 → 默认连接类型 + 默认端口 |
+| `ConnectionConfig.kt` `supportedConnectionTypes` | 方言可选的连接类型 |
+| `ConnectionConfig.kt` `engineDriverName` | 方言 → 引擎 `driver` 名 |
+| `shared/.../table/DialectCapabilities.kt` `of(dialect)` | 方言 → 前端能力判断 |
+| `desktopApp/.../DatabaseBrowserState.kt` `toSqlDialectProfile()` | 方言 → SQL 高亮档位 |
+| `shared/.../connection/ConnectionManagerScreen.kt` | 方言图标 |
+| `shared/.../connection/ConnectionManagerScreen.kt` | 方言说明文案 |
+| `shared/.../connection/SqlIdentifier.kt` | 标识符引用符 |
 
-**问题**：每加一个方言要改**四个地方**，漏一个就是「界面说能连、引擎说没这个驱动」这类错。
-仓库已经有 `DialectNameContractTest` 在防漂移 —— 说明这块**确实脆**。
+**问题**：每加一个方言要改**八个地方**，漏一个就是「界面说能连、引擎说没这个驱动」这类错。
+仓库已经有 `DialectNameContractTest` 在防其中一处漂移 —— 说明这块**确实脆**，
+而只防一处、其余七处靠自觉，是不保险的。
 
-**方案**：与 §5.2 的 `ConnectionFormSpec` 合并成**一份**方言前端元数据：
+**✅ M1 已落地**：新增 `shared/.../connection/DialectMetadata.kt` —— 一张 `mapOf` 表，
+上面八处全部改读它。**加一个方言 = 加一条元数据**，不再改分支。
 
-```
-DialectType.HIVE → ConnectionFormSpec(
-    displayName = "Hive",
-    authMethods = listOf(AuthMethod.PASSWORD, AuthMethod.KERBEROS),
-    defaultConnectionType = ConnectionType.CLIENT_SERVER,
-    defaultPort = 10000,
-    engineDriverName = "Hive",
-    frontendFeatures = DialectFeatures(...),
-    fields = listOf(ConnectionField("host", ...), ConnectionField("principal", ...)),
-)
-```
+> ⚠️ **一处显式例外**：**URL 形状仍留在 `JdbcUrl.kt` 的 `when` 里**。
+> 每种方言的 URL 语法真的不同（PG 不带 userinfo、H2 分 `mem:` / `file:`、SQLite 空库名 = 内存库），
+> 那是**行为**不是**元数据** —— 塞进表里会得到一张塞满分支的数据表，名不副实。
 
-四处 `when` 全部改成查这张表。**判据不变**：加一个方言，前端**只加一条元数据**，不再改分支。
+**M1 与 M3 的边界：未落地的方言不进 `DialectType`** ★
+
+M1 要加 Hive / Impala 时，这里出现过一个**很值得记**的岔路：
+
+- 枚举里加上 `HIVE` / `IMPALA` → 方言选择器就会**渲染出**它们 →
+  用户能选中、能建连接 → 引擎报「No dialect plugin loaded for driver: Hive」。
+  这正是仓库既有原则要挡的事：**宁可少给，不给一个点了必然失败的东西**。
+- 而且 `DialectNameContractTest` 会**直接红**：
+  「`DialectType.HIVE` maps to `'Hive'`, but the engine registered only `[Duckdb, H2, Mysql, Postgresql, Sqlite]`」——
+  它说的正是实话。
+
+**结论**：M1 只落**机制**（元数据表 + 注册表 + 通用控件），
+方言**本体**（引擎插件 + `DialectType` 枚举值 + 元数据表里的一行）在 M3 **同一个提交**里落地 ——
+`DialectNameContractTest` 就是那道闸门。**这条判据同样适用于 §5.2 的连接表单规格**：
+spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还没就绪的入口**。
+
+> 💡 顺带修掉的一个**真问题**：加了方言之后，`BasicInfoStep` 的方言列表变长，
+> 底部那个「下一步」被**顶出可视区** —— 用户得先滚动才看得见按钮，
+> 自动化测试则表现为「点了没反应」（点击坐标落在窗口外）。
+> **M3 加 Hive / Impala 之前必须先处理它**（给方言列表限高，或把动作栏固定在底部），
+> 否则「新增方言零前端改动」这句话在**布局**上是假的 —— 记为 M3 的第 0 号 UI 任务。
 
 #### 6.3.3 `DataTable`：只读与分页都**零改动**
 
@@ -1079,9 +1204,9 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
 | `engine/src/main/.../report/ReportBuilder.kt` | `ReportSpec` → .xlsx |
 | `engine/src/main/.../report/ReportCellStyler.kt` | 样式映射（**带缓存**） |
-| `api/src/main/.../dialect/ConnectionFormSpec.kt` | **方言自描述的连接表单规格**（§5.2） |
+| `dialect-contract/src/main/.../ConnectionFormSpec.kt` | **方言自描述的连接表单规格**（§5.2）—— ⚠️ **落点已改**：不在 `:api`（`:shared` 看不见它），而是一个新的契约模块，与 `:i18n` 同构 |
 | `dialect-hive/` | Hive 只读方言（SPI 注册照抄 `dialect-duckdb` 的 `META-INF/services`） |
-| `dialect-impala/` | Impala 只读方言（**自定义 URL 前缀**，见 §4.3） |
+| `dialect-impala/` | Impala 只读方言（**与 Hive 共用 `jdbc:hive2:` 与同一个 `hive-jdbc` 驱动**，消歧靠连接配置里的 `driver` 字段 —— §4.6 的 D2 / D4，**不**用自定义 URL 前缀） |
 
 ### 10.2 改动既有文件
 
@@ -1089,11 +1214,13 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|
 | `shared/.../navigation/AppDestination.kt` | 加 `ANALYSIS(StrKey.NAV_ANALYSIS)` |
 | `desktopApp/.../main.kt` | `MainScreen` 的 destination 分支加分析模式 |
-| `shared/.../connection/ConnectionConfig.kt` | 加 `authMethod` / `properties`；`DialectType` 加 `HIVE` / `IMPALA`（含 `defaultsFor` 默认端口 10000 / 21050）；`ConnectionType` 加 `CUSTOM_URL`；**四处硬编码 `when` 收进方言元数据表**（§6.3.2） |
-| `shared/.../connection/AddConnectionDialog.kt` | 表单渲染改为**优先读方言的 `connectionForm`**，读不到才回退旧分支 |
-| `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段 |
+| `shared/.../connection/ConnectionConfig.kt` | 加 `authMethod` / `properties`；`ConnectionType` 加 `CUSTOM_URL`；**八处硬编码 `when` 收进方言元数据表**（§6.3.2）。⚠️ `DialectType` 加 `HIVE` / `IMPALA` 是 **M3** 的事（§6.3.2 的边界说明） |
+| `shared/.../connection/AddConnectionDialog.kt` | 表单渲染改为**优先读方言的 `connectionForm`**，读不到才回退旧分支（M1 第二片） |
+| `shared/.../connection/DialectMetadata.kt` | **新增**：前端方言元数据的唯一真相源（`mapOf` 表） |
+| `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
 | `shared/.../ui/WinControls.kt` | **加** `WinDropdown` / `WinDropdownMenu`（**新增组件 6/6**，§6.3.4） |
+| `shared/.../editor/SqlDialectProfileRegistry.kt` | **新增**：方言档位注册表（§6.3.1） |
 | `shared/.../editor/language/SqlDialectProfile.kt` | `ALL` 降级为快照；新增 `SqlDialectProfileRegistry`（§6.3.1） |
 | `shared/.../editor/formatter/SqlFormatter.kt` | `register()` 改成遍历**注册表**而非 `ALL`（§6.3.1） |
 | `shared/.../table/DialectCapabilities.kt` | `of(dialect)` 改查方言元数据表（§6.3.2） |
@@ -1137,17 +1264,27 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - **交付 —— §5 连接管理器侧**
   - `api`：`ConnectionFormSpec` / `ConnectionField` / `AuthMethod`；`DatabaseDialect.connectionForm`；
     `buildJdbcUrl(spec)` 新重载（**旧方法保留**）
+    —— ⚠️ **落点已改**（§5.2）：`ConnectionFormSpec` 放**新的契约模块**（与 `:i18n` 同构），
+    不放 `:api` —— `:shared` 看不见 `:api`
   - `api`：`DialectCapability` 加 `BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT`
-  - `shared`：`ConnectionConfig` 加 `authMethod` / `properties`；`ConnectionType.CUSTOM_URL`；
-    `DialectType` 加 HIVE / IMPALA（**先只有元数据，无方言实现**）
+  - `shared`：`ConnectionConfig` 加 `authMethod` / `properties`；`ConnectionType.CUSTOM_URL`
   - `shared`：连接向导按 `connectionForm` 渲染（优先读 spec，回退旧分支）
   - `shared`：连接持久化 v2 → v3 + 迁移
   - `shared`：连接管理器按能力位分组 + 只读徽标
 - **交付 —— §6 组件侧**
   - `shared`：`SqlDialectProfileRegistry`（§6.3.1）；`SqlFormatter.register()` 改遍历注册表
-  - `shared`：`DialectType` 的**四处**硬编码 `when` 收进方言元数据表（§6.3.2）
+  - `shared`：`DialectType` 的**八处**硬编码 `when` 收进方言元数据表（§6.3.2）
   - `shared`：`WinControls.kt` 加 `WinDropdown` / `WinDropdownMenu`（§6.3.4）
   - `shared`：`AnalysisModuleBoundaryTest` 结构测试（§6.6）
+- **M1 已落地（v0.4，第一片）** ✅
+  - 方言元数据表 `DialectMetadata`（八处 `when` → 一张 `mapOf`）
+  - `SqlDialectProfileRegistry`（语言 + formatter 成对注册）
+  - `WinDropdown` / `WinDropdownMenu`（含 8 条纯逻辑测试）
+  - `ConnectionConfig`：`authMethod` / `properties` / `ConnectionType.CUSTOM_URL`；
+    持久化 **v2 → v3**（两字段带默认值，v2 无需迁移也能读）
+  - `DialectCapability` 三个能力位（**先只加枚举值，不声明** —— 声明了前端就会渲染出对应入口）
+  - i18n：`MODE_CUSTOM_URL` / `DESC_CUSTOM_URL` **六语言同步**
+  - ⚠️ **Hive / Impala 的 `DialectType` 与元数据行留给 M3**（§6.3.2 的边界说明）
 - **验收**
   - **加一个假方言**（3 个自定义字段 + 2 种认证方式）→ 连接管理器**自动**渲染出这 3 个字段与认证下拉，
     **前端零改动**（§5.7）
@@ -1269,7 +1406,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|---|---|
 | **R1** | `hive-jdbc` 依赖树与现有 `hadoop-common 3.5.0` / `parquet-hadoop 1.17.1` 版本冲突 | **高** | **M3.0 spike 必须先验**。备选：`hive-jdbc:standalone`（自带依赖、避免传递冲突）/ 降级 `hadoop-common` / 独立 ClassLoader 加载方言 / 走 `CUSTOM_URL` |
 | **R2** | Impala 的 HS2 兼容性未验证 | **中** | 同上 spike。若不通，Impala 降级为「后置里程碑」，**如实记录**，不假装做完 |
-| **R3** | `jdbcUrlPrefix` 撞车（两个方言同一 URL 形状） | **中** | Impala 用自定义前缀（§4.3），spike 一并验 |
+| **R3** | `jdbcUrlPrefix` 撞车（两个方言同一 URL 形状） | **中** | ✅ **v0.4 已定解法**（§4.6 的 D2 + D4）：**不**造自定义前缀，改为**连接配置里的显式 `driver` 字段**消歧 —— M3 要改 `PoolManager.resolveDialect`，让「URL 前缀唯一」不再是它的前置假设 |
 | **R4** | 拉取中转的磁盘占用是**两份** | **中** | 拉取面板显示预计占用；临时 CSV 三条路径都要清；提供「工作区清理」入口 |
 | **R5** | POI 样式对象不缓存 → 大表 OOM | **中** | `ReportCellStyler` 按「列类型 × 样式」缓存，**验收里钉住**（M5） |
 | **R6** | `spec_json` 无 proto 的兼容保证 | **中** | `schemaVersion` 必带，不认识的版本明确报错 |
@@ -1286,7 +1423,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 | # | 问题 | 为什么重要 | 建议默认 |
 |---|---|---|---|
-| **Q1** | 目标环境的 Hive / Impala **具体是什么发行版与版本**（CDH？HDP？EMR？自建？） | 决定驱动版本、SQL 方言、元数据查询写法 | —— 必须问 |
+| ~~Q1~~ | ~~目标环境的 Hive / Impala **具体是什么发行版与版本**~~ | 决定驱动版本、SQL 方言、元数据查询写法 | ✅ **v0.4 已定「兼容策略」**（§4.6 的 D1~D4）：Hive 支持最近几个大版本、尽量向下兼容；Impala 从「兼容 hive jdbc 的版本」起支持；两者共用 `hive-jdbc` + `jdbc:hive2:`，靠 `driver` 消歧。⚠️ **具体发行版与版本号仍未定** —— 只影响 R1 的客户端版本取舍，不影响架构决策 |
 | **Q2** | 一次拉取的**数据量级**？（万 / 十万 / 千万行） | 决定要不要上方案 B（应用层直搬）、要不要分片 | 按 **十万行**设计，二期再优化 |
 | **Q3** | 要不要给 **MySQL / PostgreSQL** 也加 `ANALYSIS_SOURCE` 能力位？ | 加了它们就是「可写方言」进分析模式 → L4 闸门从「兜底」变成「主力」；不加则分析模式只有三个引擎 | **不加**（用户明确只点了 DuckDB / Hive / Impala） |
 | **Q4** | 报表**要不要图表**（柱状/折线）？ | POI 图表 API 不稳定，是 M6 的大变量 | v1 **不要**（§1.2） |

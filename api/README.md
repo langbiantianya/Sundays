@@ -10,7 +10,7 @@
 |---|---|
 | [`DatabaseDialect.kt`](./src/main/kotlin/com/langbiantianya/dialect/DatabaseDialect.kt) | 核心 SPI 接口 —— **逐方法 / 逐属性的语义与契约以该文件 KDoc 为权威** |
 | [`ConnectionType.kt`](./src/main/kotlin/com/langbiantianya/dialect/ConnectionType.kt) | `CLIENT_SERVER` / `EMBEDDED` / `FILE_BASED` / `IN_MEMORY` |
-| [`DialectCapability.kt`](./src/main/kotlin/com/langbiantianya/dialect/DialectCapability.kt) | 12 个能力标签（`USERS` / `VIEWS` / `ROUTINES` …） |
+| [`DialectCapability.kt`](./src/main/kotlin/com/langbiantianya/dialect/DialectCapability.kt) | 15 个能力标签（`USERS` / `VIEWS` / `ROUTINES` / `BROWSE_SOURCE` …） |
 | [`DialectUtil.kt`](./src/main/kotlin/com/langbiantianya/dialect/DialectUtil.kt) | 共享工具方法（引用 / 转义等） |
 
 **依赖关系**：`api/` ← `dialect-*`（实现）；`api/` ← `engine/`（由 `DialectLoader` 消费）。`api/` 自身**没有任何运行时依赖**（仅 JDK 标准库）。
@@ -58,9 +58,40 @@
 | `FILE_BASED` | `.db` 文件路径 | SQLite | database |
 | `IN_MEMORY` | 可空的内存库标识 | H2 / DuckDB `:memory:` | database（可选） |
 
-[`DialectCapability.kt`](./src/main/kotlin/com/langbiantianya/dialect/DialectCapability.kt) —— 12 个能力标签：`USERS` / `PRIVILEGES` / `ROUTINES` / `VIEWS` / `INDEXES` / `FOREIGN_KEYS` / `TRIGGERS` / `CROSS_DATABASE` / `MULTI_SCHEMA` / `EXPORT` / `DDL_TRANSACTION` / `EMBEDDED_MODE`。每个标签的含义与内置方言分布、前端按钮显隐的对应关系，见该文件 KDoc。
+[`DialectCapability.kt`](./src/main/kotlin/com/langbiantianya/dialect/DialectCapability.kt) —— 15 个能力标签：`USERS` / `PRIVILEGES` / `ROUTINES` / `VIEWS` / `INDEXES` / `FOREIGN_KEYS` / `TRIGGERS` / `CROSS_DATABASE` / `MULTI_SCHEMA` / `EXPORT` / `DDL_TRANSACTION` / `EMBEDDED_MODE` / `BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT`。每个标签的含义与内置方言分布、前端按钮显隐的对应关系，见该文件 KDoc。
 
 > **能力标签是「声明」不是「探测」**：标签要么对应 SPI 里真的实现了的那组方法，要么对应默认抛 `UnsupportedOperationException` 的那批，**没有第三种**。所以加标签之前先确认底层方法可用 —— 前端据它隐藏的按钮，永远不该点到一个必然失败的调用上。
+
+### 能力矩阵（方言 × 能力）
+
+`✓` = 该方言**声明**了这个能力位，`—` = 没声明。这份表与 [`ARCHITECTURE.md` §5 方言矩阵](../ARCHITECTURE.md) 是**同一份数据**（那边是转置的「能力 × 方言」排版）；单个方言的声明位置是它自己的 `capabilities` 属性。
+
+| 方言 / 能力 | USERS | PRIVILEGES | ROUTINES | VIEWS | INDEXES | FOREIGN_KEYS | TRIGGERS | CROSS_DATABASE | MULTI_SCHEMA | EXPORT | DDL_TRANSACTION | EMBEDDED_MODE | BROWSE_SOURCE | ANALYSIS_SOURCE | READ_ONLY_DIALECT |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| MySQL | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | ✓ (软) | — | — | — | — |
+| PostgreSQL | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
+| H2 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ | ✓ (软) | ✓ | — | — | — |
+| DuckDB | — | — | ✓ (MACRO) | ✓ | ✓ | ✓ | — | ✓ (ATTACH) | ✓ | ✓ | — | ✓ | — | — | — |
+| SQLite | — | — | — | ✓ | ✓ | ✓ | — | — (ATTACH 不暴露) | — | ✓ | — | ✓ | — | — | — |
+
+> **最后三列（`BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT`）是为「数据分析模式」准备的**
+> —— 只读连 Hive / Impala / DuckDB，做分析与 Excel 报表（设计文档见
+> [`docs/analysis-mode/README.md`](../docs/analysis-mode/README.md)）。它们回答的问题与前面那批
+> 标签**不同**：那批问「这个方言实现没实现某组 SPI 方法」，这三个问「这个连接出现在哪些模式里」
+> 「它能不能写」。
+>
+> - `BROWSE_SOURCE` —— 该连接可作为**浏览模式**的数据源；`ANALYSIS_SOURCE` —— 可作为
+>   **数据分析模式**的数据源。两者让**同一个连接**同时出现在两个模式里，读的是**同一份
+>   `connection.json`** —— 前端按能力位筛选，不复制配置。
+> - `READ_ONLY_DIALECT` —— **方言级**只读：引擎里根本没有往它写入的路径，从浏览模式进来
+>   写不了，从分析模式进来同样写不了。它与会话级只读开关（分析会话带 `read_only` 标记 →
+>   写类别一律拒绝）**不是一回事**：后者只是**兜底闸门**，存在理由是「将来可写方言被加进
+>   分析模式」。
+> - **为什么这三列现在全是 `—`**：5 个内置方言**一个都不声明**。这是**有意**的 ——
+>   枚举值先落地、**声明**留给后续里程碑：一旦有方言声明，前端就会按能力位渲染出对应入口，
+>   而底层（分析模式、只读方言、Hive / Impala 实现）还没就绪，渲染出来只会点到走不通的路。
+>   能力位是**声明**不是**探测**，所以「有枚举值、暂无声明者」不会误导任何人 ——
+>   没人声明，能力集合里就不会出现它。
 
 ## 扩展自定义方言
 

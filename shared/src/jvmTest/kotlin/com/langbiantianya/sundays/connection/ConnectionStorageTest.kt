@@ -136,11 +136,96 @@ class ConnectionStorageTest {
         assertEquals("jdbc:sqlite:/tmp/legacy.db", migrated.jdbcUrl)
         assertEquals("/tmp/legacy.db", migrated.database)
 
-        // 迁移后回写为 v2：不再包含 v1 派生字段
+        // 迁移后回写为当前格式（v3）：不再包含 v1 派生字段
         val rewritten = Files.readString(file)
-        assertTrue(rewritten.contains("\"version\": 2"), rewritten)
+        assertTrue(rewritten.contains("\"version\": 3"), rewritten)
         assertTrue(!rewritten.contains("filePath"), rewritten)
         assertTrue(rewritten.contains("jdbc:sqlite:/tmp/legacy.db"), rewritten)
+    }
+
+    /**
+     * v2 文件（无 `authMethod` / `properties`）要被 v3 读出来，并**回写成 v3**。
+     *
+     * v3 只比 v2 多两个带默认值的字段，所以 v2 文件**不需要迁移也能读** ——
+     * 迁移的价值只是「顺手把文件写回 v3」，免得下次又按 v2 读一遍。
+     * 这个用例盯的就是「别把老用户的连接读丢了」。
+     */
+    @Test
+    fun `v2 file is read and rewritten as v3 with default auth method`() {
+        val v2 =
+            """
+            {
+              "connections": [
+                {
+                  "id": "v2a",
+                  "name": "旧 MySQL",
+                  "dialect": "MYSQL",
+                  "jdbcUrl": "jdbc:mysql://localhost:3306/shop",
+                  "username": "root",
+                  "password": "666666",
+                  "createdAt": 1,
+                  "updatedAt": 2
+                }
+              ],
+              "version": 2
+            }
+            """.trimIndent()
+        val file = configFile()
+        Files.createDirectories(file.parent)
+        Files.writeString(file, v2)
+
+        val loaded = ConnectionStorage.load().connections.single()
+
+        // 老记录一条不少，凭据与地址照旧
+        assertEquals("v2a", loaded.id)
+        assertEquals("旧 MySQL", loaded.name)
+        assertEquals("root", loaded.username)
+        assertEquals("666666", loaded.password)
+        assertEquals("localhost", loaded.host)
+        assertEquals(3306, loaded.port)
+        assertEquals("shop", loaded.database)
+
+        // 缺省的两个新字段取默认值：账密认证 + 无方言特有参数
+        assertEquals(AuthMethod.PASSWORD, loaded.authMethod)
+        assertTrue(loaded.properties.isEmpty())
+
+        // 回写成 v3
+        val rewritten = Files.readString(file)
+        assertTrue(rewritten.contains("\"version\": 3"), rewritten)
+        assertTrue(rewritten.contains("\"authMethod\""), rewritten)
+    }
+
+    /**
+     * 自定义 URL 的连接存盘再加载，**必须仍然是自定义 URL**。
+     *
+     * 判据是「URL 前缀对不上这个方言」—— 一旦退回方言默认连接类型，
+     * 用户那条「我自己写的 URL」就变成了「按主机/端口/库名连的另一种连接」，
+     * 而自定义 URL 下的主机/端口/库名**本来就没有意义**（字段是空的）。
+     */
+    @Test
+    fun `a custom url connection round trips as a custom url`() {
+        val custom =
+            ConnectionConfig(
+                id = "c1",
+                name = "自建库",
+                dialect = DialectType.MYSQL,
+                connectionType = ConnectionType.CUSTOM_URL,
+                jdbcUrl = "jdbc:oracle:thin:@//db.example.invalid:1521/xe",
+                username = "scott",
+                password = "tiger",
+            )
+
+        ConnectionStorage.save(ConnectionList(connections = listOf(custom)))
+        val loaded = ConnectionStorage.load().connections.single()
+
+        assertEquals(ConnectionType.CUSTOM_URL, loaded.connectionType, "自定义 URL 加载后被认成了普通连接")
+        assertEquals("jdbc:oracle:thin:@//db.example.invalid:1521/xe", loaded.jdbcUrl)
+        // 凭据走独立字段，从不从 URL 反解
+        assertEquals("scott", loaded.username)
+        assertEquals("tiger", loaded.password)
+        // 主机/库名对自定义 URL 没有意义 —— 保持为空，而不是解析出垃圾
+        assertEquals("", loaded.host)
+        assertEquals("", loaded.database)
     }
 
     @Test

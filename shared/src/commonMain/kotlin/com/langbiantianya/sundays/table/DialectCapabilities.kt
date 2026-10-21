@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.table
 
+import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.connection.DialectType
 
 /**
@@ -39,6 +40,12 @@ data class DialectFeatures(
  * 所以这里单开一份，并把「真能回滚」和「引擎会那样认为」拆成两件事。
  * 与引擎的一致性由 `DialectCapabilitiesContractTest` 对照真实
  * `SYSTEM.LIST_DRIVERS` 输出校验。
+ *
+ * ## 数据从哪来
+ *
+ * 全部读 [com.langbiantianya.sundays.connection.DialectMetadata] 的同一张表 ——
+ * 与 `DialectType.supportedConnectionTypes` / `engineDriverName` / `defaultsFor`
+ * 同源。加一个方言只需要在**那张表**里加一条，不必在这里再加一个分支。
  */
 object DialectCapabilities {
     /**
@@ -49,54 +56,11 @@ object DialectCapabilities {
      * `TableCapabilities` 那条「老引擎一律按只读处理」同一个原则：
      * 宁可少给，不给一个点了必然失败的东西。
      */
-    fun of(dialect: DialectType): DialectFeatures =
-        when (dialect) {
-            DialectType.MYSQL -> {
-                DialectFeatures(
-                    supportsForeignKeys = true,
-                    // MySQL 对 DDL 隐式提交（引擎 KDoc 已写明是软支持）
-                    ddlRollbackable = false,
-                )
-            }
-
-            DialectType.POSTGRESQL -> {
-                DialectFeatures(
-                    supportsForeignKeys = true,
-                    // PG 是五个内置方言里真正支持事务性 DDL 的。
-                    // ⚠️ 本机没有 PG 实例，这条**未经实测**，只有业界共识；
-                    // 若哪天真接了 PG，先跑一遍「BEGIN → ALTER → ROLLBACK」再改。
-                    ddlRollbackable = true,
-                )
-            }
-
-            DialectType.H2 -> {
-                DialectFeatures(
-                    supportsForeignKeys = true,
-                    // 实测：CREATE TABLE 一执行就对其它连接可见，压根没进事务。
-                    // 回归见 DdlTransactionIntegrationTest「H2 does not roll DDL back」。
-                    ddlRollbackable = false,
-                )
-            }
-
-            DialectType.DUCKDB -> {
-                DialectFeatures(
-                    supportsForeignKeys = true,
-                    ddlRollbackable = false,
-                )
-            }
-
-            DialectType.SQLITE -> {
-                DialectFeatures(
-                    supportsForeignKeys = true,
-                    ddlRollbackable = false,
-                )
-            }
-
-            DialectType.UNKNOWN -> {
-                DialectFeatures(
-                    supportsForeignKeys = false,
-                    ddlRollbackable = false,
-                )
-            }
-        }
+    fun of(dialect: DialectType): DialectFeatures {
+        val meta = DialectMetadata.of(dialect)
+        return DialectFeatures(
+            supportsForeignKeys = meta.supportsForeignKeys,
+            ddlRollbackable = meta.ddlRollbackable,
+        )
+    }
 }

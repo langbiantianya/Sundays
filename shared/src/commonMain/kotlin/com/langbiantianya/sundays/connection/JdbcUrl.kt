@@ -110,6 +110,11 @@ internal fun buildJdbcUrl(
     config: ConnectionConfig,
     extraQuery: String = "",
 ): String {
+    // 自定义 URL 逃生舱：用户自己写的 URL **原样保留**，不按字段重建。
+    // 走到这里说明连接方式就是 CUSTOM_URL —— 字段（host/port/database）对它没有意义，
+    // 按字段重建会把用户精心写好的参数（Kerberos principal、ZooKeeper 发现串…）抹掉。
+    if (config.connectionType == ConnectionType.CUSTOM_URL) return config.jdbcUrl
+
     val database = config.database.trim()
     return when (config.dialect) {
         // MySQL 与 PostgreSQL 形状同源，但**凭据是否进 URL 完全不同**，必须分开写 ——
@@ -142,6 +147,13 @@ internal fun buildJdbcUrl(
                 else -> "jdbc:sqlite:$database"
             }
         }
+
+        // M3 会在这里加 Hive 与 Impala：同一个 HiveServer2 协议、同一个 `hive-jdbc` 驱动，
+        // URL 形状**完全相同**（`jdbc:hive2://host:port/db`）——
+        // 两者的区别只在端口与「用户意图」（连接配置里的 dialect 字段）。
+        //
+        // 凭据**不进 URL**：Hive 走 Kerberos 时根本没有账密，账密模式下凭据由
+        // Hikari 的 username/password 单独传给驱动（与 PG 的理由一致，见 [clientServerUrl]）。
 
         DialectType.UNKNOWN -> {
             ""
@@ -355,6 +367,10 @@ internal fun parseJdbcUrl(
                 )
             }
         }
+
+        // M3 会在这里加 Hive 与 Impala：两者共用 `jdbc:hive2:` 前缀 —— 解析规则也就一样。
+        // ⚠️ 因此**光看 URL 分不出 Hive 还是 Impala** —— 调用方必须靠
+        // 连接配置里的 dialect 字段（用户意图的真相源）区分。
 
         DialectType.UNKNOWN -> {
             UrlParts()

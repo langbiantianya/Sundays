@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays.editor.formatter
 
 import com.langbiantianya.sundays.editor.CodeLanguageRegistry
+import com.langbiantianya.sundays.editor.SqlDialectProfileRegistry
 import com.langbiantianya.sundays.editor.TokenType
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 
@@ -175,15 +176,15 @@ class SqlFormatter(
          * 逐个档位注册「语言 + formatter」：两者共用同一个 `languageId`，因此
          * `CodeFormatterRegistry.get(languageId)` 才能命中方言档位（否则 SQL 工作台切到方言档位后
          * 「格式化」按钮会静默消失）；formatter 内部按同一个 id 反查语言，**关键字大写也随方言**。
+         *
+         * ## 委托给 [SqlDialectProfileRegistry]
+         *
+         * 注册动作本身在 [SqlDialectProfileRegistry.register] 里完成（语言与 formatter **成对**注册，
+         * 不会出现「只高亮不能格式化」的中间态）。本函数只是「把**内置**档位都注册一遍」的入口 ——
+         * 保留它是为了不打断已有的调用点（[com.langbiantianya.sundays.editor.ui.registerBuiltinEditors]）。
          */
         fun register() {
-            com.langbiantianya.sundays.editor.language.SqlDialectProfile.ALL.forEach { profile ->
-                CodeLanguageRegistry.register(
-                    com.langbiantianya.sundays.editor.language
-                        .SqlLanguage(profile),
-                )
-                CodeFormatterRegistry.register(SqlFormatter(profile.languageId))
-            }
+            SqlDialectProfileRegistry.registerBuiltins()
         }
     }
 }

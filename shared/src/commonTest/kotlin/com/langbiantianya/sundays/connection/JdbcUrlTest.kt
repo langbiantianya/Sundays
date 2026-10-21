@@ -421,4 +421,71 @@ class JdbcUrlTest {
         assertEquals(ConnectionType.FILE_BASED, file.connectionType)
         assertEquals("jdbc:h2:file:testdb", file.jdbcUrl)
     }
+
+    /**
+     * 自定义 URL **原样保留**，不按字段重建。
+     *
+     * 按字段重建会把用户精心写好的参数（Kerberos principal、ZooKeeper 发现串、
+     * 驱动特有的连接属性）整个抹掉 —— 而那些参数在自定义 URL 里**恰恰是全部内容**。
+     */
+    @Test
+    fun `custom url is kept verbatim instead of being rebuilt from the fields`() {
+        val custom =
+            ConnectionConfig(
+                id = "test",
+                name = "test",
+                dialect = DialectType.MYSQL,
+                connectionType = ConnectionType.CUSTOM_URL,
+                host = "ignored.invalid",
+                port = 1234,
+                database = "ignored",
+                jdbcUrl = "jdbc:hive2://host:10000/db;principal=hive/host@REALM",
+            )
+
+        assertEquals(
+            "jdbc:hive2://host:10000/db;principal=hive/host@REALM",
+            buildJdbcUrl(custom),
+        )
+    }
+
+    /**
+     * 切到「自定义 URL」时旧 URL 必须**清空**。
+     *
+     * 留着它等于给用户一个「看着能用、其实还是上一条连接」的初值：
+     * 他没改就保存，存下来的就是上一条连接的地址 ——
+     * 而 CUSTOM_URL 下 `buildJdbcUrl` 原样返回 `jdbcUrl`，那个旧值会一路带到磁盘上。
+     */
+    @Test
+    fun `switching to custom url clears the previous url`() {
+        val mysql =
+            config(
+                dialect = DialectType.MYSQL,
+                host = "db.internal",
+                port = 3306,
+                database = "shop",
+            ).let { it.copy(jdbcUrl = buildJdbcUrl(it)) }
+
+        assertTrue(mysql.jdbcUrl.startsWith("jdbc:mysql://"), "前提：先有了一条标准 URL")
+
+        val custom = mysql.withConnectionType(ConnectionType.CUSTOM_URL)
+
+        assertEquals(ConnectionType.CUSTOM_URL, custom.connectionType)
+        assertEquals("", custom.jdbcUrl, "切到自定义 URL 后不该还留着上一条连接的地址")
+    }
+
+    /**
+     * 自定义 URL **不按方言解析** —— 解析不出来就是解析不出来。
+     *
+     * 字段（主机/端口/库名）对它没有意义，硬解析只会得到一堆垃圾。
+     * 「它是自定义 URL」这件事由前缀判定（见 `DialectMetadata.jdbcUrlPrefix`），
+     * 不靠猜。
+     */
+    @Test
+    fun `a foreign url does not parse into the dialect shape`() {
+        val parts = parseJdbcUrl("jdbc:oracle:thin:@//db.invalid:1521/xe", DialectType.MYSQL)
+
+        assertEquals(ConnectionType.UNKNOWN, parts.connectionType)
+        assertEquals("", parts.host)
+        assertEquals("", parts.database)
+    }
 }

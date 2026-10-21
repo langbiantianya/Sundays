@@ -39,34 +39,26 @@ object SqlIdentifier {
     /**
      * 用该方言的引用符包裹 [name]。
      *
-     * - MySQL → 反引号，内嵌反引号写成两个（`` ` `` → ` `` `）
+     * - MySQL / Hive / Impala → 反引号，内嵌反引号写成两个（`` ` `` → ` `` `）
      * - 其余（PG / SQLite / DuckDB / H2 / 未知）→ 双引号，内嵌双引号写成两个（`"` → `""`）
      *
      * **不做大小写折叠**，理由见本文件的 KDoc。
+     *
+     * 引用符来自 [DialectMetadata.identifierQuote] —— 与其余方言元数据同源，
+     * 免得「加一个方言要改 N 处」又多一处。
      */
     fun quote(
         dialect: DialectType,
         name: String,
-    ): String =
-        when (dialect) {
-            // MySQL 是唯一用反引号的方言；ANSI 双引号在 MySQL 里默认是**字符串字面量**，
-            // 写成 `"biz_user"` 会被当成 SELECT 'biz_user' 而不是标识符 —— 这是 MySQL 的
-            // 历史包袱（ANSI_QUOTES 模式才改变），因此这里必须分开写而不是统一走双引号。
-            DialectType.MYSQL -> {
-                "`" + name.replace("`", "``") + "`"
-            }
-
-            DialectType.POSTGRESQL, DialectType.H2, DialectType.DUCKDB, DialectType.SQLITE -> {
-                "\"" + name.replace("\"", "\"\"") + "\""
-            }
-
-            // 未知方言：没有引擎方言可依（`DialectType.UNKNOWN` 对应引擎会直接报
-            // 「No dialect plugin loaded」），此时给双引号 —— 四个内置方言里三个用它，
-            // 是概率上最不容易让用户手工返工的那个选择。
-            DialectType.UNKNOWN -> {
-                "\"" + name.replace("\"", "\"\"") + "\""
-            }
-        }
+    ): String {
+        val quote = DialectMetadata.of(dialect).identifierQuote
+        // MySQL 是唯一用反引号的方言；ANSI 双引号在 MySQL 里默认是**字符串字面量**，
+        // 写成 `"biz_user"` 会被当成 SELECT 'biz_user' 而不是标识符 —— 这是 MySQL 的
+        // 历史包袱（ANSI_QUOTES 模式才改变），因此这里必须分开写而不是统一走双引号。
+        // Hive / Impala 沿用反引号：它们同样不是 ANSI 方言。
+        val escaped = if (quote == "`") name.replace("`", "``") else name.replace("\"", "\"\"")
+        return quote + escaped + quote
+    }
 
     /**
      * 用 `.` 连接若干段，每段各自引用。

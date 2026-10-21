@@ -34,13 +34,26 @@ class SqlDialectProfileTest {
         word: String,
     ): TokenType = SqlLanguage(profile).tokenize(word).single().type
 
+    /**
+     * 已注册的全部档位。
+     *
+     * 遍历的是 [SqlDialectProfileRegistry]（**运行时真相源**）而不是
+     * [SqlDialectProfile.ALL]（内置清单）—— 这样**运行时注册**的档位也自动纳入
+     * 下面所有不变量检查，而不是只有内置的那些享受检查。
+     */
+    private fun registeredProfiles(): List<SqlDialectProfile> {
+        SqlDialectProfileRegistry.registerBuiltins()
+        return SqlDialectProfileRegistry.all()
+    }
+
     @Test
     fun `profile language ids are unique and match the language`() {
-        val ids = SqlDialectProfile.ALL.map { it.languageId }
+        val profiles = registeredProfiles()
+        val ids = profiles.map { it.languageId }
         assertEquals(ids.size, ids.distinct().size, "档位语言 id 重复: $ids")
         assertEquals("sql", SqlDialectProfile.STANDARD.languageId, "标准档位必须仍是注册表里的 sql")
 
-        SqlDialectProfile.ALL.forEach { profile ->
+        profiles.forEach { profile ->
             val lang = SqlLanguage(profile)
             assertEquals(profile.languageId, lang.id)
             assertEquals(profile.displayName, lang.displayName)
@@ -51,7 +64,7 @@ class SqlDialectProfileTest {
     @Test
     fun `every profile registers a language and a formatter`() {
         registerBuiltinEditors()
-        SqlDialectProfile.ALL.forEach { profile ->
+        registeredProfiles().forEach { profile ->
             val lang = CodeLanguageRegistry.get(profile.languageId)
             assertNotNull(lang, "语言未注册: ${profile.languageId}（编辑器会静默退化为纯文本）")
             assertEquals(profile.displayName, lang.displayName)
@@ -65,7 +78,7 @@ class SqlDialectProfileTest {
     /** 不变量：档位词表里每个词都 tokenize 成它声明的类型，即三类词两两互斥（含与基集的合并结果）。 */
     @Test
     fun `profile words classify as declared`() {
-        SqlDialectProfile.ALL.forEach { profile ->
+        registeredProfiles().forEach { profile ->
             val lang = SqlLanguage(profile)
             profile.keywords.forEach { word ->
                 assertEquals(
@@ -101,6 +114,9 @@ class SqlDialectProfileTest {
                 SqlDialectProfile.H2 to listOf("CSVREAD", "H2VERSION", "MODE", "VARCHAR_IGNORECASE"),
                 SqlDialectProfile.DUCKDB to listOf("QUALIFY", "HUGEINT", "QUANTILE_CONT", "PIVOT"),
                 SqlDialectProfile.SQLITE to listOf("PRAGMA", "GLOB", "STRFTIME", "WITHOUT"),
+                // Hive / Impala 各自的专有词
+                SqlDialectProfile.HIVE to listOf("MSCK", "TBLPROPERTIES", "COLLECT_LIST", "NVL"),
+                SqlDialectProfile.IMPALA to listOf("COMPUTE", "INVALIDATE", "NANVL", "STDDEV"),
             )
         dialectWords.forEach { (profile, words) ->
             words.forEach { word ->
@@ -121,12 +137,53 @@ class SqlDialectProfileTest {
     /** 回归：基集词表在所有档位都必须继续生效（档位只做追加，不能覆盖掉基集）。 */
     @Test
     fun `base vocabulary stays recognized in every profile`() {
-        SqlDialectProfile.ALL.forEach { profile ->
+        registeredProfiles().forEach { profile ->
             assertEquals(TokenType.KEYWORD, typeOf(profile, "select"), profile.displayName)
             assertEquals(TokenType.KEYWORD, typeOf(profile, "JOIN"), profile.displayName)
             assertEquals(TokenType.TYPE, typeOf(profile, "varchar"), profile.displayName)
             assertEquals(TokenType.BUILTIN, typeOf(profile, "count"), profile.displayName)
         }
+    }
+
+    /**
+     * M1 验收：运行时注册一个档位 → **语言与格式化器一起出现**。
+     *
+     * 这是「新增方言不必改 `:shared` 核心文件」的全部意义：
+     * 注册之前编辑器不认识这个 `languageId`（静默退化为纯文本），
+     * 注册之后高亮与格式化**同时**可用 —— 中间没有「只高亮不能格式化」的裸奔态。
+     */
+    @Test
+    fun `a profile registered at runtime gets a language and a formatter`() {
+        val fake =
+            SqlDialectProfile(
+                languageId = "sql-fake",
+                displayName = "Fake",
+                keywords = setOf("FAKECLAUSE"),
+            )
+        SqlDialectProfileRegistry.register(fake)
+        try {
+            assertEquals(fake, SqlDialectProfileRegistry.get("sql-fake"))
+            assertNotNull(CodeLanguageRegistry.get("sql-fake"), "运行时注册的档位必须有语言")
+            assertNotNull(CodeFormatterRegistry.get("sql-fake"), "运行时注册的档位必须有格式化器")
+            assertEquals(
+                TokenType.KEYWORD,
+                typeOf(fake, "FAKECLAUSE"),
+                "运行时注册的档位必须照样遵守词表互斥不变量",
+            )
+        } finally {
+            SqlDialectProfileRegistry.unregister("sql-fake")
+        }
+    }
+
+    /** 注册表是运行时真相源：内置档位必须**全部**出现在注册表里。 */
+    @Test
+    fun `every builtin profile ends up in the registry`() {
+        val registered = registeredProfiles().map { it.languageId }.toSet()
+        val builtin = SqlDialectProfile.ALL.map { it.languageId }.toSet()
+        assertTrue(
+            builtin.all { it in registered },
+            "内置档位没进注册表: ${builtin - registered}",
+        )
     }
 
     /** 格式化器按同一个 languageId 反查语言，因此关键字大写也随档位。 */

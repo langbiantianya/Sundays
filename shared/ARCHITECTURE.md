@@ -131,6 +131,11 @@ shared/
 | 4.7 | **凭据文件权限收紧到 0700 / 0600** | 文件内含明文口令。**建目录与收权限两处都要兜底** —— 带 POSIX 属性的建目录在 Windows 上直接抛，整个保存静默失效 | `ConnectionStorage.kt`（含 Windows 差异结案记录） |
 | 4.8 | **向导步骤单调、无本地字段副本** | 各步骤经 `onUpdateEditingConnection` 直写调用方状态，不存在「字段改了但配置没变」的丢失路径；URL 文本框与字段互为投影，不需要循环防护 flag | `ConnectionManagerScreen.kt` 各步骤页 |
 | 4.9 | **`SqlIdentifier` 在前端侧维护第二份** | 「复制引用名」是纯本地动作，为此发一次引擎往返是倒退；代价是引号风格要两处同步，由 `SqlIdentifierQuoteTest` 钉住。与 H2 的 **不折叠大小写** 分歧是**故意的** | [`connection/SqlIdentifier.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/SqlIdentifier.kt) |
+| 4.10 | **前端方言元数据收进**一张**表** | 在 `DialectMetadata` 之前，「这个方言是什么」散落成**八份**互不相干的硬编码 `when`（默认连接类型 / 可选连接类型 / 引擎注册名 / 前端能力 / SQL 档位 / 图标 / 说明文案 / 标识符引用符），加一个方言要改八处，漏一处就是「界面说能连、引擎说没这驱动」。现在全部读同一张表：**加一个方言 = 加一条元数据** | [`connection/DialectMetadata.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/DialectMetadata.kt) |
+| 4.11 | **URL 形状仍留在 `JdbcUrl.kt` 的 `when` 里** | 这是 4.10 的**显式例外**：每种方言的 URL 语法真的不同，是**行为**不是**元数据**，抽进表里会得到一张塞满分支的数据表 | `JdbcUrl.kt` 的 `buildJdbcUrl` / `parseJdbcUrl` |
+| 4.12 | **持久化 v3：新增 `authMethod` + `properties`** | 数仓的常态是 Kerberos，不是账密 —— 认证方式挂在**连接**上（不是方言上）才表达得出「这一条连接用哪种认证」。两个字段都带默认值，**v2 文件无需迁移也能读**，迁移只是顺手回写成 v3 | [`connection/ConnectionStorage.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionStorage.kt) |
+| 4.13 | **`ConnectionType.CUSTOM_URL` 是「连接方式」不是「方言」** | 用户仍先选方言（决定默认端口与表单形状），再把连接方式换成自定义 URL；此时**只给一个 URL 输入框**，不给主机/端口/库名 —— 避免两处真相源打架。切到该模式时**清空旧 URL**，否则用户会拿到一个「看着能用、其实还是上一条连接」的初值 | `ConnectionConfig.kt` 的 `withConnectionType` + `JdbcUrl.kt` 的 `buildJdbcUrl` |
+| 4.14 | **自定义 URL 靠「前缀对不上」识别** | 加载时若 URL 的 scheme 不是该方言的形状，就认成 `CUSTOM_URL` 而不是退回方言默认类型 —— 否则用户那条「我自己写的 URL」加载后变成「按主机/端口/库名连的另一种连接」 | `ConnectionStorage.kt` 的 `toConnectionConfig` |
 
 **两种引导流程**：`WizardFlow.NORMAL`（`BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE`，4 步）与 `WizardFlow.QUICK_CONNECT`（`QUICK_CONNECT → CREDENTIALS → TEST_SAVE`，3 步）。调用方维护 `wizardFlow` 并在新建 / 快速连接 / 编辑三个入口同步设置；快速连接的「连接」**不落盘**。参考实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt)。
 
@@ -204,6 +209,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `FocusRing` | 可见焦点环 | 给「自带焦点能力、默认不画焦点指示」的容器补一圈焦点环 | [`ui/FocusRing.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/FocusRing.kt) |
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
+| `WinDropdown` / `WinDropdownMenu` | 下拉选择器 | 经典档是「凹陷取值区 + 凸起箭头」两块拼接的 Win 味道，现代档是一整块描边面；`value` 用 `String` 与 `WinTextField` 同口径，**标签必须互不相同**（靠文本反查选中项） | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
 
 界面语言的完整设计见 [`../i18n/README.md`](../i18n/README.md)。语言状态放在 `AppearanceState` 里 —— 落盘写的是**整份** `AppSettings`，语言若由调用方单独持有，用户改一次配色就会把已选语言抹掉。
 
@@ -249,7 +255,8 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | 测试类 | 守护的契约 |
 |---|---|
 | `LuaTokenizerTest` / `SqlTokenizerTest` | 关键字 / 字符串 / 注释 / 数字 tokenize |
-| `SqlDialectProfileTest` | 方言档位：id 唯一、词表分类互斥、标准档不认方言词、基集全档生效、语言与 formatter 配对注册 |
+| `SqlDialectProfileTest` | 方言档位：id 唯一、词表分类互斥、标准档不认方言词、基集全档生效、语言与 formatter 配对注册；**运行时注册**的档位也要自动纳入全部不变量 |
+| `DialectMetadataTest` | 方言元数据表：**所有入口读的是同一张表**（默认连接类型 / 可选连接类型 / 引擎注册名 / URL 前缀），未知方言走**最保守**的一份，URL 前缀与该方言实际折算出的 URL 一致 |
 | `FormatterSpacingTest` | 格式化契约：两侧对称、缩进原样搬运、注释只读、空行折叠、**幂等性** |
 | `CompletionTest` | 前缀切分、接受候选替换整个词、排序与上限、SQL/Lua 大小写策略差异、方言词表隔离、**宿主函数不得进 `LuaLanguage`** |
 | `CompletionPopupLayoutTest` | 弹层定位：宽度上限两端夹取、贴光标、靠右**翻转**、`>` 与 `>=` 的边界差异 |
@@ -257,12 +264,13 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `JdbcUrlTest` / `SqlIdentifierQuoteTest` | 字段 ↔ URL 折算与回解析；引号风格与 5 个真实方言逐一比对 |
 | `SundaysPaletteTest` / `UiTokensTest` | 文字对比度达 WCAG AA；逐主题 × 明暗断言经典档全开、现代档全关 |
 | `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算；**「还能不能拖」的判据**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄、上下限相等才不可拖） |
-| `SettingsStorageTest` / `ConnectionStorageTest` | 逐档往返、原子写、损坏降级 + 自愈、v1 → v2 迁移 |
+| `SettingsStorageTest` / `ConnectionStorageTest` | 逐档往返、原子写、损坏降级 + 自愈、**v1 → v2 → v3 迁移**、自定义 URL 连接的往返仍是自定义 URL |
 | `ConnectionStoragePermissionsTest` | POSIX 权限位（0600）。**Windows 上是 `assumeTrue` skip 而非断言失败** —— 那里访问控制走 ACL，断言失败等于要求 Windows 做不到的事 |
 | `DangerousSqlTest` / `SqlLiteralsTest` | 危险写操作识别与**逐句**只读判定；WHERE 字面量转义 / CAST 目标类型逐方言 |
 | `TableStructureDiffTest` | 表结构草稿的校验与差分，每条都钉在**不能少算**的那一侧：改名不能退化成「删 + 加」（中途失败就真的丢整列数据），外键改动必须落到 DROP + ADD |
 | `EditorIntegrationTest` | 注册表 / formatter / 高亮器的协作路径，同时是**扩展模板**：新增一种语言时复制本文件改参数即可 |
 | `OnboardingStateTest` / `LanguageBootstrapTest` | 首启判据、**外观变更不得抹掉已完成标记**；语言表完整性 |
+| `WinControlsTest` | 复古 / 现代两档的控件几何与下拉选择器的纯逻辑（形状解析、选中项反查、禁用与空列表的判定） |
 
 运行：
 

@@ -93,6 +93,7 @@ import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.connection.ConnectionConfig
+import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.SqlIdentifier
 import com.langbiantianya.sundays.editor.CompletionItem
@@ -140,21 +141,15 @@ import com.google.protobuf.Value as ProtoValue
 /**
  * 连接方言 → SQL 高亮档位。
  *
- * `when` **穷举且不写 `else`**：将来新增 [DialectType] 时这里编译期就报错，
- * 不会让新方言静默退化到标准档位。
+ * 映射表在 `:shared` 的 [com.langbiantianya.sundays.connection.DialectMetadata] 里 ——
+ * 与 `DialectType.supportedConnectionTypes` / `engineDriverName` 同源，
+ * 免得「方言 → 档位」成为**第五份**互不相干的硬编码 `when`
+ * （那五份 `when` 曾经散落在三个文件里，改一个方言要改五个地方）。
  *
- * 映射放在 desktopApp 而不是 `:shared` 的编辑器模块 —— 编辑器只认 [SqlDialectProfile]，
- * 不依赖连接配置（依赖方向见 desktopApp/ARCHITECTURE.md）。
+ * 编辑器模块（`:shared` 的 `editor` 包）**不依赖**连接配置 —— 依赖方向是
+ * `connection` → `editor.language`（单向），编辑器对连接配置一无所知。
  */
-private fun DialectType.toSqlDialectProfile(): SqlDialectProfile =
-    when (this) {
-        DialectType.MYSQL -> SqlDialectProfile.MYSQL
-        DialectType.POSTGRESQL -> SqlDialectProfile.POSTGRESQL
-        DialectType.H2 -> SqlDialectProfile.H2
-        DialectType.DUCKDB -> SqlDialectProfile.DUCKDB
-        DialectType.SQLITE -> SqlDialectProfile.SQLITE
-        DialectType.UNKNOWN -> SqlDialectProfile.STANDARD
-    }
+private fun DialectType.toSqlDialectProfile(): SqlDialectProfile = DialectMetadata.of(this).sqlDialectProfile
 
 // ============================================================================
 // 数据库浏览器状态机 —— 与 UI 解耦, 由 [DatabaseBrowserScreen] 创建

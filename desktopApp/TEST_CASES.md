@@ -94,8 +94,11 @@
 | [`PostgreSQLCrossDatabaseTest`](./src/test/kotlin/com/langbiantianya/sundays/PostgreSQLCrossDatabaseTest.kt) | PG 跨库（URL 指 A 选 B）：表列表来自 B / A 独有的表不混进来 / 同名表读到 B / A 本身仍正常 |
 | [`PostgreSQLSystemObjectTest`](./src/test/kotlin/com/langbiantianya/sundays/PostgreSQLSystemObjectTest.kt) | PG 系统对象不进表列表 / `information_schema` 不进 / 非 public schema 的处理 / `SCHEMA.LIST` 干净 |
 | [`MySQLRoutineTriggerQueryTest`](./src/test/kotlin/com/langbiantianya/sundays/MySQLRoutineTriggerQueryTest.kt) | 真 MySQL 的触发器 / 过程列表：列名必须是 `ROUTINE_COMMENT` 而不是 H2 的 `REMARKS`，且过程注释要**原样**读回 |
-| [`DialectNameContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectNameContractTest.kt) | `DialectType.engineDriverName` 与引擎 `SYSTEM.LIST_DRIVERS` 注册名逐一比对（防 `MYSQL` vs `Mysql` 漂移） |
+| [`DialectNameContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectNameContractTest.kt) | `DialectType.engineDriverName` 与引擎 `SYSTEM.LIST_DRIVERS` 注册名逐一比对（防 `MYSQL` vs `Mysql` 漂移）—— **前端枚举里的每个方言，引擎都得真的实现了**；这也是「未落地的方言不进 `DialectType`」那道闸门 |
 | [`TableStructureDiffTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/table/TableStructureDiffTest.kt) | 表结构草稿的校验与差分（弹窗本体在 `:shared`）：断言全钉在**不能少算**那一侧 —— 改名不能退化成「删 + 加」（中途失败就真的丢整列数据），外键改名 / 改内容必须落到 DROP + ADD |
+| [`DialectMetadataTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/connection/DialectMetadataTest.kt) | 前端方言元数据表：**所有入口读的是同一张表**（默认连接类型 / 可选连接类型 / 引擎注册名 / URL 前缀）；未知方言走最保守的一份；URL 前缀与该方言实际折算出的 URL 一致 |
+| [`JdbcUrlTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/connection/JdbcUrlTest.kt) | 字段 ↔ URL 折算与回解析；**自定义 URL 原样保留**、切到自定义 URL 时清空旧 URL、外来 URL 不按方言解析 |
+| [`ConnectionStorageTest`](../shared/src/jvmTest/kotlin/com/langbiantianya/sundays/connection/ConnectionStorageTest.kt) | 连接配置落盘：逐档往返、**v1 → v2 → v3 迁移**、自定义 URL 的连接存盘再加载**仍是自定义 URL** |
 | [`ColumnTypeCatalogLengthTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/table/ColumnTypeCatalogLengthTest.kt) | 读回表结构时「长度」的取值：引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）不是长度 —— 照搬就成了「BIGINT 长度 19」；还要挡掉 JDBC 的「不限长度」哨兵（PG 的无界 varchar = 2147483647） |
 
 ### 2.3 表格与分页

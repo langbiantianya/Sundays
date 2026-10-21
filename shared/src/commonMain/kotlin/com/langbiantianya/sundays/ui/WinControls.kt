@@ -8,39 +8,56 @@
 
 package com.langbiantianya.sundays.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /*
- * 复古控件包装层 —— 让 Win2000 / WinXP 两套主题的按钮与输入框长得像当年的控件。
+ * 复古控件包装层 —— 让 Win2000 / WinXP 两套主题的按钮、输入框与下拉框长得像当年的控件。
  *
  * ## 为什么需要这一层
  *
@@ -65,6 +82,13 @@ import androidx.compose.ui.unit.dp
  * - **按下凹陷态**没做（仅切换态做了）。真实经典 Win 按钮按住时凸起↔凹陷互换；M3 的按钮
  *   按下只改容器色，要跟随翻转斜面需要自行接管 `interactionSource` 的 pressed 状态。
  *   工具栏的**切换**按钮不受此限 —— 它有显式的选中态，故用 `WinButton` 的 `selected` 表达。
+ * - **下拉的标签不做 M3 的浮动标签**。M3 的 `TextField` 让 label 浮在框的上沿、聚焦时缩到角上；
+ *   下拉框没有输入行为，浮动标签只会跟着焦点上下跳，故改成控件**上方**的固定标签。
+ * - **弹出的菜单容器只有一圈单色描边**。经典 Win 的弹出菜单是 3D 斜面边框，而 M3 的
+ *   `DropdownMenu` 只接受单色 `BorderStroke`（画不出成对的明暗边），故用主题的 `outline`
+ *   描一圈；形状仍走 [menuShape]，经典档是直角。
+ * - **下拉菜单的宽度不与触发器对齐**。M3 的 `DropdownMenu` 按内容宽度排版，真实 Win 组合框的
+ *   下拉与框等宽 —— 那要自己实现弹层定位，代价远大于收益。
  *
  * 本文件所有外观取值都来自 `LocalUiTokens` 的派生函数（`buttonFaceColor` /
  * `buttonInkColor` / `fieldFaceColor` / `disabledInkOrNull` / `panelBorderStroke`），
@@ -102,7 +126,29 @@ import androidx.compose.ui.unit.dp
 fun resolveControlShape(
     shape: Shape?,
     modernDefault: Shape,
-): Shape = shape ?: if (isClassicChrome) controlShape() else modernDefault
+): Shape = resolveControlShapeFor(LocalUiTokens.current, shape, modernDefault)
+
+/**
+ * 形状解析的**纯逻辑核心** —— [resolveControlShape] 的可测版本。
+ *
+ * ## 为什么要多这一层
+ *
+ * 规则本身只依赖 [UiThemeTokens]（一份纯数据），而组合函数读的是 [LocalUiTokens] ——
+ * 后者在单元测试里没有组合环境可读。把规则挪进纯函数后，
+ * 「经典档取主题圆角、现代档取 M3 默认」这条约定就能在 `commonTest` 里直接断言，
+ * 不必起 UI（见 `WinControlsTest`）。
+ *
+ * @param tokens 当前主题的外观 token
+ * @param shape 调用方显式指定的形状；非空则一律以它为准
+ * @param modernDefault 现代档的默认形状（由各包装函数按自己的组件传入）
+ */
+fun resolveControlShapeFor(
+    tokens: UiThemeTokens,
+    shape: Shape?,
+    modernDefault: Shape,
+): Shape =
+    // 经典档的圆角走 [shapeFor]，与 [controlShape] 的 4dp 档同源
+    shape ?: if (tokens.isClassic) shapeFor(tokens, 4.dp) else modernDefault
 
 /**
  * 只保留上方两角、下方两角置方 —— 复现 M3 `internal fun CornerBasedShape.top()`。
@@ -591,3 +637,368 @@ fun WinProgressIndicator(
         strokeWidth = if (isClassicChrome) strokeWidth + 2.dp else strokeWidth,
     )
 }
+
+// ============================================================================
+// 下拉选择器 —— 经典档的组合框
+//
+// 补上控件集里最后一个空缺：「点开一个列表选一个值」。
+// [WinMenuItem] 是「菜单里的一项」的外观包装，不是选择器 —— 它没有「当前选中的是谁」
+// 这个概念，而选择器必须有。
+// ============================================================================
+
+/**
+ * 下拉触发器的形状解析 —— 经典档用主题圆角，现代档用 M3 输入框档位的圆角。
+ *
+ * 刻意**不**复用 [resolveTextFieldShape]：那个形状是「上圆下方」（M3 `extraSmall.top()`），
+ * 为贴底的输入框准备的；下拉框是个独立方块，四角同圆才不显歪。
+ */
+@Composable
+fun resolveDropdownShape(shape: Shape?): Shape = resolveControlShape(shape, MaterialTheme.shapes.extraSmall)
+
+/**
+ * 当前选中项的下标 —— 下拉的「值」是**显示文本**，所以只能靠文本反查是哪一项。
+ *
+ * 找不到对应项时返回 -1，而不是默默选中第一项：值被外部改成一个列表里没有的文本时
+ * （比如认证方式被配置覆盖），显示空白 + placeholder 至少是诚实的；
+ * 悄悄换成第一项则会让用户以为配置生效了。
+ *
+ * @param items 可选项
+ * @param value 当前值（显示文本）
+ * @param itemLabel 把一项映射成显示文本
+ */
+fun <T> dropdownSelectedIndex(
+    items: List<T>,
+    value: String,
+    itemLabel: (T) -> String,
+): Int = items.indexOfFirst { itemLabel(it) == value }
+
+/**
+ * 当前选中项的显示文本；没有选中返回 `null`（此时显示 placeholder）。
+ *
+ * @param items 可选项
+ * @param value 当前值（显示文本）
+ * @param itemLabel 把一项映射成显示文本
+ */
+fun <T> dropdownSelectedLabel(
+    items: List<T>,
+    value: String,
+    itemLabel: (T) -> String,
+): String? {
+    val index = dropdownSelectedIndex(items, value, itemLabel)
+    return if (index < 0) null else itemLabel(items[index])
+}
+
+/**
+ * 下拉能不能展开 —— 禁用态与空列表都不该弹出一个空菜单。
+ *
+ * 空列表时 M3 的 `DropdownMenu` 会弹出一个只有内边距的空壳；经典档下那块空壳还是一块
+ * 「点得动的银灰方块」，比不弹更糟。
+ *
+ * @param enabled 控件是否可用
+ * @param itemCount 可选项数量
+ */
+fun dropdownCanOpen(
+    enabled: Boolean,
+    itemCount: Int,
+): Boolean = enabled && itemCount > 0
+
+/**
+ * 下拉选择器 —— 经典档是 Win 组合框，现代档是 M3 的常规下拉。
+ *
+ * ## 为什么需要它
+ *
+ * 现有控件集里 [WinMenuItem] 是「菜单里的一项」的**外观包装**，不是选择器 ——
+ * 「点开一个列表选一个值」这个交互在经典档下无处安放：
+ * M3 的 `ExposedDropdownMenuBox` 在 Win2000 / WinXP 两套配色下仍然是现代外观，
+ * 而这两套配色是本项目的一等公民。
+ *
+ * ## 为什么不用 `ExposedDropdownMenuBox`
+ *
+ * 那个组件在本仓库当前依赖的 material3 里仍标着 `@ExperimentalMaterial3Api`，
+ * 而本仓库**一处**实验性 M3 API 都没用过。为了一个「经典档要完全自绘」的控件
+ * 去引入实验性 API 不划算，故自绘触发器 —— 顺带也免掉了它那套「框既是输入框又是锚点」
+ * 的双重身份。
+ *
+ * ## 参数为什么是 `value: String`
+ *
+ * 与 [WinTextField] 同口径：下拉的「值」就是**框里显示的那段文本**。
+ * 好处是调用方不必为「显示文本」与「实际取值」各维护一份状态；
+ * 代价是 [items] 的标签必须互不相同（靠文本反查选中项，见 [dropdownSelectedIndex]）。
+ *
+ * @param value 当前选中的显示文本；不在 [items] 里时视为「未选中」
+ * @param onValueChange 选中某项时回调，参数是该项的显示文本
+ * @param items 可选项
+ * @param itemLabel 把一项映射成显示文本；默认取 `toString()`
+ * @param label 控件**上方**的固定标签（不是 M3 的浮动标签，见文件头「已知简化」）
+ * @param placeholder 未选中任何一项时显示的占位文字
+ * @param enabled 禁用态：不响应点击，文字转禁用色
+ * @param contentDescription 触发器的无障碍名称；`null` 时读屏直接念框里可见的文字
+ * @param shape 触发器的形状；`null` 时经典档取主题圆角、现代档取 M3 输入框档位
+ */
+@Composable
+fun <T> WinDropdown(
+    value: String,
+    onValueChange: (String) -> Unit,
+    items: List<T>,
+    itemLabel: (T) -> String = { it.toString() },
+    modifier: Modifier = Modifier,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    enabled: Boolean = true,
+    contentDescription: String? = null,
+    shape: Shape? = null,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val canOpen = dropdownCanOpen(enabled, items.size)
+    // 禁用 / 清空列表时把弹层收掉：否则重新启用会弹出一个用户从没打开过的菜单。
+    LaunchedEffect(canOpen) {
+        if (!canOpen) expanded = false
+    }
+    val selectedIndex = dropdownSelectedIndex(items, value, itemLabel)
+    val selectedLabel = dropdownSelectedLabel(items, value, itemLabel)
+
+    Column(modifier = modifier) {
+        if (label != null) {
+            Box(modifier = Modifier.padding(bottom = 4.dp)) {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    ProvideTextStyle(MaterialTheme.typography.labelMedium) { label() }
+                }
+            }
+        }
+        // 锚点只包住触发器：M3 的 DropdownMenu 按**父节点**的边界定位，
+        // 标签若在同一个 Box 里，弹层会从标签上方开始对齐。
+        Box {
+            DropdownTrigger(
+                selectedText = selectedLabel,
+                placeholder = placeholder,
+                enabled = enabled,
+                shape = resolveDropdownShape(shape),
+                contentDescription = contentDescription,
+                onClick = { expanded = !expanded },
+            )
+            WinDropdownMenu(
+                expanded = expanded && canOpen,
+                onDismissRequest = { expanded = false },
+            ) {
+                items.forEachIndexed { index, item ->
+                    val text = itemLabel(item)
+                    val isSelected = index == selectedIndex
+                    WinMenuItem(
+                        text = { Text(text) },
+                        onClick = {
+                            expanded = false
+                            onValueChange(text)
+                        },
+                        // 选中项反色 —— 经典 Win 的菜单选中态就是整行反白（navy 底白字），
+                        // 走 token 而不是写死颜色，明暗两档自动各取各的。
+                        modifier =
+                            if (isSelected) {
+                                Modifier.background(selectionContainerColor(selected = true))
+                            } else {
+                                Modifier
+                            },
+                        colors =
+                            if (isSelected) {
+                                androidx.compose.material3.MenuDefaults
+                                    .itemColors(textColor = selectionContentColor(selected = true))
+                            } else {
+                                androidx.compose.material3.MenuDefaults
+                                    .itemColors()
+                            },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 下拉菜单容器 —— 经典档给窗口面 + 直角 + 一圈描边，现代档透传 M3 菜单默认。
+ *
+ * 形状走 [menuShape]：经典档是直角（真实 Win 的弹出菜单就是方角），
+ * 现代档是 M3 的圆角菜单。容器色在经典档取 `buttonFaceColor()` ——
+ * 经典 Win 的弹出菜单用的是 `ButtonFace`，不是输入框那种浅灰。
+ *
+ * 菜单项一律用 [WinMenuItem]，于是下拉菜单与右键菜单的观感完全一致。
+ *
+ * @param expanded 是否展开
+ * @param onDismissRequest 点击菜单外 / 按 Esc 时回调
+ * @param modifier 传给 M3 `DropdownMenu` 的修饰符
+ * @param content 菜单内容（通常是若干 [WinMenuItem]）
+ */
+@Composable
+fun WinDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val classic = isClassicChrome
+    androidx.compose.material3.DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        shape = menuShape(),
+        containerColor =
+            if (classic) {
+                buttonFaceColor()
+            } else {
+                androidx.compose.material3.MenuDefaults.containerColor
+            },
+        // 经典档补一圈描边：M3 菜单默认没有边，而经典 Win 的弹出菜单是有框的。
+        // 只画单色是因为 DropdownMenu 的 border 只接受单色 BorderStroke。
+        border = if (classic) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else null,
+        content = content,
+    )
+}
+
+/**
+ * 下拉触发器 —— 经典档是「凹陷的取值区 + 凸起的箭头按钮」，现代档是一整块描边面。
+ *
+ * 经典档刻意拆成两块：真实 Win 组合框的取值区是陷进去的，而右边的箭头按钮是凸起来的，
+ * 两块紧挨时，凹陷区的暗边与箭头区的亮边正好构成一道分隔线。
+ *
+ * @param selectedText 当前选中的显示文本；`null` 表示未选中（显示 placeholder）
+ * @param placeholder 占位文字
+ * @param enabled 是否可用
+ * @param shape 触发器形状
+ * @param contentDescription 触发器的无障碍名称
+ * @param onClick 点击回调
+ * @param modifier 修饰符
+ */
+@Composable
+private fun DropdownTrigger(
+    selectedText: String?,
+    placeholder: @Composable (() -> Unit)?,
+    enabled: Boolean,
+    shape: Shape,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ink =
+        if (enabled) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            // 禁用的控件不受 WCAG 1.4.3 约束（该条明确排除 inactive 组件）
+            disabledInkOrNull() ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        }
+    val placeholderInk = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else ink
+    val clickModifier =
+        Modifier
+            .dropdownSemantics(contentDescription)
+            // role 用 DropdownList 而不是 Button：读屏念「下拉列表」比「按钮」准确，
+            // 而 M3 的 Surface(onClick) 不给 role，裸 clickable 的 role 默认为 null。
+            .clickable(
+                enabled = enabled,
+                role = Role.DropdownList,
+                onClick = onClick,
+            )
+
+    CompositionLocalProvider(LocalContentColor provides ink) {
+        if (!isClassicChrome) {
+            // 现代档：M3 的常规下拉外观 —— 一块描边的圆角面 + 尾部箭头。
+            Box(
+                modifier =
+                    modifier
+                        .background(fieldFaceColor(), shape)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                        .then(clickModifier),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DropdownValueText(selectedText, placeholder, placeholderInk, Modifier.weight(1f))
+                    DropdownArrow()
+                }
+            }
+            return@CompositionLocalProvider
+        }
+        Row(modifier = modifier) {
+            Box(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .background(fieldFaceColor(), shape)
+                        // 经典档把 M3 的描边让给斜面，否则会出现「双层边」
+                        .uiBevel(raised = false)
+                        .then(clickModifier),
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    DropdownValueText(selectedText, placeholder, placeholderInk)
+                }
+            }
+            Box(
+                modifier =
+                    Modifier
+                        .background(buttonFaceColor(), shape)
+                        .uiBevel(raised = true)
+                        .then(clickModifier),
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+                    DropdownArrow()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 取值区里的文字 —— 有选中项显示它，没有就显示 placeholder。
+ *
+ * 两者都用 `bodyLarge`（M3 输入框正文的档位），占位文字另配 `onSurfaceVariant`
+ * —— 这是 M3 `TextField` 对 placeholder 的处理，与正文的 `onSurface` 区分开。
+ */
+@Composable
+private fun DropdownValueText(
+    selectedText: String?,
+    placeholder: @Composable (() -> Unit)?,
+    placeholderInk: Color,
+    modifier: Modifier = Modifier,
+) {
+    if (selectedText != null) {
+        Text(
+            text = selectedText,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier,
+        )
+        return
+    }
+    if (placeholder == null) return
+    Box(modifier = modifier) {
+        CompositionLocalProvider(LocalContentColor provides placeholderInk) {
+            ProvideTextStyle(MaterialTheme.typography.bodyLarge) { placeholder() }
+        }
+    }
+}
+
+/** 下拉触发器尾部的箭头 —— 纯装饰，描述挂在触发器上（见 [dropdownSemantics]）。 */
+@Composable
+private fun DropdownArrow() {
+    Icon(
+        imageVector = Icons.Filled.ArrowDropDown,
+        contentDescription = null,
+    )
+}
+
+/**
+ * 给触发器挂上无障碍名称。
+ *
+ * ## 为什么不把描述挂在箭头图标上
+ *
+ * 箭头是纯装饰：它恒定地表示「这里能展开」，而读屏真正需要知道的是
+ * 「这个下拉是干什么的、当前选了什么」。把描述挂到触发器上（合并语义节点），
+ * 读屏念的是调用方给的那句话；挂到图标上则会让图标与框里可见的文字各念一遍。
+ *
+ * 代价是：调用方一旦给了 [description]，框里的可见文字就不再被念出来 ——
+ * 需要两者都念时，由调用方自己把当前值拼进描述里（当前值本就在调用方手里）。
+ */
+private fun Modifier.dropdownSemantics(description: String?): Modifier =
+    if (description == null) {
+        this
+    } else {
+        semantics { contentDescription = description }
+    }
