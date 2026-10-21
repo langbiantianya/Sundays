@@ -26,23 +26,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,94 +43,40 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
-import com.langbiantianya.grpc.columnDef
-import com.langbiantianya.grpc.connectionConfig
-import com.langbiantianya.grpc.dataGenerateRequest
-import com.langbiantianya.grpc.dataListRequest
-import com.langbiantianya.grpc.dataRequest
-import com.langbiantianya.grpc.foreignKeyCreateRequest
-import com.langbiantianya.grpc.foreignKeyDeleteRequest
-import com.langbiantianya.grpc.foreignKeyListItem
-import com.langbiantianya.grpc.foreignKeyListRequest
-import com.langbiantianya.grpc.foreignKeyRequest
-import com.langbiantianya.grpc.functionListRequest
-import com.langbiantianya.grpc.functionRequest
-import com.langbiantianya.grpc.generateTable
-import com.langbiantianya.grpc.indexListRequest
-import com.langbiantianya.grpc.indexRequest
-import com.langbiantianya.grpc.request
-import com.langbiantianya.grpc.schemaListRequest
-import com.langbiantianya.grpc.schemaRequest
-import com.langbiantianya.grpc.sqlExecuteRequest
-import com.langbiantianya.grpc.sqlRequest
-import com.langbiantianya.grpc.systemRequest
-import com.langbiantianya.grpc.tableColumnListRequest
-import com.langbiantianya.grpc.tableCreateRequest
-import com.langbiantianya.grpc.tableDeleteRequest
-import com.langbiantianya.grpc.tableGetDdlRequest
-import com.langbiantianya.grpc.tableListRequest
-import com.langbiantianya.grpc.tableRequest
-import com.langbiantianya.grpc.tableUpdateRequest
-import com.langbiantianya.grpc.triggerListRequest
-import com.langbiantianya.grpc.triggerRequest
-import com.langbiantianya.grpc.viewListRequest
-import com.langbiantianya.grpc.viewRequest
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
-import com.langbiantianya.sundays.editor.ui.rememberCodeEditorState
 import com.langbiantianya.sundays.settings.formatBytes
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinDivider
 import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.WinOutlinedButton
 import com.langbiantianya.sundays.ui.WinProgressIndicator
-import com.langbiantianya.sundays.ui.focusRing
-import com.langbiantianya.sundays.ui.menuShape
-import com.langbiantianya.sundays.ui.onRightClick
 import com.langbiantianya.sundays.ui.plural
 import com.langbiantianya.sundays.ui.str
-import com.langbiantianya.sundays.ui.tabStripContainerColor
 import com.langbiantianya.sundays.ui.winShape
-import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.roundToInt
 
 /**
  * 底部状态栏 —— IDEA 式的 JVM 堆占用指示器（一条细进度条 + 「已用 / 上限」）。
@@ -272,192 +209,6 @@ internal fun EngineMemoryStatusBar(
     }
 }
 
-/** 右下角通知中心的入口按钮 —— 铃铛 + 未读数。 */
-@Composable
-internal fun NotificationBell(
-    unread: Int,
-    open: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .clip(winShape(4.dp))
-                .background(
-                    if (open) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-                ).clickable(
-                    onClickLabel = if (open) str(StrKey.CLOSE_NOTIFICATION_CENTER) else str(StrKey.OPEN_NOTIFICATION_CENTER),
-                    onClick = onToggle,
-                ).testTag(NOTIFICATION_BELL_TAG)
-                .padding(horizontal = 8.dp, vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Notifications,
-            contentDescription = str(StrKey.NOTIFICATION_CENTER),
-            tint = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(15.dp),
-        )
-        if (unread > 0) {
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = unread.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
-}
-
-/**
- * 通知中心面板。
- *
- * ## 画在**根 Box** 而不是状态栏内部
- *
- * 状态栏只有 20dp 高，面板画在里面会浮出父级边界，而浮出部分是**收不到指针事件**的 ——
- * 点击会**穿透**到下方的表格行上（表现为「点一下关闭面板，结果表格里还选中了一行」）。
- * 与内存详情面板同一个坑、同一个解法（见 [EngineMemoryStatusBar] 的 KDoc）。
- *
- * ## 每条给**完整原文**，不截断
- *
- * 引擎错误常常是 `ORA-00933: table or view does not exist` 这类，
- * 省略号一截断就失去可诊断性。面板宽度够放下，且可滚动。
- */
-@Composable
-internal fun NotificationCenterPanel(
-    center: NotificationCenter,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        modifier = modifier.width(420.dp).heightIn(max = 420.dp).testTag(NOTIFICATION_PANEL_TAG),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = str(StrKey.NOTIFICATIONS_TITLE),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.width(8.dp))
-                val errors = center.notifications.count { it.severity == AppNotification.Severity.ERROR }
-                Text(
-                    text =
-                        buildString {
-                            append(plural(PluralStrKey.NOTIFICATIONS_COUNT, center.notifications.size, center.notifications.size))
-                            if (errors > 0) {
-                                append(plural(PluralStrKey.NOTIFICATIONS_FAILED_COUNT, errors, errors))
-                            }
-                        },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                WinOutlinedButton(
-                    onClick = { center.markAllRead() },
-                    enabled = center.unreadCount > 0,
-                    shape = SundaysPalette.buttonShape,
-                ) {
-                    Icon(Icons.Filled.Done, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(str(StrKey.MARK_ALL_READ))
-                }
-                Spacer(Modifier.width(6.dp))
-                WinOutlinedButton(
-                    onClick = { center.clear() },
-                    enabled = center.notifications.isNotEmpty(),
-                    shape = SundaysPalette.buttonShape,
-                    modifier = Modifier.testTag(NOTIFICATION_CLEAR_BTN_TAG),
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(str(StrKey.CLEAR_NOTIFICATIONS))
-                }
-            }
-            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            if (center.notifications.isEmpty()) {
-                Text(
-                    text = str(StrKey.NO_NOTIFICATIONS_HINT),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
-            } else {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    center.notifications.forEach { n -> NotificationRow(n) }
-                }
-            }
-        }
-    }
-}
-
-/** 通知面板里的一条。 */
-@Composable
-private fun NotificationRow(n: AppNotification) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-        Icon(
-            imageVector =
-                when (n.severity) {
-                    AppNotification.Severity.SUCCESS -> Icons.Filled.Check
-                    AppNotification.Severity.ERROR -> Icons.Filled.Close
-                    AppNotification.Severity.INFO -> Icons.Filled.Refresh
-                },
-            contentDescription = null,
-            tint =
-                when (n.severity) {
-                    AppNotification.Severity.SUCCESS -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.error
-                },
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = n.title,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Medium,
-            )
-            // 引擎原文完整给出，不截断 —— 排障时省略号等于没有
-            Text(
-                text = n.detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = formatNotificationTime(n.timestamp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-    WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-}
-
-/**
- * 通知时间 → `HH:mm`（当天）或 `MM-dd HH:mm`（更早）。
- *
- * 通知是「最近发生过的事」，跨天的那几条看一眼就知道是昨天的事就够了。
- */
-private fun formatNotificationTime(ts: Long): String {
-    val cal =
-        java.util.Calendar
-            .getInstance()
-            .apply { timeInMillis = ts }
-
-    fun p(v: Int) = "%02d".format(v)
-    val hm = "${p(cal.get(java.util.Calendar.HOUR_OF_DAY))}:${p(cal.get(java.util.Calendar.MINUTE))}"
-    val today = java.util.Calendar.getInstance()
-    val sameDay =
-        cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
-            cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
-    return if (sameDay) {
-        hm
-    } else {
-        "${p(cal.get(java.util.Calendar.MONTH) + 1)}-${p(cal.get(java.util.Calendar.DAY_OF_MONTH))} $hm"
-    }
-}
-
 /**
  * 把「当前所有 sheet 的所有报错」收成一份来源清单。
  *
@@ -526,15 +277,6 @@ internal fun collectErrorSources(sheets: List<SheetDescriptor>): List<ErrorSourc
             }
         }
     }
-
-/** 通知中心入口按钮的 UI 测试 tag。 */
-private const val NOTIFICATION_BELL_TAG = "notificationBell"
-
-/** 通知面板本身的 UI 测试 tag。 */
-private const val NOTIFICATION_PANEL_TAG = "notificationPanel"
-
-/** 通知面板「清空」按钮的 UI 测试 tag。 */
-private const val NOTIFICATION_CLEAR_BTN_TAG = "notificationClearBtn"
 
 /**
  * 堆内存详情面板 —— 设置页「系统信息」内存段的**缩小版**。
@@ -924,11 +666,40 @@ private fun BackgroundTaskRow(task: DatabaseBrowserState.BackgroundTask) {
     WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
-/** 工具栏「任务」按钮的 UI 测试 tag。 */
-internal const val TASK_PANEL_BTN_TAG = "backgroundTaskPanelBtn"
-
 /** 任务面板本身的 UI 测试 tag —— 面板没有语义，测试要量它得靠它。 */
 private const val TASK_PANEL_TAG = "backgroundTaskPanel"
 
 /** 「清除已完成」按钮的 UI 测试 tag。 */
 private const val TASK_CLEAR_BTN_TAG = "backgroundTaskClearBtn"
+
+/**
+ * 通知时间 → `HH:mm`（当天）或 `MM-dd HH:mm`（更早）。
+ *
+ * 通知是「最近发生过的事」，跨天的那几条看一眼就知道是昨天的事就够了。
+ *
+ * ## 为什么它留在 `:desktopApp` 而不是跟着面板上移
+ *
+ * 「本地时区里的今天几点」是**平台知识**：JVM 有 `java.util.Calendar` 与时区数据库，
+ * 而 `commonMain` 里既没有 `Calendar` 也没有时区转换（`kotlin.time.Instant`
+ * 只做 epoch 换算）。为此引入一个新依赖（`kotlinx-datetime`）不值得 ——
+ * 与 `ClipboardWriter` / `NativePathPicker` 一样，**平台能力留在平台侧**，
+ * `:shared` 的通知面板通过参数接收格式化结果。
+ */
+internal fun formatNotificationTime(ts: Long): String {
+    val cal =
+        java.util.Calendar
+            .getInstance()
+            .apply { timeInMillis = ts }
+
+    fun p(v: Int) = "%02d".format(v)
+    val hm = "${p(cal.get(java.util.Calendar.HOUR_OF_DAY))}:${p(cal.get(java.util.Calendar.MINUTE))}"
+    val today = java.util.Calendar.getInstance()
+    val sameDay =
+        cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+            cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+    return if (sameDay) {
+        hm
+    } else {
+        "${p(cal.get(java.util.Calendar.MONTH) + 1)}-${p(cal.get(java.util.Calendar.DAY_OF_MONTH))} $hm"
+    }
+}

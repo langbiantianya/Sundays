@@ -776,6 +776,8 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 | `SettingsEntryButton` | `shared/.../ui/ThemeModeToggle.kt` | 顶栏右上角的 ⚙ 设置入口 | 图标按钮（`Icons.Filled.Settings`），与浏览模式的设置入口**同一个组件** |
 | `SqlFormatter` / `CodeFormatterRegistry` | `shared/.../editor/formatter/` | SQL 格式化 | 格式化按钮按 `languageId` 找 formatter，Hive / Impala 档位注册后自动可用 |
 | `TabRenameDialog` | `shared/.../ui/TabRenameDialog.kt` | 报表区块改名 | 已是通用的「重命名一个字符串」弹窗 |
+| `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | `shared/.../notifications/` | 分析模式的错误通知 | **本轮上移**：通知中心是纯状态 + 纯展示，分析模式要「导出失败 / 查询超时」这类提示时整套复用。时间格式化由调用方注入（本地时区是平台知识） |
+| `BrowserToolBar` / `PaneToggleButton` 形态 / `EmptySheetsHint` | `shared/.../browser/BrowserToolBar.kt` | 分析工作台的顶部 chrome 与空态 | **本轮上移**：工作台切换按钮与空态引导是纯展示，认窄数据形状，不认引擎状态。分析模式若也要「结果 / 图表」双视图切换，同一套按钮直接用 |
 
 ### 6.3 通用化之后复用的（5 项）
 
@@ -1304,6 +1306,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/.../connection/AddConnectionDialog.kt` | 表单渲染改为**优先读方言的 `connectionForm`**，读不到才回退旧分支（M1 第二片） |
 | `shared/.../connection/DialectFormRegistry.kt` | **新增**：方言 → 表单规格的注册表。**可空** = 回退旧分支（Q6 的双向通道） |
 | `shared/.../connection/ConnectionFormFields.kt` | **新增**：按 spec 渲染字段（文本 / 密码 / 整数 / 下拉 / 只读展示）+ 认证方式下拉 + 字段值 ↔ 配置的读写 |
+| `shared/.../notifications/NotificationCenter.kt` | **新增**（从 `desktopApp` 上移）：通知中心（屏级共享、按来源去重、原文不截断）+ `AppNotification` |
+| `shared/.../notifications/NotificationCenterPanel.kt` | **新增**（从 `desktopApp` 上移）：通知面板；时间格式化走 `timeFormatter` **注入参数**（本地时区是平台知识） |
+| `shared/.../notifications/NotificationBell.kt` | **新增**（从 `desktopApp` 上移）：通知铃入口按钮（铃铛 + 未读数） |
+| `shared/.../browser/BrowserPane.kt` | **新增**（从 `desktopApp` 上移）：右栏展示模式枚举（TABLE / SQL / GENERATE） |
+| `shared/.../browser/SheetSummary.kt` | **新增**：标签条要的**窄数据形状**（id / 名称 / 状态）—— 不认持有引擎状态的 `SheetDescriptor` |
+| `shared/.../browser/BrowserToolBar.kt` | **新增**（从 `desktopApp` 上移）：sheet 标签条 / 工作台切换按钮 / 空态引导 |
 | `engine-protocol/.../idb_engine.proto` | `DialectInfo.connection_form`（新消息 `DialectForm` / `DialectFormVariant` / `DialectFormField`） |
 | `engine-protocol/.../grpc/DialectFormMapping.kt` | **新增**：契约 ⇄ proto 的**双向**映射（两个方向必须放一起 —— 见 §5.2 的落点修正） |
 | `engine/.../engine/DialectInfoMapper.kt` | **新增**：方言 → proto `DialectInfo`（`listDrivers()` 原来内联 13 个字段，抽出来才可单测） |
@@ -1393,6 +1401,19 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `desktopApp`：启动时拉一次 `SYSTEM.LIST_DRIVERS` → 注册表 → 喂给向导与弹窗
   - i18n：8 个新键（JDBC URL 标签 / 认证方式 ×3 / 认证方式标签 / 三个方言特有字段标签）
     **六语言同步**
+- **共享 UI 上移（Q9 落地）** ✅ —— 独立于 M1 的结构整理，为 M2/M3 铺路
+  - `shared/.../notifications/`：`NotificationCenter`（纯状态）+ `NotificationCenterPanel`
+    + `NotificationBell` —— 整套从 `desktopApp` 上移，**时间格式化改为注入参数**
+    （本地时区是平台知识，`commonMain` 没有 `Calendar` 也没有时区转换）
+  - `shared/.../browser/`：`BrowserPane` 枚举 + `SheetSummary`（窄数据形状）
+    + `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` —— 从 `desktopApp` 上移
+  - **顺带清掉 443 条未使用 import**（其中 **255 条是 proto import**）——
+    仓库曾有一批重构残留的 proto import，让「这个文件碰不碰引擎」在**文件层面**失真，
+    看 import 会误判一批纯 UI 组件「搬不动」。清理后 §1.3 的判据重新可信
+  - ⚠️ **`SchemaTree` / `TablePreview` / `SqlWorkbench` / `ExportDialogs` / `GenerateWorkbench`
+    仍搬不动**：它们的入参是 `DatabaseBrowserState`（4200 行、35 处 proto 请求构造）。
+    要上移得先把它拆成「纯状态 + 引擎动作接口」两层 —— 那是**契约级**重构，
+    归 M3，**不夹带**
 - **M1 未做（留给 M3 或后续）**
   - `properties` 里 secret 字段的 UI 脱敏与导出剔除
   - 连接管理器按能力位分组 + 只读徽标（§5.5）—— 那要等 M3 的 `ANALYSIS_SOURCE` 真有成员

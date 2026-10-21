@@ -10,94 +10,12 @@
 
 package com.langbiantianya.sundays
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateSetOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
-import com.langbiantianya.grpc.columnDef
-import com.langbiantianya.grpc.connectionConfig
-import com.langbiantianya.grpc.dataGenerateRequest
-import com.langbiantianya.grpc.dataListRequest
-import com.langbiantianya.grpc.dataRequest
-import com.langbiantianya.grpc.foreignKeyCreateRequest
-import com.langbiantianya.grpc.foreignKeyDeleteRequest
-import com.langbiantianya.grpc.foreignKeyListItem
-import com.langbiantianya.grpc.foreignKeyListRequest
-import com.langbiantianya.grpc.foreignKeyRequest
-import com.langbiantianya.grpc.functionListRequest
-import com.langbiantianya.grpc.functionRequest
-import com.langbiantianya.grpc.generateTable
-import com.langbiantianya.grpc.indexListRequest
-import com.langbiantianya.grpc.indexRequest
-import com.langbiantianya.grpc.request
-import com.langbiantianya.grpc.schemaListRequest
-import com.langbiantianya.grpc.schemaRequest
-import com.langbiantianya.grpc.sqlExecuteRequest
-import com.langbiantianya.grpc.sqlRequest
-import com.langbiantianya.grpc.systemRequest
-import com.langbiantianya.grpc.tableColumnListRequest
-import com.langbiantianya.grpc.tableCreateRequest
-import com.langbiantianya.grpc.tableDeleteRequest
-import com.langbiantianya.grpc.tableGetDdlRequest
-import com.langbiantianya.grpc.tableListRequest
-import com.langbiantianya.grpc.tableRequest
-import com.langbiantianya.grpc.tableUpdateRequest
-import com.langbiantianya.grpc.triggerListRequest
-import com.langbiantianya.grpc.triggerRequest
-import com.langbiantianya.grpc.viewListRequest
-import com.langbiantianya.grpc.viewRequest
+import com.langbiantianya.sundays.browser.SheetSummary
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionStatus
-import com.langbiantianya.sundays.editor.ui.rememberCodeEditorState
-import com.langbiantianya.sundays.settings.formatBytes
-import com.langbiantianya.sundays.ui.focusRing
-import com.langbiantianya.sundays.ui.menuShape
-import com.langbiantianya.sundays.ui.onRightClick
-import com.langbiantianya.sundays.ui.plural
-import com.langbiantianya.sundays.ui.str
-import com.langbiantianya.sundays.ui.tabStripContainerColor
-import com.langbiantianya.sundays.ui.winShape
-import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.roundToInt
 
 /**
  * JVM 堆占用快照 —— 底部状态栏的输入。
@@ -142,15 +60,18 @@ data class SheetDescriptor(
 )
 
 /**
- * 右栏展示模式 —— 每 sheet 独立，由 [DatabaseBrowserState.activePane] 持有。
+ * sheet → 标签条要的**窄形状**。
  *
- * - [TABLE] = 表预览（双击表节点打开的标签页区）；初始值
- * - [SQL] = SQL 工作台（编辑器 + 底部结果面板）；由工具栏切换
- * - [GENERATE] = 造数工作台（Lua 脚本编辑 + 造数结果面板）；由工具栏切换
- *
- * 三个 pane 是**同一份 sheet 状态**的两种以上渲染 —— 切换只改变渲染目标，不清空任何状态。
+ * 标签条（`:shared` 的 `SheetTabRow`）只需要「谁的连接、叫什么、什么状态」，
+ * 不需要 `DatabaseBrowserState`（那是引擎接线的产物）。转换点放在这里 ——
+ * `:desktopApp` 侧唯一知道「sheet 是什么」的地方。
  */
-enum class BrowserPane { TABLE, SQL, GENERATE }
+internal fun SheetDescriptor.toSummary(): SheetSummary =
+    SheetSummary(
+        id = connection.id,
+        name = connection.name,
+        status = status,
+    )
 
 /**
  * 一个错误来源的快照 —— 屏级对账用（见 [DatabaseBrowserScreen]）。

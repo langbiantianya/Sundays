@@ -142,11 +142,11 @@ desktopApp （本模块）
 
 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) | 加载 / 标签页 / 两个工作台的**全部状态机** + `TablePreviewTab` / `SqlSheet` / `BackgroundTask` / `ColumnInfo` / `TreeTarget`。**不能**出现任何 Composable 或 Modifier —— 同一份状态机要能脱离界面直接驱动（`DatabaseBrowserFlowTest`） |
 
-| [`DatabaseBrowserTypes.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserTypes.kt) | 跨面板共享的小数据类型（`EngineMemory` / `SheetDescriptor` / `BrowserPane` / `ErrorSource`） |
+| [`DatabaseBrowserTypes.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserTypes.kt) | 跨面板共享的小数据类型（`EngineMemory` / `SheetDescriptor` / `ErrorSource` / `SqlPreviewRows`）+ `SheetDescriptor.toSummary()`（转成 `:shared` 标签条要的窄形状） |
 
-| [`BrowserChrome.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserChrome.kt) | 堆内存状态栏与详情面板、通知铃与通知面板、后台任务面板 —— 三者只读地展示状态，不接受领域事件 |
+| [`BrowserChrome.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserChrome.kt) | 堆内存状态栏与详情面板、后台任务面板 —— 只读地展示状态，不接受领域事件；另含 `formatNotificationTime`（**本地时区**的时间格式化，平台知识） |
 
-| [`BrowserToolBar.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserToolBar.kt) | 工具栏、sheet 标签条、面板切换、连接状态点、连接失败横幅 |
+| [`BrowserToolBar.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserToolBar.kt) | 激活 sheet 的内容编排（`ActiveSheetContent`）与连接失败横幅 —— 依赖 `DatabaseBrowserState`，留在本模块 |
 
 | [`SchemaTree.kt`](./src/main/kotlin/com/langbiantianya/sundays/SchemaTree.kt) | 对象树渲染、右键菜单，以及由右键菜单进入的表结构弹窗宿主 |
 
@@ -168,7 +168,7 @@ desktopApp （本模块）
 
 | [`NativePathPicker.kt`](./src/main/kotlin/com/langbiantianya/sundays/NativePathPicker.kt) | 导出路径的系统选择器（不可用时安静降级） |
 
-| [`Notifications.kt`](./src/main/kotlin/com/langbiantianya/sundays/Notifications.kt) | 通知中心：屏级共享、按来源去重、原文不截断 |
+| **（原 `Notifications.kt`）** | **已上移 `:shared`** —— 通知中心（状态 + 面板 + 铃铛入口）整套住在 [`shared/.../notifications/`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/notifications/)，本模块只留 `formatNotificationTime`（本地时区，平台知识） |
 
 | [`ClipboardWriter.kt`](./src/main/kotlin/com/langbiantianya/sundays/ClipboardWriter.kt) | AWT 剪贴板唯一出口，失败返回 `false` 而不是抛 |
 
@@ -364,15 +364,17 @@ desktopApp （本模块）
 
 |---|---|---|
 
-| 通知中心**屏级共享**不是 per-sheet | 连接 A 的导出失败、连接 B 的 SQL 报错，按连接分开就断了「刚才发生了什么」这条线 | [`Notifications.kt`](./src/main/kotlin/com/langbiantianya/sundays/Notifications.kt) |
+| 通知中心**屏级共享**不是 per-sheet | 连接 A 的导出失败、连接 B 的 SQL 报错，按连接分开就断了「刚才发生了什么」这条线 | [`shared/.../notifications/NotificationCenter.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/notifications/NotificationCenter.kt) |
 
 | 错误靠屏级**对账**而不是逐点埋点 | 报错散落在五处，每处埋一次推送等于把「什么算一次错误」的判断散到五个文件里 | [`BrowserChrome.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserChrome.kt) |
 
-| 去重键 = 结构标识 **+ 错误文本** | 连接失败是**持续状态**（每次重组都在），没有去重会刷出几十条一模一样的通知；但「`Table 'a'` 变成 `Table 'b'`」是新的一件事，必须报 | [`Notifications.kt`](./src/main/kotlin/com/langbiantianya/sundays/Notifications.kt) |
+| 去重键 = 结构标识 **+ 错误文本** | 连接失败是**持续状态**（每次重组都在），没有去重会刷出几十条一模一样的通知；但「`Table 'a'` 变成 `Table 'b'`」是新的一件事，必须报 | [`shared/.../notifications/NotificationCenter.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/notifications/NotificationCenter.kt) |
 
 | 「什么算同一次」只能有**一个产地** | 两边算的 key 不是同一个时，每轮对账都把来源 forget 掉再当新的重推，去重形同虚设 | 同上 |
 
 | 详情**原文不截断** | 引擎错误常是 `ORA-00933: table or view does not exist` 这类，省略号一截断就失去可诊断性 | 同上 |
+
+| 通知中心的**时间格式化由调用方注入** | 「本地时区里的今天几点」是平台知识（`commonMain` 没有 `Calendar` 也没有时区转换）。为此引入 `kotlinx-datetime` 不值得 —— 与 `ClipboardWriter` / `NativePathPicker` 一样，平台能力留在平台侧 | [`BrowserChrome.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserChrome.kt) 的 `formatNotificationTime` + `shared` 面板的 `timeFormatter` 参数 |
 
 | 剪贴板是**注入参数**不是直接调 `ClipboardWriter` | 本机 UI 测试其实**是有头**的（能写能读），直接调真剪贴板会让「无头必然失败」这个假设**本地绿、CI 红** | [`SchemaTree.kt`](./src/main/kotlin/com/langbiantianya/sundays/SchemaTree.kt) |
 

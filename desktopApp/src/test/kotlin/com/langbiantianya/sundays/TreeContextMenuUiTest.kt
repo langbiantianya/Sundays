@@ -15,7 +15,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.rightClick
@@ -28,6 +27,8 @@ import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.notifications.AppNotification
+import com.langbiantianya.sundays.notifications.NotificationCenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

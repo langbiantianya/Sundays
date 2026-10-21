@@ -26,6 +26,7 @@ import com.langbiantianya.dialect.H2Dialect
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
+import com.langbiantianya.sundays.browser.BrowserPane
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus

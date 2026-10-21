@@ -1,6 +1,6 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。90 个源文件（`commonMain` 63 / `commonTest` 24 /
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。97 个源文件（`commonMain` 69 / `commonTest` 25 /
 `jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 
@@ -36,6 +36,8 @@
 | `SettingsEntryButton` / `ThemeModeToggleButton` / `SystemInfoRefresh` | 设置页入口按钮、日夜切换按钮、系统信息自动刷新间隔（默认关闭） | [`ui/ThemeModeToggle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ThemeModeToggle.kt) 等 |
 | `DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog` | SQL 危险写操作识别与**逐句**只读判定、WHERE 字面量转义与 CAST 目标类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
 | `EmptyHint` / `ColumnBadge` / `TabRenameDialog` | 空态提示、字段类型徽标、标签重命名弹窗 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
+| `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 浏览器的**标签条 / 工作台切换 / 空态引导** —— 纯展示，只认窄数据形状 | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
+| `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 通知中心（状态 + 面板 + 铃铛入口）—— 跨界面收集错误 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
 
 **扩展方式**：新增语言 / formatter 走 SPI 注册；替换菜单项、详情面板、工具栏动作走 Composable lambda 插槽
 （`contextMenuItems` / `detailPanel` / `actions`）—— 不是 `List<UIElement>` 数据驱动。各扩展点的契约见
@@ -55,6 +57,10 @@
 `shared/` **不依赖** `:engine`、gRPC、protobuf、任何 `dialect-*`；依赖方向是单向的
 `desktopApp → {engine, shared}`，引擎与 desktopApp 都不感知本模块。系统信息刻意用扁平数据类而非 proto，
 由调用方映射 —— 这是解耦的物理保证。边界判据与逐项归属见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)。
+
+> ⚠️ **判据是「代码引用」，不是「import 列表」** —— `import` 里有 proto 类型不等于用到了它。
+> 仓库曾有一批**从未被引用的 proto import**（某次重构后的残留），让「这个文件碰不碰引擎」
+> 这件事在文件层面失真。本轮已清干净，判据重新可信 —— 但下次改完仍要**按引用判断**，别看 import 列表。
 
 ---
 

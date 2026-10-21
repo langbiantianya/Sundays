@@ -28,6 +28,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.sundays.browser.BrowserPane
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus

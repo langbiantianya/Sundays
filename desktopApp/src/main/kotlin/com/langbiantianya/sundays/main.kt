@@ -45,6 +45,7 @@ import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.navigation.AppDestination
+import com.langbiantianya.sundays.notifications.NotificationCenter
 import com.langbiantianya.sundays.onboarding.OnboardingScreen
 import com.langbiantianya.sundays.settings.SettingsScreen
 import com.langbiantianya.sundays.settings.SystemInfo

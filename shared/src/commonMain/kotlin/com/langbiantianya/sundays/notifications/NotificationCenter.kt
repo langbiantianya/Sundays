@@ -6,12 +6,17 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-package com.langbiantianya.sundays
+package com.langbiantianya.sundays.notifications
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.concurrent.atomics.incrementAndFetch
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 /**
  * 一条通知。
@@ -59,8 +64,22 @@ data class AppNotification(
  *
  * 只记「有没有未读」，不记每条的已读状态 —— 通知条目短、列表不长，
  * 逐条已读会逼用户逐条点，而**打开面板本身**就是一次确认。
+ *
+ * ## 为什么住在 `:shared`
+ *
+ * 它是**纯状态容器**：不碰引擎、不碰平台 API，只用 Compose 的状态原语。
+ * 而「跨界面收集错误」这件事在分析模式（另一个工作台）里同样要做 ——
+ * 放在 `:desktopApp` 就得复制一份，或者让分析模式反向依赖桌面端。
+ *
+ * 时间戳来自**可注入的时钟**（[now]），有两个理由：
+ * ① `commonMain` 里没有 `System.currentTimeMillis()`；
+ * ② 测试要能确定「这条通知是什么时候来的」。
  */
-class NotificationCenter {
+@OptIn(ExperimentalAtomicApi::class)
+class NotificationCenter(
+    /** 当前时间（毫秒）。默认读系统时钟；测试可以注入一个固定值。 */
+    private val now: () -> Long = ::systemNowMillis,
+) {
     private val _notifications = mutableStateListOf<AppNotification>()
     val notifications: List<AppNotification> get() = _notifications
 
@@ -93,7 +112,7 @@ class NotificationCenter {
                 severity = severity,
                 title = title,
                 detail = detail,
-                timestamp = System.currentTimeMillis(),
+                timestamp = now(),
             ),
         )
     }
@@ -153,15 +172,30 @@ class NotificationCenter {
         notifiedSources.clear()
     }
 
-    private fun nextId(): String =
-        "n-" +
-            java.util.concurrent.atomic
-                .AtomicLong(notifySeq)
-                .incrementAndGet()
+    private fun nextId(): String = "n-" + notifySeq.incrementAndFetch()
 
     private companion object {
         /** 列表上限。60 条足够回溯一个下午，且滚动条不会长得像日志文件。 */
         const val MAX_NOTIFICATIONS = 60
-        var notifySeq = 0L
+
+        /**
+         * 通知 id 的全局序列 —— 跨屏唯一。
+         *
+         * ⚠️ 原实现是 `AtomicLong(notifySeq).incrementAndGet()` —— **每次都 new 一个
+         * 从 0 开始的原子对象**，而 `notifySeq` 这个 `var` 永远是 0，于是每条通知的 id
+         * 都是 `"n-1"`。它当时没出事，只是因为 id 从来没被当成 key 用过；
+         * 但「id 唯一」是这个字段存在的唯一理由，留着这个写法等于埋雷。
+         */
+        val notifySeq = AtomicLong(0L)
     }
 }
+
+/**
+ * 系统时钟（毫秒）。
+ *
+ * `commonMain` 里没有 `System.currentTimeMillis()` —— 那是 JVM 的 API。
+ * `kotlin.time.Clock` 是 Kotlin 标准库在 common 里的时钟抽象，
+ * 用它代替「直接调系统时间」才能让这份代码待在 `commonMain`。
+ */
+@OptIn(ExperimentalTime::class)
+private fun systemNowMillis(): Long = Clock.System.now().toEpochMilliseconds()

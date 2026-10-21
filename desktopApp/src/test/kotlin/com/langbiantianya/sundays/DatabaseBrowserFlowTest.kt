@@ -12,6 +12,7 @@ import com.langbiantianya.dialect.H2Dialect
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
+import com.langbiantianya.sundays.browser.BrowserPane
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.CompletionKind
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile

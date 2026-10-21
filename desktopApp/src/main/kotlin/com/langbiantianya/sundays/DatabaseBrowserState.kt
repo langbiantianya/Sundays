@@ -13,47 +13,19 @@
 
 package com.langbiantianya.sundays
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateSet
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
@@ -64,7 +36,6 @@ import com.langbiantianya.grpc.dataListRequest
 import com.langbiantianya.grpc.dataRequest
 import com.langbiantianya.grpc.foreignKeyCreateRequest
 import com.langbiantianya.grpc.foreignKeyDeleteRequest
-import com.langbiantianya.grpc.foreignKeyListItem
 import com.langbiantianya.grpc.foreignKeyListRequest
 import com.langbiantianya.grpc.foreignKeyRequest
 import com.langbiantianya.grpc.functionListRequest
@@ -92,6 +63,7 @@ import com.langbiantianya.grpc.viewRequest
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.sundays.browser.BrowserPane
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.connection.DialectType
@@ -100,8 +72,8 @@ import com.langbiantianya.sundays.editor.CompletionItem
 import com.langbiantianya.sundays.editor.CompletionKind
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorState
-import com.langbiantianya.sundays.editor.ui.rememberCodeEditorState
-import com.langbiantianya.sundays.settings.formatBytes
+import com.langbiantianya.sundays.notifications.AppNotification
+import com.langbiantianya.sundays.notifications.NotificationCenter
 import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.sql.SqlLiterals
 import com.langbiantianya.sundays.table.CellEdit
@@ -118,24 +90,14 @@ import com.langbiantianya.sundays.table.TableRow
 import com.langbiantianya.sundays.table.TableStructureDraft
 import com.langbiantianya.sundays.table.defaultColumnType
 import com.langbiantianya.sundays.table.diff
-import com.langbiantianya.sundays.table.typeChoices
 import com.langbiantianya.sundays.table.validate
-import com.langbiantianya.sundays.ui.focusRing
-import com.langbiantianya.sundays.ui.menuShape
-import com.langbiantianya.sundays.ui.onRightClick
 import com.langbiantianya.sundays.ui.plural
-import com.langbiantianya.sundays.ui.str
-import com.langbiantianya.sundays.ui.tabStripContainerColor
-import com.langbiantianya.sundays.ui.winShape
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
-import kotlin.math.roundToInt
 import com.google.protobuf.Value as ProtoValue
 
 /**

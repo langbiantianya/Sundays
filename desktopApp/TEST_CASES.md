@@ -138,7 +138,7 @@
 | 测试类 | 覆盖的能力 |
 |---|---|
 | [`BackgroundTaskLifecycleTest`](./src/test/kotlin/com/langbiantianya/sundays/BackgroundTaskLifecycleTest.kt) | 后台任务：成功收口 / 失败也必须收口并带原因 / 徽标计数只数运行中 / 「清除已完成」不误伤运行中 / 批量登记 N 个且文件名带序号 / 空列表不登记 / 状态行不报 0 行 |
-| [`NotificationCenterTest`](./src/test/kotlin/com/langbiantianya/sundays/NotificationCenterTest.kt) | 通知中心：按来源去重 / 来源消失后可再报 / 徽标 / 打开面板即已读 / 详情原文不截断 |
+| [`ErrorReconciliationTest`](./src/test/kotlin/com/langbiantianya/sundays/ErrorReconciliationTest.kt) | 屏级错误**对账**：推送与遗忘必须用同一个 key —— 同一批错误反复对账只推一条；错误消失后再现会重新推送；错误文本变化视为新的一条；没有错误时不产生任何通知（通知中心本身的行为已随组件上移，见 [`shared/.../notifications/NotificationCenterTest.kt`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/notifications/NotificationCenterTest.kt)） |
 | [`EngineMemoryStatusBarTest`](./src/test/kotlin/com/langbiantianya/sundays/EngineMemoryStatusBarTest.kt) | 底部堆占用状态栏：比例算法含钳位与除零 / 紧凑格式化 / 初始「—」/ null 与异常降级 / 空态仍在 / 详情面板四行与设置页一致 / 状态栏与面板的宽度定位契约 / 指针移出 200ms 宽限自动关闭 / 指针在面板内**不**关闭 |
 | [`ModernThemeParityTest`](./src/test/kotlin/com/langbiantianya/sundays/ModernThemeParityTest.kt) | 现代配色档的组件取色一致性 |
 | [`ThemeContentColorTest`](./src/test/kotlin/com/langbiantianya/sundays/ThemeContentColorTest.kt) | 主题内容色 |

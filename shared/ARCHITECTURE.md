@@ -27,13 +27,15 @@
 | **OnboardingScreen** | 首次启动外观引导（配色 / 明暗 / 密度 / 语言） | [`onboarding/OnboardingScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreen.kt) |
 | **TableStructureDialog** | 表结构编辑弹窗（字段 / 主键 / 外键，类型下拉跟着方言走） | [`table/TableStructureDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/TableStructureDialog.kt) |
 | **SQL 文本工具** | 危险写操作识别与只读判定、WHERE 字面量转义与 CAST 类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
+| **浏览器的标签条与工作台切换** | sheet 标签条 / 工作台切换按钮 / 空态引导（只认窄数据形状 `SheetSummary`） | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
+| **通知中心** | 跨界面收集错误：状态容器 + 面板 + 铃铛入口 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
 | **通用 UI 工具** | `ContextMenuState<T>` + `Modifier.onRightClick` + `DragHandle` + `FocusRing` + `EmptyHint` + `ColumnBadge` + `TabRenameDialog` + 复古控件包装 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 
 ### 1.2 KMP Source Set 布局
 
 ```
 shared/
-├── commonMain/        所有业务 UI 组件（平台无关）：editor/ table/ connection/ navigation/ onboarding/ settings/ sql/ ui/
+├── commonMain/        所有业务 UI 组件（平台无关）：browser/ connection/ editor/ navigation/ notifications/ onboarding/ settings/ sql/ table/ ui/
 ├── commonTest/        平台无关测试（tokenizer / 模型 / 集成 / 布局契约）
 ├── jvmMain/           当前为空 —— 无平台特定实现（`commonMain` 全量可用）
 └── jvmTest/           JVM 特定测试（文件持久化与 POSIX 权限）
@@ -59,13 +61,34 @@ shared/
 | `ConnectionManagerScreen`（回调注入） | 否（引擎调用由 `onTestConnection` 等回调注入） | ✅ `shared/commonMain` |
 | `TableStructure*`（草稿 / 差分 / 校验 / 编辑弹窗） | 否（只依赖 Compose 与 `DialectType` / `ColumnTypeCatalog`） | ✅ `shared/commonMain` |
 | `DangerousSql` / `SqlLiterals` / 危险语句确认框 | 否（纯字符串扫描与转义） | ✅ `shared/commonMain` |
+| `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 否（纯状态 + 纯展示；时间格式化由调用方注入） | ✅ `shared/commonMain`（v2.28 上移） |
+| `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 否（纯展示 + 窄数据形状） | ✅ `shared/commonMain`（v2.28 上移） |
 | `ConnectionSession` | 是（`IdbEngine.testConnection` / `disconnect`） | ❌ `desktopApp` |
 | `DatabaseBrowserState` / `DatabaseBrowserScreen` | 是（`IdbEngine.invoke` + proto 构造器） | ❌ `desktopApp` |
+| `SchemaTree` / `TablePreview` / `ExportDialogs` / `GenerateWorkbench` / `SqlWorkbench` / `ActiveSheetContent` | 间接是（参数是 `DatabaseBrowserState`） | ❌ `desktopApp`（见下「为什么它们还搬不动」） |
+| `ClipboardWriter` / `NativePathPicker` / `PointerIcons` | 否，但**平台专属**（`java.awt`） | ❌ `desktopApp` |
 
 `:engine` 是纯 JVM 模块，因此任何引用 `IdbEngine` 或 proto 类型的代码**都无法进入 `commonMain`** —— 状态机与引擎接线必须留在 `desktopApp`。
 
 > ⚠️ 这条边界**只在代码里引用了 proto 时才生效**，写一段 KDoc 提到 `com.langbiantianya.grpc.ColumnDef` 不会挡住搬迁。
 > 判据是「代码引用」，不是「文本出现」—— 搬完顺手把 KDoc 里的全名改成短名，否则会留下一个在 commonMain 里永远解析不了的悬空链接。
+
+> ⚠️ **判据是「代码引用」，不是「import 列表」**。仓库曾有一批**从未被引用的 proto import**
+> （某次重构后的残留，共 255 条），让「这个文件碰不碰引擎」在**文件层面**失真 ——
+> 看 import 会得出「这些 UI 文件都依赖 proto」的结论，于是错过了一批本可上移的组件。
+> 本轮已清干净（连带另外 188 条其他未使用 import），但下次仍要**按引用判断**。
+
+#### 为什么 `SchemaTree` / `TablePreview` / `SqlWorkbench` 那些还搬不动
+
+它们本身是纯展示，卡住它们的是**参数类型**：这些组件的入参是 `DatabaseBrowserState`，
+而那个 state 是**引擎接线**的产物（它构造 proto 请求、调用引擎、解析响应）。
+
+要让它们上移，得先把 `DatabaseBrowserState`（4200 行、35 处 proto 请求构造）拆成
+「纯状态 + 引擎动作接口」两层 —— 那是一次**契约级**重构（要新增几十个纯 Kotlin 数据形状），
+属于 M3 的范畴，**不夹带在这次上移里**。在那之前它们留在 `desktopApp`。
+
+本轮上移的 `SheetTabRow` 走的正是**同一个解法**（窄数据形状 + 回调注入），
+说明这条路是通的 —— 只是 state 那一侧的工作量比标签条大两个数量级。
 
 > ⚠️ `internal` 在 Kotlin 里是**模块内**可见。代码从 `desktopApp` 搬到 `shared` 之后，原来只给同模块用的声明会突然编译不过；
 > 反过来，不加区分地全改成 `public` 又会把测试 tag 契约变成一锅谁都能看见的公共面。逐个按「消费方真的引用到了吗」放开。
@@ -147,6 +170,10 @@ shared/
 | 4.17 | **字段 id 决定它存到哪里** | 六个**约定 id**（host / port / database / username / password / jdbcUrl）对应 `ConnectionConfig` 的固定字段；**其余 id 一律落进 `properties`**（那个开放的键值容器）。前者是引擎建池时直接要的，后者是方言特有的 —— 固定字段的做法等于「每加一个方言改一次模型」 | [`connection/ConnectionFormFields.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionFormFields.kt) 的 `fieldValue` / `withFieldValue` |
 | 4.18 | **URL 形状**不**进 spec** | spec 描述「要填哪些字段」，不描述「URL 长什么样」—— 那是 4.11 的**同一条**例外：每种方言的 URL 语法真的不同，是行为不是元数据。spec 里那条 `jdbcUrl` 字段只声明「有一个 URL 输入框」，URL 怎么拼仍由 `JdbcUrl.kt` 的 `when` 决定 | `ConnectionFormFields.kt` + `JdbcUrl.kt` |
 | 4.19 | **嵌入式方言的 URL 是**只读展示**（`FieldType.DISPLAY`） | 嵌入式方言的 URL 完全由目标字段折算出来，让用户手改它只会与目标字段打架（改字段会重写 URL，改 URL 会覆盖字段）—— 两处真相源 | `ConnectionFormFields.kt` 的 `DisplayField` |
+| 4.20 | **通知中心上移，且**时间格式化**由调用方注入** | 通知中心是纯状态 + 纯展示，本该在 `:shared`；但「本地时区里的今天几点」是**平台知识**（`commonMain` 既没有 `java.util.Calendar` 也没有时区转换）。为此引入 `kotlinx-datetime` 不值得 —— 改成**参数注入**，`desktopApp` 继续用 `Calendar` 实现。分界与 `ClipboardWriter` / `NativePathPicker` 一致 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) + `desktopApp/.../BrowserChrome.kt` 的 `formatNotificationTime` |
+| 4.21 | **标签条只认**窄数据形状**（`SheetSummary`），不认 `SheetDescriptor`** | `SheetDescriptor` 持有整个 `DatabaseBrowserState`（引擎接线的产物），标签条一个字节都用不到，却因参数类型带上了它而被绑死在 `:desktopApp`。抽出「id / 名称 / 状态」三样即可解耦 —— 与 `ConnectionManagerScreen` 的**回调注入**是同一个解法 | [`browser/SheetSummary.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/SheetSummary.kt) + `desktopApp/.../DatabaseBrowserTypes.kt` 的 `toSummary` |
+| 4.22 | **通知 id 必须全局唯一**，序列是**真原子**的 | 原实现写的是 `AtomicLong(notifySeq).incrementAndGet()` —— **每次 new 一个从 0 开始的原子对象**，而 `notifySeq` 那个 `var` 永远是 0，于是每条通知的 id 都是 `"n-1"`。当时没出事只是因为 id 从来没被当成 key 用过；「id 唯一」却是它存在的唯一理由 | [`notifications/NotificationCenter.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/NotificationCenter.kt) 的 `notifySeq` + `NotificationCenterTest` |
+| 4.23 | **上移的判据是「代码引用」，不是「import 列表」** | 仓库曾有 255 条**从未被引用**的 proto import（重构残留），让「这个文件碰不碰引擎」在文件层面失真 —— 看 import 会误判一批纯 UI 组件「搬不动」。清理后判据重新可信，但结论仍要**按引用**得出 | §1.3 的判据表 |
 
 **两种引导流程**：`WizardFlow.NORMAL`（`BASIC_INFO → CONNECTION_TYPE → CREDENTIALS → TEST_SAVE`，4 步）与 `WizardFlow.QUICK_CONNECT`（`QUICK_CONNECT → CREDENTIALS → TEST_SAVE`，3 步）。调用方维护 `wizardFlow` 并在新建 / 快速连接 / 编辑三个入口同步设置；快速连接的「连接」**不落盘**。参考实现见 [`desktopApp/.../ConnectionSession.kt`](../desktopApp/src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt)。
 

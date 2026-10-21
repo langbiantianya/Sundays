@@ -8,16 +8,10 @@
 
 package com.langbiantianya.sundays
 
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.grpc.Action
@@ -26,8 +20,8 @@ import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.grpc.sqlExecuteRequest
 import com.langbiantianya.grpc.sqlRequest
+import com.langbiantianya.sundays.browser.BrowserPane
 import com.langbiantianya.sundays.connection.ConnectionConfig
-import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.sql.SqlLiterals
