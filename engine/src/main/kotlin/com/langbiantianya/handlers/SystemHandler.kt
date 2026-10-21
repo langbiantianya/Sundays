@@ -8,9 +8,9 @@
 
 package com.langbiantianya.handlers
 
+import com.langbiantianya.engine.DialectInfoMapper
 import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.grpc.ConnectionConfig
-import com.langbiantianya.grpc.DialectInfo
 import com.langbiantianya.grpc.PayloadAdapter
 import com.langbiantianya.grpc.SystemBeginResponse
 import com.langbiantianya.grpc.SystemCancelResponse
@@ -252,27 +252,13 @@ object SystemHandler {
      * 前端调用此接口后，可以根据返回的 DialectInfo.connectionType / requiresHost /
      * supportsUser 等字段动态决定连接表单的字段显隐与默认值。
      *
+     * v2.29 起还带上了 `DialectInfo.connectionForm`（**方言自描述的连接表单规格**，
+     * 见 `dialect-contract` 模块）—— 前端据此按 spec 渲染凭据页，不必按方言写分支。
+     *
      * 不需要 connection（与 INFO 一样纯元数据查询），但 Request 仍可携带 connection 字段（被忽略）。
      */
     fun listDrivers(): SystemListDriversResponse {
-        val items =
-            DialectLoader.getAllDialects().map { dialect ->
-                dialectInfo {
-                    driverName = dialect.driverName
-                    displayName = dialect.displayName
-                    jdbcDriverClassName = dialect.jdbcDriverClassName
-                    jdbcUrlExample = dialect.jdbcUrlExample
-                    connectionType = dialect.connectionType.name
-                    requiresHost = dialect.requiresHost
-                    requiresPort = dialect.requiresPort
-                    defaultPort = dialect.defaultPort ?: 0
-                    supportsUser = dialect.supportsUser
-                    supportsPassword = dialect.supportsPassword
-                    supportsSchema = dialect.supportsSchema
-                    supportsCrossDatabase = dialect.supportsCrossDatabase
-                    capabilities.addAll(dialect.capabilities.map { it.name })
-                }
-            }
+        val items = DialectLoader.getAllDialects().map { dialect -> DialectInfoMapper.toDialectInfo(dialect) }
         return systemListDriversResponse {
             this.items.addAll(items)
         }

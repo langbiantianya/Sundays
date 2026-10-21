@@ -29,6 +29,13 @@ dependencies {
     api(libs.grpc.kotlin.stub)
     api(libs.kotlinx.coroutines.core)
     api(libs.slf4j.api)
+
+    // 连接表单契约（`:dialect-contract`）—— 本模块的 `DialectFormMapping` 要在
+    // proto 消息与契约类型之间来回映射。
+    //
+    // 它带进来的只有 :i18n（文案键）与 kotlinx-serialization（AuthMethod），
+    // 都很轻 —— 不破坏「不把 Hadoop / POI 带给纯客户端」这条约束。
+    api(project(":dialect-contract"))
 }
 
 // protoc 及其 gRPC 插件都是**按平台分发的原生可执行文件**。插件默认用 osdetector

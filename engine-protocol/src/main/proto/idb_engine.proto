@@ -739,6 +739,62 @@ message DialectInfo {
   //               ROUTINES / CROSS_DATABASE / MULTI_SCHEMA / EXPORT / DDL_TRANSACTION /
   //               EMBEDDED_MODE）。前端按集合显隐对应按钮/菜单。
   repeated string capabilities    = 13;
+  // 连接表单规格（v2.29）—— 方言自描述「连得上要填什么」。
+  //
+  // ⚠️ 这**不是** per-connection 的字段：它随 LIST_DRIVERS 一次性下发
+  // （SYSTEM.INFO 那样的纯元数据查询，不需要连接），不是每次建连接都跑一遍。
+  //
+  // **不设置**（has_connection_form() == false）表示「该方言没声明表单」——
+  // 前端据此**回退旧的枚举分支**（见设计文档 §5.7 的 Q6 结论）。
+  // 这与「声明了但字段为空」是两件事，前端要分得开。
+  //
+  // 消息字段在 proto3 里天然带存在性（presence），所以不需要 optional。
+  DialectForm connection_form = 14;
+}
+
+// 连接表单规格（v2.29）—— 与 dialect-contract 模块的 ConnectionFormSpec 一一对应。
+message DialectForm {
+  // 每种连接类型一份表单（"CLIENT_SERVER" / "EMBEDDED" / "IN_MEMORY" / "FILE_BASED"）。
+  // 同一份 spec 里可以有多份：H2 的内存库与文件库形状不同。
+  repeated DialectFormVariant forms = 1;
+  // 认证方式（"PASSWORD" / "KERBEROS" / "NONE"）。长度为 1 时前端不渲染下拉。
+  repeated string auth_methods = 2;
+  // 默认端口；0 表示无默认（嵌入式方言）。
+  int32 default_port = 3;
+}
+
+// 一份表单 —— 某个连接类型下的字段清单。
+message DialectFormVariant {
+  // 连接类型名，与前端 ConnectionType.name 同名。
+  string connection_type = 1;
+  // 字段清单，**顺序即渲染顺序**。
+  repeated DialectFormField fields = 2;
+}
+
+// 一个表单字段。
+message DialectFormField {
+  // 字段 id。约定 id："host" / "port" / "database" / "username" / "password" / "jdbcUrl"
+  //（对应 ConnectionConfig 的固定字段）；其余 id 落进 ConnectionConfig.properties。
+  string id = 1;
+  // 标签的文案键 —— i18n StrKey 的枚举名（不是译文本身）。
+  string label_key = 2;
+  // 字段类型："TEXT" / "PASSWORD" / "INT" / "CHOICE" / "DISPLAY"。
+  string type = 3;
+  bool required = 4;
+  // 敏感值：界面上要掩码、导出配置时要剔除。
+  bool secret = 5;
+  // 下拉候选（type == "CHOICE" 时有效）。
+  repeated string choices = 6;
+  // 占位提示的文案键（StrKey 名）；空串 = 没有。
+  string placeholder_key = 7;
+  // 占位提示的字面量（不翻译，例如 JDBC URL 示例）；空串 = 没有。
+  string placeholder = 8;
+  // 该字段在哪些认证方式下出现；空 = 所有认证方式下都出现。
+  repeated string auth_methods = 9;
+  // 该字段之前是否画一条分隔线。
+  bool separator_before = 10;
+  // 该字段是否是多行输入（JDBC URL 这类长文本）。
+  bool multiline = 11;
 }
 message SystemListDriversResponse {
   repeated DialectInfo items = 1;
