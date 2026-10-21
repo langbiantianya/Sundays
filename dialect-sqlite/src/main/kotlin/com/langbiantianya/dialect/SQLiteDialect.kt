@@ -8,6 +8,10 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.ConnectionFormTypes
+import com.langbiantianya.dialect.contract.StandardForms
+import com.langbiantianya.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -62,6 +66,25 @@ class SQLiteDialect : DatabaseDialect {
     override val supportsSchema = false // SQLite 只有 main/temp，无业务 schema
     override val supportsCrossDatabase = false // 业务层不暴露 ATTACH（嵌入场景罕见）
     override val jdbcUrlExample = "jdbc:sqlite:/path/to/data.db  (or :memory: for in-memory)"
+
+    /**
+     * 连接表单规格 —— 前端按它渲染凭据页。
+     *
+     * SQLite 只有一个连接类型（`FILE_BASED`），字段是**一个目标**：文件路径，
+     * 留空或填 `:memory:` 则是内存库。
+     */
+    override val connectionForm =
+        ConnectionFormSpec(
+            forms =
+                listOf(
+                    StandardForms.embedded(
+                        connectionType = ConnectionFormTypes.FILE_BASED,
+                        labelKey = StrKey.DATABASE_FILE_PATH_LABEL,
+                        placeholderKey = StrKey.DATABASE_FILE_PATH_HINT_SQLITE,
+                    ),
+                ),
+        )
+
     override val capabilities =
         setOf(
             DialectCapability.VIEWS,

@@ -8,6 +8,8 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.StandardForms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -48,6 +50,20 @@ class PostgreSQLDialect : DatabaseDialect {
     override val supportsSchema = true
     override val supportsCrossDatabase = true // PG 同连接可跨 database 查询
     override val jdbcUrlExample = "jdbc:postgresql://127.0.0.1:5432/mydb"
+
+    /**
+     * 连接表单规格 —— 前端按它渲染凭据页。
+     *
+     * 形状与 MySQL 完全相同（都是客户端/服务端），所以用
+     * [StandardForms.clientServer] 复用；**只有 JDBC URL 的占位示例**因方言而异
+     * （PG 的 URL 不带凭据段，示例也不该带）。
+     */
+    override val connectionForm =
+        ConnectionFormSpec(
+            forms = listOf(StandardForms.clientServer(jdbcUrlPlaceholder = "jdbc:postgresql://host:5432/db")),
+            defaultPort = 5432,
+        )
+
     override val capabilities =
         setOf(
             DialectCapability.USERS,

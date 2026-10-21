@@ -8,6 +8,10 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.ConnectionFormTypes
+import com.langbiantianya.dialect.contract.StandardForms
+import com.langbiantianya.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -65,6 +69,37 @@ class H2Dialect : DatabaseDialect {
     override val supportsSchema = true
     override val supportsCrossDatabase = true
     override val jdbcUrlExample = "jdbc:h2:mem:mydb;DB_CLOSE_DELAY=-1"
+
+    /**
+     * 连接表单规格 —— 前端按它渲染凭据页。
+     *
+     * H2 有**两种**连接类型，表单形状不同，所以声明**两份** form：
+     *
+     * - `IN_MEMORY` —— 填库名（`jdbc:h2:mem:<db>`）
+     * - `FILE_BASED` —— 填文件路径（`jdbc:h2:file:<path>`，H2 自己补 `.mv.db`）
+     *
+     * ⚠️ 内存库的字段标签过去用的是一句**硬编码中文**（「数据库名称」），
+     * 因为文案表里当时只有 `DATABASE`（「数据库」）而没有完全对应的那句。
+     * 现在改用 `StrKey.DATABASE_NAME`（「数据库名」）—— 顺手去掉一处漏出，
+     * 代价是那一句的措辞从「数据库名称」变成「数据库名」。
+     */
+    override val connectionForm =
+        ConnectionFormSpec(
+            forms =
+                listOf(
+                    StandardForms.embedded(
+                        connectionType = ConnectionFormTypes.IN_MEMORY,
+                        labelKey = StrKey.DATABASE_NAME,
+                        placeholderKey = StrKey.DATABASE_NAME_HINT,
+                    ),
+                    StandardForms.embedded(
+                        connectionType = ConnectionFormTypes.FILE_BASED,
+                        labelKey = StrKey.DATABASE_FILE_PATH,
+                        placeholderKey = StrKey.DATABASE_FILE_PATH_HINT_H2,
+                    ),
+                ),
+        )
+
     override val capabilities =
         setOf(
             DialectCapability.USERS,

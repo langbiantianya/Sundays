@@ -150,6 +150,23 @@ enum class StrKey {
     DATABASE_FILE_PATH_HINT_SQLITE,
     DATABASE_FILE_PATH_LABEL,
     DATABASE,
+
+    // ──────────────── 连接表单（方言自描述） ────────────────
+    //
+    // 这一组是「连接表单规格」（`dialect-contract` 模块的 `ConnectionFormSpec`）
+    // 要用的文案键 —— 方言声明字段时给出**键**，而不是字面量。
+    //
+    // · `FIELD_JDBC_URL` —— JDBC URL 输入框的标签。之前是硬编码的英文字面量
+    //   "JDBC URL"：它在六语言界面里是一处英文漏出（其余字段都有译文），
+    //   入表之后顺带修掉。
+    // · `FIELD_AUTH_METHOD` —— 认证方式下拉的标签。
+    // · `AUTH_METHOD_*` —— 三种认证方式各自的显示名（账密 / Kerberos 票据 / 无认证）。
+    FIELD_JDBC_URL,
+    FIELD_AUTH_METHOD,
+    AUTH_METHOD_PASSWORD,
+    AUTH_METHOD_KERBEROS,
+    AUTH_METHOD_NONE,
+
     TEST_AND_SAVE,
     CONNECTION_SUMMARY,
     TESTING,
@@ -704,4 +721,24 @@ enum class StrKey {
     // ──────────────── 原生文件选择 ────────────────
     PICK_EXPORT_FILE,
     PICK_OUTPUT_DIR,
+    ;
+
+    companion object {
+        /**
+         * 键名 → 键的映射 —— 供**按名字反查**用。
+         *
+         * ## 谁需要按名字反查
+         *
+         * 连接表单规格（`dialect-contract` 模块）里的字段带一个 `StrKey`，
+         * 而它要跨进程送到前端 —— proto 传不了 Kotlin 枚举，只能传**名字**。
+         * 前端收到名字后再反查回 `StrKey` 去查文案表。
+         *
+         * 认不出来的名字返回 `null`（**不猜**）：猜一个键等于给用户看一句
+         * 与字段语义不符的话，而「标签是空的」比「标签是错的」更容易被发现。
+         */
+        private val BY_NAME: Map<String, StrKey> = entries.associateBy { it.name }
+
+        /** 按名字反查键；认不出来返回 `null`。 */
+        fun fromName(value: String): StrKey? = BY_NAME[value]
+    }
 }

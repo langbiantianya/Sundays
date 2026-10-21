@@ -8,6 +8,9 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.ConnectionFormTypes
+import com.langbiantianya.dialect.contract.StandardForms
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +75,26 @@ class DuckDBDialect : DatabaseDialect {
     override val supportsSchema = true
     override val supportsCrossDatabase = true // ATTACH 多文件
     override val jdbcUrlExample = "jdbc:duckdb:/path/to/data.duckdb  (or :memory: / .csv / .parquet / .json / .xlsx)"
+
+    /**
+     * 连接表单规格 —— 前端按它渲染凭据页。
+     *
+     * DuckDB 只有一个连接类型（`EMBEDDED`），字段是**一个目标**：
+     * 文件路径、空（内存库）、或 `.csv` / `.parquet` / `.json` / `.xlsx`
+     * （后两类经 `ExcelToDuckDbCache` 预转换）。
+     */
+    override val connectionForm =
+        ConnectionFormSpec(
+            forms =
+                listOf(
+                    StandardForms.embedded(
+                        connectionType = ConnectionFormTypes.EMBEDDED,
+                        labelKey = StrKey.DATABASE_FILE_PATH_LABEL,
+                        placeholderKey = StrKey.DATABASE_FILE_PATH_HINT_DUCKDB,
+                    ),
+                ),
+        )
+
     override val capabilities =
         setOf(
             DialectCapability.ROUTINES,

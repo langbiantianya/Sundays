@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.connection
 
+import com.langbiantianya.dialect.contract.AuthMethod
 import com.langbiantianya.i18n.StrKey
 import kotlinx.serialization.Serializable
 
@@ -132,27 +133,15 @@ data class ConnectionConfig(
     }
 }
 
-/**
- * 认证方式。
- *
- * ## 为什么不是「有密码 / 没密码」两个值
- *
- * 数仓环境的常态是 **Kerberos**（票据 / keytab），不是账密。把它单列成一个值，
- * 连接向导才能把「用户 / 主体 / keytab」这几个字段摆出来 ——
- * 继续用「账密 / 空」两个值表达 Kerberos，只能把它塞进 `properties` 里当无名键，
- * 界面与校验都无从谈起。
- */
-@Serializable
-enum class AuthMethod {
-    /** 账密认证（用户名 + 密码）。 */
-    PASSWORD,
-
-    /** Kerberos 票据 / keytab 认证。 */
-    KERBEROS,
-
-    /** 无认证（本地嵌入式库，或服务端不校验身份）。 */
-    NONE,
-}
+// 认证方式（`AuthMethod`）**已搬到 `:dialect-contract` 模块**
+// （`com.langbiantianya.dialect.contract.AuthMethod`）。
+//
+// 搬家原因：连接表单规格（`ConnectionFormSpec`）要声明「本方言支持哪些认证方式」，
+// 而 spec 住在契约模块、`:shared` 依赖契约模块 —— 认证方式若留在 `:shared`，
+// 契约模块就看不见它（依赖方向反了）。
+//
+// 序列化名不变（`PASSWORD` / `KERBEROS` / `NONE`），所以 `connection.json` 的
+// 存量记录照常读得出，磁盘格式没有变化。
 
 /** 数据库方言类型 */
 @Serializable

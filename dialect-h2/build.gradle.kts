@@ -15,6 +15,9 @@ version = "0.1.0"
 
 dependencies {
     implementation(project(":api"))
+    // 文案表 —— `connectionForm` 里要给字段标 `StrKey`（标签 / 占位提示）。
+    // :api 对 :i18n 是 implementation 依赖（不传递给消费方），所以这里要自己声明。
+    implementation(project(":i18n"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.slf4j.api)
 

@@ -8,6 +8,8 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.DialectConnectionSpec
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import java.sql.Connection
@@ -143,6 +145,55 @@ interface DatabaseDialect {
      */
     val capabilities: Set<DialectCapability>
         get() = emptySet()
+
+    /**
+     * 该方言的**连接表单规格** —— 前端按它渲染凭据页，不按方言写分支。
+     *
+     * ## 为什么要有它
+     *
+     * 没有它的时候，连接向导的字段是按连接类型写死的分支
+     * （`ConnectionManagerScreen` 里的 `when (connectionType)`），
+     * 于是「加一个方言」=「改一次前端」—— 而漏改一处就是一处
+     * 「界面说能连、实际连不上」的静默错配。
+     *
+     * 现在这段知识由**方言自己声明**：新增一个方言的表单形状不需要改前端。
+     *
+     * ## 默认实现是「空 spec」，不是「猜一套字段」
+     *
+     * 默认返回 [ConnectionFormSpec]（`forms` 为空）表示**「我没声明」**，
+     * 前端据此**回退旧的枚举分支**（见设计文档 §5.7 的 Q6 结论）。
+     *
+     * 为什么不默认给一套 host/port/database 的通用表单：
+     * 那会让「声明了 spec」和「没声明 spec」在数据上**分不出来** ——
+     * 前端会以为所有方言都归它管，于是内置方言的行为悄悄变了。
+     * 「空」是一个诚实的信号：**没声明就走老路**。
+     *
+     * 现有 5 个方言在 M1 第二片里各自补上了自己的声明（见各方言的 `connectionForm`）。
+     */
+    val connectionForm: ConnectionFormSpec
+        get() = ConnectionFormSpec()
+
+    // endregion
+
+    // region ─────── 拼 URL（带方言特有参数） ───────
+
+    /**
+     * 用「连接参数值」拼 JDBC URL —— **新重载**，旧的三个参数方法原样保留。
+     *
+     * ## 为什么要加重载，而不是改老方法的签名
+     *
+     * 方言拼 URL 时可能需要**方言特有的参数**（Kerberos 主体、keytab 路径、
+     * ZooKeeper 发现串……）。老签名 `buildJdbcUrl(host, port, database)` 装不下它们。
+     *
+     * 直接改签名会**破坏所有现存的方言插件**（第三方方言也得跟着改）。
+     * 加一个新重载、默认实现转调老方法，则：
+     *
+     * - 现有 5 个方言**一行不改**（默认实现走老路径，行为完全不变）；
+     * - 需要方言特有参数的方言（未来的 Hive / Impala）**只覆写新重载**。
+     *
+     * 这也是 §5.6「SPI 的向后兼容策略」那条决策的落点。
+     */
+    fun buildJdbcUrl(spec: DialectConnectionSpec): String = buildJdbcUrl(spec.host, spec.port, spec.database)
 
     // endregion
 

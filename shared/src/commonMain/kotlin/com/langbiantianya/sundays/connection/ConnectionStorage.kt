@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.connection
 
+import com.langbiantianya.dialect.contract.AuthMethod
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json

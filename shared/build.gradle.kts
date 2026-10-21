@@ -30,6 +30,13 @@ kotlin {
             // 对应 target（文案表本身没有任何 JVM 专有 API，迁移成本很低）。
             implementation(project(":i18n"))
 
+            // 连接表单契约 —— 「方言连得上要填什么」的共享声明。
+            //
+            // 与 `:i18n` 同理：`:api`（方言声明表单形状）与 `:shared`（前端按形状渲染）
+            // 彼此看不见对方，契约因此下沉成独立模块，两边都依赖它。
+            // 见 `dialect-contract/README.md`。
+            implementation(project(":dialect-contract"))
+
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)

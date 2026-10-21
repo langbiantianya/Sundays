@@ -14,6 +14,10 @@ dependencies {
     // 「$driverName 不支持 XXX」这批界面可见报错由文案表统一提供语言。
     // :i18n 是纯 Kotlin + JDK 模块（无 project 依赖），不会与 :api 形成环。
     implementation(project(":i18n"))
+    // 连接表单契约 —— `DatabaseDialect.connectionForm` 的类型。
+    // 必须是 api 依赖：方言插件（dialect-mysql 等）要能 new 出 `ConnectionFormSpec`，
+    // 而它们只依赖 :api，拿不到 implementation 里的东西。
+    api(project(":dialect-contract"))
 }
 
 group = "com.langbiantianya"

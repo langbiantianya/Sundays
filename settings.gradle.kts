@@ -45,6 +45,9 @@ plugins {
 include(":desktopApp")
 include(":shared")
 include(":i18n")
+// 连接表单契约 —— 「方言连得上要填什么」的共享声明。
+// 与 :i18n 同构：:api（声明）与 :shared（渲染）都依赖它，而彼此看不见对方。
+include(":dialect-contract")
 include("dialect-mysql")
 include("dialect-postgresql")
 include("dialect-h2")

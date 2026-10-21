@@ -8,6 +8,8 @@
 
 package com.langbiantianya.dialect
 
+import com.langbiantianya.dialect.contract.ConnectionFormSpec
+import com.langbiantianya.dialect.contract.StandardForms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.sql.Connection
@@ -47,6 +49,19 @@ class MySQLDialect : DatabaseDialect {
     //   `switchCatalog` 是多余的。见 DesktopBrowser TEST_CASES.md §9.16。）
     override val supportsCrossDatabase = true
     override val jdbcUrlExample = "jdbc:mysql://127.0.0.1:3306/mydb"
+
+    /**
+     * 连接表单规格 —— 前端按它渲染凭据页。
+     *
+     * 形状与 PostgreSQL 完全相同（都是客户端/服务端），所以用
+     * [StandardForms.clientServer] 复用；**只有 JDBC URL 的占位示例**因方言而异。
+     */
+    override val connectionForm =
+        ConnectionFormSpec(
+            forms = listOf(StandardForms.clientServer(jdbcUrlPlaceholder = "jdbc:mysql://host:3306/db?useSSL=false")),
+            defaultPort = 3306,
+        )
+
     override val capabilities =
         setOf(
             DialectCapability.USERS,
