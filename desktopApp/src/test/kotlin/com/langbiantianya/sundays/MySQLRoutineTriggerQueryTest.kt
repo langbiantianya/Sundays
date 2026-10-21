@@ -94,6 +94,11 @@ class MySQLRoutineTriggerQueryTest {
 
     @After
     fun tearDown() {
+        // ⚠️ @Before 可能被 `assumeTrue` 跳过（远程库不可达）—— 那时 `workspace`
+        // 还没赋值，下面的删除会抛 `UninitializedPropertyAccessException`，
+        // 把「跳过」变成「失败」。仓库的约定是「不可达时显式 skip，报告里留一条 skipped」。
+        if (!::workspace.isInitialized) return
+
         // 只回收对象，不碰库 —— 见类注释的资源纪律
         runCatching {
             MySqlSmoke.direct(SCHEMA).use { c ->
