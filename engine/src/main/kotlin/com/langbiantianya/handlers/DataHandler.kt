@@ -462,6 +462,7 @@ object DataHandler {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             val schema = req.schema
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             withBoundConnection(config, schema, sessionId) { conn ->
                 val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
@@ -498,6 +499,7 @@ object DataHandler {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             val schema = req.schema
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             withBoundConnection(config, schema, sessionId) { conn ->
                 val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)
@@ -538,6 +540,7 @@ object DataHandler {
             if (req.tableName.isBlank()) throw IllegalArgumentException("Missing 'tableName'")
             val schema = req.schema
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             withBoundConnection(config, schema, sessionId) { conn ->
                 val columnTypes = loadColumnTypes(conn, config.driver, config.database, schema, req.tableName)

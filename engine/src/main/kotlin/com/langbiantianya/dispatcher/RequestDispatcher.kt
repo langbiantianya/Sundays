@@ -570,6 +570,31 @@ object RequestDispatcher {
                         return@flow
                     }
 
+                    // ─────── L4 只读闸门 ───────
+                    // 必须排在**流式路由分支之前**：SQL.EXECUTE 与 IMPORT.RUN_IMPORT
+                    // 都是流式路由，而它们恰好是两条最要命的写路由。
+                    // 排在后面的话，闸门就永远碰不到它们。
+                    if (ReadOnlyGate.rejects(request)) {
+                        logger.info(
+                            "Read-only session rejected ${request.category}/${request.action}",
+                        )
+                        emit(
+                            Response
+                                .newBuilder()
+                                .setId(request.id)
+                                .setSuccess(false)
+                                .setStream(false)
+                                .setEnd(true)
+                                .setError(
+                                    ReadOnlyGate.rejectionMessage(
+                                        request.category,
+                                        request.action,
+                                    ),
+                                ).build(),
+                        )
+                        return@flow
+                    }
+
                     // ─────── Stream routes ───────
                     // timeoutMs 对流式路由同样生效。修复前流式分支在超时包装之外直接 return@flow，
                     // 导致 SQL.EXECUTE / DATA.LIST(pageSize=0) / DATA.GENERATE / EXPORT / IMPORT

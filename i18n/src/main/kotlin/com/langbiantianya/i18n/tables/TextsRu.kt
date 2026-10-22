@@ -586,4 +586,6 @@ internal val textsRu: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0} содержит точку с запятой",
         StrKey.PICK_EXPORT_FILE to "Выбор файла экспорта",
         StrKey.PICK_OUTPUT_DIR to "Выбор каталога вывода",
+        StrKey.ENGINE_READ_ONLY_REJECTED to "Операция записи отклонена в сеансе только для чтения: {0}",
+        StrKey.DIALECT_READ_ONLY to "{0} — диалект только для чтения, запись запрещена",
     )

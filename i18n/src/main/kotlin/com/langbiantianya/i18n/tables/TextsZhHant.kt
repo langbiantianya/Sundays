@@ -586,4 +586,6 @@ internal val textsZhHant: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0}含有分號",
         StrKey.PICK_EXPORT_FILE to "選擇匯出檔案",
         StrKey.PICK_OUTPUT_DIR to "選擇輸出目錄",
+        StrKey.ENGINE_READ_ONLY_REJECTED to "唯讀工作階段拒絕寫入操作：{0}",
+        StrKey.DIALECT_READ_ONLY to "{0} 是唯讀方言，不允許寫入",
     )

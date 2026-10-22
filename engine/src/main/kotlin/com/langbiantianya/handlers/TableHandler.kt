@@ -189,6 +189,7 @@ object TableHandler {
             val schema = req.schema
 
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val columnDefs =
@@ -288,6 +289,7 @@ object TableHandler {
             val schema = req.schema
 
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val sql =
@@ -369,6 +371,7 @@ object TableHandler {
             val schema = req.schema
 
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             return@withContext DataHandler.withBoundConnection(config, schema, sessionId) { conn ->
                 val ifClause = if (req.hasIfExists() && req.ifExists) "IF EXISTS " else ""
@@ -400,6 +403,7 @@ object TableHandler {
 
             val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
             return@withContext connection.use { conn ->
                 dialect.renameTable(conn, oldName, req.newName)
                 DataHandler.invalidateColumnTypeCache(config.driver, config.database, schema, oldName)
@@ -427,6 +431,7 @@ object TableHandler {
 
             val connection = PoolManager.getConnection(config, schema)
             val dialect = DialectLoader.getDialect(config.driver)
+            requireWritable(dialect)
 
             return@withContext connection.use { conn ->
                 dialect.truncateTable(conn, req.tableName)

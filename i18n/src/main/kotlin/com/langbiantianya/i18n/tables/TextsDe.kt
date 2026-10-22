@@ -586,4 +586,6 @@ internal val textsDe: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0} enthält ein Semikolon",
         StrKey.PICK_EXPORT_FILE to "Exportdatei wählen",
         StrKey.PICK_OUTPUT_DIR to "Ausgabeverzeichnis wählen",
+        StrKey.ENGINE_READ_ONLY_REJECTED to "Schreibvorgang in einer schreibgeschützten Sitzung abgelehnt: {0}",
+        StrKey.DIALECT_READ_ONLY to "{0} ist ein schreibgeschützter Dialekt und erlaubt keine Schreibvorgänge",
     )
