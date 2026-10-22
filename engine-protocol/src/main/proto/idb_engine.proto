@@ -30,6 +30,8 @@ enum Category {
   FOREIGN_KEY  = 11;
   TRIGGER      = 12;
   IMPORT       = 14;  // v2.16: 数据导入（CSV / JSON_LINES → 目标表）
+  ANALYSIS     = 15;  // v2.29: 数据分析模式（列源元数据 + 在计算引擎上跑分析 SQL）
+  REPORT       = 16;  // v2.29: 报表生成（ReportSpec → .xlsx）
 }
 
 enum Action {
@@ -59,6 +61,17 @@ enum Action {
   COMMIT       = 23;  // v2.16: 提交事务会话
   ROLLBACK     = 24;  // v2.16: 回滚事务会话
   SESSION_INFO = 25;  // v2.16: 查询事务会话状态
+
+  // ---- v2.29: 数据分析模式 ----
+  // 这四个动作**只在 Category.ANALYSIS 下有意义**，与别的 Category 里的同名动作
+  // （LIST / EXECUTE）刻意区分开：分析模式的请求带 read_only 标记、要打在
+  // 特定的方言上，走同一套 (Category, Action) 表分不开。
+  LIST_SOURCES = 26;  // 列该连接的「命名空间」（MySQL 的库 / PG 的 schema）
+  LIST_TABLES  = 27;  // 列远端表（只读 SPI）
+  LIST_COLUMNS = 28;  // 列远端列（只读 SPI）
+  RUN_QUERY    = 29;  // 在**计算引擎**（本地嵌入式方言）上跑分析 SQL
+
+  BUILD_EXCEL  = 30;  // v2.29: ReportSpec → .xlsx（Category.REPORT；M5 落地，本轮只落枚举）
 }
 
 // ============================================================================
@@ -80,6 +93,15 @@ message ConnectionConfig {
   // 非空时 PoolManager 直接用它建立连接池，host/port/database 被忽略，
   // 方言由 URL scheme 反查（DialectLoader.getDialectByJdbcUrl）。
   string jdbc_url  = 10;
+
+  // v2.29: 会话级只读标记（L4 闸门的判据）。
+  //
+  // 置 true 时，引擎在**进入 handler 之前**拒绝一切写路由，返回明确的只读错误。
+  //
+  // 为什么是**请求级**而不是连接级：只读是「这次调用属于哪种会话」的性质，
+  // 不是「这条连接是什么」的性质。同一条远端连接，在分析模式里是只读的，
+  // 在浏览模式里不是 —— 所以它不该被记在 connection.json 里。
+  bool read_only   = 11;
 }
 
 // Column definition used by TABLE.CREATE and TABLE.UPDATE.
@@ -430,6 +452,45 @@ message ImportRunRequest {
   string stop_import_id = 11; // 设置为运行中的导入 id 即取消该任务（与 stop_export_id 同构）
 }
 
+// ---------- ANALYSIS (v2.29) ----------
+// 数据分析模式的四条路由。它们的共同点是**只读源元数据** + **在计算引擎上跑 SQL**。
+//
+// 为什么源元数据要另起一个 Category，而不是复用 SCHEMA.LIST / TABLE.LIST：
+// 分析模式的源会话带 read_only 标记，而**分析流量在协议层要能一眼认出来**
+// （主设计 §3.5 的 L5「API 面才是窄门」）。复用浏览模式的路由会让
+// 「这条请求属于分析会话」这件事只存在于前端的一个布尔变量里 ——
+// 引擎就再也说不清了。
+message AnalysisRequest {
+  oneof body {
+    AnalysisListSourcesRequest list_sources = 1;
+    AnalysisListTablesRequest  list_tables  = 2;
+    AnalysisListColumnsRequest list_columns = 3;
+    AnalysisRunQueryRequest    run_query    = 4;
+  }
+}
+
+// 列该连接的「命名空间」。
+//
+// 「命名空间」是个中性叫法：**MySQL 上它是库，PG 上它是 schema** ——
+// 两者对 SPI 都是 listTables(conn, namespace) 的同一个参数位。
+// （浏览模式早就是这么用的：TablePreviewTab.schema 那个字段装的一直是**库名**。）
+//
+// 无参：命名空间列表由**连接配置**决定（PG 的库在 connection.database 里）。
+message AnalysisListSourcesRequest { }
+
+// 列远端表。namespace 为空 = 该连接下的全部（由方言决定语义）。
+message AnalysisListTablesRequest  { string namespace = 1; }
+
+// 列远端列。
+message AnalysisListColumnsRequest { string namespace = 1; string table = 2; }
+
+// 在计算引擎上跑分析 SQL。
+//
+// ⚠️ 引擎侧会校验目标方言**声明了 EMBEDDED_MODE**（本地嵌入式）——
+// 见主设计 §3.4：这条路由必须能写（工作区里的 CREATE TABLE tmp AS SELECT …），
+// 所以不能被只读闸门挡；但它绝不能打在远端上，否则就是绕过闸门的后门。
+message AnalysisRunQueryRequest    { string sql = 1; }
+
 // ============================================================================
 // Request envelope
 // ============================================================================
@@ -461,6 +522,7 @@ message Request {
     TriggerRequest   trigger_request   = 20;
     ExportRequest    export_request    = 21;
     ImportRequest    import_request    = 22;  // v2.16
+    AnalysisRequest  analysis_request  = 23;  // v2.29
   }
 }
 
@@ -1042,6 +1104,36 @@ message GenerateTerminalResponse {
   int32 tables_processed = 2;
 }
 
+// ---------- ANALYSIS 响应 (v2.29) ----------
+//
+// 三个列表响应**复用既有消息**（TableListItem / ColumnDef / Row），不另立类型 ——
+// 「同一个概念只该有一个消息类型」：另立一份 `AnalysisTableItem` 只会让
+// 引擎与前端多一次互转，而两边的字段完全一样。
+message AnalysisListSourcesResponse { repeated string items = 1; }         // 命名空间名
+message AnalysisListTablesResponse  { repeated TableListItem items = 1; }  // 复用
+message AnalysisListColumnsResponse { repeated ColumnDef items = 1; }      // 复用
+
+// 分析查询的结果。
+//
+// 为什么是**单次响应**而不是流式：浏览模式的 DATA.LIST 也是这么返回行的；
+// 行数上限复用 SQL_RESULT_MAX_ROWS（5000，与浏览模式一致），
+// 超了用 truncated 显式告知 —— 静默截断等于骗人。
+message AnalysisRunQueryResponse {
+  repeated Row rows = 1;           // 复用（map<string, Value>）
+  repeated ColumnDef columns = 2;  // 复用
+  int32  affected_rows = 3;
+  bool   truncated = 4;
+}
+
+message AnalysisResponse {
+  oneof body {
+    AnalysisListSourcesResponse list_sources = 1;
+    AnalysisListTablesResponse  list_tables  = 2;
+    AnalysisListColumnsResponse list_columns = 3;
+    AnalysisRunQueryResponse    run_query    = 4;
+  }
+}
+
 // ============================================================================
 // Response envelope
 // ============================================================================
@@ -1069,6 +1161,7 @@ message Response {
     ExportResponse     export     = 21;
     GenerateTerminalResponse generate_terminal = 22;
     ImportResponse     import     = 23;  // v2.16
+    AnalysisResponse   analysis   = 24;  // v2.29
 
     // Streaming frames (one per row / progress event)
     DataRowFrame          data_row_frame  = 30;
