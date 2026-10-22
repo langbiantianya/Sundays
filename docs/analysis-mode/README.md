@@ -1,6 +1,17 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v0.3** · 2026-10-21
+> **状态**：设计冻结待评审 · **v0.6** · 2026-10-22
+>
+> **v0.6 相对 v0.5 的修改**（M2 + M4' 实现期；实现细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
+>
+> 1. **§5.5 与 §13 的 Q3：MySQL / PostgreSQL 也声明 `ANALYSIS_SOURCE`** ——
+>    Q3 当初「不加」的理由是「L4 闸门从兜底变主力」，而 M2 正好把 L4 建起来；
+>    补上它当时缺的那个前置条件后，加不加已不再是安全性问题。
+> 2. **§3.5：`ANALYSIS.PULL_SAMPLE` 本轮不落地** —— 拉取要碰**两个**数据库
+>    （远端读 + 本地写），而一个 `Request` 只有一份 `ConnectionConfig`；
+>    按 §2.4 方案 C 拆成既有的 `EXPORT` + `IMPORT` 两次调用，零新协议。
+> 3. **§11：M2 / M4 的本轮范围** —— 明确 M3 跳过、拉取源用现有 MySQL / PostgreSQL。
 >
 > **v0.3 相对 v0.2 的修改**（评审意见：*组件和控件也尽量复用，可以优化组件更加通用*）：
 >
@@ -319,6 +330,17 @@ L4 的落法：
 | 路由 | 作用 |
 |---|---|
 | `REPORT.BUILD_EXCEL` | `ReportSpec` → .xlsx |
+
+> ⚠️ **v0.6：`ANALYSIS.PULL_SAMPLE` 本轮不落地**（实现期偏离，理由见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2）：
+> 拉取要碰**两个**数据库（远端读 + 本地写），而一个 `Request` 只有一份
+> `ConnectionConfig`；做成单路由就得在请求体里再塞一份 workspace 配置，
+> 「哪个配置才是本次请求的连接」于是有了两个产地。按 §2.4 方案 C 拆成
+> 既有的 `EXPORT.RUN_EXPORT` + `IMPORT.RUN_IMPORT` 两次调用，零新协议，
+> 三段进度各自已有实现与测试。
+>
+> ⚠️ **路由编号以实现篇为准**：§7.4 是 v0.3 的草图，它的路由名
+> （`RUN_ANALYSIS_QUERY`）与本节的路由表对不上；本节为准，编号在实现篇重新排。
 
 ### 3.6 验收：只读必须有测试钉住
 
@@ -654,13 +676,16 @@ enum class ConnectionType {
 | 能力位 | 含义 | 内置分布 |
 |---|---|---|
 | `BROWSE_SOURCE` | 可在**浏览模式**使用 | MySQL / PG / H2 / DuckDB / SQLite |
-| `ANALYSIS_SOURCE` | 可在**分析模式**使用 | DuckDB / Hive / Impala |
+| `ANALYSIS_SOURCE` | 可在**分析模式**使用 | DuckDB / Hive / Impala / **MySQL / PG**（v0.6 起，见下方说明与 Q3） |
 | `READ_ONLY_DIALECT` | **方言级只读**：写方法一律抛 `UnsupportedOperationException` | Hive / Impala |
 
 - 连接管理器按这两组显示（「可浏览」/「可分析」），**同一份配置**。
 - `READ_ONLY_DIALECT` 的连接在列表与向导里显示**只读徽标** ⓘ（§3.3）。
 - DuckDB 两组都在。
 - 现有 5 个方言**全部补声明 `BROWSE_SOURCE`**（这是行为不变的一句声明）。
+- **v0.6：MySQL / PostgreSQL 也声明 `ANALYSIS_SOURCE`**。理由见 Q3 的更新：
+  当初「不加」是因为 L4 闸门还不存在，而 M2 正好把它建起来 ——
+  补上前置条件后，可写方言进分析模式是**安全的**。
 
 ### 5.6 SPI 的向后兼容策略
 
@@ -1455,6 +1480,9 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 ### M2 —— 只读地基
 
+> **v0.6：本轮落地（M2 + M4' 一起做）** —— 实现细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)。
+
 - **交付**
   - proto：`Category.ANALYSIS` / `Category.REPORT` / 新 Action / `ConnectionConfig.read_only`
   - 引擎：`RequestDispatcher` 的只读闸门（L4）；`ANALYSIS.LIST_SOURCES` / `RUN_QUERY` 两条只读路由
@@ -1490,6 +1518,10 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - **风险**：R1（依赖冲突）、R2（HS2 兼容性）、R3（URL 前缀撞车）
 
 ### M4 —— 分析工作台
+
+> **v0.6：本轮落地 M4'**（M4 减去依赖 M3 的部分）—— **拉取源用现有 MySQL / PostgreSQL**，
+> 其余交付项与 M4 一致。M3（Hive / Impala）整体后置到目标环境确定之后，
+> 那时只要加方言即可，架构不变。
 
 - **交付**
   - DuckDB 工作区（**复用 `dialect-duckdb`，零新方言**）
@@ -1578,7 +1610,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|---|---|
 | ~~Q1~~ | ~~目标环境的 Hive / Impala **具体是什么发行版与版本**~~ | 决定驱动版本、SQL 方言、元数据查询写法 | ✅ **v0.4 已定「兼容策略」**（§4.6 的 D1~D4）：Hive 支持最近几个大版本、尽量向下兼容；Impala 从「兼容 hive jdbc 的版本」起支持；两者共用 `hive-jdbc` + `jdbc:hive2:`，靠 `driver` 消歧。⚠️ **具体发行版与版本号仍未定** —— 只影响 R1 的客户端版本取舍，不影响架构决策 |
 | **Q2** | 一次拉取的**数据量级**？（万 / 十万 / 千万行） | 决定要不要上方案 B（应用层直搬）、要不要分片 | 按 **十万行**设计，二期再优化 |
-| **Q3** | 要不要给 **MySQL / PostgreSQL** 也加 `ANALYSIS_SOURCE` 能力位？ | 加了它们就是「可写方言」进分析模式 → L4 闸门从「兜底」变成「主力」；不加则分析模式只有三个引擎 | **不加**（用户明确只点了 DuckDB / Hive / Impala） |
+| **Q3** | 要不要给 **MySQL / PostgreSQL** 也加 `ANALYSIS_SOURCE` 能力位？ | 加了它们就是「可写方言」进分析模式 → L4 闸门从「兜底」变成「主力」；不加则分析模式只有三个引擎 | **v0.6 更新：加。** 原结论是「不加」（用户当时只点了 DuckDB / Hive / Impala），理由是 **L4 闸门还不存在**。M2 把 L4 建起来之后，这个顾虑消失了 —— 可写方言进分析模式，由引擎侧的闸门兜住，**不靠前端自觉**。代价是 L4 从「兜底」升为「主力」，而这正是它该在的位置（§3.6 的两类回归测试是它的守门人） |
 | ~~Q4~~ | ~~报表**要不要图表**（柱状/折线）？~~ | POI 图表 API 不稳定，是 M6 的大变量 | ✅ **v0.4 已定：v1 不做**（用户拍板「报表先不要图」）—— 与 §1.2「明确不做的事」一致；M6 只出**表格型** Excel 报表 |
 | **Q5** | AI 用哪家模型、云端还是本地？ | 属 M7，但**接口**要在 M5 之前定死 | 不影响 v1；先留 SPI |
 | ~~Q6~~ | ~~通用化后，**要不要保留旧的枚举分支**作为回退？~~ | 决定 M1 的迁移策略与 R9 的处理 | ✅ **v0.4 已定：保留**（用户拍板「旧枚举保留」）—— 单向迁移：优先读 spec，读不到回退；细节见 §5.7 |
@@ -1652,3 +1684,4 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `BrowserChrome.kt` 只耦合 `DatabaseBrowserState.BackgroundTask` | `desktopApp/.../BrowserChrome.kt:808` |
 | `SchemaTree` / `TablePreview` / `ExportDialogs` / `GenerateWorkbench` 深度耦合 `DatabaseBrowserState` | `desktopApp/.../SchemaTree.kt:296` `:445`、`TablePreview.kt:156`、`ExportDialogs.kt:267`、`GenerateWorkbench.kt:157` `:303` |
 | 「平台无关的纯 UI 上移到 `:shared`」是本项目**既定做法** | `desktopApp/.../main.kt:78-79` 的 KDoc（`TopNavBar` / `SundaysTheme` 已上移） |
+| **M2 + M4' 的实现设计**（协议字段 / 模块落点 / 判据 / 提交切分） | [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) |
