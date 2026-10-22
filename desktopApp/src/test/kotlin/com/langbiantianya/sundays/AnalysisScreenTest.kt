@@ -11,15 +11,27 @@ package com.langbiantianya.sundays
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.sundays.analysis.ANALYSIS_READ_ONLY_BADGE_TAG
+import com.langbiantianya.sundays.analysis.ANALYSIS_RESULT_TABLE_TAG
+import com.langbiantianya.sundays.analysis.ANALYSIS_RUN_BUTTON_TAG
+import com.langbiantianya.sundays.analysis.AnalysisColumn
+import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
-import com.langbiantianya.sundays.analysis.analysisSourceRowTag
+import com.langbiantianya.sundays.analysis.AnalysisTreeKind
+import com.langbiantianya.sundays.analysis.AnalysisTreeNode
+import com.langbiantianya.sundays.analysis.analysisTreeRowTag
+import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
+import com.langbiantianya.sundays.table.TABLE_CELL_TAG_PREFIX
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
@@ -29,7 +41,15 @@ import kotlin.test.assertFalse
 /**
  * 分析工作台的界面契约（主设计 §7.5）。
  *
- * ## 这一轮最要紧的一条：只读徽标**不可关**
+ * ## 这一轮最要紧的一条：结果表**没有**编辑入口
+ *
+ * 分析模式的结果是**算出来的**，而且它可能来自远端（恒为只读）。
+ * 在结果表上留一个编辑入口，等于给远端数据开了一个写入的口子 ——
+ * 而分析模式对远端**只有读的需求**。
+ *
+ * 所以 `onCellEdit = null`：双击单元格**不进编辑态**。
+ *
+ * ## 另一条：只读徽标**不可关**
  *
  * 分析模式连的是远端，而远端**恒为只读**。这不只是「现在开着只读」，
  * 而是「根本关不掉」——
@@ -48,6 +68,29 @@ class AnalysisScreenTest {
         listOf(
             AnalysisSourceItem(id = "c1", name = "本地 MySQL", dialectLabel = "MySQL"),
             AnalysisSourceItem(id = "c2", name = "分析 PG", dialectLabel = "PostgreSQL"),
+        )
+
+    private val result =
+        AnalysisResult(
+            columns = listOf(AnalysisColumn("region", "VARCHAR"), AnalysisColumn("n", "INTEGER")),
+            rows = listOf(listOf("华东", "1284"), listOf("华南", "932")),
+            elapsedMs = 42,
+        )
+
+    private val treeRoots =
+        listOf(
+            AnalysisTreeNode(
+                id = "workspace",
+                label = "workspace.duckdb",
+                kind = AnalysisTreeKind.WORKSPACE,
+                dialectLabel = "DuckDB",
+            ),
+            AnalysisTreeNode(
+                id = "c1",
+                label = "本地 MySQL",
+                kind = AnalysisTreeKind.SOURCE,
+                dialectLabel = "MySQL",
+            ),
         )
 
     @Test
@@ -91,7 +134,7 @@ class AnalysisScreenTest {
     }
 
     @Test
-    fun `the analysis screen lists the data sources`() {
+    fun `the analysis screen lists the data sources in the tree`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
@@ -100,6 +143,7 @@ class AnalysisScreenTest {
                             sources = sources,
                             selectedSourceId = "c1",
                             onSelectSource = {},
+                            treeRoots = treeRoots,
                         )
                     }
                 }
@@ -107,8 +151,8 @@ class AnalysisScreenTest {
 
             // 数据源的名字同时出现在工具条的下拉框里和左树的行里 ——
             // 按标记找树里那一行，断言才说得清「是哪一行」。
-            onNodeWithTag(analysisSourceRowTag("c1")).assertIsDisplayed()
-            onNodeWithTag(analysisSourceRowTag("c2")).assertIsDisplayed()
+            onNodeWithTag(analysisTreeRowTag("c1")).assertIsDisplayed()
+            onNodeWithTag(analysisTreeRowTag("workspace")).assertIsDisplayed()
         }
     }
 
@@ -130,6 +174,166 @@ class AnalysisScreenTest {
             // 空态必须**说清下一步做什么** —— 只写「没有数据源」等于让用户自己猜。
             onNodeWithText("没有可分析的数据源").assertIsDisplayed()
             onNodeWithText("在「连接管理」里建一个连接；它的方言声明了「可分析」才会出现在这里").assertIsDisplayed()
+        }
+    }
+
+    // ──────────────── 结果表只读 ────────────────
+
+    @Test
+    fun `the result table has no editing entry`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            result = result,
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ANALYSIS_RESULT_TABLE_TAG).assertIsDisplayed()
+
+            // 判据：**可编辑**的单元格才会被 DataTable 挂上编辑标记
+            // （`sundays.cell.<列键>`）—— 只读的单元格连这个标记都没有，
+            // 它压根没准备接收编辑手势。
+            //
+            // ⚠️ 这里**不能**写成「点一下单元格，看有没有冒出输入框」：
+            // 那种写法是**假绿** —— 实测过，把结果表改成可编辑后，
+            // 点单元格**照样**不冒输入框（编辑手势挂在单元格的 Box 上，
+            // 而 `Text` 自己不收指针事件，见 `DataTable` 里 `TableCell` 的 KDoc），
+            // 于是那条断言无论只读还是可编辑都恒绿 ——
+            // 绿得像模像样，却什么都没守住。
+            //
+            // 一个测不出来的断言等于没有断言，所以这里用**结构**判据：
+            // 「这个单元格压根没有编辑入口」这件事本身就该看得见。
+            onNodeWithTag(TABLE_CELL_TAG_PREFIX + "c0").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun `the result table shows the columns and the rows`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            result = result,
+                        )
+                    }
+                }
+            }
+
+            onNodeWithText("region").assertIsDisplayed()
+            onNodeWithText("华东").assertIsDisplayed()
+            onNodeWithText("932").assertIsDisplayed()
+            // 面板头上有行数 —— 2 行
+            onNodeWithText("结果（2 行）").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `a failed query shows the reason instead of an empty table`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            result = AnalysisResult(error = "Catalog Error: Table with name orders does not exist"),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithText("查询失败").assertIsDisplayed()
+            onNodeWithText("Catalog Error: Table with name orders does not exist").assertIsDisplayed()
+        }
+    }
+
+    // ──────────────── 运行 ────────────────
+
+    @Test
+    fun `the run button calls back`() {
+        var runs = 0
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            onRun = { runs++ },
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ANALYSIS_RUN_BUTTON_TAG).performClick()
+        }
+
+        assertEquals(1, runs, "点「运行」必须回调一次")
+    }
+
+    @Test
+    fun `the run button is disabled while a query is running`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            running = true,
+                            onRun = {},
+                        )
+                    }
+                }
+            }
+
+            // 正在跑的时候再点一下就是**第二条并发查询** ——
+            // 而工作区是**一个** DuckDB 文件，后一条会把前一条的结果盖掉。
+            onNodeWithTag(ANALYSIS_RUN_BUTTON_TAG).assertIsNotEnabled()
+        }
+    }
+
+    // ──────────────── 编辑器 ────────────────
+
+    @Test
+    fun `the editor shows the current sql`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            selectedSourceId = "c1",
+                            onSelectSource = {},
+                            sql = "SELECT * FROM staging_shop_orders",
+                        )
+                    }
+                }
+            }
+
+            // 编辑器把 SQL 放在**可写文本**里（BasicTextField）——
+            // 断言落在那儿，才真的验到「SQL 进了编辑器」。
+            onNode(hasSetTextAction()).assertTextContains("SELECT * FROM staging_shop_orders")
         }
     }
 }

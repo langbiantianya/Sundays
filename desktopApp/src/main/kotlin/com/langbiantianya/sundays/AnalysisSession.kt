@@ -16,17 +16,28 @@ import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ConnectionConfig
+import com.langbiantianya.grpc.analysisListSourcesRequest
+import com.langbiantianya.grpc.analysisListTablesRequest
 import com.langbiantianya.grpc.analysisRequest
 import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.grpc.connectionConfig
+import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.AnalysisTreeKind
+import com.langbiantianya.sundays.analysis.AnalysisTreeNode
 import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullProgress
+import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
+import com.langbiantianya.sundays.analysis.analysisNamespaceNodeId
+import com.langbiantianya.sundays.analysis.analysisTableNodeId
+import com.langbiantianya.sundays.analysis.findAnalysisNode
+import com.langbiantianya.sundays.analysis.replaceAnalysisNode
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.connection.SqlIdentifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -173,6 +184,53 @@ class AnalysisSession(
     /** 当前那次拉取的任务 —— 取消要用它。 */
     private var pullJob: Job? = null
 
+    // ──────────────── 数据源树 ────────────────
+
+    /**
+     * 数据源树的根节点 —— 工作区 + 各远端源。
+     *
+     * ## 为什么树住在会话里而不是界面里
+     *
+     * 树的**内容**（已加载的子节点）是**派生数据** —— 由引擎的
+     * `LIST_SOURCES` / `LIST_TABLES` 查出来。放在界面侧就意味着
+     * 「界面自己管一份树数据」，而界面是纯 Compose、拿不到引擎；
+     * 于是树只能由会话喂，展开动作也由会话执行。
+     *
+     * ## 为什么**根**是「工作区 + 远端源」而不是「远端源」
+     *
+     * 工作区是分析模式的**计算引擎**（DuckDB 文件），它与远端源在树上**同级** ——
+     * 一个可写、一个恒只读，性质相反但都是「分析模式能用的东西」。
+     * 把工作区塞进某个远端源底下会传达错误的关系。
+     */
+    var treeRoots by mutableStateOf<List<AnalysisTreeNode>>(emptyList())
+        private set
+
+    /**
+     * 当前展开着的树节点 id。
+     *
+     * ## 为什么展开态也归会话管
+     *
+     * 因为**会话比界面活得久**：顶层切到「连接管理」再切回来，
+     * `AnalysisScreen` 会离开组合又重新进入，而 [AnalysisSession] 是
+     * `remember(engine)` 建的，一直都在。
+     *
+     * 展开态放在界面侧的话，用户「展开树 → 去连个库 → 回来」会发现树又缩回去了 ——
+     * 那不是「界面没保存」，是**放错了地方**。
+     */
+    var expandedNodeIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** 树里正有节点在加载 —— 界面据此显示「加载中」。 */
+    var treeLoading by mutableStateOf(false)
+        private set
+
+    /** 树加载失败的原因；`null` = 没有错误。 */
+    var treeError by mutableStateOf<String?>(null)
+        private set
+
+    /** 正在加载的节点 id —— 用来挡住**重复**加载（连点两下扭子）。 */
+    private val loadingNodeIds = mutableSetOf<String>()
+
     /**
      * 同步可分析的远端源。
      *
@@ -186,6 +244,231 @@ class AnalysisSession(
         val current = selectedSourceId
         if (current != null && !sourceBindings.containsKey(current)) {
             selectedSourceId = null
+        }
+        refreshTree()
+    }
+
+    /**
+     * 重建树的**根**，但保住已经加载出来的子节点。
+     *
+     * ## 为什么要「重建根但保留子节点」
+     *
+     * 连接列表一变（加一个连接、改个名字）就要重建根 —— 否则树里会留着
+     * 已经删掉的源。但**直接重建**会把用户展开的节点连同它的子节点一起抹掉：
+     * 改个连接名，用户的树就缩回去了。
+     *
+     * 所以这里只换「根节点自己」（名字、方言标签），
+     * 已经加载出来的 `children` 与 `loaded` 原样带走。
+     */
+    private fun refreshTree() {
+        val previous = treeRoots.associateBy { it.id }
+        treeRoots =
+            buildTreeRoots().map { node ->
+                val old = previous[node.id] ?: return@map node
+                node.copy(children = old.children, loaded = old.loaded)
+            }
+    }
+
+    /**
+     * 树的根节点 —— 工作区 + 各远端源。
+     *
+     * 工作区**永远**在第一位：它是分析模式的默认落点（拉进来的表都在那儿）。
+     */
+    private fun buildTreeRoots(): List<AnalysisTreeNode> {
+        val workspace =
+            AnalysisTreeNode(
+                id = ANALYSIS_WORKSPACE_NODE_ID,
+                label = workspaceFileName(),
+                kind = AnalysisTreeKind.WORKSPACE,
+                dialectLabel = "DuckDB",
+            )
+        val sources =
+            sourceBindings.values.map { binding ->
+                AnalysisTreeNode(
+                    id = binding.item.id,
+                    label = binding.item.name,
+                    kind = AnalysisTreeKind.SOURCE,
+                    dialectLabel = binding.item.dialectLabel,
+                )
+            }
+        return listOf(workspace) + sources
+    }
+
+    /** 工作区文件名 —— 只作诊断用（界面上工作区那一行显示的是固定名）。 */
+    private fun workspaceFileName(): String {
+        val name = Paths.get(workspaceFile).fileName
+        return name?.toString() ?: workspaceFile
+    }
+
+    /**
+     * 展开 / 收起一个**分组**节点。
+     *
+     * 展开时如果子节点还没查过，就顺手查一次。
+     *
+     * @param node 被点的节点
+     * @return 启动的加载任务；`null` = 没加载（收起了，或已经加载过）
+     */
+    fun toggleNode(node: AnalysisTreeNode): Job? {
+        if (node.id in expandedNodeIds) {
+            expandedNodeIds = expandedNodeIds - node.id
+            return null
+        }
+        expandedNodeIds = expandedNodeIds + node.id
+        return if (!node.loaded) loadChildren(node) else null
+    }
+
+    /**
+     * 加载某个节点的子节点，并**按 id 替换**那个节点。
+     *
+     * @param node 要展开的节点
+     * @return 启动的任务；`null` = 不用查（正在查，或已经查过了）
+     */
+    fun loadChildren(node: AnalysisTreeNode): Job? {
+        if (node.loaded) return null
+        if (!loadingNodeIds.add(node.id)) return null
+        treeLoading = true
+        treeError = null
+        return scope.launch {
+            try {
+                val children = fetchChildren(node)
+                treeRoots =
+                    replaceAnalysisNode(treeRoots, node.id) {
+                        it.copy(children = children, loaded = true)
+                    }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 加载失败**不算**「这个节点是空的」—— 保持 `loaded = false`，
+                // 用户再点一次就能重试；错误原文摆在树脚下。
+                treeError = e.message ?: "加载失败"
+            } finally {
+                loadingNodeIds.remove(node.id)
+                treeLoading = loadingNodeIds.isNotEmpty()
+            }
+        }
+    }
+
+    /**
+     * 按节点的 kind 决定「该查什么」。
+     *
+     * 三种分组各查各的：
+     * - 工作区 → 它的表（DuckDB 的 `main` schema）
+     * - 远端源 → 它的命名空间（MySQL 的库 / PG 的 schema）
+     * - 命名空间 → 它的表
+     */
+    private suspend fun fetchChildren(node: AnalysisTreeNode): List<AnalysisTreeNode> =
+        when (node.kind) {
+            AnalysisTreeKind.WORKSPACE -> listWorkspaceTables()
+            AnalysisTreeKind.SOURCE -> listNamespaces(node.sourceId ?: node.id)
+            AnalysisTreeKind.NAMESPACE -> listTables(node.sourceId, node.namespace)
+            AnalysisTreeKind.TABLE -> emptyList()
+        }
+
+    /** 远端源的命名空间。 */
+    private suspend fun listNamespaces(sourceId: String): List<AnalysisTreeNode> {
+        val config = sourceConfig(sourceId) ?: return emptyList()
+        val response =
+            engine.invoke(config) {
+                category = Category.ANALYSIS
+                action = Action.LIST_SOURCES
+                analysisRequest = analysisRequest { listSources = analysisListSourcesRequest { } }
+            }
+        if (!response.success) {
+            throw IllegalStateException(response.error.ifBlank { "列命名空间失败" })
+        }
+        return response.analysis.listSources.itemsList.map { namespace ->
+            AnalysisTreeNode(
+                id = analysisNamespaceNodeId(sourceId, namespace),
+                label = namespace,
+                kind = AnalysisTreeKind.NAMESPACE,
+                sourceId = sourceId,
+                namespace = namespace,
+            )
+        }
+    }
+
+    /** 某个命名空间下的表（远端）。 */
+    private suspend fun listTables(
+        sourceId: String?,
+        namespace: String?,
+    ): List<AnalysisTreeNode> {
+        if (sourceId == null || namespace == null) return emptyList()
+        val config = sourceConfig(sourceId) ?: return emptyList()
+        val response =
+            engine.invoke(config) {
+                category = Category.ANALYSIS
+                action = Action.LIST_TABLES
+                analysisRequest =
+                    analysisRequest {
+                        listTables = analysisListTablesRequest { this.namespace = namespace }
+                    }
+            }
+        if (!response.success) {
+            throw IllegalStateException(response.error.ifBlank { "列表失败" })
+        }
+        return response.analysis.listTables.itemsList.map { item ->
+            AnalysisTreeNode(
+                id = analysisTableNodeId(sourceId, namespace, item.name),
+                label = item.name,
+                kind = AnalysisTreeKind.TABLE,
+                sourceId = sourceId,
+                namespace = namespace,
+                table = item.name,
+            )
+        }
+    }
+
+    /**
+     * 工作区里的表。
+     *
+     * 走的是**同一套** `ANALYSIS.LIST_TABLES` 路由，只是连接换成了工作区 ——
+     * 不另写一条「列工作区表」的通路，免得两处的分派规则各说各话。
+     */
+    private suspend fun listWorkspaceTables(): List<AnalysisTreeNode> {
+        val response =
+            engine.invoke(workspaceConnection()) {
+                category = Category.ANALYSIS
+                action = Action.LIST_TABLES
+                analysisRequest =
+                    analysisRequest {
+                        listTables = analysisListTablesRequest { namespace = WORKSPACE_SCHEMA }
+                    }
+            }
+        if (!response.success) {
+            throw IllegalStateException(response.error.ifBlank { "列工作区表失败" })
+        }
+        return response.analysis.listTables.itemsList.map { item ->
+            AnalysisTreeNode(
+                id = analysisTableNodeId(ANALYSIS_WORKSPACE_NODE_ID, WORKSPACE_SCHEMA, item.name),
+                label = item.name,
+                kind = AnalysisTreeKind.TABLE,
+                namespace = WORKSPACE_SCHEMA,
+                table = item.name,
+            )
+        }
+    }
+
+    /**
+     * 拉取成功后刷新工作区那一支 —— 新落地的 staging 表要立刻出现在树上。
+     *
+     * 刷的是**工作区节点**，不是整棵树：远端那一支没动过，重查一遍是白花钱。
+     */
+    private fun refreshWorkspaceChildren() {
+        val workspace = findAnalysisNode(treeRoots, ANALYSIS_WORKSPACE_NODE_ID) ?: return
+        scope.launch {
+            try {
+                val children = listWorkspaceTables()
+                treeRoots =
+                    replaceAnalysisNode(treeRoots, workspace.id) {
+                        it.copy(children = children, loaded = true)
+                    }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 刷新失败**不**报错：表已经拉进工作区了，只是树没刷上。
+                // 这时候报一个错会让用户以为拉取失败了 —— 那比树少刷新一次严重得多。
+                treeError = e.message
+            }
         }
     }
 
@@ -285,18 +568,29 @@ class AnalysisSession(
     }
 
     /**
-     * 把当前选中源的一张表拉进工作区。
+     * 把某个远端源的一张表拉进工作区。
      *
+     * ## 为什么要**显式传 sourceId**，而不是用「当前选中的源」
+     *
+     * 早先的写法用 `selectedSourceId`（工具条下拉框里的那个）。但树上点的是
+     * **某一张具体的表** —— 它属于哪个源是那棵树自己知道的（表节点带着 `sourceId`），
+     * 而下拉框里的「当前源」可能压根不是这张表的源。
+     *
+     * 两者不一致时，「拉 A 源里的表」会变成「拉 B 源里的同名表」——
+     * 而后者**不会报错**（只要 B 源里恰好有那张表），只是数据悄悄换了来源。
+     * 所以这里让调用方把源**显式**交出来。
+     *
+     * @param sourceId 远端源 id
      * @param namespace 命名空间（MySQL 上是库，PG 上是 schema）
      * @param table 表名
-     * @return 启动的任务；`null` = 没启动（没选源，或上一次还在拉）
+     * @return 启动的任务；`null` = 没启动（上一次还在拉，或源不存在）
      */
     fun pull(
+        sourceId: String,
         namespace: String,
         table: String,
     ): Job? {
         if (pulling) return null
-        val sourceId = selectedSourceId ?: return null
         val source = sourceConfig(sourceId) ?: return null
         val dialect = sourceDialect(sourceId) ?: return null
         pullJob =
@@ -319,6 +613,8 @@ class AnalysisSession(
                             pullProgress = progress
                         }
                     pullOutcome = PullOutcome.Done(result)
+                    // 拉进来的表就在工作区里 —— 树上要立刻看得见它。
+                    refreshWorkspaceChildren()
                 } catch (e: CancellationException) {
                     // 取消**不是**失败 —— 取消没有错，只是没做完。
                     // 但要原样抛出去：吞掉它会让协程以为自己正常结束，
@@ -332,6 +628,35 @@ class AnalysisSession(
                 }
             }
         return pullJob
+    }
+
+    /**
+     * 把一张工作区的表名加进编辑器。
+     *
+     * ## 规则只有一条，例外只有一个
+     *
+     * - 编辑器**是空的** → 放一条能直接跑的语句（`SELECT * FROM "orders"`）；
+     * - 编辑器**有内容** → 在末尾追加一行**引用的表名**（`"orders"`）。
+     *
+     * ## 为什么不插到光标处
+     *
+     * 光标位置住在编辑器的内部状态（`CodeEditorState`）里，那是**界面**的东西；
+     * 会话只拿着一个纯字符串。在会话里插光标位置就得把编辑器状态也搬进会话 ——
+     * 而那会把「一段文本」与「一个编辑器控件」耦在一起。
+     *
+     * 追加到末尾虽然不一定是用户想要的位置，但它是**可预期**的：
+     * 用户看得到自己多了什么，也能自己挪。
+     *
+     * @param name 表名（未引用）
+     */
+    fun appendToSql(name: String) {
+        val quoted = SqlIdentifier.quote(DialectType.DUCKDB, name)
+        sql =
+            if (sql.isBlank()) {
+                "SELECT * FROM $quoted"
+            } else {
+                sql.trimEnd() + "\n" + quoted
+            }
     }
 
     /** 取消当前这次拉取。 */

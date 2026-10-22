@@ -262,7 +262,7 @@ class AnalysisSessionTest {
         session.setSources(listOf(binding("c1")))
         session.selectSource("c1")
 
-        runBlocking { session.pull("demo", "orders")?.join() }
+        runBlocking { session.pull("c1", "demo", "orders")?.join() }
 
         val outcome = assertNotNull(session.pullOutcome, "拉完了必须有终态")
         assertTrue(outcome is PullOutcome.Done, "应当落在完成态：$outcome")
@@ -277,7 +277,7 @@ class AnalysisSessionTest {
         session.setSources(listOf(binding("c1")))
         session.selectSource("c1")
 
-        runBlocking { session.pull("demo", "orders")?.join() }
+        runBlocking { session.pull("c1", "demo", "orders")?.join() }
 
         val outcome = assertNotNull(session.pullOutcome, "取消也必须留下终态")
         assertTrue(outcome is PullOutcome.Cancelled, "取消必须落在取消态：$outcome")
@@ -290,7 +290,7 @@ class AnalysisSessionTest {
         session.setSources(listOf(binding("c1")))
         session.selectSource("c1")
 
-        runBlocking { session.pull("demo", "orders")?.join() }
+        runBlocking { session.pull("c1", "demo", "orders")?.join() }
 
         val outcome = assertNotNull(session.pullOutcome, "失败也必须有终态")
         assertTrue(outcome is PullOutcome.Failed, "应当落在失败态：$outcome")
@@ -299,10 +299,12 @@ class AnalysisSessionTest {
     }
 
     @Test
-    fun `a pull without a selected source does not start at all`() {
+    fun `a pull of an unknown source does not start at all`() {
+        // 源 id 是**显式**传进来的 —— 传错（或传一个已删掉的源）时，
+        // 宁可不启动：拿着查无此人的 id 去引擎，得到的只会是一句看不懂的错。
         val session = newSession(FakePuller { PullResult(stagingTable = "staging_x") })
 
-        assertNull(session.pull("demo", "orders"), "没选源时不该启动拉取")
+        assertNull(session.pull("nope", "demo", "orders"), "源不存在时不该启动拉取")
         assertNull(session.pullOutcome, "没启动就没有终态")
         assertFalse(session.pulling, "没启动就不该在拉取中")
     }

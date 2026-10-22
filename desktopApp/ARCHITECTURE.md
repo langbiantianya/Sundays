@@ -128,7 +128,7 @@ desktopApp （本模块）
 
 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) | 引擎的方言列表 → 前端要的**两半**（连接表单注册表 + 能力位集合）；一次 `SYSTEM.LIST_DRIVERS`、一次换算（`DialectCatalog`） |
 
-| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径、**拉取进度与终态**。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
+| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径、**拉取进度与终态**、**数据源树与展开态**。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
 
 | [`AnalysisSourceConnector.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSourceConnector.kt) | UI 层的 `ConnectionConfig` → 引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` 同口径）；**不**在这里设 `read_only` —— 那是会话的唯一执行点，两处都设就又有了两个可能不一致的产地 |
 
@@ -461,6 +461,11 @@ desktopApp （本模块）
 | 临时文件的清理写在**一处 `finally`** 里 | 成功 / 失败 / 取消**三条路径同一条语句**，不是三个分支各写一遍；漏一条的代价是「用户拉了一半就关掉窗口，磁盘上留下几百 MB 的 CSV」。`finally` 里跑在 `withContext(NonCancellable)` 中，否则取消时清理根本跑不完 | [`EngineAnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/EngineAnalysisPuller.kt) |
 | 导出请求 id **在导出开始之前**就定下来 | 取消发生在导出**途中**时导出根本不会返回，于是「叫停子进程」那一步永远拿不到 id —— 子进程继续开着 CSV，Windows 上文件被占用时删不掉，磁盘上留下一个孤儿目录。**这是实测抓出来的真 bug** | 同上 |
 | 拉取的终态是一个 **sealed**，不是三个可空字段 | 「结果 + 错误」两个可空字段表达不了「取消」（两个都空 ⇒ 大概是取消了 —— 那是**推断**不是事实）。`PullOutcome`（`Done` / `Cancelled` / `Failed`）三种情况互斥且穷举，**取消不是失败**，界面上分开说 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) + [`AnalysisPull.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) |
+| 树与展开态都归**会话**管 | 会话比界面活得久（顶层切走再回来，`AnalysisScreen` 会离开组合，而会话是 `remember(engine)` 建的、一直都在）。展开态放界面侧的话，用户「展开树 → 去连个库 → 回来」会发现树缩回去了 —— 那不是「界面没保存」，是**放错了地方** | 同上 |
+| 树的展开是**懒加载**的 | 子节点在点开的时候才去查 —— 启动时把每个源的每个库都列一遍，意味着「打开分析模式」要先连一遍所有远端，而远端可能压根连不上 | 同上 |
+| 树加载**失败**不算「这个节点是空的」 | 保持 `loaded = false`（再点一次就能重试），错误原文摆在树脚下。把失败当成空列表，用户会以为是自己连错了库 | 同上 |
+| 拉取要**显式传源 id** | 树上点的是**某一张具体的表**，它属于哪个源是树自己知道的；用「当前选中的源」会拉错库的同名表 —— 而那**不会报错**（只要恰好有那张表），只是数据悄悄换了来源 | 同上 |
+| 结果表的只读判据是**结构的** | 「点一下单元格看有没有冒出输入框」是**假绿**：实测把结果表改成可编辑后，点单元格照样不冒输入框（编辑手势挂在单元格的 `Box` 上，`Text` 自己不收指针事件）。改用「可编辑的单元格才有的标记」才有判别力 | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
 
 
 ---

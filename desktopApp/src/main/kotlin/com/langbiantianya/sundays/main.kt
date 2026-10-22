@@ -42,6 +42,7 @@ import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.i18n.LanguageScope
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.AnalysisTreeNode
 import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
@@ -464,6 +465,26 @@ internal fun MainScreen(
         analysis.setSources(analysisBindings)
     }
 
+    // 树上点一张表 —— **远端表拉进工作区**，**工作区表加进编辑器**。
+    //
+    // 两个方向的后果完全不同，所以必须分开处理：
+    // - 远端表：它在远端，而远端**恒为只读** —— 想拿它算东西，
+    //   只能先拉进本地工作区；
+    // - 工作区表：它**已经在本地**了 —— 把名字加进编辑器，让用户直接写查询。
+    //
+    // 判据是节点自带的 `sourceId`：远端表的节点带它，工作区的表不带。
+    val onTreeTableSelected: (AnalysisTreeNode) -> Unit = { node ->
+        val table = node.table
+        val sourceId = node.sourceId
+        val namespace = node.namespace
+        when {
+            table == null -> Unit
+            sourceId == null -> analysis.appendToSql(table)
+            namespace == null -> Unit
+            else -> analysis.pull(sourceId, namespace, table)
+        }
+    }
+
     // 方言的连接表单规格 —— 引擎的 SYSTEM.LIST_DRIVERS **一次性**下发（纯元数据查询，
     // 与 SYSTEM.INFO 同性质，不需要连接、不连库）。
     //
@@ -750,6 +771,19 @@ internal fun MainScreen(
                         pullProgress = analysis.pullProgress,
                         pullOutcome = analysis.pullOutcome,
                         onCancelPull = analysis::cancelPull,
+                        // 树与展开态同样由会话持有 —— 切去别的顶层页再回来，
+                        // 用户展开到一半的树还摊在那儿。
+                        treeRoots = analysis.treeRoots,
+                        expandedNodeIds = analysis.expandedNodeIds,
+                        onToggleNode = { node -> analysis.toggleNode(node) },
+                        onSelectTreeTable = { node -> onTreeTableSelected(node) },
+                        treeLoading = analysis.treeLoading,
+                        treeError = analysis.treeError,
+                        sql = analysis.sql,
+                        onSqlChange = analysis::updateSql,
+                        result = analysis.result,
+                        running = analysis.running,
+                        onRun = { analysis.run() },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

@@ -119,6 +119,13 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | **工程** | Windows / macOS / Linux 原生安装包（`.msi` / `.dmg` / `.deb`） | `compose.desktop` |
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
+| **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
+| | **数据源树**：工作区 + 远端源 → 命名空间 → 表，**懒加载** | `shared/analysis/SourceTree.kt` |
+| | **拉取链路**：远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`（**零新协议**），三段进度 + 可取消 | `EngineAnalysisPuller` / `PullStageIndicator` |
+| | 临时 CSV 在**成功 / 失败 / 取消**三条路径上都被清理 | 同上 |
+| | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
+| | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
+| | 「⊘ 只读」徽标**不可关闭** | `ReadOnlyBadge` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 
@@ -274,5 +281,6 @@ Navicat 9。sundays 目前 **5** 个。引擎侧是插件化 SPI（`DialectLoade
 | [`../engine/README.md`](../engine/README.md) | 引擎能力全集（含尚未被 UI 使用的部分） |
 | [`../engine/ARCHITECTURE.md`](../engine/ARCHITECTURE.md) | 引擎架构：路由、方言 SPI、连接池、事务 |
 | [`../shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) | 共享 UI 层：`CodeEditor` / `DataTable` / 主题 |
+| [`../docs/analysis-mode/README.md`](../docs/analysis-mode/README.md) | **数据分析模式**：独立只读分析模式、组件复用与通用化、DuckDB / Hive / Impala 引擎、Excel 报表模型、迭代拆分（附 [UI 设计图](../docs/analysis-mode/ui-mockup.html)） |
 | [`../i18n/README.md`](../i18n/README.md) | 六语言文案：键枚举 / 译文表 / 简繁判定 / 复数规则 / 语言传递链路 |
 | [`../README.md`](../README.md) | 仓库总览、构建运行、架构升级历史 |

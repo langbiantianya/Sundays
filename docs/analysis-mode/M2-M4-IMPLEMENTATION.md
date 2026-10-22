@@ -240,13 +240,13 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult` | ✅ 已落地 |
+| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult`、**树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） | ✅ 已落地 |
 | `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
 | `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：三段枚举、进度 / 结果 / 终态模型、staging 列类型、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 | ✅ 已落地（第 5 片） |
-| `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ⏳ 第 6 片 |
+| `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ✅ 已落地（第 6 片） |
 | `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 + 一行占用 + 终态行 | ✅ 已落地（第 5 片） |
 | `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
-| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地**骨架**（工具条 / 数据源树 / 只读徽标 / 拉取状态条是真的，右侧主区仍走空态） |
+| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」） |
 
 ### 5.2 `:desktopApp` 的状态机
 
@@ -289,6 +289,14 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > 两条都**不会立刻报错**（工作区带只读只是「建表失败」，远端漏只读只是「还能写」），
 > 所以各有断言钉住。
 
+> 📌 **第 6 片的实现期决定：树与展开态都归会话管。**
+> 树的内容（已加载的子节点）是**派生数据**（由引擎的 `LIST_SOURCES` / `LIST_TABLES` 查出来），
+> 放在界面侧就意味着界面自己管一份树数据 —— 而界面是纯 Compose、拿不到引擎；
+> 展开态同理：**会话比界面活得久**（顶层切到「连接管理」再切回来，
+> `AnalysisScreen` 会离开组合，而 `AnalysisSession` 是 `remember(engine)` 建的、一直都在）。
+> 展开态放界面侧的话，用户「展开树 → 去连个库 → 回来」会发现树又缩回去了 ——
+> 那不是「界面没保存」，是**放错了地方**。
+
 ### 5.3 `:engine`
 
 | 文件 | 内容 |
@@ -307,7 +315,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
-| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源列表渲染、无数据源时的空态文案 | ✅ 已落地 |
+| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源树渲染、无数据源时的空态文案、**结果表没有编辑入口**、结果表显示列与行、失败结果显示原文、运行按钮回调且运行中禁用、编辑器里有当前 SQL | ✅ 已落地（第 3 片；第 6 片补 6 例，共 9 例） |
+| `desktopApp/.../AnalysisSourceTreeTest.kt` | **树的界面契约**：每行有标记、工作区那一行显示**固定名**、源行带方言标签、点扭子 / 点分组行都回调「展开」、**点表回调「选中」而不是「展开」**、展开后子节点出现、表行**没有扭子**、空树不崩 | ✅ 已落地（第 6 片，8 例） |
+| `desktopApp/.../AnalysisTreeSessionTest.kt` | **会话里的树**：工作区永远在第一位、工作区在树上、方言标签、展开工作区真能列出它的表、点两次收起、收起再展开**不丢已加载的子节点**、加载失败**留下原因**而不是变成「空」、连接列表变了**不抹掉已加载的子节点**、删掉的源从树上消失、把表名加进编辑器（空 / 非空两种） | ✅ 已落地（第 6 片，12 例） |
 | `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、源没了选中项被剪枝、DDL 回 -1、SQL 出错收成**失败结果**而不是异常、**拉取的三条终态**（完成 / 取消 / 失败各落各的态） | ✅ 已落地（第 4 片；第 5 片补 4 例，共 14 例） |
 | `desktopApp/.../AnalysisWorkspaceIntegrationTest.kt` | **工作区端到端**（真 DuckDB 文件）：能建表、重开连接表还在、目录会被自动建出来、查询能回行与列 | ✅ 已落地（第 4 片） |
 | `desktopApp/.../AnalysisPullIntegrationTest.kt` | **导入那一半**端到端（真 DuckDB + 手写带 BOM 的 CSV）：行数对上、空串**不毁行**、重拉替换旧表、表头不匹配时失败且**不留半张表**、列名带空格、进度回调有帧、**失败路径不留临时目录** | ✅ 已落地（第 5 片，7 例） |
@@ -316,6 +326,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `desktopApp/.../AnalysisPullIndicatorTest.kt` | **拉取进度的界面契约**：三段都在、当前段被标出来（按段寻址）、行数与占用、没有文件时不报大小、取消按钮回调、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 | ✅ 已落地（第 5 片，9 例） |
 | `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | 工作区纯规则：staging 表名、标识符清洗（引号 / 分号不得混入）、工作区文件路径 | ✅ 已落地（第 4 片，10 例） |
 | `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯规则：列名**引用**、引号转义、列一律 VARCHAR、删表 `IF EXISTS`、方言各自的引用形式、命名空间为空时退化、三段的状态判定、每段各有各的文案键 | ✅ 已落地（第 5 片，11 例） |
+| `shared/.../commonTest/analysis/AnalysisTreeTest.kt` | **树的纯规则**：同名表在不同源下 id 不同、命名空间与表的 id 不撞、只有表是叶子、按 id 找到深处的节点、**按 id 替换**只换该换的那一处、找不到就原样返回、结果列的键**按下标**（重复列名不塌）、列与行用**同一套键**、NULL 仍是 NULL | ✅ 已落地（第 6 片，15 例） |
 
 ### 5.5 i18n
 
@@ -346,6 +357,24 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > 这三个是**界面件 `PullStageIndicator` 落地时才发现缺**的：
 > 「取消拉取」没有按钮就点不着，「已处理 N 行」与「临时文件 X」是 §6.5 那两行占用。
 > 补键的规矩不变 —— **六语言一个都不能少**（`StringsIntegrityTest` 盯着）。
+
+> ✅ **第 6 片再补 9 个键**（六语言同步，共 **36** 个）：
+> `ANALYSIS_RUN`（运行）、`ANALYSIS_EDITOR_TITLE`（SQL 编辑器）、
+> `ANALYSIS_RESULT_EMPTY`（还没有结果）、`ANALYSIS_RESULT_FAILED`（查询失败）、
+> `ANALYSIS_ROW_COUNT`（行数 {0}）、`ANALYSIS_ELAPSED`（耗时 {0} ms）、
+> `ANALYSIS_ENGINE`（引擎 {0}）、`ANALYSIS_TREE_LOADING`（加载中…）、
+> `ANALYSIS_TREE_ERROR`（加载失败：{0}）。
+> 这九个是**工作台主区接上引擎时才发现缺**的 ——
+> 主区一落地，标题 / 空态 / 状态栏 / 树的三种态就都要文案。
+>
+> ⚠️ **第 6 片还改了一个既有键的占位符**：
+> `ANALYSIS_RESULT_TRUNCATED` 从「结果超过上限 {0} 行，只显示前 {1} 行」
+> 改成「结果超过显示上限，只显示前 {0} 行」——
+> **少一个占位符**。原因是上限那个数字前端**拿不到**：
+> 引擎的 `AnalysisRunQueryResponse` 只回 `truncated` 标志，不回上限，
+> 而前端硬抄一份 5000 就是**两份真相源**（引擎改宽了，前端还在说 5000）。
+> 截断时 `rows.size` **就是**上限（引擎正好停在上限那一行），
+> 所以一个占位符足够，而且它顺带把上限告诉了用户。
 
 ---
 
@@ -446,6 +475,79 @@ staging 因此是**落地层**（数据仓库的惯例：原始层存文本，�
 大小在 ① 结束之前**没有值** —— 那时显示「临时文件 0 B」是**假信息**
 （用户会以为文件已经建好却只有 0 字节），所以那之前**不显示**这一项。
 
+### 6.6 数据源树（第 6 片）
+
+### 6.6.1 树的形状：**根 → 命名空间 → 表**，工作区少一层
+
+```
+本地工作区 (DuckDB)          ← 工作区：恒在，且在第一位
+  orders                     ← 工作区的子节点直接是表
+hive_prod (MySQL)
+  shop                       ← 命名空间（MySQL 的库 / PG 的 schema）
+    orders                   ← 表
+```
+
+**工作区这一层不摆命名空间**：远端源的命名空间是**用户必须分辨**的东西
+（MySQL 的库、PG 的 schema），那一层一定要摆出来；而工作区是应用自带的
+DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在每张表前面，
+只会给每张表多加一个没有信息量的中间层。
+
+> ⚠️ **代价**：用户在 DuckDB 里**自建**的其它 schema 不会出现在树里。
+> 那是本轮的取舍，不是遗漏 —— 拉取进来的 staging 表全在 `main`，
+> 而 `main` 正是「工作区里能查到的表」的集合。
+
+工作区那一行的**名字是固定的**（「本地工作区」是应用自带的引擎，不是用户起名的），
+由界面按 `StrKey.ANALYSIS_LOCAL_WORKSPACE` 取 —— 会话不传字符串，
+也就传不错语言。
+
+### 6.6.2 节点 id 与「按 id 替换」
+
+节点 id 的约定：`workspace` / 源 id / `ns:<属主>:<命名空间>` /
+`table:<属主>:<命名空间>:<表名>`。
+
+展开一个节点时**只换掉那一个节点**（把它的子节点填上），其余原样保留 ——
+用户的展开态与滚动位置都挂在这棵树上。整棵树重建会把「谁展开了」从树上抹掉。
+所以 `replaceAnalysisNode(roots, id) { … }` 是**按 id 替换**，找不到就**原样返回**
+（凭空造节点会让树里出现幽灵行）。
+
+### 6.6.3 展开是**懒加载**的
+
+子节点在**点开的时候**才去查 —— 不是启动时把每个源的每个库都列一遍。
+后者意味着「打开分析模式」要先连一遍所有远端，用户没点任何东西就已经
+等在了网络 I/O 上（而远端可能压根连不上）。
+
+加载失败**不算**「这个节点是空的」：保持 `loaded = false`（用户再点一次就能重试），
+错误原文摆在树脚下。把失败当成空列表，用户会以为是自己连错了库。
+
+### 6.6.4 拉取要**显式**传源 id
+
+`AnalysisSession.pull(sourceId, namespace, table)` —— 源 id 是**参数**，不是
+「当前选中的源」。早先的写法用 `selectedSourceId`（工具条下拉框里的那个），
+但树上点的是**某一张具体的表** —— 它属于哪个源是那棵树自己知道的。
+两者不一致时，「拉 A 源里的表」会变成「拉 B 源里的同名表」——
+而后者**不会报错**（只要 B 源里恰好有那张表），只是数据悄悄换了来源。
+
+### 6.6.5 点工作区的表 → 把表名加进编辑器
+
+- 编辑器**是空的** → 放一条能直接跑的语句（`SELECT * FROM "orders"`）；
+- 编辑器**有内容** → 在末尾追加一行**引用的表名**（`"orders"`）。
+
+**为什么不插到光标处**：光标位置住在编辑器的内部状态（`CodeEditorState`）里，
+那是**界面**的东西；会话只拿着一个纯字符串。在会话里插光标位置就得把编辑器
+状态也搬进会话 —— 而那会把「一段文本」与「一个编辑器控件」耦在一起。
+追加到末尾虽然不一定是用户想要的位置，但它是**可预期**的。
+
+### 6.6.6 结果表**只读**的判据是**结构**的
+
+`onCellEdit = null` + `cellEditable = false`。判据用
+「可编辑的单元格才会有的标记」（`sundays.cell.<列键>`）：
+
+> ⚠️ **不能**写成「点一下单元格看有没有冒出输入框」—— 那是**假绿**：
+> 实测过，把结果表改成可编辑后，点单元格**照样**不冒输入框
+> （编辑手势挂在单元格的 `Box` 上，而 `Text` 自己不收指针事件），
+> 于是那条断言无论只读还是可编辑都恒绿 —— 绿得像模像样，却什么都没守住。
+> 一个测不出来的断言等于没有断言。
+
 
 ---
 
@@ -481,14 +583,21 @@ staging 因此是**落地层**（数据仓库的惯例：原始层存文本，�
 - 工作区里跑一条窗口函数聚合 → 结果正确
 - 工作区里 `CREATE TABLE tmp AS SELECT …` **成功**（本地写允许）
 
-### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest`）
+### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest` / `AnalysisSourceTreeTest`）
 
 - 「⊘ 只读」徽标**没有关闭入口**
 - 拉取三段各自标出「已完成 / 进行中 / 待执行」（按**段**寻址，不看颜色）
 - 没有文件时不报大小（不显示「临时文件 0 B」）
 - 完成 / 取消 / 失败三种终态各说各的话；**取消不是失败**
 - 进行中**不显示**上一次的终态
-- 结果表双击单元格**不进编辑态**（`onCellEdit = null`，第 6 片）
+- **结果表没有编辑入口**（`onCellEdit = null` + `cellEditable = false`）——
+  判据用「可编辑的单元格才有的标记」，**不是**「点一下看有没有输入框」（§6.6.6）
+- 结果表显示**列名与行值**；查询失败时显示**错误原文**而不是空表
+- 「▶ 运行」点了会回调；**正在跑时禁用**（连点两下就是两条并发查询，
+  而工作区是**一个** DuckDB 文件，后一条会把前一条的结果盖掉）
+- 编辑器里能看到当前 SQL
+- 树：每行有标记、工作区那一行显示**固定名**、源行带方言标签、
+  **点表走「选中」而不是「展开」**、展开后子节点出现、表行**没有扭子**
 
 ---
 
@@ -503,7 +612,7 @@ staging 因此是**落地层**（数据仓库的惯例：原始层存文本，�
 | 3 | `feat(analysis): 分析模式入口 —— 四条只读路由 + 顶层导航 + 不可关闭的只读徽标` | `AnalysisHandler` + 四条路由注册 + `AppDestination.ANALYSIS` + `TopNavBar` + `ReadOnlyBadge` + 主屏骨架 + 能力位声明 + i18n 六语言 | 界面能进；徽标不可关；`AnalysisHandlerIntegrationTest` / `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest` 全绿 | ✅ **本轮落地**（提交标题按此风格） |
 | 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ✅ **本轮落地** |
 | 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ✅ **本轮落地** |
-| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ⏳ 未开始 |
+| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——
@@ -555,6 +664,33 @@ staging 因此是**落地层**（数据仓库的惯例：原始层存文本，�
 > （导出在取消到达之前就结束了）。所以补了 `AnalysisPullCancelTest` ——
 > 用假引擎把导出钉成「永远不结束」，「取消发生在导出途中」变成**确定**的事实。
 > **一个测不出来的断言等于没有断言**：判别力不足的测试要主动补强，不能算数。
+
+> 📌 **第 6 片的实际落点比原文多四处**：
+> 一是**工作区那一层不摆命名空间**（§6.6.1）—— DuckDB 的工作区只有一个
+> `main` schema，把它摆出来只会在每张表前面多插一个没有信息量的节点；
+> 二是**拉取要显式传源 id**（§6.6.4）—— 用「当前选中的源」会拉错库的同名表，
+> 而那**不会报错**，只是数据悄悄换了来源；
+> 三是**树与展开态都归会话管**（§5.2）—— 会话比界面活得久，
+> 展开态放界面侧的话，用户切走再回来会发现树缩回去了；
+> 四是**结果表的只读判据是结构的**（§6.6.6）—— 见下。
+>
+> ✅ **第 6 片的变异验证（五处，各被抓住）**：
+>
+> | 变异 | 变红的用例 |
+> |---|---|
+> | 结果表改成**可编辑**（`onCellEdit = { }` + `cellEditable = true`） | `the result table has no editing entry` |
+> | 结果列的键从**下标**改成**列名** | `the result columns are keyed by their index not by their name` + `the columns and the rows agree on the keys` |
+> | `replaceAnalysisNode` 变成**空操作**（不替换） | `AnalysisTreeTest` 两例 + `AnalysisTreeSessionTest` 三例（展开工作区 / 收起再展开 / 刷新源后仍留着子节点） |
+> | 树加载失败时把 `treeError` **吞掉** | `a failing load reports the reason instead of pretending the node is empty` |
+> | `appendToSql` 在空编辑器时**不**给一条能跑的语句 | `appending a table name to an empty editor seeds a runnable statement` + `an appended table name is quoted` |
+>
+> 📌 **第 6 片抓出的一条「假绿」**：结果表只读这件事，最自然的写法是
+> 「点一下单元格，看有没有冒出输入框」。实测发现那条断言**抓不住任何东西** ——
+> 把结果表改成可编辑之后，点单元格**照样**不冒输入框
+> （编辑手势挂在单元格的 `Box` 上，而 `Text` 自己不收指针事件）。
+> 于是它无论只读还是可编辑都恒绿 —— 绿得像模像样，却什么都没守住。
+> 换成**结构判据**（「可编辑的单元格才有的标记」不存在）之后才真正有判别力。
+> **一个测不出来的断言等于没有断言**：宁可换判据，也不能留着一条恒绿的。
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、
