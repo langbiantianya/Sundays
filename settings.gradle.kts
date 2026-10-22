@@ -39,6 +39,10 @@ dependencyResolutionManagement {
 }
 
 plugins {
+    // foojay resolver：本机没装 JDK 25 时，由它自动拉一个下来。
+    //
+    // 版本号不在这里写 —— 写在根 build.gradle.kts（`jdkVersion`，全仓库唯一声明处）。
+    // 这个插件只负责「下载」，不决定版本。
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 

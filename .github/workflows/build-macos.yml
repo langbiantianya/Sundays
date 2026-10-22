@@ -87,9 +87,10 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          # 与另外两条腿保持一致：仓库里没有 jvmToolchain 声明，
-          # 构建跟着跑它的 JDK 走，所以这里钉住的不只是「用什么编译」，
-          # 还决定产物的字节码目标与 jlink 出来的运行时版本。
+          # 与另外两条腿保持一致：仓库里的**编译目标**已经统一钉在 25
+          # （根 build.gradle.kts 的 jvmToolchain），这里仍然要钉住这台 runner
+          # 上装着的 JDK —— jlink / jpackage 要用它切运行时、打出产物，
+          # 编译用的 toolchain 也是它。
           #
           # macOS 两个架构都有 Temurin 25（与 Windows ARM 腿那个
           # 「Temurin 没有 Windows ARM64 JDK」的坑不同），所以两条腿同款。

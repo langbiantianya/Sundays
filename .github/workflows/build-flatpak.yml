@@ -89,8 +89,9 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          # 与 Windows 腿保持一致：仓库里没有 jvmToolchain 声明，构建跟着
-          # 跑它的 JDK 走，所以这里同时决定了字节码目标与 jlink 出来的运行时。
+          # 与 Windows 腿保持一致：仓库里的**编译目标**已经统一钉在 25，
+          # 这里要提供的是这台 runner 上装着的 JDK ——
+          # jlink / jpackage 用它切运行时、拼 Flatpak 产物。
           java-version: '25'
           distribution: temurin
 

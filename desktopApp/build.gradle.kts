@@ -90,8 +90,8 @@ dependencies {
 
 // 运行与打包用的 JDK —— 与根 build.gradle.kts 的 jvmToolchain 是**同一个版本**。
 //
-// 版本取自 gradle.properties 的 `sundaysJdkVersion`（全仓库单点来源）。
-val jdkVersion = providers.gradleProperty("sundaysJdkVersion").get().toInt()
+// 版本取自根构建（`jdkVersion`，全仓库唯一声明处）。
+val jdkVersion = rootProject.extra["sundaysJdkVersion"] as Int
 
 compose.desktop {
     application {

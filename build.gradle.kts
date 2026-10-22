@@ -6,7 +6,9 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
@@ -49,33 +51,37 @@ plugins {
 // Project，lambda 内部再引用 libs 生成的类型安全访问器容易踩解析坑。
 val ktlintVersion = libs.versions.ktlint.get()
 
+// ── 全仓库统一的 JDK 25 ─────────────────────────────────
+//
+// 一处声明，11 个模块统一适用（各模块自己不再写版本）——
+// 漏掉一个就会跟别的模块编出不同版本的字节码，而这种差异到运行时才炸
+// （UnsupportedClassVersionError，且只在用到新 API 时才炸）。
+//
+//   · jvmToolchain → 编译用的 JDK（本机没装 25 时，settings.gradle.kts 里的
+//     foojay resolver 会自动拉一个）
+//   · jvmTarget    → 字节码目标（.class 的 major version = 69）
+//
+// 运行与打包用的 JDK 在 :desktopApp 里按同一个版本取 toolchain
+// （run 的 javaLauncher + jlink/jpackage 的 javaHome）—— 同一版本才不会出现
+// 「编译 25 但跑不起来」。
+val jdkVersion = 25
+
+// 字节码目标由上面那个版本派生 —— 不写第二个字面量，免得改版本时只改一处。
+val jvmTarget = requireNotNull(JvmTarget.fromTarget(jdkVersion.toString())) {
+    "不认识的 JDK 版本：$jdkVersion"
+}
+
+// :desktopApp 也要用同一个版本（它单独取 toolchain 拿 run / 打包的 JDK）。
+extra["sundaysJdkVersion"] = jdkVersion
+
 subprojects {
     // 插件只在子项目真的挂了 Kotlin 插件时才激活——不为不编译的代码做检查。
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
     // ── JDK 25：全仓库统一钉住 ──────────────────────────
     //
-    // 以前**没有任何声明**：编译目标完全跟着「跑 Gradle 的那个 JVM」走 ——
-    // 本机是 Zulu 25.0.4.1，CI 靠各流水线自己的 `java-version: '25'` 保证。
-    // 于是「用哪个版本编」是一件谁都没写下来的事：本机升级 JDK、CI 换镜像，
-    // 字节码目标就静默漂移，而仓库里没有任何东西能证明它变过。
-    //
-    // 为什么写在根上而不是各模块自己声明：11 个模块分散写，迟早会漏掉一个；
-    // 漏掉的那个会跟别的模块编出**不同版本**的字节码，而这种差异到运行时才暴露
-    // （UnsupportedClassVersionError，且只在用到新 API 时才炸）。
-    //
-    // 本机没装 JDK 25 也不至于卡死：settings.gradle.kts 装了
-    // `org.gradle.toolchains.foojay-resolver-convention`，foojay 会自动拉一个。
-    //
-    // ⚠️ 这条只管**编译目标**。运行与打包的 JDK 在 :desktopApp 里单独指定（
-    // run 的 javaLauncher + jlink/jpackage 的 javaHome）—— 三处同版本才不会出现「编译 25 但跑不起来」。
-    //
-    // 为什么不能只靠「让 Gradle daemon 跑在 25 上」：daemon 的 JDK 由「谁启动了 Gradle」决定（JAVA_HOME /
-    // org.gradle.java.home），不是仓库能声明的事 —— 本机上就曾因为一次实验请求 JDK 21，
-    // 留下一个 21 的 daemon，而它被后面的构建复用了。
-    // JDK 版本从 gradle.properties 读（单点来源）—— 改它只要改一处。
-    val jdkVersion = providers.gradleProperty("sundaysJdkVersion").get().toInt()
-
+    // 版本号在上面那一个 `jdkVersion`：jvmToolchain 定「编译用的 JDK」，
+    // jvmTarget 定「字节码目标」。
     plugins.withId("org.jetbrains.kotlin.jvm") {
         project.extensions.configure<KotlinProjectExtension> {
             jvmToolchain(jdkVersion)
@@ -85,6 +91,11 @@ subprojects {
         project.extensions.configure<KotlinProjectExtension> {
             jvmToolchain(jdkVersion)
         }
+    }
+    // 字节码目标：所有 Kotlin 编译任务统一 25。
+    // KMP 的 jvm() 目标也在内 —— 它的编译任务同样是 KotlinJvmCompile。
+    tasks.withType<KotlinJvmCompile>().configureEach {
+        compilerOptions.jvmTarget.set(jvmTarget)
     }
 
     configure<KtlintExtension> {

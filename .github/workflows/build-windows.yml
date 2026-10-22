@@ -92,9 +92,13 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           # 25 是本机实测能打出 MSI 的版本（zulu 25.0.4.1），Temurin 同为 25.0.4.1+1 LTS。
-          # 仓库里**没有**任何 jvmToolchain 声明 —— 构建跟着跑它的 JDK 走，
-          # 所以这里钉住的不只是「用什么编译」，还决定产物的字节码目标
-          # 与 jlink 打包出来的运行时版本，两者必须与本地一致，否则测出来的包不是同一个包。
+          # 仓库里的**编译目标**已经统一钉在 25（根 build.gradle.kts 的 jvmToolchain），
+          # 这里仍然要钉 —— 它提供的是**这台 runner 上真正装着的那个 JDK**：
+          #   · jlink / jpackage 要用它切运行时、打安装包；
+          #   · 编译用的 toolchain 也是它 —— 版本对得上，foojay 就不必再下载一份。
+          #
+          # 两条腿的发行版不一样（x64 用 temurin、ARM64 用 zulu），但那不影响：
+          # toolchain 只认版本号，不认厂商 —— 哪个厂商的 25 都算数。
           #
           # Gradle 从 9.2.0 起才正式支持在 Windows ARM64 上跑（本项目用 9.7.1，
           # 在官方兼容性矩阵的「Windows 11 / AMD64, AArch64」一栏里），
