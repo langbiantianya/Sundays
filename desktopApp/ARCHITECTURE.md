@@ -128,9 +128,13 @@ desktopApp （本模块）
 
 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) | 引擎的方言列表 → 前端要的**两半**（连接表单注册表 + 能力位集合）；一次 `SYSTEM.LIST_DRIVERS`、一次换算（`DialectCatalog`） |
 
-| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
+| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径、**拉取进度与终态**。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
 
 | [`AnalysisSourceConnector.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSourceConnector.kt) | UI 层的 `ConnectionConfig` → 引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` 同口径）；**不**在这里设 `read_only` —— 那是会话的唯一执行点，两处都设就又有了两个可能不一致的产地 |
+
+| [`AnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisPuller.kt) | 拉取链路的**契约**（接口）—— 抽出来是为了让会话的终态映射（完成 / 取消 / 失败）能被**确定性地**测：真实现要连远端、起导出子进程，而假实现还能把导出钉成「永远不结束」，于是「取消发生在导出途中」从竞态变成事实 |
+
+| [`EngineAnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/EngineAnalysisPuller.kt) | 拉取链路的**真实现**：远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`（**零新协议**）、三段进度回调、临时文件在**成功 / 失败 / 取消**三条路径上都被清理 |
 
 
 
@@ -452,6 +456,11 @@ desktopApp （本模块）
 | 工作区放在**应用配置目录**（`~/.config/sundays/workspace.duckdb`） | 与 `connection.json` 同处，不另立一套目录规则 —— 「应用的文件都在哪」多一个答案，清理 / 备份 / 迁移就要记得两处 | 同上 |
 
 | DuckDB 的上级目录**自己建** | DuckDB 建库时**不会**自动创建上级目录 —— 目录不存在就直接失败；而用户第一次打开分析模式时，那个目录**一定**不存在 | 同上（`ensureWorkspaceDir`） |
+| 拉取 = **两次既有调用**，不是一条新路由 | 拉取要碰**两个**数据库（远端读 + 本地写），而一个 `Request` 只有一份 `ConnectionConfig`；做成单路由就得在请求体里再塞一份 workspace 配置 ——「哪个配置才是本次请求的连接」于是有了两个产地 | [`EngineAnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/EngineAnalysisPuller.kt) |
+| staging 表的列**一律 `VARCHAR`** | CSV 导出把 NULL 写成**空串**，而导入侧按字符串写值 —— `INSERT INTO t (a) VALUES ('')` 在 `a INTEGER` 上**整行失败**。源表里只要有一列可空且是数值，**每一行**都会丢。staging 是**落地层**，类型由下游 `TRY_CAST` 决定 | 同上 + [`AnalysisPull.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) |
+| 临时文件的清理写在**一处 `finally`** 里 | 成功 / 失败 / 取消**三条路径同一条语句**，不是三个分支各写一遍；漏一条的代价是「用户拉了一半就关掉窗口，磁盘上留下几百 MB 的 CSV」。`finally` 里跑在 `withContext(NonCancellable)` 中，否则取消时清理根本跑不完 | [`EngineAnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/EngineAnalysisPuller.kt) |
+| 导出请求 id **在导出开始之前**就定下来 | 取消发生在导出**途中**时导出根本不会返回，于是「叫停子进程」那一步永远拿不到 id —— 子进程继续开着 CSV，Windows 上文件被占用时删不掉，磁盘上留下一个孤儿目录。**这是实测抓出来的真 bug** | 同上 |
+| 拉取的终态是一个 **sealed**，不是三个可空字段 | 「结果 + 错误」两个可空字段表达不了「取消」（两个都空 ⇒ 大概是取消了 —— 那是**推断**不是事实）。`PullOutcome`（`Done` / `Cancelled` / `Failed`）三种情况互斥且穷举，**取消不是失败**，界面上分开说 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) + [`AnalysisPull.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) |
 
 
 ---

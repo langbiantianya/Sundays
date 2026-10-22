@@ -21,9 +21,13 @@ import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisResult
+import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.PullOutcome
+import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -32,7 +36,28 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * 分析模式的状态机 —— 源列表、工作区、当前 SQL 与结果。
+ * 一个远端源在本会话里的全部信息 —— 展示条目 + 引擎配置 + 方言。
+ *
+ * ## 为什么三样东西捆在一起
+ *
+ * 拉取一条远端表要同时用到：给界面看的 [AnalysisSourceItem]、
+ * 给引擎的连接配置（含凭据）、以及**方言**（决定命名空间的引用形式：
+ * MySQL 上是库、PG 上是 schema）。
+ *
+ * 分成三张并行的 map（按 id 索引）就是三个可能对不上的东西 ——
+ * 加一个源要改三处，漏一处就拉错库。捆在一起就没有「漏」这回事。
+ *
+ * 它住在 `desktopApp` 而不是 `:shared`：引擎配置是 proto 类型，
+ * `:shared` 看不见协议层。
+ */
+data class AnalysisSourceBinding(
+    val item: AnalysisSourceItem,
+    val engineConfig: ConnectionConfig,
+    val dialect: DialectType,
+)
+
+/**
+ * 分析模式的状态机 —— 源列表、工作区、当前 SQL 与结果、拉取任务。
  *
  * ## 它与 `ConnectionSession` / `DatabaseBrowserState` 是**并列**的
  *
@@ -72,6 +97,14 @@ class AnalysisSession(
      *   换一个路径等于换了一个工作区，之前拉进来的数据全都留在旧文件里。
      */
     val workspaceFile: String = workspaceFilePath(System.getProperty("user.home")),
+    /**
+     * 拉取链路的编排器。
+     *
+     * 做成构造参数（而不是在类体里现算）是为了让**会话的终态映射**可测：
+     * 真实现要连远端、还要起导出子进程，而「拉完了 / 拉挂了 / 拉取消了」
+     * 这三条路径是状态机的一部分，必须能**确定性地**各测一遍。
+     */
+    private val puller: AnalysisPuller = EngineAnalysisPuller(engine),
 ) {
     /**
      * 工作区数据库文件路径 —— `~/.config/sundays/workspace.duckdb`。
@@ -82,24 +115,19 @@ class AnalysisSession(
     val workspacePath: Path = Paths.get(workspaceFile)
 
     /**
-     * 远端源的**完整连接配置**（含凭据）—— 按数据源 id 索引。
-     *
-     * ## 为什么单独存一份
-     *
-     * 拉数据需要 URL 与凭据，而界面那份 `AnalysisSourceItem` 只有展示字段
-     * （id / 名字 / 方言标签）。让 UI 层在需要时再回连接管理器取配置，
-     * 等于把「配置从哪来」这件事在两处各写一遍 —— 那就是第二个真相源。
+     * 远端源的绑定（按 id 索引）。
      *
      * ## 为什么**不**把源列表也存进来
      *
      * 源列表是**派生数据**：连接列表 × 「方言声明了可分析」= 可分析的源。
      * 派生数据再存一份，就有了两个可能对不上的副本
      * （连接删了、引擎改了能力位声明，存的那份不会自己跟着变）。
-     * 所以列表留在调用方现算，这里只收**派生不出来的那部分** —— 凭据。
+     * 所以列表留在调用方现算，这里只收**派生不出来的那部分** ——
+     * 凭据、方言，以及派生不出的**状态**：选中项、SQL、结果。
      *
      * 它**不是** Compose 状态：没有界面读它，不需要重组。
      */
-    private var sourceConfigs: Map<String, ConnectionConfig> = emptyMap()
+    private var sourceBindings: Map<String, AnalysisSourceBinding> = emptyMap()
 
     /** 当前选中的数据源 id。 */
     var selectedSourceId by mutableStateOf<String?>(null)
@@ -117,18 +145,46 @@ class AnalysisSession(
     var running by mutableStateOf(false)
         private set
 
+    /** 拉取中的进度（哪一段、已处理多少行、临时文件多大）。 */
+    var pullProgress by mutableStateOf<PullProgress?>(null)
+        private set
+
     /**
-     * 同步可分析的远端源的**连接配置**（按 id 索引）。
+     * 最近一次拉取的**终态** —— 完成 / 取消 / 失败，三者互斥。
+     *
+     * ## 为什么不用「结果 + 错误」两个可空字段
+     *
+     * 两个可空字段表达不了「取消」：结果是空、错误也是空，
+     * 界面只能靠「两个都空 ⇒ 大概是取消了」来**推断**。
+     * 而「大概」在状态机里是不该有的字眼 ——
+     * 一旦将来多出第四种「什么都没发生」的路径（比如还没点拉取就被切了页），
+     * 那两个字面量就再也分不出「取消」与「没开始」。
+     *
+     * 终态是一个**穷举**（sealed），三种情况各自带自己的载荷，
+     * 界面照着渲染即可，不必自己推断。
+     */
+    var pullOutcome by mutableStateOf<PullOutcome?>(null)
+        private set
+
+    /** 正在拉取 —— 界面据此禁用「拉取」按钮。 */
+    var pulling by mutableStateOf(false)
+        private set
+
+    /** 当前那次拉取的任务 —— 取消要用它。 */
+    private var pullJob: Job? = null
+
+    /**
+     * 同步可分析的远端源。
      *
      * ## 为什么要剪枝选中项
      *
      * 连接被删掉后，选中项若还留着，界面会指向一个**不存在的源** ——
      * 后续拉取会拿着一个查无此人的 id 去引擎。宁可退回「未选中」。
      */
-    fun setSourceConfigs(configs: Map<String, ConnectionConfig>) {
-        sourceConfigs = configs
+    fun setSources(bindings: List<AnalysisSourceBinding>) {
+        sourceBindings = bindings.associateBy { it.item.id }
         val current = selectedSourceId
-        if (current != null && !configs.containsKey(current)) {
+        if (current != null && !sourceBindings.containsKey(current)) {
             selectedSourceId = null
         }
     }
@@ -163,7 +219,15 @@ class AnalysisSession(
      * 用户有权在浏览模式里改数据。在这里就地改掉，
      * 就等于把浏览模式也变成只读了。
      */
-    fun sourceConfig(id: String): ConnectionConfig? = sourceConfigs[id]?.toBuilder()?.setReadOnly(true)?.build()
+    fun sourceConfig(id: String): ConnectionConfig? {
+        // 拆成两段而不是一条长链：一条链上的运算符超过四个就必须折行，
+        // 折行之后那几行读起来比原来的单行更难核对 —— 这里拆开更清楚。
+        val config = sourceBindings[id]?.engineConfig ?: return null
+        return config.toBuilder().setReadOnly(true).build()
+    }
+
+    /** 远端源的方言 —— 决定命名空间的引用形式（MySQL 是库，PG 是 schema）。 */
+    fun sourceDialect(id: String): DialectType? = sourceBindings[id]?.dialect
 
     /**
      * 远端表在**工作区**里的落点 —— `staging_<源库>_<表名>`。
@@ -218,6 +282,61 @@ class AnalysisSession(
         if (dirError != null) return AnalysisResult(error = dirError)
         return runCatching { runAnalysisQuery(engine, workspaceConnection(), statement) }
             .getOrElse { AnalysisResult(error = it.message ?: "查询失败") }
+    }
+
+    /**
+     * 把当前选中源的一张表拉进工作区。
+     *
+     * @param namespace 命名空间（MySQL 上是库，PG 上是 schema）
+     * @param table 表名
+     * @return 启动的任务；`null` = 没启动（没选源，或上一次还在拉）
+     */
+    fun pull(
+        namespace: String,
+        table: String,
+    ): Job? {
+        if (pulling) return null
+        val sourceId = selectedSourceId ?: return null
+        val source = sourceConfig(sourceId) ?: return null
+        val dialect = sourceDialect(sourceId) ?: return null
+        pullJob =
+            scope.launch {
+                pulling = true
+                // 终态在**开跑前**清掉：上一次拉取的「完成」不该继续挂在界面上，
+                // 否则用户会以为这次的表已经拉好了。
+                pullOutcome = null
+                pullProgress = null
+                try {
+                    val result =
+                        puller.pull(
+                            source = source,
+                            workspace = workspaceConnection(),
+                            workspacePath = workspacePath,
+                            dialect = dialect,
+                            namespace = namespace,
+                            table = table,
+                        ) { progress ->
+                            pullProgress = progress
+                        }
+                    pullOutcome = PullOutcome.Done(result)
+                } catch (e: CancellationException) {
+                    // 取消**不是**失败 —— 取消没有错，只是没做完。
+                    // 但要原样抛出去：吞掉它会让协程以为自己正常结束，
+                    // 上层就再也等不到「任务结束了」这件事。
+                    pullOutcome = PullOutcome.Cancelled
+                    throw e
+                } catch (e: Exception) {
+                    pullOutcome = PullOutcome.Failed(e.message ?: "拉取失败")
+                } finally {
+                    pulling = false
+                }
+            }
+        return pullJob
+    }
+
+    /** 取消当前这次拉取。 */
+    fun cancelPull() {
+        pullJob?.cancel()
     }
 
     /**

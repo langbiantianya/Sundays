@@ -1,6 +1,21 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v0.8** · 2026-10-22
+> **状态**：设计冻结待评审 · **v0.9** · 2026-10-22
+>
+> **v0.9 相对 v0.8 的修改**（M4 第 5 片落地；实现细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
+>
+> 1. **M4 的第 5 片已落地 —— 拉取链路与三段进度** ——
+>    远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT` 的整条链路
+>    （**零新协议**，复用既有两条路由）、
+>    `PullStageIndicator`（三段 + 一行占用 + 终态行）、临时文件在
+>    **成功 / 失败 / 取消**三条路径上都被清理。
+> 2. **§11 的 M4 条目补上「第 5 片已落地」说明** ——
+>    拉取终态是一个 `sealed`（`Done` / `Cancelled` / `Failed`）而不是三个可空字段；
+>    取消**不是**失败，界面上分开说。
+> 3. **实现文档 §6.3.1 记下一处实测抓出来的真 bug** ——
+>    导出请求 id 必须在导出**开始之前**就定下来，
+>    否则取消时叫停不了导出子进程，Windows 上留下删不掉的孤儿目录。
 >
 > **v0.8 相对 v0.7 的修改**（M2 分三片落地；实现细节见
 > [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
@@ -1369,6 +1384,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|
 | `shared/src/commonMain/.../analysis/` | `ReportSpec.kt`（报表规格）、`AnalysisScreen.kt`、`ReportDesignerScreen.kt` |
 | `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 数据源行的测试标记 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
+| `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯规则**：三段枚举、进度 / 结果 / 终态模型、staging 列类型（**一律 VARCHAR**）、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 |
 | `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/6**，§6.4） |
 | `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/6**） |
 | `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/6**） |
@@ -1378,6 +1394,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
 | `desktopApp/src/test/.../AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6）—— 落在 `desktopApp` 而不是 `:shared`：它要读 `:shared` 的**源文件**（按 import 行判定），而 Gradle 跑测试时的工作目录是**模块根** |
 | `desktopApp/src/main/.../AnalysisSession.kt` | 分析模式的会话与状态机（与 `ConnectionSession` / `DatabaseBrowserState` **并列**，不继承） |
+| `desktopApp/src/main/.../AnalysisPuller.kt` | 拉取链路的**契约**（接口）—— 抽出来是为了让会话的终态映射可被**确定性地**测 |
+| `desktopApp/src/main/.../EngineAnalysisPuller.kt` | 拉取链路的**真实现**（引擎 + 临时文件）：三段编排、临时文件清理、取消时叫停导出子进程 |
 | `engine/src/main/.../analysis/AnalysisHandler.kt` | `Category.ANALYSIS` 的路由实现 |
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
 | `engine/src/main/.../report/ReportBuilder.kt` | `ReportSpec` → .xlsx |
@@ -1609,6 +1627,17 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 > 两条方向相反的只读性各有**唯一执行点**与断言钉住。
 > 拉取链路 / `SourceTree` / 结果表与编辑器是第 5~6 片。
 > 实现细节见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §5.2 / §6.1。
+>
+> ✅ **v0.9：第 5 片已落地（拉取链路与三段进度）** ——
+> 拉取 = 远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`（**零新协议**）；
+> `PullStageIndicator` 把三段（导出 / CSV / 导入）各自标出
+> 「已完成 / 进行中 / 待执行」，并显示行数与临时文件占用。
+> 临时文件在**成功 / 失败 / 取消**三条路径上都被清理；
+> 取消时**先叫停导出子进程**再删目录（Windows 上文件被占用时删不掉）。
+> 拉取的终态是一个 `sealed`（`Done` / `Cancelled` / `Failed`）——
+> **取消不是失败**，界面上分开说。
+> `SourceTree` 与结果表 / 编辑器是第 6 片。
+> 实现细节见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §5.2 / §6.2~§6.5。
 
 - **交付**
   - DuckDB 工作区（**复用 `dialect-duckdb`，零新方言**）

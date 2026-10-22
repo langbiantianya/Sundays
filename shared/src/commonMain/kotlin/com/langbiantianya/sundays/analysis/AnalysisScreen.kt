@@ -63,12 +63,18 @@ import com.langbiantianya.sundays.ui.winShape
  * @param sources 可分析的远端数据源（已按「方言声明了可分析」过滤过）
  * @param selectedSourceId 当前选中的数据源 id；`null` = 未选中
  * @param onSelectSource 选中某个数据源时回调
+ * @param pullProgress 正在拉取时的进度；`null` = 没在拉
+ * @param pullOutcome 最近一次拉取的**终态**；`null` = 还没拉过（或正在拉）
+ * @param onCancelPull 「取消拉取」被点时回调；`null` = 不给取消入口
  */
 @Composable
 fun AnalysisScreen(
     sources: List<AnalysisSourceItem>,
     selectedSourceId: String?,
     onSelectSource: (String) -> Unit,
+    pullProgress: PullProgress? = null,
+    pullOutcome: PullOutcome? = null,
+    onCancelPull: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -77,6 +83,16 @@ fun AnalysisScreen(
             selectedSourceId = selectedSourceId,
             onSelectSource = onSelectSource,
         )
+        // 拉取状态条 —— 在工具条**下面**、树与主区**上面**横贯一条。
+        // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
+        // 结果落在右边的分析区里，中间那条横贯的带子正是它俩的连接。
+        if (pullProgress != null || pullOutcome != null) {
+            AnalysisPullStrip(
+                progress = pullProgress,
+                outcome = pullOutcome,
+                onCancel = onCancelPull,
+            )
+        }
 
         Row(modifier = Modifier.fillMaxSize()) {
             AnalysisSourceTree(
@@ -96,6 +112,39 @@ fun AnalysisScreen(
             }
         }
     }
+}
+
+/**
+ * 拉取状态条 —— 进度指示器与终态行。
+ *
+ * 两个都传时**只显示进度**：正在拉的时候，终态还没发生，
+ * 显示「拉取完成」是骗人。
+ */
+@Composable
+private fun AnalysisPullStrip(
+    progress: PullProgress?,
+    outcome: PullOutcome?,
+    onCancel: (() -> Unit)?,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (progress != null) {
+            PullStageIndicator(
+                progress = progress,
+                onCancel = onCancel,
+            )
+        }
+        if (progress == null && outcome != null) {
+            PullOutcomeLine(outcome = outcome)
+        }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /**

@@ -9,9 +9,14 @@
 package com.langbiantianya.sundays
 
 import com.langbiantianya.engine.IdbEngine
+import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.PullOutcome
+import com.langbiantianya.sundays.analysis.PullResult
 import com.langbiantianya.sundays.connection.DialectType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +27,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -65,12 +71,36 @@ class AnalysisSessionTest {
     }
 
     /** 工作区落在临时目录里，不碰用户真实的 `~/.config/sundays`。 */
-    private fun newSession(): AnalysisSession =
+    private fun newSession(puller: AnalysisPuller = EngineAnalysisPuller(engine)): AnalysisSession =
         AnalysisSession(
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            puller = puller,
         )
+
+    /**
+     * 一个**立刻返回**的假拉取器。
+     *
+     * 用来测会话的**终态映射**（完成 / 取消 / 失败）——
+     * 真实现要连远端、还要起导出子进程，那三条路径就没法**确定性地**各测一遍。
+     * 而终态映射恰恰是状态机里最容易写反的地方：
+     * 把「取消」当成「失败」，界面上就会显示「拉取失败：cancelled」，
+     * 用户以为出了错，其实只是自己按了取消。
+     */
+    private class FakePuller(
+        private val body: suspend () -> PullResult,
+    ) : AnalysisPuller {
+        override suspend fun pull(
+            source: ConnectionConfig,
+            workspace: ConnectionConfig,
+            workspacePath: Path,
+            dialect: DialectType,
+            namespace: String,
+            table: String,
+            onProgress: suspend (com.langbiantianya.sundays.analysis.PullProgress) -> Unit,
+        ): PullResult = body()
+    }
 
     /** 一条远端源的基础配置（**不带**只读 —— 只读由会话统一加）。 */
     private fun sourceConfig() =
@@ -81,6 +111,16 @@ class AnalysisSessionTest {
             password = "p"
             database = "demo"
         }
+
+    /** 一个远端源在会话里的绑定。 */
+    private fun binding(
+        id: String,
+        config: com.langbiantianya.grpc.ConnectionConfig = sourceConfig(),
+    ) = AnalysisSourceBinding(
+        item = AnalysisSourceItem(id = id, name = "源 $id", dialectLabel = "MySQL"),
+        engineConfig = config,
+        dialect = DialectType.MYSQL,
+    )
 
     // ──────────────── 只读方向 ────────────────
 
@@ -96,7 +136,7 @@ class AnalysisSessionTest {
     @Test
     fun `the remote source session is read only`() {
         val session = newSession()
-        session.setSourceConfigs(mapOf("c1" to sourceConfig()))
+        session.setSources(listOf(binding("c1")))
 
         val config = assertNotNull(session.sourceConfig("c1"), "源的配置应当能取到")
         assertTrue(config.readOnly, "远端源必须只读 —— 分析模式对远端只有读的权限")
@@ -108,7 +148,7 @@ class AnalysisSessionTest {
         // 浏览模式里同一条连接是可写的 —— 在这里就地改掉，就把浏览模式也废了。
         val stored = sourceConfig()
         val session = newSession()
-        session.setSourceConfigs(mapOf("c1" to stored))
+        session.setSources(listOf(binding("c1", stored)))
 
         session.sourceConfig("c1")
 
@@ -130,11 +170,11 @@ class AnalysisSessionTest {
     fun `the selection is pruned when the source disappears`() {
         // 连接被删掉后，选中项若还留着，后续拉取会拿着一个查无此人的 id 去引擎。
         val session = newSession()
-        session.setSourceConfigs(mapOf("c1" to sourceConfig()))
+        session.setSources(listOf(binding("c1")))
         session.selectSource("c1")
         assertEquals("c1", session.selectedSourceId)
 
-        session.setSourceConfigs(emptyMap())
+        session.setSources(emptyList())
         assertNull(session.selectedSourceId, "源没了，选中项不能还留着")
     }
 
@@ -212,5 +252,58 @@ class AnalysisSessionTest {
         assertTrue(Files.exists(session.workspacePath.parent), "用工作区之前必须把目录建出来")
         val result = assertNotNull(session.result)
         assertFalse(result.failed, "建完目录就该能查：${result.error}")
+    }
+
+    // ──────────────── 拉取的终态 ────────────────
+
+    @Test
+    fun `a finished pull lands in the done outcome`() {
+        val session = newSession(FakePuller { PullResult(stagingTable = "staging_x", rowsImported = 3) })
+        session.setSources(listOf(binding("c1")))
+        session.selectSource("c1")
+
+        runBlocking { session.pull("demo", "orders")?.join() }
+
+        val outcome = assertNotNull(session.pullOutcome, "拉完了必须有终态")
+        assertTrue(outcome is PullOutcome.Done, "应当落在完成态：$outcome")
+        assertEquals("staging_x", (outcome as PullOutcome.Done).result.stagingTable)
+        assertFalse(session.pulling, "跑完必须把 pulling 落回去")
+    }
+
+    @Test
+    fun `a cancelled pull lands in the cancelled outcome and not in the failed one`() {
+        // 取消不是失败 —— 显示成失败会让用户以为出了错。
+        val session = newSession(FakePuller { throw CancellationException("cancelled") })
+        session.setSources(listOf(binding("c1")))
+        session.selectSource("c1")
+
+        runBlocking { session.pull("demo", "orders")?.join() }
+
+        val outcome = assertNotNull(session.pullOutcome, "取消也必须留下终态")
+        assertTrue(outcome is PullOutcome.Cancelled, "取消必须落在取消态：$outcome")
+        assertFalse(session.pulling, "取消完必须把 pulling 落回去")
+    }
+
+    @Test
+    fun `a failed pull lands in the failed outcome with the reason`() {
+        val session = newSession(FakePuller { throw IllegalStateException("表不存在") })
+        session.setSources(listOf(binding("c1")))
+        session.selectSource("c1")
+
+        runBlocking { session.pull("demo", "orders")?.join() }
+
+        val outcome = assertNotNull(session.pullOutcome, "失败也必须有终态")
+        assertTrue(outcome is PullOutcome.Failed, "应当落在失败态：$outcome")
+        assertEquals("表不存在", (outcome as PullOutcome.Failed).reason)
+        assertFalse(session.pulling, "失败完必须把 pulling 落回去")
+    }
+
+    @Test
+    fun `a pull without a selected source does not start at all`() {
+        val session = newSession(FakePuller { PullResult(stagingTable = "staging_x") })
+
+        assertNull(session.pull("demo", "orders"), "没选源时不该启动拉取")
+        assertNull(session.pullOutcome, "没启动就没有终态")
+        assertFalse(session.pulling, "没启动就不该在拉取中")
     }
 }

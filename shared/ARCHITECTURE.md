@@ -23,7 +23,7 @@
 | **ConnectionManagerScreen** | 连接管理（左侧连接列表 + 右侧 4 步 / 3 步向导 + 连接总览） | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
 | **AppDestination** | 顶层导航目标枚举 | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
 | **TopNavBar** | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
-| **AnalysisScreen / ReadOnlyBadge** | 数据分析模式的工作台骨架 + **不可关闭**的只读徽标 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
+| **AnalysisScreen / ReadOnlyBadge / PullStageIndicator** | 数据分析模式的工作台骨架 + **不可关闭**的只读徽标 + 拉取三段进度 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |
 | **SettingsScreen / SettingsStorage** | 设置页（左分类 / 右内容）与设置持久化 | [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) |
 | **OnboardingScreen** | 首次启动外观引导（配色 / 明暗 / 密度 / 语言） | [`onboarding/OnboardingScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreen.kt) |
@@ -269,14 +269,16 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ### 6.1 数据分析模式的 UI 包（`analysis/`）
 
-[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，四件事：
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，五件事：
 
 | 文件 | 内容 |
 |---|---|
 | [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 + 只读徽标的测试标记 + `AnalysisColumn` / `AnalysisResult` |
 | [`AnalysisWorkspace.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisWorkspace.kt) | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗（纯函数，不碰文件系统 → 能进 `commonTest`） |
+| [`AnalysisPull.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) | **拉取的纯规则**：三段枚举、进度 / 结果 / 终态模型（`PullOutcome` 是 sealed）、staging 列类型（**一律 VARCHAR**）、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 |
 | [`ReadOnlyBadge.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/ReadOnlyBadge.kt) | 「⊘ 只读」徽标 —— **不可关闭**（它没有任何开关） |
-| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（工具条 + 左侧数据源列表 + 右侧主区） |
+| [`PullStageIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullStageIndicator.kt) | 拉取进度指示器（三段 + 一行占用 + 终态行）—— 状态用**静态字形**（`✓ ● ○`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
+| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（工具条 + 左侧数据源列表 + 拉取状态条 + 右侧主区） |
 
 三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
 

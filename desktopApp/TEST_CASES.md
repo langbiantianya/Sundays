@@ -160,8 +160,12 @@
 | [`AnalysisModuleBoundaryTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisModuleBoundaryTest.kt) | `:shared` 的 `analysis/` 包的**结构边界**：不 import `java.*` / `javax.*`、不 import 引擎与协议层（界面只该接收**算好的**数据）、不出现字面量颜色。断言打在**源文件**上 —— 字节码里看不到「只用了类型」的 import |
 | [`AnalysisScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisScreenTest.kt) | 分析工作台的界面契约：只读徽标**可见且没有可点语义**（它是标记，不是开关 —— 远端只读是既定事实）、数据源列表渲染（按 `analysisSourceRowTag` **精确定位到行**，不靠文本猜）、无数据源时的空态文案**说清下一步做什么** |
 | [`AnalysisHandlerIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/AnalysisHandlerIntegrationTest.kt)（在 `:engine`） | 四条分析路由的集成测试：命名空间按 `supportsSchema` 分派（schema 型 / 库型）、`RUN_QUERY` 打在**非嵌入式**方言上被拒、行数到上限时 `truncated` 置位、正好等于上限**不算**截断 |
-| [`AnalysisSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisSessionTest.kt) | **分析状态机**：① 两条会话的**只读方向相反**（工作区可写 / 远端源只读）；② 浏览模式那份连接配置**不被就地改写**；③ 空语句不启动查询；④ 源没了选中项被剪枝；⑤ DDL 的 `affectedRows` 是 -1（JDBC 的「不是更新计数」）而不是 0；⑥ SQL 出错收成**失败结果**而不是抛异常；⑦ 工作区目录会被自动建出来 |
+| [`AnalysisSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisSessionTest.kt) | **分析状态机**：① 两条会话的**只读方向相反**（工作区可写 / 远端源只读）；② 浏览模式那份连接配置**不被就地改写**；③ 空语句不启动查询；④ 源没了选中项被剪枝；⑤ DDL 的 `affectedRows` 是 -1（JDBC 的「不是更新计数」）而不是 0；⑥ SQL 出错收成**失败结果**而不是抛异常；⑦ 工作区目录会被自动建出来；⑧ **拉取的三条终态**（完成 / 取消 / 失败各落各的态 —— **取消不是失败**）；⑨ 没选源时拉取不启动 |
 | [`AnalysisWorkspaceIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisWorkspaceIntegrationTest.kt) | **工作区端到端**（真 DuckDB 文件、真引擎）：能建表、**重开连接表还在**（证明真的落盘而不是只在内存里）、目录会被建出来、查询能回行与列。连接配置**直接取会话那份** —— 早先这里照抄了一遍「工作区怎么连」，测试就会对着另一种连法发绿 |
+| [`AnalysisPullIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIntegrationTest.kt) | **拉取的导入那一半**端到端（真 DuckDB + 手写带 BOM 的 CSV）：行数对得上、**空串不毁行**（staging 列一律 VARCHAR 的判据）、重拉替换旧表（不撞「Table already exists」）、表头与列名不匹配时**失败且不留半张表**、列名带空格也落得下、进度回调有帧、**失败路径不留临时目录** |
+| [`AnalysisPullSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullSmokeTest.kt) | **整条链路**端到端（真 MySQL → CSV → 真 DuckDB）：行数对上、**三段进度都走到**、临时目录清空、窗口函数聚合结果正确、工作区里 `CREATE TABLE tmp AS SELECT` 成功、**取消路径不留临时目录**。内网 MySQL 不可达时**显式 skip**（报告里留一条 skipped），不是静默跳过 |
+| [`AnalysisPullCancelTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullCancelTest.kt) | **取消必须叫停导出子进程**：用**假引擎**把导出钉成「永远不结束」，于是「取消发生在导出途中」是**确定**的（真跑一遍要靠时机，那是竞态 —— 3 行的表在两种写法下都能把目录清干净，测不出差别）。断言：按**导出请求的 id** 叫停 + 取消路径清干净临时目录 |
+| [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：三段都在、**当前段被标出来**（按段寻址的状态字形，不靠颜色也不靠「屏上有个 ✓」）、行数与临时文件占用、**没有文件时不报大小**（「临时文件 0 B」是假信息）、取消按钮真的会回调、完成 / 取消 / 失败三种终态各说各的话、**进行中不显示上一次的终态** |
 
 ### 2.8 非测试支撑文件
 

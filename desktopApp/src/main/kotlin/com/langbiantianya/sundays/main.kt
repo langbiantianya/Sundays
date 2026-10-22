@@ -437,17 +437,31 @@ internal fun MainScreen(
                 )
             }
         }
-    // 源的**引擎会话配置**（带凭据）—— 只读由会话内部统一加，外面拿不到可写的版本。
-    val analysisSourceConfigs =
+    // 源在会话里的**绑定**：展示条目 + 引擎配置（带凭据）+ 方言。
+    //
+    // 三样捆在一起而不是分三张 map：分开放就要在三处各写一遍「加一个源」，
+    // 漏一处就拉错库。
+    val analysisBindings =
         remember(analysisConnections) {
-            analysisConnections.associate { cfg -> cfg.id to analysisSourceEngineConfig(cfg) }
+            analysisConnections.map { cfg ->
+                AnalysisSourceBinding(
+                    item =
+                        AnalysisSourceItem(
+                            id = cfg.id,
+                            name = cfg.name,
+                            dialectLabel = DialectMetadata.of(cfg.dialect).displayName,
+                        ),
+                    engineConfig = analysisSourceEngineConfig(cfg),
+                    dialect = cfg.dialect,
+                )
+            }
         }
     // 同步进会话 —— 不能在组合过程中直接改状态（Compose 会因此判定为副作用）。
     //
     // 源列表本身**不进会话**：它是「连接列表 × 可分析能力位」的派生结果，
     // 存一份就多一个可能对不上的副本。
-    LaunchedEffect(analysisSourceConfigs) {
-        analysis.setSourceConfigs(analysisSourceConfigs)
+    LaunchedEffect(analysisBindings) {
+        analysis.setSources(analysisBindings)
     }
 
     // 方言的连接表单规格 —— 引擎的 SYSTEM.LIST_DRIVERS **一次性**下发（纯元数据查询，
@@ -731,6 +745,11 @@ internal fun MainScreen(
                         sources = analysisSources,
                         selectedSourceId = effectiveSelection,
                         onSelectSource = analysis::selectSource,
+                        // 拉取状态由**会话**持有：它跨页面切换存活，
+                        // 拉一半切去别的页再回来，进度条还在动。
+                        pullProgress = analysis.pullProgress,
+                        pullOutcome = analysis.pullOutcome,
+                        onCancelPull = analysis::cancelPull,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

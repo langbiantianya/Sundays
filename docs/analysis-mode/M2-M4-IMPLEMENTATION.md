@@ -242,10 +242,11 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 |---|---|---|
 | `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult` | ✅ 已落地 |
 | `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
+| `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：三段枚举、进度 / 结果 / 终态模型、staging 列类型、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 | ✅ 已落地（第 5 片） |
 | `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ⏳ 第 6 片 |
-| `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 | ⏳ 第 5 片 |
+| `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 + 一行占用 + 终态行 | ✅ 已落地（第 5 片） |
 | `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
-| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地**骨架**（工具条 / 数据源树 / 只读徽标是真的，右侧主区仍走空态） |
+| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地**骨架**（工具条 / 数据源树 / 只读徽标 / 拉取状态条是真的，右侧主区仍走空态） |
 
 ### 5.2 `:desktopApp` 的状态机
 
@@ -255,6 +256,22 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 `desktopApp/.../AnalysisSourceConnector.kt` —— UI 层的 `ConnectionConfig` →
 引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` **同口径**）。
+
+`desktopApp/.../AnalysisPuller.kt` —— 拉取链路的**契约**（接口）；
+`desktopApp/.../EngineAnalysisPuller.kt` —— 它的**真实现**（引擎 + 临时文件）。
+
+> 📌 **第 5 片的一处实现期决定：拉取器拆成「接口 + 实现」**。
+> 真实现要连远端、还要起导出子进程，在 CI 上既慢又不稳；
+> 而会话的**终态映射**（拉完了 / 拉挂了 / 拉取消了）是状态机的一部分，
+> 必须能**确定性地**各测一遍。所以抽一个接口，测试塞一个立刻返回的假实现。
+> 假实现还能把「导出**永远不结束**」钉死 —— 于是「取消发生在导出途中」
+> 这件事从**竞态**变成**确定**，「取消时必须叫停导出子进程」那条断言才有判别力。
+>
+> 📌 **第 5 片的另一处决定：拉取的终态是一个 sealed，而不是三个可空字段**。
+> 早先的写法是「结果 + 错误」两个可空字段，取消靠「两个都空」来**推断**；
+> 那是推断不是事实 —— 一旦将来多出第四种「什么都没发生」的路径，
+> 那两个字面量就再也分不出「取消」与「没开始」。改成
+> `PullOutcome`（`Done` / `Cancelled` / `Failed`）之后，三种情况互斥且穷举。
 
 > 📌 **第 4 片的一处实现期决定：源列表**不**进会话**。
 > 源列表是「连接列表 × 声明了 `ANALYSIS_SOURCE` 的方言」的**派生结果**；
@@ -291,10 +308,14 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
 | `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源列表渲染、无数据源时的空态文案 | ✅ 已落地 |
-| `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、源没了选中项被剪枝、DDL 回 -1、SQL 出错收成**失败结果**而不是异常 | ✅ 已落地（第 4 片） |
+| `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、源没了选中项被剪枝、DDL 回 -1、SQL 出错收成**失败结果**而不是异常、**拉取的三条终态**（完成 / 取消 / 失败各落各的态） | ✅ 已落地（第 4 片；第 5 片补 4 例，共 14 例） |
 | `desktopApp/.../AnalysisWorkspaceIntegrationTest.kt` | **工作区端到端**（真 DuckDB 文件）：能建表、重开连接表还在、目录会被自动建出来、查询能回行与列 | ✅ 已落地（第 4 片） |
-| `desktopApp/.../AnalysisPullTest.kt` | 拉取链路端到端（真 MySQL → DuckDB） | ⏳ 第 5 片 |
+| `desktopApp/.../AnalysisPullIntegrationTest.kt` | **导入那一半**端到端（真 DuckDB + 手写带 BOM 的 CSV）：行数对上、空串**不毁行**、重拉替换旧表、表头不匹配时失败且**不留半张表**、列名带空格、进度回调有帧、**失败路径不留临时目录** | ✅ 已落地（第 5 片，7 例） |
+| `desktopApp/.../AnalysisPullSmokeTest.kt` | **整条链路**端到端（真 MySQL → CSV → 真 DuckDB）：行数对上、三段进度走全、临时目录清空、窗口函数聚合、`CREATE TABLE tmp AS SELECT`、**取消路径不留临时目录** | ✅ 已落地（第 5 片，5 例；MySQL 不可达时显式 skip） |
+| `desktopApp/.../AnalysisPullCancelTest.kt` | **取消必须叫停导出子进程**（假引擎把导出钉成「永远不结束」，时机确定）：按**导出请求的 id** 叫停 + 取消路径清干净临时目录 | ✅ 已落地（第 5 片，2 例） |
+| `desktopApp/.../AnalysisPullIndicatorTest.kt` | **拉取进度的界面契约**：三段都在、当前段被标出来（按段寻址）、行数与占用、没有文件时不报大小、取消按钮回调、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 | ✅ 已落地（第 5 片，9 例） |
 | `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | 工作区纯规则：staging 表名、标识符清洗（引号 / 分号不得混入）、工作区文件路径 | ✅ 已落地（第 4 片，10 例） |
+| `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯规则：列名**引用**、引号转义、列一律 VARCHAR、删表 `IF EXISTS`、方言各自的引用形式、命名空间为空时退化、三段的状态判定、每段各有各的文案键 | ✅ 已落地（第 5 片，11 例） |
 
 ### 5.5 i18n
 
@@ -318,6 +339,13 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > `ANALYSIS_EDITOR_HINT`（工作区）、`ANALYSIS_RESULT_ROWS`（行数）、
 > `ANALYSIS_RESULT_TRUNCATED`（上限与实际行数）、`ANALYSIS_PULL_FAILED`（原因）、
 > `ANALYSIS_STAGING_TABLE`（staging 表名）。
+>
+> ✅ **第 5 片再补 3 个键**（六语言同步，共 27 个）：
+> `ANALYSIS_PULL_CANCEL`（取消拉取）、`ANALYSIS_PULL_ROWS`（已处理 {0} 行）、
+> `ANALYSIS_PULL_SIZE`（临时文件 {0}）。
+> 这三个是**界面件 `PullStageIndicator` 落地时才发现缺**的：
+> 「取消拉取」没有按钮就点不着，「已处理 N 行」与「临时文件 X」是 §6.5 那两行占用。
+> 补键的规矩不变 —— **六语言一个都不能少**（`StringsIntegrityTest` 盯着）。
 
 ---
 
@@ -368,9 +396,56 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 清理写在**编排函数的一处 `finally`** 里——成功 / 失败 / 取消**三条路径同一条语句**，
 不是三个分支各写一遍（M4 验收要求「三条路径上都被清理」）。
 
-### 6.4 预计占用
+`finally` 里跑在 `withContext(NonCancellable)` 中——不这么做的话，
+取消时协程已经是「取消中」态，里面的挂起调用会被立刻取消，清理根本跑不完。
+
+**删除带 5 次重试**（每次间隔 200 ms）：取消时导出子进程可能**还没来得及**
+关掉文件句柄，而 Windows 上文件被占用时删不掉。删一次失败就放弃，
+留下的正是「取消之后仍然占着磁盘」的那个文件 —— 恰恰是这条验收要防的。
+
+### 6.3.1 取消时必须**先叫停导出子进程**（实测抓出来的）
+
+导出跑在**另一个进程**里，它正开着那个临时 CSV。Windows 上文件被占用时删不掉，
+所以取消时的顺序必须是：**先叫停子进程（它放开文件）→ 再删目录**。
+
+叫停走引擎既有的 `EXPORT.RUN_EXPORT` 停止分支（`stop_export_id`），
+而 `stop_export_id` 要带的正是**导出请求自己的 id**。
+
+> ⚠️ **这里的坑**：导出请求 id **不能在导出返回之后才记**。
+> 取消发生在导出**途中**时，导出根本不会返回，于是「叫停」那一步永远拿不到 id ——
+> 子进程继续开着 CSV，磁盘上留下一个删不掉的孤儿目录。
+>
+> 最初的写法把 id 记在 `exportToCsv` 的**返回值**里，实测确实抓到了残留
+> （一个装着 `pull.csv` 的临时目录）。现在的写法：**id 在导出开始之前就定下来**，
+> `finally` 里一定拿得到。
+
+### 6.4 staging 表的列一律 `VARCHAR`
+
+看着「把远端的 `INT` 映成 `INTEGER`」更贴心，但那条路会**整行丢数据**，实测如下：
+
+1. CSV 导出把 **NULL 写成空串**（`CsvWriter.writeRow`：`it?.toString() ?: ""`）；
+2. 导入侧按**字符串**写值（`ImportHandler.bindRow`：`stmt.setString`）；
+3. 而 `INSERT INTO t (a) VALUES ('')` 在 `a INTEGER` 上**会失败** —— 空串转不成整数。
+
+于是：源表里只要有一列可空且是数值，**每一行**都会导入失败。
+打开 `ignore_errors` 也救不了 —— 失败的是**整行**，那一行的其它列也跟着没了。
+
+staging 因此是**落地层**（数据仓库的惯例：原始层存文本，类型由下游建模决定）。
+要按数值聚合，在工作区里建一张**建模表**即可 ——
+`CREATE TABLE orders AS SELECT TRY_CAST(id AS BIGINT) AS id, … FROM staging_shop_orders`。
+`TRY_CAST`（而不是 `CAST`）让「转不动」的值落成 NULL 而不是让整条查询失败。
+
+> 实测补充：`sum()` 与窗口函数在 `VARCHAR` 上**不工作**（探针 PROBE-3/4 失败），
+> 而 `TIMESTAMP` / `DATE` / `BOOLEAN` / `DECIMAL(38,10)` 接受字符串。
+> 所以「一切皆 VARCHAR」是**对的方向**，但**必须配 `TRY_CAST`** 才能做聚合。
+
+### 6.5 预计占用
 
 拉取面板显示两行：CSV 文件大小（① 完成后可知）+ 行数（③ 的进度帧给出）。
+
+大小在 ① 结束之前**没有值** —— 那时显示「临时文件 0 B」是**假信息**
+（用户会以为文件已经建好却只有 0 字节），所以那之前**不显示**这一项。
+
 
 ---
 
@@ -398,17 +473,22 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 `AnalysisModuleBoundaryTest` 断言 `shared/.../analysis/` 下的 `.kt`：
 不 import desktopApp 的任何类型、不 import `java.*` / `javax.*`、不出现字面量颜色。
 
-### 7.4 工作台端到端（`AnalysisPullTest`）
+### 7.4 工作台端到端（`AnalysisPullSmokeTest` / `AnalysisPullIntegrationTest` / `AnalysisPullCancelTest`）
 
 - 真 MySQL（`sundays_smoke`）拉一张表进 DuckDB → `staging_<库>_<表>` 存在、**行数对得上**
 - 临时 CSV 在成功 / 失败 / 取消三条路径上都被清理
+- 取消时按**导出请求的 id** 叫停导出子进程（假引擎把导出钉成「永远不结束」，时机确定）
 - 工作区里跑一条窗口函数聚合 → 结果正确
 - 工作区里 `CREATE TABLE tmp AS SELECT …` **成功**（本地写允许）
 
-### 7.5 界面（`AnalysisScreenTest`）
+### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest`）
 
 - 「⊘ 只读」徽标**没有关闭入口**
-- 结果表双击单元格**不进编辑态**（`onCellEdit = null`）
+- 拉取三段各自标出「已完成 / 进行中 / 待执行」（按**段**寻址，不看颜色）
+- 没有文件时不报大小（不显示「临时文件 0 B」）
+- 完成 / 取消 / 失败三种终态各说各的话；**取消不是失败**
+- 进行中**不显示**上一次的终态
+- 结果表双击单元格**不进编辑态**（`onCellEdit = null`，第 6 片）
 
 ---
 
@@ -422,7 +502,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | 2 | `feat(engine): 只读闸门 —— 会话级 L4 + 方言级 L3，配两级回归测试` | dispatcher 闸门 + `ReadOnlySessionGateTest` + `ReadOnlyDialectTest` | §7.1 / §7.2 全绿，且**变异验证**：去掉闸门后测试变红 | ✅ **已提交** |
 | 3 | `feat(analysis): 分析模式入口 —— 四条只读路由 + 顶层导航 + 不可关闭的只读徽标` | `AnalysisHandler` + 四条路由注册 + `AppDestination.ANALYSIS` + `TopNavBar` + `ReadOnlyBadge` + 主屏骨架 + 能力位声明 + i18n 六语言 | 界面能进；徽标不可关；`AnalysisHandlerIntegrationTest` / `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest` 全绿 | ✅ **本轮落地**（提交标题按此风格） |
 | 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ✅ **本轮落地** |
-| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ⏳ 未开始 |
+| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ✅ **本轮落地** |
 | 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ⏳ 未开始 |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
@@ -448,6 +528,33 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > | 工作区连接标上 `read_only = true` | `the workspace connection is writable` |
 > | 远端源不再强制 `read_only = true` | `the remote source session is read only` |
 > | 去掉 `ensureWorkspaceDir` 调用 | `running a statement…` / `a select returns…` / `the workspace directory is created on demand` |
+>
+> 📌 **第 5 片的实际落点比原文多三处**：
+> 一是**拉取器拆成「接口 + 实现」**（§5.2）—— 真实现要连远端、起导出子进程，
+> 而会话的终态映射必须能**确定性地**测；假实现还能把导出钉成「永远不结束」，
+> 于是「取消发生在导出途中」从竞态变成确定；
+> 二是**拉取终态是 sealed**（`Done` / `Cancelled` / `Failed`），不是三个可空字段；
+> 三是**导出请求 id 在导出开始之前就定下来**（§6.3.1）—— 这是实测抓出来的真 bug。
+>
+> ✅ **第 5 片的变异验证（四处，各被抓住）**：
+>
+> | 变异 | 变红的用例 |
+> |---|---|
+> | 三段的状态判定把「进行中」与「待执行」对调 | `AnalysisPullTest` 三例 + `AnalysisPullIndicatorTest` 的 `the indicator shows the three stages…` |
+> | 取消被记成**失败**（`CancellationException` 落进 `Failed`） | `a cancelled pull lands in the cancelled outcome and not in the failed one` |
+> | 去掉临时目录的删除（`deleteTempDir` 变成空操作） | `the temp csv is gone after a successful pull` / `a failed pull leaves no temp directory behind` / `a cancelled pull leaves no temp directory behind` |
+> | 导出请求 id 只在导出**返回之后**才记（= 最初的 bug） | `a cancelled pull stops the export subprocess by the export request id` |
+>
+> 📌 **最后一条为什么值得单独记**：前三个变异是「设计上就该防住」的；
+> 第四个是**实测才发现的真 bug** —— 最初的写法把导出请求 id 记在 `exportToCsv` 的
+> **返回值**里，而取消发生在导出**途中**时那个返回值根本不会来，
+> 于是「叫停子进程」被跳过，Windows 上留下一个装着 `pull.csv` 的孤儿目录。
+> 它是被 `AnalysisPullSmokeTest` 的「取消路径不留临时目录」抓到的。
+>
+> ⚠️ 而那条冒烟测试本身**判别力不够**：3 行的表在两种写法下都能把目录清干净
+> （导出在取消到达之前就结束了）。所以补了 `AnalysisPullCancelTest` ——
+> 用假引擎把导出钉成「永远不结束」，「取消发生在导出途中」变成**确定**的事实。
+> **一个测不出来的断言等于没有断言**：判别力不足的测试要主动补强，不能算数。
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、
@@ -462,7 +569,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 |---|---|
 | **L4 闸门漏了一条写路由** | 写路由清单集中在**一处**函数里（§4.2 的那张表就是它的唯一产地）；测试逐条覆盖 |
 | `ANALYSIS.RUN_QUERY` 被打到远端 | 引擎侧校验 `EMBEDDED_MODE`（§3.4），不靠前端自觉 |
-| 拉取把远端磁盘写满 | CSV 落临时目录 + 面板显示占用（§6.4）；三段路径都清理（§6.3） |
+| 拉取把远端磁盘写满 | CSV 落临时目录 + 面板显示占用（§6.5）；三段路径都清理（§6.3） |
+| 取消拉取后临时目录删不掉（Windows 上文件被占用） | 取消时**先叫停导出子进程**再删目录（§6.3.1），删除带 5 次重试 |
 | MySQL / PG 进分析模式削弱了安全性 | **这正是 L4 存在的理由**；且 §3.6 的两类回归测试是它的守门人 |
 | 能力位在前后端两处各写一份 | 前端用引擎 `LIST_DRIVERS` 下发的 `DialectInfo.capabilities`，**不另立真相源** |
 
