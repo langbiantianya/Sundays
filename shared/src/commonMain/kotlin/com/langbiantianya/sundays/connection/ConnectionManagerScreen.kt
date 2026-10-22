@@ -672,25 +672,36 @@ fun ConnectionWizardContent(
     dialectForms: DialectFormRegistry = DialectFormRegistry.EMPTY,
     idleContent: @Composable () -> Unit = {},
 ) {
-    val scrollState = rememberScrollState()
     val totalSteps = totalStepsFor(wizardFlow)
 
     Column(
         modifier =
             modifier
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(24.dp)
-                .verticalScroll(scrollState),
+                .padding(24.dp),
     ) {
         // 使用 safe render 避免 editingConnection 为 null 时崩溃
         when (wizardStep) {
             WizardStep.IDLE -> {
-                idleContent()
+                // 总览面板也可能比窗口高（连接摘要长、条目多），所以这一屏自己带滚动。
+                //
+                // ⚠️ 这里**不能**再在整列上挂 `verticalScroll`：那会让整列的高度约束变成
+                // 「无限高」，`weight` 就再也分不出剩余空间了（见 [StepLayout] 的 KDoc）。
+                Column(
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                ) {
+                    idleContent()
+                }
             }
 
             WizardStep.QUICK_CONNECT -> {
                 editingConnection?.let { config ->
                     QuickConnectStep(
+                        modifier = Modifier.weight(1f),
                         stepIndex = 1,
                         totalSteps = totalSteps,
                         onSelectDialect = { dialect ->
@@ -706,6 +717,7 @@ fun ConnectionWizardContent(
             WizardStep.BASIC_INFO -> {
                 editingConnection?.let { config ->
                     BasicInfoStep(
+                        modifier = Modifier.weight(1f),
                         editingConnection = config,
                         stepIndex = stepIndexOf(wizardStep, wizardFlow),
                         totalSteps = totalSteps,
@@ -722,6 +734,7 @@ fun ConnectionWizardContent(
             WizardStep.CONNECTION_TYPE -> {
                 editingConnection?.let { config ->
                     ConnectionTypeStep(
+                        modifier = Modifier.weight(1f),
                         editingConnection = config,
                         stepIndex = stepIndexOf(wizardStep, wizardFlow),
                         totalSteps = totalSteps,
@@ -736,6 +749,7 @@ fun ConnectionWizardContent(
             WizardStep.CREDENTIALS -> {
                 editingConnection?.let { config ->
                     CredentialsStep(
+                        modifier = Modifier.weight(1f),
                         editingConnection = config,
                         stepIndex = stepIndexOf(wizardStep, wizardFlow),
                         totalSteps = totalSteps,
@@ -751,6 +765,7 @@ fun ConnectionWizardContent(
             WizardStep.TEST_SAVE -> {
                 editingConnection?.let { config ->
                     TestSaveStep(
+                        modifier = Modifier.weight(1f),
                         editingConnection = config,
                         stepIndex = stepIndexOf(wizardStep, wizardFlow),
                         totalSteps = totalSteps,
@@ -986,6 +1001,7 @@ internal fun IdlePanel(
 /** 快速连接步骤 — 预置方言快捷入口 */
 @Composable
 private fun QuickConnectStep(
+    modifier: Modifier = Modifier,
     stepIndex: Int,
     totalSteps: Int,
     onSelectDialect: (DialectType) -> Unit,
@@ -993,10 +1009,19 @@ private fun QuickConnectStep(
     onCancel: () -> Unit,
 ) {
     StepLayout(
+        modifier = modifier,
         title = str(StrKey.QUICK_CONNECT),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+            ) {
+                WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.BACK_WITH_ARROW)) }
+            }
+        },
     ) {
         Text(
             text = str(StrKey.QUICK_CONNECT_HINT),
@@ -1043,15 +1068,6 @@ private fun QuickConnectStep(
                 icon = Icons.Default.FolderOpen,
                 onClick = { onSelectDialect(DialectType.SQLITE) },
             )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-        ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.BACK_WITH_ARROW)) }
         }
     }
 }
@@ -1124,6 +1140,7 @@ private fun QuickConnectCard(
 @Composable
 private fun BasicInfoStep(
     editingConnection: ConnectionConfig,
+    modifier: Modifier = Modifier,
     stepIndex: Int,
     totalSteps: Int,
     onNameChange: (String) -> Unit,
@@ -1132,10 +1149,28 @@ private fun BasicInfoStep(
     onCancel: () -> Unit,
 ) {
     StepLayout(
+        modifier = modifier,
         title = str(StrKey.BASIC_INFO),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                WinTextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CANCEL)) }
+                Spacer(Modifier.width(8.dp))
+                WinButton(
+                    onClick = onNext,
+                    enabled = editingConnection.name.isNotBlank(),
+                    shape = SundaysPalette.buttonShape,
+                ) {
+                    Text(str(StrKey.NEXT_STEP))
+                    Icon(Icons.Default.ArrowForward, null)
+                }
+            }
+        },
     ) {
         WinTextField(
             value = editingConnection.name,
@@ -1158,24 +1193,6 @@ private fun BasicInfoStep(
                     isSelected = editingConnection.dialect == d,
                     onClick = { if (d != editingConnection.dialect) onDialectChange(d) },
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            WinTextButton(onClick = onCancel, shape = SundaysPalette.buttonShape) { Text(str(StrKey.CANCEL)) }
-            Spacer(modifier = Modifier.width(8.dp))
-            WinButton(
-                onClick = onNext,
-                enabled = editingConnection.name.isNotBlank(),
-                shape = SundaysPalette.buttonShape,
-            ) {
-                Text(str(StrKey.NEXT_STEP))
-                Icon(Icons.Default.ArrowForward, null)
             }
         }
     }
@@ -1259,6 +1276,7 @@ private fun DialectOption(
 @Composable
 private fun ConnectionTypeStep(
     editingConnection: ConnectionConfig,
+    modifier: Modifier = Modifier,
     stepIndex: Int,
     totalSteps: Int,
     onConnectionTypeChange: (ConnectionType) -> Unit,
@@ -1269,10 +1287,24 @@ private fun ConnectionTypeStep(
     val availableTypes = editingConnection.dialect.supportedConnectionTypes
 
     StepLayout(
+        modifier = modifier,
         title = str(StrKey.CONNECTION_TYPE),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
+                Spacer(Modifier.width(8.dp))
+                WinButton(onClick = onNext, shape = SundaysPalette.buttonShape) {
+                    Text(str(StrKey.NEXT_STEP))
+                    Icon(Icons.Default.ArrowForward, null)
+                }
+            }
+        },
     ) {
         Text(str(StrKey.SELECT_CONNECTION_MODE), style = MaterialTheme.typography.labelLarge)
         Spacer(modifier = Modifier.height(8.dp))
@@ -1284,20 +1316,6 @@ private fun ConnectionTypeStep(
                     isSelected = editingConnection.connectionType == ct,
                     onClick = { if (editingConnection.connectionType != ct) onConnectionTypeChange(ct) },
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
-            Spacer(modifier = Modifier.width(8.dp))
-            WinButton(onClick = onNext, shape = SundaysPalette.buttonShape) {
-                Text(str(StrKey.NEXT_STEP))
-                Icon(Icons.Default.ArrowForward, null)
             }
         }
     }
@@ -1332,6 +1350,7 @@ private fun ConnectionTypeOption(
 @Composable
 private fun CredentialsStep(
     editingConnection: ConnectionConfig,
+    modifier: Modifier = Modifier,
     stepIndex: Int,
     totalSteps: Int,
     onNext: () -> Unit,
@@ -1359,10 +1378,24 @@ private fun CredentialsStep(
     }
 
     StepLayout(
+        modifier = modifier,
         title = str(StrKey.CONNECTION_DETAILS),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
+                Spacer(Modifier.width(8.dp))
+                WinButton(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
+                    Text(str(StrKey.NEXT_STEP))
+                    Icon(Icons.Default.ArrowForward, null)
+                }
+            }
+        },
     ) {
         // ── spec 分支优先，回退旧的枚举分支 ──
         //
@@ -1535,20 +1568,6 @@ private fun CredentialsStep(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
-            Spacer(modifier = Modifier.width(8.dp))
-            WinButton(onClick = onNext, enabled = canProceed, shape = SundaysPalette.buttonShape) {
-                Text(str(StrKey.NEXT_STEP))
-                Icon(Icons.Default.ArrowForward, null)
-            }
-        }
     }
 }
 
@@ -1602,6 +1621,7 @@ private fun embeddedFieldSpec(
 @Composable
 private fun TestSaveStep(
     editingConnection: ConnectionConfig,
+    modifier: Modifier = Modifier,
     stepIndex: Int,
     totalSteps: Int,
     wizardFlow: WizardFlow,
@@ -1621,10 +1641,32 @@ private fun TestSaveStep(
     var isTesting by remember { mutableStateOf(false) }
 
     StepLayout(
+        modifier = modifier,
         title = str(StrKey.TEST_AND_SAVE),
         step = stepIndex,
         totalSteps = totalSteps,
         onCancel = onCancel,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
+                Spacer(Modifier.width(8.dp))
+                WinButton(
+                    onClick = { onConfirm(editingConnection) },
+                    enabled = canConfirm,
+                    shape = SundaysPalette.buttonShape,
+                ) {
+                    Icon(
+                        imageVector = if (isQuickConnect) Icons.Default.Bolt else Icons.Default.Save,
+                        contentDescription = null,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(confirmLabel)
+                }
+            }
+        },
     ) {
         // 连接信息摘要
         Surface(
@@ -1723,28 +1765,6 @@ private fun TestSaveStep(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            WinTextButton(onClick = onBack, shape = SundaysPalette.buttonShape) { Text(str(StrKey.PREV_STEP)) }
-            Spacer(modifier = Modifier.width(8.dp))
-            WinButton(
-                onClick = { onConfirm(editingConnection) },
-                enabled = canConfirm,
-                shape = SundaysPalette.buttonShape,
-            ) {
-                Icon(
-                    imageVector = if (isQuickConnect) Icons.Default.Bolt else Icons.Default.Save,
-                    contentDescription = null,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(confirmLabel)
-            }
-        }
     }
 }
 
@@ -1803,16 +1823,47 @@ data class TestResult(
     val message: String = "",
 )
 
-/** 步骤布局 */
+/**
+ * 步骤布局 —— **头部固定 / 内容可滚 / 底部按钮固定**。
+ *
+ * ## 为什么底部按钮必须钉在滚动区**之外**
+ *
+ * 原实现把「上一步 / 下一步」那一行放在**内容里**，于是它跟着内容一起滚。
+ * 内容比窗口高时（5 个方言选项 + 名称框就要 ~700dp；小屏笔记本的工作区只有
+ * 600 出头 dp），按钮被推到视口之外 —— 用户看得见「这一步有 5 个方言要选」，
+ * 却**看不到也点不到**「下一步」，向导就此走不下去。
+ *
+ * 真机实测（本机 1536×864 @125% DPI，工作区 691dp）：第 1 步的「下一步」
+ * 落在窗口底边之下，**不可见、滚不出来、Tab 也聚焦不到**。
+ *
+ * 改成「内容可滚 + 按钮固定」之后：
+ *
+ * - 按钮**永远**在视口里 —— 窗口多小都点得到；
+ * - 内容再长也只影响滚动区，不影响操作区；
+ * - Tab 顺序也随之合理：先走完表单，再落到按钮上。
+ *
+ * ## 为什么整列上**不能**再挂 `verticalScroll`
+ *
+ * `verticalScroll` 会把内容的最大高度约束改成「无限高」，而 `weight` 正是靠
+ * 「父容器还剩多少高度」来分配空间的 —— 两者叠在一起，`weight` 就分不出剩余了
+ * （内容区会塌成 0 高，按钮反而被顶到屏幕外）。
+ *
+ * 所以滚动**下沉到本函数内部**：整列保持有界高度，内容区自己滚。
+ * 整列的高度由调用方给（[ConnectionWizardContent] 用 `weight(1f)` 分配剩余空间）。
+ */
 @Composable
 private fun StepLayout(
     title: String,
     step: Int,
     totalSteps: Int,
     onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** 底部固定操作区 —— 「上一步 / 下一步」等按钮。**不参与滚动**。 */
+    footer: @Composable ColumnScope.() -> Unit,
+    /** 内容区 —— 随窗口高度不够而滚动。 */
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1861,7 +1912,22 @@ private fun StepLayout(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        content()
+        // 内容区：可滚。`fillMaxHeight` 让它**填满**剩余高度 —— 否则内容短的时候
+        // 这一块会缩成内容高度，底部按钮就跟着往上跑而不是钉在底部。
+        Column(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+        ) {
+            content()
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 底部操作区：固定，不参与滚动
+        footer()
     }
 }
 

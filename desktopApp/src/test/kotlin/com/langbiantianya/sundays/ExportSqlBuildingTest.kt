@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays
 
+import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.table.TableColumn
 import org.junit.Test
@@ -26,50 +27,70 @@ import kotlin.test.assertTrue
  *
  * 而现在这条 SQL 会**显示在可编辑的编辑器里**、并决定实际导出的内容 ——
  * 拼错了用户看不出来，只能事后发现文件不对。
+ *
+ * ## 表名为什么带限定
+ *
+ * 裸表名按**会话默认库**解析，而导出打到的库未必是这张表所在的库 ——
+ * 真机实测：预览 `sundays_xdb.probe_shared_name` 正常，导出却报
+ * `Table 'sundays_smoke.probe_shared_name' doesn't exist`（`sundays_smoke` 是
+ * 「连接配置里那个库」，而用户在树上点的是 `sundays_xdb`）。
+ *
+ * 所以起手 SQL 必须带限定；限定成什么样由方言决定（见下面几条）。
  */
 class ExportSqlBuildingTest {
+    /**
+     * 造一个 tab。
+     *
+     * 方言默认给 **MySQL** —— 因为它是唯一「命名空间就是 database」的方言，
+     * 限定形态最具体（`` `库`.`表` ``），最能暴露「限定被漏掉」这种回归。
+     */
+    private fun tab(
+        database: String = "shop",
+        table: String = "orders",
+        dialect: DialectType = DialectType.MYSQL,
+    ) = TablePreviewTab(schema = database, tableName = table).apply { this.dialect = dialect }
+
     @Test
     fun `无过滤无排序时就是整表 SELECT`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
-        assertEquals("SELECT * FROM orders", tab.buildExportSql())
+        assertEquals("SELECT * FROM `shop`.`orders`", tab().buildExportSql())
     }
 
     @Test
     fun `带上手动过滤`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.whereClause = "status = 'paid'"
         assertEquals(
-            "SELECT * FROM orders WHERE status = 'paid'",
+            "SELECT * FROM `shop`.`orders` WHERE status = 'paid'",
             tab.buildExportSql(),
         )
     }
 
     @Test
     fun `带上排序`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.orderByClause = "created_at DESC"
         assertEquals(
-            "SELECT * FROM orders ORDER BY created_at DESC",
+            "SELECT * FROM `shop`.`orders` ORDER BY created_at DESC",
             tab.buildExportSql(),
         )
     }
 
     @Test
     fun `过滤与排序同时带上且顺序正确`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.whereClause = "status = 'paid'"
         tab.orderByClause = "created_at DESC"
         // 顺序必须是 WHERE 在前 ORDER BY 在后 —— 反过来是语法错误，
         // 而这条 SQL 是直接发给引擎执行的，错了会整条挂掉
         assertEquals(
-            "SELECT * FROM orders WHERE status = 'paid' ORDER BY created_at DESC",
+            "SELECT * FROM `shop`.`orders` WHERE status = 'paid' ORDER BY created_at DESC",
             tab.buildExportSql(),
         )
     }
 
     @Test
     fun `表内搜索也算过滤`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.columns =
             listOf(
                 TableColumn(key = "id", header = "id"),
@@ -78,13 +99,13 @@ class ExportSqlBuildingTest {
         tab.searchTerm = "第一行"
         val sql = tab.buildExportSql()
 
-        assertTrue(sql.startsWith("SELECT * FROM orders WHERE "), "搜索词应进 WHERE：$sql")
+        assertTrue(sql.startsWith("SELECT * FROM `shop`.`orders` WHERE "), "搜索词应进 WHERE：$sql")
         assertTrue("label" in sql, "搜索应铺到已知列上：$sql")
     }
 
     @Test
     fun `过滤与搜索同时存在时是 AND 关系`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.columns = listOf(TableColumn(key = "label", header = "label"))
         tab.whereClause = "status = 'paid'"
         tab.searchTerm = "第一行"
@@ -95,11 +116,56 @@ class ExportSqlBuildingTest {
 
     @Test
     fun `空白过滤与空白排序不留下多余子句`() {
-        val tab = TablePreviewTab(schema = "shop", tableName = "orders")
+        val tab = tab()
         tab.whereClause = "   "
         tab.orderByClause = "  "
         // 多出 `WHERE` / `ORDER BY` 而后面没内容 = 语法错误，导出直接失败
-        assertEquals("SELECT * FROM orders", tab.buildExportSql())
+        assertEquals("SELECT * FROM `shop`.`orders`", tab.buildExportSql())
+    }
+
+    // ------------------------------------------------------------------
+    // 表名限定 —— 跨库导出的修复（真机实测的缺陷）
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `MySQL 导出带库名限定`() {
+        // MySQL 的命名空间**就是** database，`` `库`.`表` `` 是合法且最不容易歧义的写法。
+        //
+        // 这条是跨库导出的修复本体：预填 SQL 原来是裸表名，而导出子进程连的是
+        // 「连接配置里那个库」，于是预览另一张表能看见、导出却报
+        // `Table '<配置里那个库>.<表>' doesn't exist`。
+        val sql = tab(database = "sundays_xdb", table = "probe_shared_name").buildExportSql()
+        assertEquals("SELECT * FROM `sundays_xdb`.`probe_shared_name`", sql)
+    }
+
+    @Test
+    fun `PG 不把库名当 schema 写`() {
+        // PG 的 database 是 **catalog**，写进 `库.表` 会被解释成「名为 <库> 的 schema 下的表」
+        // —— 报 `relation "库.表" does not exist`。
+        // 而 PG 跨库压根不可引用（`cross-database references are not implemented`），
+        // 所以这里只能退回由会话 search_path 解析的裸表名。
+        val sql = tab(database = "examquestions", dialect = DialectType.POSTGRESQL).buildExportSql()
+        assertEquals("SELECT * FROM \"orders\"", sql)
+    }
+
+    @Test
+    fun `H2 不把库名当 schema 写`() {
+        // H2 的 schema 是 `PUBLIC`，与 catalog（库名）无关。
+        // 把库名当 schema 写会报 `Schema "X" not found`。
+        val sql = tab(database = "TESTDB", dialect = DialectType.H2).buildExportSql()
+        assertEquals("SELECT * FROM \"orders\"", sql)
+    }
+
+    @Test
+    fun `限定后的表名仍然可以被表内搜索与过滤拼在后面`() {
+        // 限定只作用在 FROM 后面那一段 —— 过滤 / 排序 / 搜索仍是裸片段，
+        // 若限定被误拼到 WHERE 里，这条会红。
+        val tab = tab(database = "sundays_xdb", table = "probe_shared_name")
+        tab.whereClause = "id > 10"
+        assertEquals(
+            "SELECT * FROM `sundays_xdb`.`probe_shared_name` WHERE id > 10",
+            tab.buildExportSql(),
+        )
     }
 }
 

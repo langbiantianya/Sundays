@@ -15,12 +15,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -107,6 +109,19 @@ internal const val SQL_RESULT_MAX_ROWS = 5000
 internal const val SQL_READONLY_CHIP_TAG = "sqlReadonlyChip"
 
 /**
+ * SQL 结果区的**最小高度** —— 够放下「查询结果 · N 行」+ 表头 + **一行数据** + 横向滚动条 + 分页栏。
+ *
+ * ## 为什么要有这个下限
+ *
+ * 结果区内部是「标题行 + 表格」两层，而表格内部还要再分给「表头 / 数据区 / 横向滚动条 / 分页栏」。
+ * 纯比例分配（40%）在窗口一小的时候会把**数据区**挤成 0 高度：标题写着「2 行」，
+ * 屏幕上却一行都没有 —— 用户看到的是「查出来了但没结果」，而拉高窗口数据就出来了。
+ *
+ * 宁可编辑器小一点（它内部能滚），也不能让结果区看不见数据。
+ */
+private val MIN_SQL_RESULT_HEIGHT = 180.dp
+
+/**
  * SQL 工作台 —— 顶部信息条 + SQL sheet 标签条 + 编辑器（60%） + 结果面板（40%）。
  *
  * 与 [GenerateWorkbenchPane] 同构：**多 sheet**，每个 sheet 的 [CodeEditorState] 与执行结果都由
@@ -127,6 +142,7 @@ internal const val SQL_READONLY_CHIP_TAG = "sqlReadonlyChip"
  * - 有 `rows` → [DataTable]
  * - 否则 → 「执行 SQL 后在此查看结果」占位
  */
+
 @Composable
 internal fun SqlWorkbenchPane(
     state: DatabaseBrowserState,
@@ -329,184 +345,195 @@ internal fun SqlWorkbenchPane(
                 onBackground = { trackedTaskIds = emptyList() },
             )
         }
-        // 上编辑器 + 下结果（fillMaxHeight 60% / 40% 通过 weight 分配）
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (sheet == null) {
-                EmptyHint(
-                    title = str(StrKey.NO_EDITABLE_SQL_SHEET),
-                    description = str(StrKey.NO_EDITABLE_SQL_SHEET_HINT),
-                    // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                )
-            } else {
-                CodeEditorWithToolbar(
-                    text = sheet.editor.text,
-                    editorState = sheet.editor,
-                    onTextChange = { sheet.editor.setText(it) },
-                    // 方言档位即语言 id：高亮与「格式化」都走同一档位（见 SqlDialectProfile）
-                    languageId = dialect.languageId,
-                    // 本工作台只处理 SQL —— 不暴露语言切换器
-                    showLanguageSwitcher = false,
-                    // 注入当前连接的库 / 表 / 字段（**零额外请求**，见 sqlSchemaCompletions）。
-                    // 关键字由上面的 `languageId` 按方言档位自动带来，无需重复注入。
-                    // 忽略大小写：标识符大小写行为因方言而异，敲 `FROM USERS` 也该能补出 `users`
-                    extraCompletions = schemaCompletions,
-                    extraCompletionsCaseSensitive = false,
-                    actions = {
-                        // 只读模式开关 —— 摆最左，因为它决定后面所有按钮按下去会发生什么
-                        FilterChip(
-                            selected = state.readOnly,
-                            onClick = { state.readOnly = !state.readOnly },
-                            enabled = !sheet.running,
-                            label = { Text(str(StrKey.READ_ONLY), maxLines = 1, softWrap = false) },
-                            modifier = Modifier.testTag(SQL_READONLY_CHIP_TAG),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        // 多语句开关 —— 放在最左侧，因为它改的是**执行语义**，
-                        // 而执行 / 停止 / 事务都排在它后面，视觉上是「先定模式再操作」。
-                        //
-                        // 做成逐 sheet 的开关而不是全局默认开：多语句意味着
-                        // 「一次点执行会改多张表」，用户得能对某个脚本明确表态。
-                        // 用 [FilterChip] 而不是复选框：它自己就是「选中态 + 可禁用」
-                        // 的两态控件，与旁边的 WinButton 视觉重量一致。
-                        FilterChip(
-                            selected = sheet.multiStatement,
-                            onClick = { sheet.multiStatement = !sheet.multiStatement },
-                            enabled = !sheet.running,
-                            label = { Text(str(StrKey.MULTI_STATEMENT), maxLines = 1, softWrap = false) },
-                            modifier = Modifier.testTag(SQL_MULTI_STATEMENT_CHIP_TAG),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        // 事务按钮组 —— 在执行 / 停止之前。
-                        // 开着事务时「提交 / 回滚」必须一眼可见：数据没落盘这件事
-                        // 靠状态栏那行小字提醒是不够的，用户关窗口就全丢了。
-                        if (sheet.transactionSessionId != null) {
-                            WinButton(
-                                onClick = {
-                                    actionScope.launch {
-                                        val err = state.commitTransaction(sheet)
-                                        if (err != null) sheet.error = err
-                                    }
-                                },
-                                shape = SundaysPalette.buttonShape,
-                            ) {
-                                Icon(Icons.Filled.Check, contentDescription = null)
-                                Spacer(Modifier.width(4.dp))
-                                Text(str(StrKey.COMMIT))
-                            }
+        // 上编辑器 + 下结果 —— 结果区有**最小高度**，空间不够时从编辑器那里借。
+        //
+        // 原来的 60% / 40% 是**纯比例**分配：窗口一小，结果区被压到 130dp 出头，
+        // 而结果区里要塞「查询结果 · N 行」+ 表头 + 数据区 + 横向滚动条 + 分页栏 ——
+        // 数据区于是被挤成 **0 高度**：标题写着「2 行」，屏幕上一行数据都没有，
+        // 拉高窗口才出现（真机实测）。
+        //
+        // 现在结果区至少 [MIN_SQL_RESULT_HEIGHT]（够放下表头 + 一行数据 + 分页栏），
+        // 多出来的高度归编辑器 —— 编辑器内部能滚，结果区不能：数据看不见就是白跑。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val resultHeight = (maxHeight * 0.4f).coerceAtLeast(MIN_SQL_RESULT_HEIGHT)
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (sheet == null) {
+                    EmptyHint(
+                        title = str(StrKey.NO_EDITABLE_SQL_SHEET),
+                        description = str(StrKey.NO_EDITABLE_SQL_SHEET_HINT),
+                        // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                    )
+                } else {
+                    CodeEditorWithToolbar(
+                        text = sheet.editor.text,
+                        editorState = sheet.editor,
+                        onTextChange = { sheet.editor.setText(it) },
+                        // 方言档位即语言 id：高亮与「格式化」都走同一档位（见 SqlDialectProfile）
+                        languageId = dialect.languageId,
+                        // 本工作台只处理 SQL —— 不暴露语言切换器
+                        showLanguageSwitcher = false,
+                        // 注入当前连接的库 / 表 / 字段（**零额外请求**，见 sqlSchemaCompletions）。
+                        // 关键字由上面的 `languageId` 按方言档位自动带来，无需重复注入。
+                        // 忽略大小写：标识符大小写行为因方言而异，敲 `FROM USERS` 也该能补出 `users`
+                        extraCompletions = schemaCompletions,
+                        extraCompletionsCaseSensitive = false,
+                        actions = {
+                            // 只读模式开关 —— 摆最左，因为它决定后面所有按钮按下去会发生什么
+                            FilterChip(
+                                selected = state.readOnly,
+                                onClick = { state.readOnly = !state.readOnly },
+                                enabled = !sheet.running,
+                                label = { Text(str(StrKey.READ_ONLY), maxLines = 1, softWrap = false) },
+                                modifier = Modifier.testTag(SQL_READONLY_CHIP_TAG),
+                            )
                             Spacer(Modifier.width(4.dp))
-                            WinButton(
-                                onClick = {
-                                    actionScope.launch {
-                                        val err = state.rollbackTransaction(sheet)
-                                        if (err != null) sheet.error = err
-                                    }
-                                },
-                                shape = SundaysPalette.buttonShape,
-                                colors =
-                                    ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    ),
-                            ) {
-                                Icon(Icons.Filled.Close, contentDescription = null)
-                                Spacer(Modifier.width(4.dp))
-                                Text(str(StrKey.ROLLBACK))
-                            }
+                            // 多语句开关 —— 放在最左侧，因为它改的是**执行语义**，
+                            // 而执行 / 停止 / 事务都排在它后面，视觉上是「先定模式再操作」。
+                            //
+                            // 做成逐 sheet 的开关而不是全局默认开：多语句意味着
+                            // 「一次点执行会改多张表」，用户得能对某个脚本明确表态。
+                            // 用 [FilterChip] 而不是复选框：它自己就是「选中态 + 可禁用」
+                            // 的两态控件，与旁边的 WinButton 视觉重量一致。
+                            FilterChip(
+                                selected = sheet.multiStatement,
+                                onClick = { sheet.multiStatement = !sheet.multiStatement },
+                                enabled = !sheet.running,
+                                label = { Text(str(StrKey.MULTI_STATEMENT), maxLines = 1, softWrap = false) },
+                                modifier = Modifier.testTag(SQL_MULTI_STATEMENT_CHIP_TAG),
+                            )
                             Spacer(Modifier.width(4.dp))
-                        } else {
-                            WinButton(
-                                onClick = {
-                                    actionScope.launch {
-                                        val err = state.beginTransaction(sheet)
-                                        if (err != null) sheet.error = err
-                                    }
-                                },
-                                enabled = connected && !sheet.running,
-                                shape = SundaysPalette.buttonShape,
-                                modifier = Modifier.testTag(SQL_TRANSACTION_BTN_TAG),
-                            ) {
-                                Icon(Icons.Filled.Lock, contentDescription = null)
+                            // 事务按钮组 —— 在执行 / 停止之前。
+                            // 开着事务时「提交 / 回滚」必须一眼可见：数据没落盘这件事
+                            // 靠状态栏那行小字提醒是不够的，用户关窗口就全丢了。
+                            if (sheet.transactionSessionId != null) {
+                                WinButton(
+                                    onClick = {
+                                        actionScope.launch {
+                                            val err = state.commitTransaction(sheet)
+                                            if (err != null) sheet.error = err
+                                        }
+                                    },
+                                    shape = SundaysPalette.buttonShape,
+                                ) {
+                                    Icon(Icons.Filled.Check, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(str(StrKey.COMMIT))
+                                }
                                 Spacer(Modifier.width(4.dp))
-                                Text(str(StrKey.TRANSACTION))
+                                WinButton(
+                                    onClick = {
+                                        actionScope.launch {
+                                            val err = state.rollbackTransaction(sheet)
+                                            if (err != null) sheet.error = err
+                                        }
+                                    },
+                                    shape = SundaysPalette.buttonShape,
+                                    colors =
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                        ),
+                                ) {
+                                    Icon(Icons.Filled.Close, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(str(StrKey.ROLLBACK))
+                                }
+                                Spacer(Modifier.width(4.dp))
+                            } else {
+                                WinButton(
+                                    onClick = {
+                                        actionScope.launch {
+                                            val err = state.beginTransaction(sheet)
+                                            if (err != null) sheet.error = err
+                                        }
+                                    },
+                                    enabled = connected && !sheet.running,
+                                    shape = SundaysPalette.buttonShape,
+                                    modifier = Modifier.testTag(SQL_TRANSACTION_BTN_TAG),
+                                ) {
+                                    Icon(Icons.Filled.Lock, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(str(StrKey.TRANSACTION))
+                                }
+                                Spacer(Modifier.width(4.dp))
                             }
-                            Spacer(Modifier.width(4.dp))
-                        }
 
-                        // 执行中：主按钮让位给「停止」。
-                        //
-                        // 两个按钮**互斥**而不是并存 —— 执行期间 `enabled` 已是 false，
-                        // 摆在一起只会让用户去点一个按不动的按钮。「停止」单独占位还顺带
-                        // 避免了「点错了以为是执行」的重灾区。
-                        if (sheet.running && sheet.runningRequestId != null) {
-                            WinButton(
-                                onClick = { state.cancelSql() },
-                                shape = SundaysPalette.buttonShape,
-                                colors =
-                                    ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    ),
-                            ) {
-                                Icon(Icons.Filled.Close, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(str(StrKey.STOP))
+                            // 执行中：主按钮让位给「停止」。
+                            //
+                            // 两个按钮**互斥**而不是并存 —— 执行期间 `enabled` 已是 false，
+                            // 摆在一起只会让用户去点一个按不动的按钮。「停止」单独占位还顺带
+                            // 避免了「点错了以为是执行」的重灾区。
+                            if (sheet.running && sheet.runningRequestId != null) {
+                                WinButton(
+                                    onClick = { state.cancelSql() },
+                                    shape = SundaysPalette.buttonShape,
+                                    colors =
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                        ),
+                                ) {
+                                    Icon(Icons.Filled.Close, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(str(StrKey.STOP))
+                                }
+                            } else {
+                                WinButton(
+                                    onClick = {
+                                        // 危险操作要**先确认再发**：判据是 [DangerousSql]，
+                                        // 拦在引擎之前 —— 用户看到确认框时，数据库还什么都没发生。
+                                        val findings = DangerousSql.scan(sheet.editor.text)
+                                        if (findings.isEmpty()) {
+                                            state.executeSql()
+                                        } else {
+                                            pendingDangerous = findings
+                                        }
+                                    },
+                                    enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
+                                    shape = SundaysPalette.buttonShape,
+                                ) {
+                                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (sheet.running) str(StrKey.EXECUTING) else str(StrKey.EXECUTE_SQL))
+                                }
                             }
-                        } else {
+                            Spacer(Modifier.width(4.dp))
+                            // 导出：把**当前 sheet 的 SQL** 原样送进导出对话框。
+                            //
+                            // 多语句在这里是**逐条导出成多个文件**（见 [exportStatements]）——
+                            // 不是把整段脚本塞给一次导出：一段脚本里若有两条 SELECT，
+                            // 一次导出只能拿到最后一组结果集，前一条的结果会被丢掉。
+                            // 逐条导出才符合「每条查询各自一份结果」的直觉。
                             WinButton(
-                                onClick = {
-                                    // 危险操作要**先确认再发**：判据是 [DangerousSql]，
-                                    // 拦在引擎之前 —— 用户看到确认框时，数据库还什么都没发生。
-                                    val findings = DangerousSql.scan(sheet.editor.text)
-                                    if (findings.isEmpty()) {
-                                        state.executeSql()
-                                    } else {
-                                        pendingDangerous = findings
-                                    }
-                                },
+                                onClick = { exportStatements = exportStatementsFor(sheet.editor.text) },
                                 enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
                                 shape = SundaysPalette.buttonShape,
+                                modifier = Modifier.testTag(SQL_EXPORT_BTN_TAG),
                             ) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (sheet.running) str(StrKey.EXECUTING) else str(StrKey.EXECUTE_SQL))
+                                Icon(Icons.Filled.SaveAlt, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text(str(StrKey.EXPORT))
                             }
-                        }
-                        Spacer(Modifier.width(4.dp))
-                        // 导出：把**当前 sheet 的 SQL** 原样送进导出对话框。
-                        //
-                        // 多语句在这里是**逐条导出成多个文件**（见 [exportStatements]）——
-                        // 不是把整段脚本塞给一次导出：一段脚本里若有两条 SELECT，
-                        // 一次导出只能拿到最后一组结果集，前一条的结果会被丢掉。
-                        // 逐条导出才符合「每条查询各自一份结果」的直觉。
-                        WinButton(
-                            onClick = { exportStatements = exportStatementsFor(sheet.editor.text) },
-                            enabled = connected && !sheet.running && sheet.editor.text.isNotBlank(),
-                            shape = SundaysPalette.buttonShape,
-                            modifier = Modifier.testTag(SQL_EXPORT_BTN_TAG),
-                        ) {
-                            Icon(Icons.Filled.SaveAlt, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text(str(StrKey.EXPORT))
-                        }
-                    },
+                        },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                    )
+                }
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SqlResultArea(
+                    sheet = sheet,
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .weight(0.6f),
+                            .height(resultHeight),
                 )
             }
-            WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SqlResultArea(
-                sheet = sheet,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .weight(0.4f),
-            )
         }
     }
 }

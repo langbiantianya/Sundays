@@ -881,6 +881,24 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 > **M3 加 Hive / Impala 之前必须先处理它**（给方言列表限高，或把动作栏固定在底部），
 > 否则「新增方言零前端改动」这句话在**布局**上是假的 —— 记为 M3 的第 0 号 UI 任务。
 
+> ✅ **这个「第 0 号 UI 任务」已经提前做掉了**（在一次真机走查里发现并修复，
+> 比 M3 早得多 —— 留档见 [`desktopApp/TEST_CASES.md`](../../desktopApp/TEST_CASES.md) §5）。
+> 真机实测把根因拆成了**两个**，两者都能单独解释症状，**缺一不可**：
+>
+> 1. **按钮随内容一起滚走** —— 原来整个向导列挂着 `verticalScroll`，
+>    底部的「下一步」跟着内容滚，滚不到底就点不着。
+>    现在 [`ConnectionManagerScreen.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt)
+>    的 `StepLayout` 改成「**头部固定 / 内容可滚 / 底部按钮固定**」。
+> 2. **窗口比屏幕高** —— 默认窗口 720dp，而本机（1536×864 @125% 缩放）的
+>    工作区只有 **659dp** 高，窗口底边落在**屏幕外**，应用内部滚动也救不了。
+>    现在默认尺寸在**建窗口之前**就被 `fitWindowSizeToScreen` 夹到工作区以内
+>    （见 [`main.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt)）。
+>
+> **教训**：第 1 条是「窗口里的布局」，第 2 条是「窗口本身的大小」——
+> **只修布局那个，在大窗口上看起来好了，换块小屏照旧点不到**。
+> 所以两者各自钉一条回归测试
+> （[`WizardSmallWindowTest`](../../desktopApp/src/test/kotlin/com/langbiantianya/sundays/WizardSmallWindowTest.kt)）。
+
 #### 6.3.3 `DataTable`：只读与分页都**零改动**
 
 `DataTable`（`shared/.../table/DataTable.kt:187`）的签名里有 20 多个参数，

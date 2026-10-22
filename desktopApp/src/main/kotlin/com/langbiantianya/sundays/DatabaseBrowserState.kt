@@ -125,6 +125,13 @@ private fun DialectType.toSqlDialectProfile(): SqlDialectProfile = DialectMetada
  * - [columns] / [rows] 渲染到 [DataTable]
  * - [loading] / [error] 控制顶部信息条
  * - [page] / [pageSize] / [total] 展示分页元信息(仅供 UI 显示)
+ *
+ * @property schema 本表所在**库**的名字 —— 字段叫 `schema`，装的却是**库名**。
+ *   树上点表时传下来的就是库节点名（见 [DatabaseBrowserState.openTab]），而
+ *   `loadTabPreview` 也正是拿它当 catalog 去建池（`engineConn(database = tab.schema)`）。
+ *   真正的 schema 名由 `resolveSchemas` 解析、存在 `schemasByDatabase` 里，与本字段无关。
+ *   历史遗留，改名要动十几处调用点；**读它请用 [database]** —— 那个别名至少不会
+ *   让人把库名错塞进 [SqlIdentifier.tableRef] 的 `schema` 槽位。
  */
 class TablePreviewTab(
     val schema: String,
@@ -132,6 +139,13 @@ class TablePreviewTab(
     val title: String = tableName,
 ) {
     val key: String get() = "$schema::$tableName"
+
+    /**
+     * 本表所在**库**的名字 —— [schema] 的语义化别名。
+     *
+     * 见类 KDoc：`schema` 这个字段名装的一直是库名。
+     */
+    val database: String get() = schema
 
     var columns: List<TableColumn> by mutableStateOf(emptyList())
     var rows: List<TableRow> by mutableStateOf(emptyList())
@@ -376,6 +390,40 @@ class TablePreviewTab(
     }
 
     /**
+     * 本表在 SQL 里的**限定引用名**。
+     *
+     * ## 为什么不能是裸表名
+     *
+     * 导出子进程连的是**连接配置里那个库**（JDBC URL 里钉死的那个），而这张表
+     * 可能在**另一个**库。裸表名按会话默认库解析，于是导出必然报
+     *
+     * ```text
+     * Table 'sundays_smoke.probe_shared_name' doesn't exist
+     * ```
+     *
+     * 而用户在树上点的偏偏是 `sundays_xdb` —— 报错里那个库名恰好是「我没点的那个」，
+     * 很难自己联想到根因（真机实测，见 desktopApp/TEST_CASES.md 的导出缺陷记录）。
+     *
+     * 限定规则交给 [SqlIdentifier.tableRef]：它知道 MySQL 的命名空间**就是** database、
+     * PG 的 database 是 catalog（跨库压根不可引用，只能退回 schema / 裸表名）、
+     * H2 的 schema 是 `PUBLIC`（把库名当 schema 写会报 `Schema not found`）。
+     *
+     * ## 为什么**不**带 schema 段
+     *
+     * schema 名是 `resolveSchemas` 解析出来的、且只能取列表第一个 —— 而 PG 的
+     * schema 列表是按名字排序的，第一个未必是 `public`。**猜错的 schema 比不带更糟**：
+     * 它会把查询指到一个确实存在、但**不是这张表**的地方去，导出一份别人的数据。
+     * 所以这里只给「库」这一级；schema 交给会话的 search_path 解析。
+     */
+    fun tableReference(): String =
+        SqlIdentifier.tableRef(
+            dialect = dialect ?: DialectType.UNKNOWN,
+            database = database,
+            schema = "",
+            table = tableName,
+        )
+
+    /**
      * 按当前预览条件拼出一条**可读、可编辑**的 SELECT，供导出对话框起手用。
      *
      * ## 为什么把过滤与排序拼进来
@@ -394,10 +442,15 @@ class TablePreviewTab(
      * 表内搜索框也是过滤。用户在搜索框敲了词、屏幕上只剩匹配行，
      * 导出却把不匹配的行也带进去，同样是「所见非所导」。
      *
-     * @return 单行 SQL；无过滤无排序时就是 `SELECT * FROM <表>`。
+     * ## 表名为什么带限定
+     *
+     * 裸表名按**会话默认库**解析，而导出打到的库未必是这张表所在的库 ——
+     * 见 [tableReference] 的 KDoc。
+     *
+     * @return 单行 SQL；无过滤无排序时就是 `SELECT * FROM <限定表名>`。
      */
     fun buildExportSql(): String {
-        val sb = StringBuilder("SELECT * FROM ").append(tableName)
+        val sb = StringBuilder("SELECT * FROM ").append(tableReference())
         effectiveWhere()?.takeIf { it.isNotBlank() }?.let { sb.append(" WHERE ").append(it.trim()) }
         orderByClause.trim().takeIf { it.isNotEmpty() }?.let { sb.append(" ORDER BY ").append(it) }
         return sb.toString()
@@ -2610,6 +2663,8 @@ class DatabaseBrowserState(
      * 会在该 composable 离开组合时取消所有协程。导出动辄几十秒，
      * 用户切个 pane 就被杀掉 —— 然而「后台运行」这个按钮恰恰在暗示它能活着跑完。
      *
+     * @param catalog 导出打到的**库**；空串 = 退回 [currentSchema]。
+     *   表预览那条路必须传这张表所在的库（见 [exportQuery] 的 KDoc）。
      * @param onComplete 在**引擎协程**里回调（非主线程）；主要用于把结果写到 tab / sheet 的提示行。
      * @return 任务 id，供调用方后续对账。
      */
@@ -2619,6 +2674,7 @@ class DatabaseBrowserState(
         outputDir: String,
         fileName: String,
         tableName: String = "",
+        catalog: String = "",
         onComplete: (Result<ExportResult>) -> Unit = {},
     ): String {
         val taskId = "task-" + java.util.UUID.randomUUID()
@@ -2634,7 +2690,7 @@ class DatabaseBrowserState(
             ),
         )
         scope.launch {
-            exportQuery(sql, format, outputDir, fileName, tableName) { p ->
+            exportQuery(sql, format, outputDir, fileName, tableName, catalog) { p ->
                 updateTask(taskId) { it.copy(progress = p.rowsWritten) }
             }.onSuccess { r ->
                 updateTask(taskId) {
@@ -2697,6 +2753,7 @@ class DatabaseBrowserState(
         outputDir: String,
         baseFileName: String,
         tableName: String = "",
+        catalog: String = "",
         onComplete: (List<Result<ExportResult>>) -> Unit = {},
     ): List<String> {
         if (statements.isEmpty()) return emptyList()
@@ -2707,7 +2764,7 @@ class DatabaseBrowserState(
         scope.launch {
             val results =
                 statements.mapIndexed { index, sql ->
-                    exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName) { p ->
+                    exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName, catalog) { p ->
                         updateTask(taskIds[index]) { it.copy(progress = p.rowsWritten) }
                     }.also { result ->
                         updateTask(taskIds[index]) {
@@ -2831,7 +2888,22 @@ class DatabaseBrowserState(
      * 与最终 `file_path`。`invoke` 只 collect 到**第一条**终止帧就返回，中间进度与最终
      * 文件路径都会丢。
      *
+     * ## 为什么导出打到的库不能只问树
+     *
+     * 原实现恒用 [currentSchema] —— 也就是「树里**第一个展开**的库」。而表预览那条路
+     * 导出的是**用户眼前这张表**，它可以在**另一个**库里。两者不一致时导出会报
+     *
+     * ```text
+     * Table 'sundays_smoke.probe_shared_name' doesn't exist
+     * ```
+     *
+     * 报错里那个库名恰好是「用户**没点**的那个」，很难自己联想到根因（真机实测）。
+     * 所以 [catalog] 由调用方显式给出 —— 表预览传这张表所在的库，
+     * SQL 工作台那条路没有「某一张表」，留空即退回 [currentSchema]。
+     *
      * @param format `SQL_INSERT` 时 [tableName] 必填 —— 引擎要拼出 `INSERT INTO <表>`。
+     * @param catalog 导出打到的**库**（catalog 维度）。空串 = 退回 [currentSchema]。
+     *   表预览那条路径必须传这张表所在的库 —— 见下面的「为什么不能只问树」。
      * @param onProgress 每收到一帧进度就调一次（**在引擎的协程里**，不是主线程）。
      *   UI 层用它驱动进度弹窗；不给就用默认的空实现，行为与过去完全一致。
      * @return 失败时 `Result.failure`；成功时 [ExportResult]。
@@ -2842,6 +2914,7 @@ class DatabaseBrowserState(
         outputDir: String,
         fileName: String,
         tableName: String = "",
+        catalog: String = "",
         onProgress: (ExportProgress) -> Unit = {},
     ): Result<ExportResult> {
         // 参数先在**前端**校验：让引擎那边才报错的话，用户看到的是一句 JDBC 异常，
@@ -2856,7 +2929,8 @@ class DatabaseBrowserState(
         if (format == ExportFormat.SQL_INSERT && tableName.isBlank()) {
             return Result.failure(IllegalArgumentException(Msg.text(StrKey.EXPORT_TABLE_NAME_REQUIRED)))
         }
-        val schema = currentSchema()
+        // 导出打到的库：调用方给的那张表所在的库优先，空串才退回「树里第一个展开的库」。
+        val schema = catalog.ifBlank { currentSchema() }
         activeDatabases.add(schema)
         // 在 DSL 之外构造：`sql` / `outputDir` 等字段名会与外层 `dataRequest` 的兄弟消息
         // 撞名，内联赋值会被解析到外层去（见 updateCell 的 KDoc）
@@ -3026,6 +3100,7 @@ class DatabaseBrowserState(
      * 供 SQL 工作台的「导出」使用 —— 那里用户写的是一整段脚本，逐条导出才符合
      * 「每条查询各自一份结果」的直觉。文件名由 [numberedFileName] 加序号。
      *
+     * @param catalog 导出打到的**库**；空串 = 退回 [currentSchema]（见 [exportQuery]）。
      * @param onProgress 每条开始前回调一次（**在引擎协程里，不是主线程**），供进度弹窗显示「第 k/N 条」。
      * @return 每条的结果（成功与失败都在列表里 —— 一条挂了不该让前面几条白跑）。
      */
@@ -3035,11 +3110,12 @@ class DatabaseBrowserState(
         outputDir: String,
         baseFileName: String,
         tableName: String = "",
+        catalog: String = "",
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): List<Result<ExportResult>> =
         statements.mapIndexed { index, sql ->
             onProgress(index, statements.size)
-            exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName)
+            exportQuery(sql, format, outputDir, numberedFileName(baseFileName, index, statements.size), tableName, catalog)
         }
 
     // ------------------------------------------------------------------------

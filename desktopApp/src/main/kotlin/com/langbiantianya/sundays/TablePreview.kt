@@ -122,12 +122,15 @@ internal fun PreviewTabArea(
                         state = state,
                         presetSql = exportSql!!,
                         presetTableName = current.tableName,
-                        catalog = current.schema,
+                        catalog = current.database,
                         onDismiss = { exportSql = null },
                         onConfirm = { fmt, sql, dir, name, tbl ->
                             exportSql = null
                             trackedTaskId =
-                                state.startExport(sql, fmt, dir, name, tbl) { result ->
+                                // catalog 传**这张表所在的库** —— 不是「树里第一个展开的库」。
+                                // 后者与眼前这张表可能不是同一个库，导出会报
+                                // `Table '<别的库>.<表>' doesn't exist`（实测）。
+                                state.startExport(sql, fmt, dir, name, tbl, catalog = current.database) { result ->
                                     // 提示走 [TablePreviewTab.notice] 而不是 [TablePreviewTab.error]：
                                     // 后者会把表格换成「读取失败」面板，导出成功不该长那样
                                     // 回调跑在引擎协程里、已经离开了组合作用域，所以这里取文案走 `Msg` 而不是 `str`
@@ -527,7 +530,7 @@ private fun PreviewTabContent(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "${tab.schema} · ${tab.tableName}",
+                    text = "${tab.database} · ${tab.tableName}",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

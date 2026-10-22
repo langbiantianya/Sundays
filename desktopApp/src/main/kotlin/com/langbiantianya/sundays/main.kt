@@ -57,6 +57,8 @@ import com.langbiantianya.sundays.ui.rememberPersistentAppearanceState
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.jetbrains.skia.Image
+import java.awt.GraphicsEnvironment
+import java.awt.Toolkit
 
 /**
  * KMP Desktop 应用入口.
@@ -87,7 +89,11 @@ fun main() =
         val engine: EngineClient = createEngineClient()
         // 窗口尺寸：不设的话用平台默认（Windows 约 800×600），而浏览屏是「左树 + 右表 +
         // 底栏」三段布局，800 宽下左树挤掉半棵、右边一列都放不下。
-        val windowState = rememberWindowState(size = DEFAULT_WINDOW_SIZE)
+        //
+        // ⚠️ 默认尺寸还要**夹到屏幕工作区以内**（见 [fitWindowSizeToScreen]）：
+        // 720dp 在 1366×768 的屏上放得下，在 1536×864@125% 的本机就放不下了 ——
+        // 窗口比屏幕高，底部那一截永远在屏幕外，而向导的「下一步」正好钉在底部。
+        val windowState = rememberWindowState(size = fitWindowSizeToScreen(DEFAULT_WINDOW_SIZE))
         Window(
             onCloseRequest = {
                 engine.close()
@@ -180,6 +186,68 @@ internal val DEFAULT_WINDOW_SIZE = DpSize(1152.dp, 720.dp)
  * 低于 640 高，sheet 标签条 + 工具栏 + 表格 + 分页栏四段就放不下一屏。
  */
 internal val MIN_WINDOW_SIZE = DpSize(1024.dp, 640.dp)
+
+/**
+ * 把默认窗口尺寸**夹到屏幕工作区以内**。
+ *
+ * ## 为什么需要这一步
+ *
+ * [DEFAULT_WINDOW_SIZE] 是 1152×720dp —— 它在 1366×768 的屏上放得下，
+ * 但**不是每块屏都放得下**。本机实测（1536×864 物理像素 @125% 缩放）：
+ *
+ * ```text
+ * maximumWindowBounds = 1536 × 824    ← 屏幕减去任务栏后的工作区（物理像素）
+ * screenResolution    = 120 dpi       ← 125% 缩放
+ * ```
+ *
+ * 换算成 dp，工作区只有 1536/1.25 = 1229dp 宽、**824/1.25 = 659dp 高** ——
+ * 比默认窗口的 720dp **矮 61dp**。于是：
+ *
+ * - 窗口底边落在屏幕外；
+ * - 底边上的东西（向导的「下一步」正好钉在底部）**永远点不到**；
+ * - 应用内部的滚动也救不了 —— 滚到底了，按钮仍在屏幕外。
+ *
+ * 这不是「小窗口下体验不好」，是**默认配置下功能不可用**。
+ *
+ * ## 为什么在**建窗口之前**算
+ *
+ * 放到组合里用 `LaunchedEffect` 改 `state.size` 会让窗口**先大后小地跳一下**
+ * （第一帧已经是 720dp，第二帧才缩到 659dp）。这里在 `rememberWindowState`
+ * 的参数里就算好，窗口**从第一帧起**就是对的。
+ *
+ * ## 缩放比怎么来
+ *
+ * `Toolkit.getScreenResolution()`（本机 120）÷ 96（96 dpi = 100% 缩放）= 缩放倍数。
+ * 这与 Compose Desktop 自己的 density 同源（同为系统 DPI 换算），所以
+ * 「AWT 物理像素 ÷ 缩放倍数」得到的正是 Compose 的 dp。
+ *
+ * ## 拿不到屏幕信息时怎么办
+ *
+ * **原样返回** [default] —— 无头 / CI 环境下 AWT 可能抛
+ * `HeadlessException`，此时宁可保持原行为，也不要凭空造一个尺寸。
+ *
+ * ## 下限仍然是 [MIN_WINDOW_SIZE]
+ *
+ * 屏幕比最小尺寸还小的情况（罕见）无法两全：这里保留下限，
+ * 让窗口只是「仍然超出一屏」，而不是「被压成一团没法用」。
+ */
+internal fun fitWindowSizeToScreen(default: DpSize): DpSize {
+    val scale =
+        runCatching {
+            Toolkit.getDefaultToolkit().screenResolution / 96f
+        }.getOrDefault(1f).takeIf { it > 0f } ?: 1f
+    val work =
+        runCatching {
+            GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+        }.getOrNull()
+    if (work == null || work.width <= 0 || work.height <= 0) return default
+    val workWidth = (work.width / scale).dp
+    val workHeight = (work.height / scale).dp
+    return DpSize(
+        width = default.width.coerceAtMost(workWidth).coerceAtLeast(MIN_WINDOW_SIZE.width),
+        height = default.height.coerceAtMost(workHeight).coerceAtLeast(MIN_WINDOW_SIZE.height),
+    )
+}
 
 /**
  * 应用图标 —— 「天天都是周末」：表格线格里嵌一颗照进每一格的太阳。

@@ -10,6 +10,8 @@ package com.langbiantianya.sundays
 
 import androidx.compose.ui.unit.DpSize
 import org.junit.Test
+import java.awt.GraphicsEnvironment
+import java.awt.Toolkit
 import kotlin.test.assertTrue
 
 /**
@@ -88,6 +90,57 @@ class WindowSizeTest {
         assertTrue(
             size.width.value > size.height.value,
             "桌面工具窗口应宽大于高，实际 ${size.width}×${size.height}（可能宽高写反了）",
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // 窗口必须**放得进屏幕**
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `the window never grows beyond the default`() {
+        // 夹取只能**变小**：屏幕比默认尺寸大得多时，窗口就该是默认那个尺寸。
+        val fitted = fitWindowSizeToScreen(DEFAULT_WINDOW_SIZE)
+        assertTrue(
+            fitted.width <= DEFAULT_WINDOW_SIZE.width && fitted.height <= DEFAULT_WINDOW_SIZE.height,
+            "夹取后 ${fitted.width}×${fitted.height} 比默认 ${DEFAULT_WINDOW_SIZE.width}×${DEFAULT_WINDOW_SIZE.height} 还大",
+        )
+    }
+
+    @Test
+    fun `the fitted window still respects the minimum size`() {
+        // 屏幕比最小尺寸还小时保留下限 —— 宁可超出一屏，也不能把窗口压成一团没法用。
+        val fitted = fitWindowSizeToScreen(DEFAULT_WINDOW_SIZE)
+        assertTrue(
+            fitted.width >= MIN_WINDOW_SIZE.width && fitted.height >= MIN_WINDOW_SIZE.height,
+            "夹取后 ${fitted.width}×${fitted.height} 小于下限 " +
+                "${MIN_WINDOW_SIZE.width}×${MIN_WINDOW_SIZE.height}",
+        )
+    }
+
+    @Test
+    fun `the fitted window fits on the actual screen`() {
+        // 真机实测过的那个坑：1536×864 @125% 缩放 → 工作区只有 659dp 高，
+        // 而默认窗口是 720dp —— 窗口比屏幕高，底边上的东西永远在屏幕外。
+        //
+        // 拿不到屏幕信息（无头 / CI）时跳过：那条分支的行为由上面两条兜住。
+        val bounds =
+            runCatching {
+                GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+            }.getOrNull()
+        if (bounds == null || bounds.width <= 0 || bounds.height <= 0) return
+
+        val scale =
+            runCatching {
+                Toolkit.getDefaultToolkit().screenResolution / 96f
+            }.getOrDefault(1f).takeIf { it > 0f } ?: 1f
+        val workHeightDp = bounds.height / scale
+
+        val fitted = fitWindowSizeToScreen(DEFAULT_WINDOW_SIZE)
+        assertTrue(
+            fitted.height.value <= workHeightDp + 0.5f,
+            "窗口高度 ${fitted.height.value}dp 超过屏幕工作区 ${workHeightDp}dp —— " +
+                "窗口比屏幕高，底边上的控件永远在屏幕外（向导的「下一步」就是这样点不到的）",
         )
     }
 }

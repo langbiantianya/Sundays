@@ -73,7 +73,8 @@
 | [`ConnectionListKeyboardReachTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionListKeyboardReachTest.kt) | 连接列表的键盘可达性与 Tab 序 |
 | [`ConnectionOverviewPrimaryActionVisibilityTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionOverviewPrimaryActionVisibilityTest.kt) | 最小窗口下总览面板三个按钮完整落在视口内；更矮时被顶出界且**滚动能带回来** |
 | [`EngineClientSelectionTest`](./src/test/kotlin/com/langbiantianya/sundays/EngineClientSelectionTest.kt) | 装配点实现选择：未设 / 空白属性 → `IdbEngine`；设 `host:port` / `unix://` → `GrpcEngineClient`；畸形端点 → `IllegalArgumentException`（**响亮失败，不静默回落**） |
-| [`WindowSizeTest`](./src/test/kotlin/com/langbiantianya/sundays/WindowSizeTest.kt) | 窗口契约：默认 ≥ 下限 / 默认高度放得下 768 屏 / 右栏放得下 6 列 / 引导页 960dp 内容列不换行 |
+| [`WindowSizeTest`](./src/test/kotlin/com/langbiantianya/sundays/WindowSizeTest.kt) | 窗口契约：默认 ≥ 下限 / 默认高度放得下 768 屏 / 右栏放得下 6 列 / 引导页 960dp 内容列不换行 / **默认尺寸被夹到屏幕工作区以内**（`fitWindowSizeToScreen`：不大于默认、不小于下限、实际高度 ≤ 工作区；无屏幕时跳过） |
+| [`WizardSmallWindowTest`](./src/test/kotlin/com/langbiantianya/sundays/WizardSmallWindowTest.kt) | **小窗口下向导走得完**：240 / 360 / 480dp 三档高度下「下一步」必须**显示且点得动**（点击计数 +1）；内容放不下时 `performScrollTo` 能把方言选项滚进来，且**滚完之后按钮仍然在**（底栏固定 ≠ 按钮跟着内容滚走） |
 | [`SystemInfoFetchTest`](./src/test/kotlin/com/langbiantianya/sundays/SystemInfoFetchTest.kt) | `SYSTEM.INFO` 用空 `ConnectionConfig` 不会被当成真实连接去解析方言 |
 | [`DialectFormSpecRenderingTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormSpecRenderingTest.kt) | **凭据页按方言自描述的规格渲染**：假方言声明 3 个自定义字段 + 2 种认证方式 → 界面**自动**出现那 3 个字段与认证下拉，而 MySQL 的内置字段**不出现**（同一个方言换一份 spec 就换一套字段 ⇒ 前端没有按方言写死字段清单）；Kerberos 专属字段只在切到 Kerberos 后出现；只有一种认证方式时不渲染下拉；**没有规格时回退旧的枚举分支**；端到端：引擎 `SYSTEM.LIST_DRIVERS` → session → 界面 |
 | [`DialectFormContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormContractTest.kt) | **连接类型名的三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）：拼写一字不差、契约认的类型前端都认得、引擎用的类型契约都认得、内置方言声明的 form 前端都查得到、同一份 form 的字段 id 不重复、约定字段 id 就那六个 —— 三处漂移的症状是**静默回退旧分支**（界面正常、spec 失效、无报错），只能靠测试钉住 |
@@ -122,12 +123,14 @@
 | [`CodeEditorKeyboardReachTest`](./src/test/kotlin/com/langbiantianya/sundays/CodeEditorKeyboardReachTest.kt) | 代码编辑器的键盘可达性 |
 | [`editor/CodeEditorThemeFollowTest`](./src/test/kotlin/com/langbiantianya/sundays/editor/CodeEditorThemeFollowTest.kt) | 编辑器高亮随主题 / 连接方言切换词表 |
 | [`GuiFeatureWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/GuiFeatureWalkthroughTest.kt) | GUI 真点击走查：浏览 / SQL 执行 / 多语句 / 危险确认 / 导出对话框 |
+| [`SqlResultMinHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlResultMinHeightTest.kt) | **SQL 结果区不得被压成 0 高**：320dp 高的窗口里结果表数据区 `boundsInRoot.height > 0` —— 标题写着「查询结果 · 2 行」而数据区**零高度**，等于查了白查 |
 
 ### 2.5 导出
 
 | 测试类 | 覆盖的能力 |
 |---|---|
-| [`ExportSqlBuildingTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportSqlBuildingTest.kt) | 导出起手 SQL 带上过滤/排序/搜索 / 编号文件名 / 语句切分（用 `SqlScriptSplitter`，不是 `split(";")`）/ 预览白名单逐句判定 |
+| [`ExportSqlBuildingTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportSqlBuildingTest.kt) | 导出起手 SQL 带上过滤/排序/搜索 / 编号文件名 / 语句切分（用 `SqlScriptSplitter`，不是 `split(";")`）/ 预览白名单逐句判定 / **表名带库名限定**（MySQL → `` `库`.`表` ``；PG / H2 不把库名当 schema 用） |
+| [`ExportCatalogTargetingTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportCatalogTargetingTest.kt) | **导出打的是被导出的那张表所在的库** —— 不是「树里第一个展开的库」。假引擎记下请求的 `connection.database`：显式传 `catalog` 时请求带它；不传才退回 `currentSchema()` |
 | [`ExportQueryValidationTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportQueryValidationTest.kt) | 导出参数校验：格式、目录、文件名、目标表 |
 | [`ExportAlwaysTerminatesTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportAlwaysTerminatesTest.kt) | **导出必定终止**：引擎只推进度帧永不推完成帧时必须返回失败而不是挂起 / 空文件名在发请求前被拒 / 成功结论带真实路径与行数 / 看门狗不短于一分钟 / 进度**逐帧**回调 |
 | [`ExportEndToEndIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportEndToEndIntegrationTest.kt) | 桌面层 → 引擎 → 真子进程 → 磁盘有文件；进度里出现过非零行数 |
@@ -237,7 +240,12 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 
 ## 5. 跨模块缺陷留档
 
-下列缺陷的修复落在 `:engine` / `dialect-*` / `:shared`，**代码注释在那里**；本表只留一句索引，避免以后重复踩。
+下列缺陷的修复落在 `:engine` / `dialect-*` / `:shared` / `:desktopApp`，**代码注释在那里**；本表只留一句索引，避免以后重复踩。
+
+> 后三行是**一次真机走查**（本机 1536×864 @125% 缩放）里抓到的 ——
+> 自动化测试全绿、界面却**点不动 / 看不见**的那一类。
+> 共同教训：**「有控件」不等于「用户够得着」**，
+> 断言要落在「**位置 / 尺寸**」上，而不是「节点存在」。
 
 | 主题 | 一句话结论 | 回归测试 |
 |---|---|---|
@@ -251,6 +259,9 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 | 导出不产出文件也不提示 | 那条流式路由没有任何一层保证「一定会结束」：命令没发出去 ⇒ 一个帧都没有 ⇒ `collect` 永久挂起 ⇒ 两个回调分支都不执行 | `ExportAlwaysTerminatesTest` / `ExportEndToEndIntegrationTest` |
 | 并发导出搞坏 ExportHub 流 | gRPC 的 `StreamObserver.onNext` **不是线程安全的**；用户同时导两张表就是这个并发度 | `ExportPipelineIntegrationTest`（引擎侧） |
 | protobuf 整数往返变成 `3.0` | `google.protobuf.Value` 只有 `number_value`（double），`JsonPrimitive(3.0).content` 是 `"3.0"`，`longOrNull` 一律返回 null | `PayloadAdapterNumberRoundTripTest`（引擎侧） |
+| 跨库导出**必然失败** | `TablePreviewTab.schema` 装的其实是**库名**，而导出请求用的是「树里第一个展开的库」——两者不是同一个；再加上预填 SQL 是**裸表名**（按会话默认库解析），于是必然报 `Table '<别的库>.<表>' doesn't exist` | `ExportSqlBuildingTest` / `ExportCatalogTargetingTest` |
+| 小窗口下向导第 1 步走不完 | **两个根因**：按钮随内容一起滚走（整个向导列挂 `verticalScroll`）+ 默认窗口 720dp 比本机工作区（659dp）高 ⇒ 底边**在屏幕外**。只修布局那个，大窗口上好了、小屏照旧点不到 | `WizardSmallWindowTest` |
+| SQL 结果表数据行被压没 | 结果区按比例分高度（`maxHeight * 0.4f`）而**没有下限** ⇒ 小窗口下数据区 0 高度，标题却写着「查询结果 · 2 行」 | `SqlResultMinHeightTest` |
 
 ---
 

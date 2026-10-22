@@ -222,6 +222,8 @@ desktopApp （本模块）
 
 | 默认 1152×720 | 原 1280×820 在 1366×768 这类笔记本上**根本放不下**，窗口比屏幕还高 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) |
 
+| 默认尺寸再**夹到屏幕工作区以内** | 1152×720 在 1366×768 上放得下，在本机（1536×864 物理 @125% 缩放 ⇒ 工作区只有 **659dp** 高）上**放不下** —— 窗口底边落在**屏幕外**，而向导的「下一步」正好钉在底部，**永远点不到**（应用内部滚动也救不了）。夹取在 `rememberWindowState` 的**参数**里做，不在组合里改 `state.size` —— 后者会让窗口「先大后小跳一下」 | 同上的 `fitWindowSizeToScreen` |
+
 | 最小 1024×640 靠组合夹取 | Compose 的 `Window` **没有** `minSize` 参数，只能用 `snapshotFlow` 在组合里把尺寸夹回来 | 同上 |
 
 | 状态机提升到 `MainScreen` | 浏览 sheet、通知中心、长生命周期 scope 都挂在这一层 —— 切目标只销毁屏幕组合，**不销毁状态** | 同上 |
@@ -266,6 +268,8 @@ desktopApp （本模块）
 
 | 多语句导出 = N 个任务且**串行** | 面板存在的意义是回答「哪一条失败」；并发会把库压垮，而并发度不可控 | 同上 |
 
+| SQL 结果区有**最小高度** | 结果区原先按 `maxHeight * 0.4f` 分高度且**没有下限** ⇒ 小窗口下数据区被压成 0 高，而标题照写着「查询结果 · 2 行」——**查了白查**。编辑器内部能滚、结果区不能，所以空间从编辑器借：结果区保底 180dp，编辑器拿剩下的 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `MIN_SQL_RESULT_HEIGHT` |
+
 
 
 ### 3.4 表预览与对象树
@@ -307,6 +311,10 @@ desktopApp （本模块）
 |---|---|---|
 
 | 起手 SQL = 屏幕上那张表 | 旧实现恒拼 `SELECT * FROM <表>`，于是筛出 3 行却导出全表 —— **所见非所导** | [`TablePreview.kt`](./src/main/kotlin/com/langbiantianya/sundays/TablePreview.kt) |
+
+| 起手 SQL **带库名限定** + 导出**打那张表所在的库** | 两处都得改：**只限定表名**则 PG 仍打错库（库 ≠ schema，库里没有同名表就查不到）；**只改 catalog**则 MySQL 仍可能因裸表名落在错库。限定名交给 `SqlIdentifier.tableRef` 按方言生成（MySQL → `` `库`.`表` ``；PG / H2 退回只引表名 —— 库名当 schema 用在 PG 里恒失败）。**刻意不给 schema 段**：PG 的 schema 列表按名字排序，第一个未必是 `public`，猜错比不带更糟 | 同上 + [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `tableReference()` / `exportQuery(…, catalog)` |
+
+| 导出的 catalog = **这张表所在的库**，不是「树里第一个展开的库」 | `TablePreviewTab.schema` 这个字段名装的一直是**库名**（历史遗留，没改名）；导出请求若用 `currentSchema()`（= 第一个展开的库），两者**不是同一个**时就必然报 `Table '<别的库>.<表>' doesn't exist` | 同上 |
 
 | 用 `effectiveWhere` 而非 `whereClause` | **表内搜索也是过滤**，用户搜到只剩匹配行、导出却带上不匹配的行同样是「所见非所导」 | 同上 |
 
