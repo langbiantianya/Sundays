@@ -30,6 +30,14 @@ dependencies {
     // :shared 与 :engine 都依赖它，本模块直接引用而不是绕道 :shared，
     // 是为了不让「装配点依赖某个实现模块的传递依赖」这种写法扩散。
     implementation(project(":i18n"))
+    // 方言**能力位**枚举（ANALYSIS_SOURCE / READ_ONLY_DIALECT / EMBEDDED_MODE …）。
+    //
+    // 界面要按能力位筛数据源（「哪些连接能进分析模式」），而能力位是**引擎侧**的声明
+    // —— 前端自己写一份「MySQL/PG 可分析」的名单就是第二个真相源，两边迟早漂移。
+    // 所以这里直接引用引擎用的同一个枚举：引擎下发什么，前端就按什么判。
+    //
+    // :api 是纯 JVM 模块（无 project 依赖形成环），本模块也是 JVM 桌面应用，引用无冲突。
+    implementation(project(":api"))
 
     // 方言插件 + JDBC 驱动随应用类路径加载（Direct 模式不依赖外部 dialects/ drivers/ 目录）：
     // DialectLoader.loadFromDir 会先扫一遍应用类路径上的 SPI（ServiceLoader），再让 dialects/ 目录覆盖同名方言。

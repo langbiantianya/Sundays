@@ -238,13 +238,13 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 ### 5.1 `:shared` 的 `analysis/` 包（纯 UI + 纯数据，不碰引擎）
 
-| 文件 | 内容 |
-|---|---|
-| `shared/.../analysis/AnalysisModels.kt` | 数据源描述、工作区状态、拉取阶段枚举、staging 表名规则 |
-| `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 |
-| `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 |
-| `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** |
-| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） |
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、工作区状态、拉取阶段枚举、staging 表名规则 | ✅ 已落地（**目前只有数据源条目与行测试标记**；工作区状态与拉取阶段留给第 4~5 片） |
+| `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ⏳ 第 6 片 |
+| `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 | ⏳ 第 5 片 |
+| `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
+| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地**骨架**（工具条 / 数据源树 / 只读徽标是真的，右侧主区仍走空态） |
 
 ### 5.2 `:desktopApp` 的状态机
 
@@ -261,25 +261,40 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 ### 5.4 测试
 
-| 文件 | 内容 |
-|---|---|
-| `shared/.../commonTest/analysis/AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import desktopApp / `java.*` / 字面量颜色） |
-| `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | staging 表名、临时文件清理规则等纯逻辑 |
-| `engine/.../integration/ReadOnlySessionGateTest.kt` | §3.6 的**会话级**回归测试 |
-| `engine/.../integration/ReadOnlyDialectTest.kt` | §3.6 的**方言级**回归测试 |
-| `desktopApp/.../AnalysisPullTest.kt` | 拉取链路端到端（真 MySQL → DuckDB） |
-| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标不可关、结果表无编辑入口 |
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| `engine/.../integration/ReadOnlySessionGateTest.kt` | §3.6 的**会话级**回归测试 | ✅ 已落地 |
+| `engine/.../integration/ReadOnlyDialectTest.kt` | §3.6 的**方言级**回归测试 | ✅ 已落地 |
+| `engine/.../integration/AnalysisHandlerIntegrationTest.kt` | 四条路由的集成测试：命名空间分派（schema 型 / 库型）/ 行数截断 / 远端方言被拒 / 只读会话里照常可列 | ✅ 已落地 |
+| `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
+| `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
+| `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
+| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源列表渲染、无数据源时的空态文案 | ✅ 已落地 |
+| `desktopApp/.../AnalysisPullTest.kt` | 拉取链路端到端（真 MySQL → DuckDB） | ⏳ 第 5 片 |
+| `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | staging 表名、临时文件清理规则等纯逻辑 | ⏳ 第 4 片 |
 
 ### 5.5 i18n
 
 新文案键**六语言同步**（`TextsZhHans` / `TextsEn` / `TextsJa` / `TextsDe` / `TextsRu` /
 `TextsZhHant`）。键分两类：
 
-- **前端文案**（走 `str(StrKey)`）：`NAV_ANALYSIS`、`ANALYSIS_READONLY_BADGE`、
-  `ANALYSIS_SOURCE_EMPTY`、`ANALYSIS_PULL_STAGE_EXPORT` / `_CSV` / `_IMPORT`、
-  `ANALYSIS_PULL_CANCELLED`、`ANALYSIS_WORKSPACE_*`、`ANALYSIS_RESULT_EMPTY`
-- **引擎文案**（走 `Msg.format(StrKey, …)`）：`ENGINE_READ_ONLY_REJECTED`（L4 闸门）、
-  `ENGINE_ANALYSIS_LOCAL_ONLY`（`RUN_QUERY` 打在远端）
+- **前端文案**（走 `str(StrKey)`）：`NAV_ANALYSIS`、`ANALYSIS_READONLY_BADGE` /
+  `ANALYSIS_READONLY_HINT`、`ANALYSIS_SOURCE_HEAD` / `_NOTE` / `_FOOT`、
+  `ANALYSIS_NO_SOURCE` / `_HINT`、`ANALYSIS_LOCAL_WORKSPACE`、
+  `ANALYSIS_WORKSPACE_EMPTY` / `_HINT`、`ANALYSIS_EDITOR_HINT`、
+  `ANALYSIS_RESULT_ROWS` / `ANALYSIS_RESULT_TRUNCATED`、
+  `ANALYSIS_PULL` / `ANALYSIS_PULLING` / `ANALYSIS_PULL_DONE` /
+  `ANALYSIS_PULL_CANCELLED` / `ANALYSIS_PULL_FAILED`、`ANALYSIS_STAGING_TABLE`、
+  `ANALYSIS_PULL_STAGE_EXPORT` / `_CSV` / `_IMPORT`
+- **引擎文案**（走 `Msg.text` / `Msg.format(StrKey, …)`）：`ENGINE_READ_ONLY_REJECTED`（L4 闸门）、
+  `DIALECT_READ_ONLY`（方言级只读）、`ENGINE_ANALYSIS_LOCAL_ONLY`（`RUN_QUERY` 打在远端）
+
+> ✅ **第 3 片已落地**：本轮新增 **24 个**键（六语言同步）——
+> 上面两组里除去第 2 片带来的 `ENGINE_READ_ONLY_REJECTED` / `DIALECT_READ_ONLY` 两个，
+> 其余全是本轮的。带占位符的是 `ANALYSIS_SOURCE_FOOT`（引擎名）、
+> `ANALYSIS_EDITOR_HINT`（工作区）、`ANALYSIS_RESULT_ROWS`（行数）、
+> `ANALYSIS_RESULT_TRUNCATED`（上限与实际行数）、`ANALYSIS_PULL_FAILED`（原因）、
+> `ANALYSIS_STAGING_TABLE`（staging 表名）。
 
 ---
 
@@ -371,14 +386,25 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 每次提交都能编译、能跑、能看见。**代码与文档同提交**（仓库惯例）。
 
-| # | 提交 | 内容 | 验收 |
-|---|---|---|---|
-| 1 | `feat: 分析模式协议 —— ANALYSIS 类别与 read_only 标记` | proto（`Category.ANALYSIS` / `REPORT`、5 个 Action、`read_only`、`AnalysisRequest` / `AnalysisResponse`）+ Kotlin 映射 | 编译通过；`engine-protocol` 的映射测试全绿 |
-| 2 | `feat: 引擎只读闸门（L4）—— 写路由在只读会话里不进 handler` | dispatcher 闸门 + `ReadOnlySessionGateTest` + `ReadOnlyDialectTest` | §7.1 / §7.2 全绿，且**变异验证**：去掉闸门后测试变红 |
-| 3 | `feat: 分析模式入口 —— 顶层导航 + 不可关闭的只读徽标` | `AppDestination.ANALYSIS` + `ReadOnlyBadge` + 主屏骨架 + `ANALYSIS` 四条路由 + i18n 六语言 | 界面能进；徽标不可关 |
-| 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL |
-| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 |
-| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 |
+| # | 提交 | 内容 | 验收 | 状态 |
+|---|---|---|---|---|
+| 1 | `feat(protocol): 新增 ANALYSIS / REPORT 类别、五条分析动作、连接级只读开关` | proto（`Category.ANALYSIS` / `REPORT`、5 个 Action、`read_only`、`AnalysisRequest` / `AnalysisResponse`）+ Kotlin 映射 | 编译通过；`engine-protocol` 的映射测试全绿 | ✅ **已提交** |
+| 2 | `feat(engine): 只读闸门 —— 会话级 L4 + 方言级 L3，配两级回归测试` | dispatcher 闸门 + `ReadOnlySessionGateTest` + `ReadOnlyDialectTest` | §7.1 / §7.2 全绿，且**变异验证**：去掉闸门后测试变红 | ✅ **已提交** |
+| 3 | `feat(analysis): 分析模式入口 —— 四条只读路由 + 顶层导航 + 不可关闭的只读徽标` | `AnalysisHandler` + 四条路由注册 + `AppDestination.ANALYSIS` + `TopNavBar` + `ReadOnlyBadge` + 主屏骨架 + 能力位声明 + i18n 六语言 | 界面能进；徽标不可关；`AnalysisHandlerIntegrationTest` / `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest` 全绿 | ✅ **本轮落地**（提交标题按此风格） |
+| 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ⏳ 未开始 |
+| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ⏳ 未开始 |
+| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ⏳ 未开始 |
+
+> 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
+> 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——
+> §4.4 决定的「加」，在这一片里真的写进了引擎，前端据此筛数据源；
+> 二是**顶层导航条**（`shared/.../navigation/TopNavBar.kt`）——
+> 原文第 3 片只写了「顶层导航」，没定它长什么样、落在哪；
+> 落点在 `:shared` 的 `commonMain`（纯 Compose，不碰引擎），与 §1.3 的判据一致。
+>
+> ⚠️ **第 3 片没有做的**：编辑器与结果面板、工作区会话、拉取链路 ——
+> 那是第 4~6 片。`AnalysisScreen` 目前是**骨架**：工具条、数据源树、只读徽标是真的，
+> 右侧主区仍走空态。
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、

@@ -23,5 +23,15 @@ enum class AppDestination(
 ) {
     CONNECTIONS(StrKey.NAV_CONNECTIONS),
     DATABASE(StrKey.NAV_DATABASE),
+
+    /**
+     * 数据分析模式（v2.29）。
+     *
+     * 它是**顶层目标**而不是浏览模式的子页 —— 分析模式有自己的会话
+     * （源会话 + 本地工作区），与浏览模式那套「按连接开 sheet」的模型不同，
+     * 硬塞进 `DATABASE` 会让两套生命周期互相牵扯。
+     */
+    ANALYSIS(StrKey.NAV_ANALYSIS),
+
     SETTINGS(StrKey.SETTINGS_TITLE),
 }

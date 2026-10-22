@@ -26,6 +26,7 @@
 | [`engine/`](./src/main/kotlin/com/langbiantianya/engine/IdbEngine.kt) | `IdbEngine`（`EngineClient` 的同进程实现）、`StatementRegistry`（取消通道）、`SqlScriptSplitter`（多语句分句）、`EngineLanguageContext`（请求语言上下文） |
 | [`dispatcher/`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) | `RequestDispatcher`：`(Category, Action)` → handler 的薄路由；dryRun 短路、超时、语言上下文、异常兜底都在这里 |
 | [`handlers/`](./src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt) | 14 个业务 handler，typed proto 进 / typed proto 出（System / Schema / User / Table / Data / SQL / Function / View / Index / ForeignKey / Trigger / Export / Import / Generate） |
+| [`analysis/`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) | `AnalysisHandler`：`ANALYSIS` 四条路由（列命名空间 / 列表 / 列列 / 在计算引擎上跑分析 SQL）—— 数据分析模式的引擎侧入口 |
 | [`metadata/`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) | JDBC `getColumns` 的列元数据读取 —— **自增标记**的唯一来源（各方言的 `listColumns` 都不吐这一项） |
 | [`pool/`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) | `PoolManager`（SHA-256 keyed HikariCP 连接池）与 `TransactionManager`（事务会话钉连接） |
 | [`loader/`](./src/main/kotlin/com/langbiantianya/loader/DialectLoader.kt) | JDBC 驱动与方言 SPI 的双通道加载（应用类路径 + `dialects/` 目录） |
@@ -83,6 +84,8 @@
 | 38 | 自增标记只认 JDBC 元数据 | 各方言的 `listColumns` 都不吐 `autoIncrement`，读回表结构时必须从 `getColumns` 的 `IS_AUTOINCREMENT` 补，否则用户改别的列再保存会悄悄丢掉自增 | [`JdbcColumnMetadata.kt`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) |
 | 39 | 方言的连接表单规格随 `LIST_DRIVERS` 下发 | 规格是**静态**的（方言写死的），而 `LIST_DRIVERS` 是与 `INFO` 同性质的**一次性**纯元数据查询（不需要连接、不连库）—— 所以复用它既不违背「别让静态声明走运行时通道」那条，也不必新开 action。「没声明」用 proto3 消息字段的天然存在性表达，与「声明了但字段为空」分得开 | [`DialectInfoMapper.kt`](./src/main/kotlin/com/langbiantianya/engine/DialectInfoMapper.kt) · [`DialectFormMapping.kt`](../engine-protocol/src/main/kotlin/com/langbiantianya/grpc/DialectFormMapping.kt) |
 | 40 | 映射规则抽出来才可单测 | `listDrivers()` 原来把 13 个字段内联在 `dialectInfo { … }` 块里；加上表单规格会变成 20 多个字段的一大块 —— 读起来像一堵墙，而且**没法单测**（要测它得拉起一个引擎、注册方言）。抽成独立对象后，映射规则可以脱离引擎单测 | [`DialectInfoMapper.kt`](./src/main/kotlin/com/langbiantianya/engine/DialectInfoMapper.kt) |
+| 41 | 「命名空间」是中性叫法 | MySQL 上它是**库**、PG 上它是 **schema** —— 两者对 SPI 是 `listTables(conn, namespace)` 的同一个参数位。判据用既有的 `supportsSchema`，**不**用方言名硬判：按名字判等于把「哪个方言有什么概念」复制一份到引擎里，那份副本迟早与方言本身对不上 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
+| 42 | 分析查询只打本地嵌入式方言 | `ANALYSIS.RUN_QUERY` 必须能写（工作区里的 `CREATE TABLE tmp AS SELECT …` 是 M4 的验收要求），所以它**不能**被 L4 只读闸门挡；但它**绝不能**打在远端上 —— 否则它就是绕过 L4 的后门。判据用既有的 `EMBEDDED_MODE`，不新造同义能力位 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
 
 ## 4. 请求处理链路
 

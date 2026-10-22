@@ -24,7 +24,12 @@ package com.langbiantianya.dialect
  * 语义、以及后续会有哪些方言去声明它（例如 `docs/analysis-mode/README.md` §5.5 的
  * `BROWSE_SOURCE` / `ANALYSIS_SOURCE` / `READ_ONLY_DIALECT`）。这时**先把枚举值落地**
  * 是安全的 —— 前提是**还没有任何方言真的声明它**：没人声明，能力集合里就不会出现它，
- * 前端也就不会渲染出对应入口。本文件末尾那三个标签正属于这一类。
+ * 前端也就不会渲染出对应入口。
+ *
+ * `ANALYSIS_SOURCE` 已经跨过这条线（v2.29：MySQL / PostgreSQL 声明了它）——
+ * 跨过去的前提是**引擎侧的只读闸门已经建起来**（见 `ReadOnlyGate`），
+ * 否则「可写方言进分析模式」就等于开了一条真能写库的路。
+ * 剩下的两个标签仍停在「只落枚举值」那一步。
  *
  * 前端拿到 `DialectInfo.capabilities` 后，按集合决定 UI 显隐：
  * 包含 [USERS] → 显示「用户管理」导航；不包含 [TRIGGERS] → 隐藏「触发器」标签页。
@@ -163,13 +168,17 @@ enum class DialectCapability {
      *
      * ## 谁会声明它
      *
-     * 将来：**DuckDB / Hive / Impala**。
-     * DuckDB 是本地分析引擎（远端数据拉进本地 DuckDB 再算）；Hive / Impala 是远端只读源。
-     * MySQL / PostgreSQL **不**声明 —— 它们是**可写**方言，放进分析模式等于给分析工作区
-     * 开了一条真能写库的路（那时才需要会话级只读闸门兜底，见
-     * `docs/analysis-mode/README.md` §3.4）。
+     * **MySQL / PostgreSQL**（v2.29 起）—— 远端数据源。
+     * 它们是**可写**方言，所以进分析模式后，**会话级只读闸门（L4）**是唯一
+     * 挡在数据前面的引擎侧防线；那正是 M2 把闸门建起来的原因。
+     * Q3 当初「MySQL / PG 不声明」的理由正是「L4 闸门还不存在」——
+     * 补上这个前置条件后，加不加已不再是安全性问题
+     * （见 `docs/analysis-mode/README.md` §13 的 Q3）。
      *
-     * **现在一个都没声明**：枚举值先落地，声明留给后续里程碑。
+     * **H2 / DuckDB / SQLite** **不**声明 —— 它们是**本地**库，不是「远端数据源」。
+     * 分析模式的计算引擎是 DuckDB 自己，把它也列成数据源会让人以为可以拉自己。
+     *
+     * 将来：**Hive / Impala**（它们在引擎里只有读路径）。
      *
      * ## 为什么是「声明」而不是「探测」
      *

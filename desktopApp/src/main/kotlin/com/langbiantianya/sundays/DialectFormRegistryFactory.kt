@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays
 
 import com.langbiantianya.client.EngineClient
+import com.langbiantianya.dialect.DialectCapability
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.DialectInfo
@@ -44,7 +45,14 @@ object DialectFormRegistryFactory {
      *
      * @param infos 引擎下发的方言列表
      */
-    fun fromDialectInfos(infos: List<DialectInfo>): DialectFormRegistry {
+    fun fromDialectInfos(infos: List<DialectInfo>): DialectFormRegistry = catalogFrom(infos).forms
+
+    /**
+     * 把 `SYSTEM.LIST_DRIVERS` 的返回值换算成**目录**（表单 + 能力位）。
+     *
+     * @param infos 引擎下发的方言列表
+     */
+    internal fun catalogFrom(infos: List<DialectInfo>): DialectCatalog {
         val pairs =
             infos.mapNotNull { info ->
                 val dialect = dialectFor(info.driverName) ?: return@mapNotNull null
@@ -52,7 +60,15 @@ object DialectFormRegistryFactory {
                 if (!info.hasConnectionForm()) return@mapNotNull null
                 dialect to info.connectionForm.toSpec()
             }
-        return DialectFormRegistry(pairs.toMap())
+        // 能力位按**引擎说的**算，不在前端另写一份名单。
+        // 引擎下发的 `capabilities` 是能力位枚举的**名字**（`DialectCapability.name`），
+        // 所以这里比对枚举名而不是下标 —— 下标会随枚举增删而漂移。
+        val analysisCapable =
+            infos
+                .filter { info -> info.capabilitiesList.contains(DialectCapability.ANALYSIS_SOURCE.name) }
+                .mapNotNull { info -> dialectFor(info.driverName) }
+                .toSet()
+        return DialectCatalog(DialectFormRegistry(pairs.toMap()), analysisCapable)
     }
 
     /** 引擎的注册名 → 前端的方言枚举；认不出来返回 `null`。 */
@@ -61,6 +77,27 @@ object DialectFormRegistryFactory {
             it != DialectType.UNKNOWN && it.engineDriverName == engineDriverName
         }
 }
+
+/**
+ * 引擎下发的一次方言元数据 —— 前端需要的**两半**。
+ *
+ * ## 为什么合成一个
+ *
+ * 两半都来自**同一次** `SYSTEM.LIST_DRIVERS`：
+ *
+ * - [forms] —— 连接表单规格（连得上要填什么）
+ * - [analysisCapableDialects] —— 哪些方言声明了「可作为分析数据源」
+ *
+ * 分两次拉会让两个快照**不在同一时刻** —— 方言插件热插拔时，
+ * 前后端看到的方言集合可能对不上。所以一次查询、一次换算。
+ *
+ * @param forms 连接表单注册表（按方言查规格）
+ * @param analysisCapableDialects 声明了 `ANALYSIS_SOURCE` 的方言（前端枚举口径）
+ */
+internal data class DialectCatalog(
+    val forms: DialectFormRegistry,
+    val analysisCapableDialects: Set<DialectType>,
+)
 
 /**
  * 向引擎要一次方言列表，把其中的连接表单规格收进注册表。
@@ -76,12 +113,28 @@ object DialectFormRegistryFactory {
  * 这比「引擎连不上就整个界面瘫掉」好得多：连接管理器的第一个用途
  * 恰恰是**去连一个还没连上的库**，而那时引擎可能正忙。
  */
-internal suspend fun fetchDialectForms(engine: EngineClient): DialectFormRegistry {
+internal suspend fun fetchDialectForms(engine: EngineClient): DialectFormRegistry = fetchDialectCatalog(engine).forms
+
+/**
+ * 向引擎要一次方言列表，换算成**目录**（连接表单 + 能力位）。
+ *
+ * ## 这是**一次性**的元数据查询
+ *
+ * 与 `SYSTEM.INFO` 同一性质：不需要连接、不连库、只回静态声明。
+ * 所以它在应用启动时拉一次就够 —— **不是**每次建连接都跑一趟。
+ *
+ * ## 拉失败 → 空目录
+ *
+ * 空目录意味着「所有方言都走旧的枚举分支」—— 界面照常能用。
+ * 这比「引擎连不上就整个界面瘫掉」好得多：连接管理器的第一个用途
+ * 恰恰是**去连一个还没连上的库**，而那时引擎可能正忙。
+ */
+internal suspend fun fetchDialectCatalog(engine: EngineClient): DialectCatalog {
     val response =
         engine.invoke(connectionConfig { }) {
             category = Category.SYSTEM
             action = Action.LIST_DRIVERS
         }
-    if (!response.success) return DialectFormRegistry.EMPTY
-    return DialectFormRegistryFactory.fromDialectInfos(response.system.listDrivers.itemsList)
+    if (!response.success) return DialectCatalog(DialectFormRegistry.EMPTY, emptySet())
+    return DialectFormRegistryFactory.catalogFrom(response.system.listDrivers.itemsList)
 }

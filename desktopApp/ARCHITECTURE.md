@@ -18,7 +18,7 @@
 
 
 
-**模块边界**：`AppDestination`（导航目标枚举）、`SundaysTheme` / `SundaysPalette`（主题）、以及 `ConnectionManagerScreen` / `CodeEditor` / `DataTable` / `OnboardingScreen` / `SettingsScreen` 等 UI 都在 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`，可跨平台复用。本模块因此只剩「**平台窗口 + 引擎状态机接线**」，15 个源文件（见 §2）。
+**模块边界**：`AppDestination`（导航目标枚举）、`SundaysTheme` / `SundaysPalette`（主题）、以及 `ConnectionManagerScreen` / `CodeEditor` / `DataTable` / `OnboardingScreen` / `SettingsScreen` 等 UI 都在 `:shared/commonMain` —— 它们是纯 Compose，不引用 `:engine`，可跨平台复用。本模块因此只剩「**平台窗口 + 引擎状态机接线**」，16 个源文件（见 §2）。
 
 
 
@@ -122,9 +122,11 @@ desktopApp （本模块）
 
 |---|---|
 
-| [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) | `main()`（Window + 主题 + 首启引导分流）、`createEngineClient()`（**唯一引擎装配点**）、`MainScreen`（顶层导航 + 三处长生命周期状态的归属）、`fetchSystemInfo` |
+| [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) | `main()`（Window + 主题 + 首启引导分流）、`createEngineClient()`（**唯一引擎装配点**）、`MainScreen`（顶层导航 + 三处长生命周期状态的归属 + **分析模式分支**：按能力位筛数据源）、`fetchSystemInfo` |
 
-| [`ConnectionSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt) | 连接列表 / 向导状态 / 引擎会话状态 / 多 sheet 的**唯一持有者**；全部回调（`connect` / `disconnect` / `testConnection` / `save` / `delete`） |
+| [`ConnectionSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt) | 连接列表 / 向导状态 / 引擎会话状态 / 多 sheet 的**唯一持有者**；全部回调（`connect` / `disconnect` / `testConnection` / `save` / `delete`）；`analysisCapableDialects` —— 声明了 `ANALYSIS_SOURCE` 的方言集合，**来自引擎** |
+
+| [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) | 引擎的方言列表 → 前端要的**两半**（连接表单注册表 + 能力位集合）；一次 `SYSTEM.LIST_DRIVERS`、一次换算（`DialectCatalog`） |
 
 
 
@@ -412,6 +414,28 @@ desktopApp （本模块）
 
 | 排序不在这层管 | 引擎侧 `validateOrderBy` 已经挡了，前端再拼一套规则只会与它漂移 | 同上 |
 
+
+
+### 3.9 数据分析模式的接线
+
+> 界面本体在 `:shared`（`analysis/` + `navigation/TopNavBar.kt`），
+> 这一层只做**装配**：把引擎侧的能力位换算成数据源、把导航目标分派到各屏。
+
+| 决策 | 结论 | 落点 |
+
+|---|---|---|
+
+| `ANALYSIS` 是**并列的顶层目标**，不是浏览模式的子页 | 它有自己的会话（源会话 + 本地工作区），与浏览模式那套「按连接开 sheet」的模型不同；硬塞进 `DATABASE` 会让两套生命周期互相牵扯 | [`AppDestination.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
+
+| 顶层导航条**只在并列的顶层目标**渲染 | `CONNECTIONS` 与 `ANALYSIS` 渲染；浏览屏（`DATABASE`，下钻页）与设置页（`SETTINGS`，覆盖页）**不渲染** —— 给下钻页一个「切换模式」的入口，会让人以为能从分析屏直接跳到「某个连接的浏览页」，而那件事的语义是「选一个连接」 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) |
+
+| 分析屏**豁免**浏览模式那条自动切屏 | 浏览模式有「sheet 集合变化就自动切屏」的 `LaunchedEffect`；分析模式与浏览模式是两套独立会话，那条副作用会把分析屏抢走 | 同上 |
+
+| 数据源按**引擎下发的能力位**过滤 | 判据是 `session.analysisCapableDialects`（引擎的 `DialectInfo.capabilities` 里带 `ANALYSIS_SOURCE` 的方言）。前端自己写一份「MySQL/PG 可分析」的名单就是**第二个真相源** —— 引擎改了声明而前端没改，界面就会给出「点进去必然失败」的入口 | 同上 + [`ConnectionSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/ConnectionSession.kt) |
+
+| 能力位**一次查询、一次换算** | 连接表单规格与能力位都来自**同一次** `SYSTEM.LIST_DRIVERS`（`DialectCatalog`）；分两次拉会让两个快照**不在同一时刻** —— 方言插件热插拔时前后端看到的方言集合可能对不上 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) |
+
+| 桌面端直接引用**引擎侧同一个**能力位枚举 | `desktopApp` 加了 `implementation(project(":api"))` 就是为了用 `DialectCapability.ANALYSIS_SOURCE` —— 比对的是**枚举名**（下标会随枚举增删而漂移） | `desktopApp/build.gradle.kts` |
 
 
 ---

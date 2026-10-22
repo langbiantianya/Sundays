@@ -40,11 +40,15 @@ import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.i18n.LanguageScope
+import com.langbiantianya.sundays.analysis.AnalysisScreen
+import com.langbiantianya.sundays.analysis.AnalysisSourceItem
 import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
+import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.navigation.AppDestination
+import com.langbiantianya.sundays.navigation.TopNavBar
 import com.langbiantianya.sundays.notifications.NotificationCenter
 import com.langbiantianya.sundays.onboarding.OnboardingScreen
 import com.langbiantianya.sundays.settings.SettingsScreen
@@ -456,8 +460,12 @@ internal fun MainScreen(
     // 这样 ConnectManager 「连接」按钮和 AddConnectionDialog 完成后都能触发自动切换。
     // 例外：用户正在「设置」页时不劫持 —— 否则只要 sheet 集合变化（哪怕是别处触发的），
     // 就会把人从设置页强行拽回浏览页。
+    //
+    // 「数据分析」页同样不劫持：它与浏览模式是两套独立的会话，
+    // 分析页上不该因为别处的 sheet 变化而被抢走界面。
     LaunchedEffect(session.openSheets.isEmpty()) {
         if (destination == AppDestination.SETTINGS) return@LaunchedEffect
+        if (destination == AppDestination.ANALYSIS) return@LaunchedEffect
         destination =
             if (session.openSheets.isEmpty()) {
                 AppDestination.CONNECTIONS
@@ -491,6 +499,18 @@ internal fun MainScreen(
     // 引导页叠在上层不透明渲染。
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // 顶层导航条 —— 只在**并列的顶层目标**渲染。
+            //
+            // 浏览屏（DATABASE）是「从某个连接点进去」的下钻页、设置页是覆盖页，
+            // 它们都不是目标之一，给它们渲染切换条只会让人以为能从那里换模式。
+            if (destination == AppDestination.CONNECTIONS || destination == AppDestination.ANALYSIS) {
+                TopNavBar(
+                    current = destination,
+                    onNavigate = { destination = it },
+                    onOpenSettings = ::openSettings,
+                )
+            }
+
             if (destination == AppDestination.DATABASE) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
@@ -656,6 +676,38 @@ internal fun MainScreen(
                             },
                         )
                     }
+                }
+
+                AppDestination.ANALYSIS -> {
+                    // 分析模式的数据源：**只有**方言声明了 `ANALYSIS_SOURCE` 的连接才进来。
+                    //
+                    // 判据来自引擎下发的能力位（`session.analysisCapableDialects`），
+                    // 不是前端写死的名单 —— 写死的话，引擎改了声明而前端没改，
+                    // 界面就会给出「点进去必然失败」的入口。
+                    val analysisSources =
+                        remember(session.connectionList.connections, session.analysisCapableDialects) {
+                            session.connectionList.connections
+                                .filter { it.dialect in session.analysisCapableDialects }
+                                .map { cfg ->
+                                    AnalysisSourceItem(
+                                        id = cfg.id,
+                                        name = cfg.name,
+                                        dialectLabel = DialectMetadata.of(cfg.dialect).displayName,
+                                    )
+                                }
+                        }
+                    // 选中的数据源：默认第一个；用户改过之后记住他的选择。
+                    var selectedAnalysisSourceId by remember { mutableStateOf<String?>(null) }
+                    val effectiveSelection =
+                        selectedAnalysisSourceId?.takeIf { id -> analysisSources.any { it.id == id } }
+                            ?: analysisSources.firstOrNull()?.id
+
+                    AnalysisScreen(
+                        sources = analysisSources,
+                        selectedSourceId = effectiveSelection,
+                        onSelectSource = { selectedAnalysisSourceId = it },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
             }
         }

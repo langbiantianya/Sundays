@@ -22,6 +22,8 @@
 | **DataTable** | 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 / 可编辑 + 右键菜单 | [`table/DataTable.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/DataTable.kt) |
 | **ConnectionManagerScreen** | 连接管理（左侧连接列表 + 右侧 4 步 / 3 步向导 + 连接总览） | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
 | **AppDestination** | 顶层导航目标枚举 | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
+| **TopNavBar** | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
+| **AnalysisScreen / ReadOnlyBadge** | 数据分析模式的工作台骨架 + **不可关闭**的只读徽标 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |
 | **SettingsScreen / SettingsStorage** | 设置页（左分类 / 右内容）与设置持久化 | [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) |
 | **OnboardingScreen** | 首次启动外观引导（配色 / 明暗 / 密度 / 语言） | [`onboarding/OnboardingScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreen.kt) |
@@ -35,7 +37,7 @@
 
 ```
 shared/
-├── commonMain/        所有业务 UI 组件（平台无关）：browser/ connection/ editor/ navigation/ notifications/ onboarding/ settings/ sql/ table/ ui/
+├── commonMain/        所有业务 UI 组件（平台无关）：analysis/ browser/ connection/ editor/ navigation/ notifications/ onboarding/ settings/ sql/ table/ ui/
 ├── commonTest/        平台无关测试（tokenizer / 模型 / 集成 / 布局契约）
 ├── jvmMain/           当前为空 —— 无平台特定实现（`commonMain` 全量可用）
 └── jvmTest/           JVM 特定测试（文件持久化与 POSIX 权限）
@@ -63,6 +65,7 @@ shared/
 | `DangerousSql` / `SqlLiterals` / 危险语句确认框 | 否（纯字符串扫描与转义） | ✅ `shared/commonMain` |
 | `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 否（纯状态 + 纯展示；时间格式化由调用方注入） | ✅ `shared/commonMain`（v2.28 上移） |
 | `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 否（纯展示 + 窄数据形状） | ✅ `shared/commonMain`（v2.28 上移） |
+| `TopNavBar` / `analysis/`（分析模式 UI） | 否（纯 Compose + 回调注入；数据由调用方算好） | ✅ `shared/commonMain`（v2.29 新增） |
 | `ConnectionSession` | 是（`IdbEngine.testConnection` / `disconnect`） | ❌ `desktopApp` |
 | `DatabaseBrowserState` / `DatabaseBrowserScreen` | 是（`IdbEngine.invoke` + proto 构造器） | ❌ `desktopApp` |
 | `SchemaTree` / `TablePreview` / `ExportDialogs` / `GenerateWorkbench` / `SqlWorkbench` / `ActiveSheetContent` | 间接是（参数是 `DatabaseBrowserState`） | ❌ `desktopApp`（见下「为什么它们还搬不动」） |
@@ -184,10 +187,21 @@ shared/
 
 ### 5.1 `AppDestination`
 
-[`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) —— 纯枚举（`CONNECTIONS` / `DATABASE` / `SETTINGS`），无平台 / 引擎依赖。`labelKey` 是**文案键**而非文案本身（导航条要跟着界面语言走）。新增目标只需加一个枚举项，由调用方（desktopApp 的 `MainScreen`）按 `entries` 分派。
+[`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) —— 纯枚举（`CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`），无平台 / 引擎依赖。`labelKey` 是**文案键**而非文案本身（导航条要跟着界面语言走）。新增目标只需加一个枚举项，由调用方（desktopApp 的 `MainScreen`）按 `entries` 分派。
 
-> ⚠️ `TopNavBar` **当前不存在**：全仓无 `fun TopNavBar` 定义，`navigation/` 下只有 `AppDestination.kt`。
-> 曾有的导航条形态已删除，`MainScreen` 直接按 `AppDestination` 分派内容。历史残留章节已从本文移除。
+> ✅ **`TopNavBar` 现在存在了**（v2.29 新增）——
+> [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt)：
+> 品牌标记 + 目标切换 chip + ⚙ 设置入口。
+>
+> **为什么它以前不需要、现在需要**：以前应用是「连接管理 → 数据库浏览」的**单向**两屏结构，
+> 没有回得去的入口 —— 浏览屏是「从某个连接点进去」的**下钻页**，不是并列目标。
+> 数据分析模式是**并列**的顶层目标（连远端只读做分析，与浏览库是两种活儿），
+> 于是需要一个能在两个模式之间切换的地方。
+>
+> **它只放「并列的顶层目标」的 chip**（`CONNECTIONS` 与 `ANALYSIS`）：
+> 浏览屏（`DATABASE`）与设置页（`SETTINGS`）**没有** chip ——
+> 给下钻页一个「切换模式」的入口，会让人以为能从分析屏直接跳到「某个连接的浏览页」，
+> 而那件事的语义是「选一个连接」，不是「选一个模式」。
 
 ### 5.2 三轴外观模型
 
@@ -235,7 +249,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ---
 
-## 6. SQL 文本工具与通用 UI 工具
+## 6. SQL 文本工具、通用 UI 工具与分析模式 UI
 
 | 组件 | 一句话 | 关键点（详见 KDoc） | 源码 |
 |---|---|---|---|
@@ -249,8 +263,33 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
 | `WinDropdown` / `WinDropdownMenu` | 下拉选择器 | 经典档是「凹陷取值区 + 凸起箭头」两块拼接的 Win 味道，现代档是一整块描边面；`value` 用 `String` 与 `WinTextField` 同口径，**标签必须互不相同**（靠文本反查选中项） | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
+| `analysis/`（数据分析模式 UI） | 分析工作台骨架 + 不可关闭的只读徽标 + 数据源条目 | 见 §6.1 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 
 界面语言的完整设计见 [`../i18n/README.md`](../i18n/README.md)。语言状态放在 `AppearanceState` 里 —— 落盘写的是**整份** `AppSettings`，语言若由调用方单独持有，用户改一次配色就会把已选语言抹掉。
+
+### 6.1 数据分析模式的 UI 包（`analysis/`）
+
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，三件事：
+
+| 文件 | 内容 |
+|---|---|
+| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 |
+| [`ReadOnlyBadge.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/ReadOnlyBadge.kt) | 「⊘ 只读」徽标 —— **不可关闭**（它没有任何开关） |
+| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（工具条 + 左侧数据源列表 + 右侧主区） |
+
+三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
+
+1. **不 import `java.*` / `javax.*`** —— `:shared` 是跨平台模块，引入 JVM 专有的 import 就让它名存实亡。
+2. **不 import 引擎 / 协议层**（`com.langbiantianya.engine.*` / `.grpc.*` / `.client.*`）——
+   界面只接收**已经算好的**数据（数据源列表），把事件回调出去；
+   连不连、怎么拉，全在 `desktopApp` 侧决定。
+3. **不出现字面量颜色** —— 颜色一律取自 `MaterialTheme.colorScheme`；
+   写死的颜色在五套配色里只有一套是对的，而且不跟明暗档位走。
+
+> 💡 **为什么只读徽标不可关闭**：会话级 `read_only` 是**请求级**标记（不落 `connection.json`），
+> 方言级只读更是**实现事实** —— 引擎里压根没有往它写入的路径。
+> 给了又关不掉的东西，用户点了发现没反应，下次就不信这个徽标了，
+> 而它恰恰是最该被信的那句话。
 
 ---
 
@@ -336,7 +375,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | 不支持 IME composition 输入 | 中文 / 日文输入法合成期间显示可能异常 |
 | `DataTable` 不支持列拖拽 / 多列排序 / 过滤 | 调用方需自己用 `TableColumn.weight` 排列表头、在外层维护排序 / 过滤状态 |
 | `Modifier.onRightClick` 仅响应鼠标右键 / 双指点击 | 触摸设备长按弹出菜单需另写 |
-| `TopNavBar` 不存在 | 顶层导航由调用方按 `AppDestination` 分派；如需导航条请新增组件而不是找它 |
+| 顶层导航条只给**并列的顶层目标** | `CONNECTIONS` / `ANALYSIS` 有 chip；`DATABASE`（下钻页）与 `SETTINGS`（覆盖页）没有 —— 给它们加 chip 会让人以为能从那里直接换模式 |
 
 ---
 

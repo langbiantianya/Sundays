@@ -1,6 +1,20 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v0.6** · 2026-10-22
+> **状态**：设计冻结待评审 · **v0.7** · 2026-10-22
+>
+> **v0.7 相对 v0.6 的修改**（M2 分三片落地；实现细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
+>
+> 1. **M2 已落地（分三片）** —— 片1 **协议**（`Category.ANALYSIS` / `Category.REPORT`、
+>    五个 Action、`ConnectionConfig.read_only`、`AnalysisRequest` / `AnalysisResponse`）、
+>    片2 **只读闸门**（会话级 L4 + 方言级 L3，配两级回归测试）、
+>    片3 **四条只读路由 + 顶层导航 + 只读徽标 + 能力位声明 + 24 个新文案键**。
+> 2. **§3.5：四条 ANALYSIS 路由已落地** —— `LIST_SOURCES` / `LIST_TABLES` /
+>    `LIST_COLUMNS` / `RUN_QUERY` 都在引擎里实现了；
+>    `ANALYSIS.PULL_SAMPLE` **仍然不落地**（理由见下方说明，本版没有新增理由）。
+> 3. **§13 的 Q3：MySQL / PostgreSQL 声明 `ANALYSIS_SOURCE` 已落地** —— 引擎侧真的声明了，
+>    并由 `desktopApp` 的 `AnalysisCapabilityContractTest` 钉住「谁声明了什么」。
+> 4. **§11：M2 补上「已落地」条目清单** —— 按三片逐条记，便于对着仓库核对。
 >
 > **v0.6 相对 v0.5 的修改**（M2 + M4' 实现期；实现细节见
 > [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
@@ -317,13 +331,28 @@ L4 的落法：
 
 `Category.ANALYSIS` 下的路由**只有读**：
 
-| 路由 | 作用 |
-|---|---|
-| `ANALYSIS.LIST_SOURCES` | 列分析数据源 |
-| `ANALYSIS.LIST_TABLES` | 列远端表（只读 SPI） |
-| `ANALYSIS.LIST_COLUMNS` | 列远端列（只读 SPI） |
-| `ANALYSIS.RUN_QUERY` | 在**计算引擎**上跑分析 SQL |
-| `ANALYSIS.PULL_SAMPLE` | 从远端拉样本到本地工作区 |
+| 路由 | 作用 | 状态 |
+|---|---|---|
+| `ANALYSIS.LIST_SOURCES` | 列分析数据源 | ✅ 已落地 |
+| `ANALYSIS.LIST_TABLES` | 列远端表（只读 SPI） | ✅ 已落地 |
+| `ANALYSIS.LIST_COLUMNS` | 列远端列（只读 SPI） | ✅ 已落地 |
+| `ANALYSIS.RUN_QUERY` | 在**计算引擎**上跑分析 SQL | ✅ 已落地 |
+| `ANALYSIS.PULL_SAMPLE` | 从远端拉样本到本地工作区 | ⏳ 不落地（见下） |
+
+> ✅ **v0.7：上面四条路由已落地** —— 实现见
+> [`engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt)，
+> 路由注册见 [`engine/.../dispatcher/RequestDispatcher.kt`](../../engine/src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt)。
+> 三处值得记的判据：
+>
+> - **「命名空间」是中性叫法** —— MySQL 上它是**库**，PG 上它是 **schema**，
+>   判据是既有的 `DatabaseDialect.supportsSchema`（**不**用方言名硬判，
+>   那等于把「哪个方言有什么概念」复制一份到引擎里）。
+> - **`RUN_QUERY` 只允许打在声明了 `EMBEDDED_MODE` 的方言上**（H2 / DuckDB / SQLite）——
+>   远端方言一律拒绝，错误文案是「分析查询只能跑在本地工作区上」。
+>   它**必须**能写（工作区里的 `CREATE TABLE tmp AS SELECT …` 是 M4 的验收要求），
+>   所以不能被 L4 闸门挡；但它**绝不能**打在远端上，否则就是绕过 L4 的后门。
+> - **行数上限 5000**，与浏览模式的 SQL 结果上限同值；超出时响应里的
+>   `truncated` **显式置位**（正好等于上限不算截断 —— 只有真的还有下一行才算）。
 
 `Category.REPORT` 下：
 
@@ -676,16 +705,23 @@ enum class ConnectionType {
 | 能力位 | 含义 | 内置分布 |
 |---|---|---|
 | `BROWSE_SOURCE` | 可在**浏览模式**使用 | MySQL / PG / H2 / DuckDB / SQLite |
-| `ANALYSIS_SOURCE` | 可在**分析模式**使用 | DuckDB / Hive / Impala / **MySQL / PG**（v0.6 起，见下方说明与 Q3） |
+| `ANALYSIS_SOURCE` | 可在**分析模式**使用 | **MySQL / PG**（v0.7 起已声明，见下方说明与 Q3） |
 | `READ_ONLY_DIALECT` | **方言级只读**：写方法一律抛 `UnsupportedOperationException` | Hive / Impala |
 
 - 连接管理器按这两组显示（「可浏览」/「可分析」），**同一份配置**。
 - `READ_ONLY_DIALECT` 的连接在列表与向导里显示**只读徽标** ⓘ（§3.3）。
-- DuckDB 两组都在。
-- 现有 5 个方言**全部补声明 `BROWSE_SOURCE`**（这是行为不变的一句声明）。
-- **v0.6：MySQL / PostgreSQL 也声明 `ANALYSIS_SOURCE`**。理由见 Q3 的更新：
-  当初「不加」是因为 L4 闸门还不存在，而 M2 正好把它建起来 ——
-  补上前置条件后，可写方言进分析模式是**安全的**。
+- **DuckDB 不在 `ANALYSIS_SOURCE` 那一组** —— 它是分析模式**自带的计算引擎**
+  （§2.2 读法 B），不是「数据源」；本地库（H2 / SQLite）同理。
+- `BROWSE_SOURCE` **目前还没有任何方言声明** —— 浏览模式是当前的默认模式，
+  前端按「连接类型」分组，不需要这个能力位来筛选；
+  等浏览模式也按能力位分组时再补（那是一次行为不变的一句声明）。
+- **v0.7：MySQL / PostgreSQL 已声明 `ANALYSIS_SOURCE`**（引擎侧 `dialect-mysql` /
+  `dialect-postgresql`）。理由见 Q3 的更新：当初「不加」是因为 L4 闸门还不存在，
+  而 M2 正好把它建起来 —— 补上前置条件后，可写方言进分析模式是**安全的**。
+- ⚠️ **DuckDB / H2 / SQLite 都不声明 `ANALYSIS_SOURCE`** —— 分析模式的计算引擎
+  是 DuckDB **自己**（§2.2 读法 B），它不是「数据源」；把它列成数据源，
+  用户会以为自己能「拉自己」。这条边界由
+  [`desktopApp` 的 `AnalysisCapabilityContractTest`](../../desktopApp/src/test/kotlin/com/langbiantianya/sundays/AnalysisCapabilityContractTest.kt) 钉住。
 
 ### 5.6 SPI 的向后兼容策略
 
@@ -1264,6 +1300,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 | 画面 | 界面区域 | 复用的组件（`:shared` commonMain） | 新增？ |
 |---|---|---|---|
+| ① 顶层导航 | 导航条本体（品牌 + 目标 chip + ⚙） | `TopNavBar` + `SettingsEntryButton` | ★ 新增（`:shared` 的 `navigation/`） |
 | ② 分析工作区 | 顶栏按钮 | `WinButton` / `WinOutlinedButton` / `WinIconButton` | —— |
 | ② 分析工作区 | 顶栏「⊘ 只读」徽标 | `ReadOnlyBadge` | ★ 新增（§6.4-4） |
 | ② 分析工作区 | 左侧数据源树 | `SourceTree`（内部用 `EmptyHint` / `ColumnBadge` / `focusRing` / `onRightClick` / `winShape`） | ★ 新增（§6.4-1） |
@@ -1319,13 +1356,15 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | 路径 | 内容 |
 |---|---|
 | `shared/src/commonMain/.../analysis/` | `ReportSpec.kt`（报表规格）、`AnalysisScreen.kt`、`ReportDesignerScreen.kt` |
+| `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 数据源行的测试标记 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
 | `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/6**，§6.4） |
 | `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/6**） |
 | `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/6**） |
 | `shared/src/commonMain/.../analysis/ReadOnlyBadge.kt` | 不可关闭的只读徽标（**新增组件 4/6**） |
 | `shared/src/commonMain/.../analysis/PullStageIndicator.kt` | 拉取三段进度（**新增组件 5/6**） |
+| `shared/src/commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口）—— 只在**并列的顶层目标**渲染 |
 | `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
-| `shared/src/commonTest/.../analysis/AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6） |
+| `desktopApp/src/test/.../AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6）—— 落在 `desktopApp` 而不是 `:shared`：它要读 `:shared` 的**源文件**（按 import 行判定），而 Gradle 跑测试时的工作目录是**模块根** |
 | `desktopApp/src/main/.../AnalysisSession.kt` | 分析模式的会话与状态机（与 `ConnectionSession` / `DatabaseBrowserState` **并列**，不继承） |
 | `engine/src/main/.../analysis/AnalysisHandler.kt` | `Category.ANALYSIS` 的路由实现 |
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
@@ -1358,9 +1397,9 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `engine-protocol/.../idb_engine.proto` | `DialectInfo.connection_form`（新消息 `DialectForm` / `DialectFormVariant` / `DialectFormField`） |
 | `engine-protocol/.../grpc/DialectFormMapping.kt` | **新增**：契约 ⇄ proto 的**双向**映射（两个方向必须放一起 —— 见 §5.2 的落点修正） |
 | `engine/.../engine/DialectInfoMapper.kt` | **新增**：方言 → proto `DialectInfo`（`listDrivers()` 原来内联 13 个字段，抽出来才可单测） |
-| `desktopApp/.../DialectFormRegistryFactory.kt` | **新增**：引擎的方言列表 → 前端注册表（换算只用已有的 `engineDriverName` 表，不另写一份映射） |
+| `desktopApp/.../DialectFormRegistryFactory.kt` | **新增**：引擎的方言列表 → 前端注册表（换算只用已有的 `engineDriverName` 表，不另写一份映射）；同一次 `SYSTEM.LIST_DRIVERS` 换算出**表单 + 能力位**两半（`DialectCatalog`）—— 分两次拉会让两个快照不在同一时刻 |
 | `desktopApp/src/test/.../DialectFormContractTest.kt` | **新增**：连接类型名的**三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）—— 漂移的症状是**静默回退旧分支**，只能靠测试钉住 |
-| `desktopApp/.../ConnectionSession.kt` | 持有 `dialectForms` + `refreshDialectForms()`（启动时拉一次，失败保持空注册表） |
+| `desktopApp/.../ConnectionSession.kt` | 持有 `dialectForms` + `refreshDialectForms()`（启动时拉一次，失败保持空注册表）+ `analysisCapableDialects`（声明了 `ANALYSIS_SOURCE` 的方言集合，**来自引擎**） |
 | `shared/.../connection/DialectMetadata.kt` | **新增**：前端方言元数据的唯一真相源（`mapOf` 表） |
 | `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
@@ -1377,7 +1416,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `engine/.../export/ExcelWriter.kt` | 类型分派抽到 `CellValueWriter`（**不改变现有行为**） |
 | `i18n/src/main/.../StrKey` + 6 张文案表 | 新增文案键（**六语言必须同步**） |
 | `settings.gradle.kts` | `include(":dialect-hive")` / `include(":dialect-impala")` |
-| `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖 |
+| `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖；**加** `implementation(project(":api"))` —— 前端要按**引擎侧同一个** `DialectCapability` 枚举判「哪些方言可分析」，前端另写一份名单就是第二个真相源 |
 | `gradle/libs.versions.toml` | `hive-jdbc` 版本（spike 结论出来后定） |
 
 ### 10.3 打包要留意
@@ -1482,13 +1521,41 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 > **v0.6：本轮落地（M2 + M4' 一起做）** —— 实现细节见
 > [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)。
+>
+> ✅ **v0.7：M2 已落地，分三片** —— 逐条清单见下。
 
 - **交付**
   - proto：`Category.ANALYSIS` / `Category.REPORT` / 新 Action / `ConnectionConfig.read_only`
-  - 引擎：`RequestDispatcher` 的只读闸门（L4）；`ANALYSIS.LIST_SOURCES` / `RUN_QUERY` 两条只读路由
+  - 引擎：`RequestDispatcher` 的只读闸门（L4）；`ANALYSIS` 的**四条**只读路由
+    （`LIST_SOURCES` / `LIST_TABLES` / `LIST_COLUMNS` / `RUN_QUERY`）
   - UI：`AppDestination.ANALYSIS` + 空壳主屏 + **不可关闭**的只读徽标（§6.4-4）
   - 组件层只读表达（§6.5）：SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句
   - 测试：§3.6 的两类回归测试（方言级 + 会话级）
+- **M2 已落地（v0.7，分三片）** ✅
+  - **片1 协议** —— `Category.ANALYSIS` / `Category.REPORT`、**五个** Action
+    （`LIST_SOURCES` / `LIST_TABLES` / `LIST_COLUMNS` / `RUN_QUERY` / `BUILD_EXCEL`，
+    最后一个只落枚举不实现路由）、`ConnectionConfig.read_only`、
+    `AnalysisRequest` / `AnalysisResponse`（列表响应复用既有的 `TableListItem` /
+    `ColumnDef` / `Row`，不另立消息类型）
+  - **片2 只读闸门（L4）** —— 闸门放在 `RequestDispatcher` 的**查路由表之前**：
+    `read_only = true` 的会话命中写路由一律拒绝，**不进入 handler**
+    （判据写在 handler 里，测试就只能退化成「断言错误文案」）。
+    配**方言级**（L3）与**会话级**（L4）两级回归测试
+  - **片3 四条路由 + 顶层导航 + 只读徽标 + 能力位声明**
+    - 引擎：[`engine/.../analysis/AnalysisHandler.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt)
+      + `RequestDispatcher` 的四条路由注册；`RUN_QUERY` 只允许打在声明了
+      `EMBEDDED_MODE` 的方言上，行数上限 5000、超出时 `truncated` 显式置位
+    - 能力位：`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`；
+      前端按**引擎下发的**能力位筛数据源（`DialectCatalog` 一次换算表单与能力位），
+      **不另写一份**「MySQL / PG 可分析」的名单
+    - UI：`AppDestination.ANALYSIS` + [`shared/.../navigation/TopNavBar.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt)
+      （品牌 + 两个 chip + ⚙ 设置入口）+ `shared/.../analysis/`（`AnalysisModels.kt` /
+      `ReadOnlyBadge.kt` / `AnalysisScreen.kt` 骨架）
+    - 测试：引擎的 `AnalysisHandlerIntegrationTest`（12 例）+ `desktopApp` 的
+      `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest`
+    - i18n：**24 个**新文案键**六语言同步**
+  - ⏳ **还没做的**：§6.5 的「组件层只读表达」（编辑器只放行 `DangerousSql.isReadOnlyQuery`
+    判定为只读的语句）—— 分析屏目前是骨架，编辑器随工作台一起接上
 - **验收**
   - 在只读会话里发 `TABLE.CREATE` / `DATA.INSERT` / `IMPORT.RUN_IMPORT` / `SQL.EXECUTE("INSERT …")`
     —— **全部**返回明确的只读错误，且**不进入 handler**
@@ -1610,7 +1677,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|---|---|
 | ~~Q1~~ | ~~目标环境的 Hive / Impala **具体是什么发行版与版本**~~ | 决定驱动版本、SQL 方言、元数据查询写法 | ✅ **v0.4 已定「兼容策略」**（§4.6 的 D1~D4）：Hive 支持最近几个大版本、尽量向下兼容；Impala 从「兼容 hive jdbc 的版本」起支持；两者共用 `hive-jdbc` + `jdbc:hive2:`，靠 `driver` 消歧。⚠️ **具体发行版与版本号仍未定** —— 只影响 R1 的客户端版本取舍，不影响架构决策 |
 | **Q2** | 一次拉取的**数据量级**？（万 / 十万 / 千万行） | 决定要不要上方案 B（应用层直搬）、要不要分片 | 按 **十万行**设计，二期再优化 |
-| **Q3** | 要不要给 **MySQL / PostgreSQL** 也加 `ANALYSIS_SOURCE` 能力位？ | 加了它们就是「可写方言」进分析模式 → L4 闸门从「兜底」变成「主力」；不加则分析模式只有三个引擎 | **v0.6 更新：加。** 原结论是「不加」（用户当时只点了 DuckDB / Hive / Impala），理由是 **L4 闸门还不存在**。M2 把 L4 建起来之后，这个顾虑消失了 —— 可写方言进分析模式，由引擎侧的闸门兜住，**不靠前端自觉**。代价是 L4 从「兜底」升为「主力」，而这正是它该在的位置（§3.6 的两类回归测试是它的守门人） |
+| **Q3** | 要不要给 **MySQL / PostgreSQL** 也加 `ANALYSIS_SOURCE` 能力位？ | 加了它们就是「可写方言」进分析模式 → L4 闸门从「兜底」变成「主力」；不加则分析模式只有三个引擎 | **v0.6 更新：加。** 原结论是「不加」（用户当时只点了 DuckDB / Hive / Impala），理由是 **L4 闸门还不存在**。M2 把 L4 建起来之后，这个顾虑消失了 —— 可写方言进分析模式，由引擎侧的闸门兜住，**不靠前端自觉**。代价是 L4 从「兜底」升为「主力」，而这正是它该在的位置（§3.6 的两类回归测试是它的守门人）。<br>✅ **v0.7 已落地**：引擎侧 `dialect-mysql` / `dialect-postgresql` 真的声明了 `ANALYSIS_SOURCE`，分析屏据此筛数据源。**这个决定现在有测试守着** —— [`desktopApp` 的 `AnalysisCapabilityContractTest`](../../desktopApp/src/test/kotlin/com/langbiantianya/sundays/AnalysisCapabilityContractTest.kt) 断言「MySQL / PG 声明它、H2 / DuckDB / SQLite 不声明它、能力位以**枚举名**下发」；任何一侧改了声明而另一侧没跟上，测试就会红 |
 | ~~Q4~~ | ~~报表**要不要图表**（柱状/折线）？~~ | POI 图表 API 不稳定，是 M6 的大变量 | ✅ **v0.4 已定：v1 不做**（用户拍板「报表先不要图」）—— 与 §1.2「明确不做的事」一致；M6 只出**表格型** Excel 报表 |
 | **Q5** | AI 用哪家模型、云端还是本地？ | 属 M7，但**接口**要在 M5 之前定死 | 不影响 v1；先留 SPI |
 | ~~Q6~~ | ~~通用化后，**要不要保留旧的枚举分支**作为回退？~~ | 决定 M1 的迁移策略与 R9 的处理 | ✅ **v0.4 已定：保留**（用户拍板「旧枚举保留」）—— 单向迁移：优先读 spec，读不到回退；细节见 §5.7 |
@@ -1650,7 +1717,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 | 事实 | 出处 |
 |---|---|
-| 顶层导航现有 3 个目标 | `shared/.../navigation/AppDestination.kt` |
+| 顶层导航现有 4 个目标（`CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`） | `shared/.../navigation/AppDestination.kt` |
 | 5 套配色 × 明暗 2 档 | `shared/.../ui/ThemePalette.kt` |
 | 10 套 `ColorScheme` + 9 条字号 | `shared/.../ui/SundaysPalette.kt` |
 | 连接配置模型与 `DialectType`（5 种方言） | `shared/.../connection/ConnectionConfig.kt` |

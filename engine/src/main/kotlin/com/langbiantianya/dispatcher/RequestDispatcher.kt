@@ -9,10 +9,15 @@
 package com.langbiantianya.dispatcher
 
 import com.google.protobuf.Message
+import com.langbiantianya.analysis.AnalysisHandler
 import com.langbiantianya.engine.EngineLanguageContext
 import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.engine.requestLanguageOrNull
 import com.langbiantianya.grpc.Action
+import com.langbiantianya.grpc.AnalysisListColumnsResponse
+import com.langbiantianya.grpc.AnalysisListSourcesResponse
+import com.langbiantianya.grpc.AnalysisListTablesResponse
+import com.langbiantianya.grpc.AnalysisRunQueryResponse
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ColumnDef
 import com.langbiantianya.grpc.ConnectionConfig
@@ -59,6 +64,7 @@ import com.langbiantianya.grpc.ViewCreateRequest
 import com.langbiantianya.grpc.ViewDeleteRequest
 import com.langbiantianya.grpc.ViewGetDdlRequest
 import com.langbiantianya.grpc.ViewListRequest
+import com.langbiantianya.grpc.analysisResponse
 import com.langbiantianya.grpc.dataResponse
 import com.langbiantianya.grpc.foreignKeyResponse
 import com.langbiantianya.grpc.functionResponse
@@ -514,6 +520,69 @@ object RequestDispatcher {
                 Route(
                     invoke = { c, r -> TriggerHandler.getDDL(c, r.triggerRequest.getDdl) },
                     wrap = { b, m -> b.trigger = triggerResponse { getDdl = m as com.langbiantianya.grpc.TriggerGetDdlResponse } },
+                ),
+            )
+            // ─────── ANALYSIS（数据分析模式）───────
+            //
+            // 四条路由与四个 Action 一一对应，所以不用再判 oneof 到底是哪个分支：
+            // 走哪条路由本身就说明了请求体是哪一个。
+            // 但**仍然**要判 oneof 有没有被设过 —— protobuf 的 oneof 未设置时
+            // getter 返回默认实例，不判的话一个空请求会被当成「列空命名空间」执行，
+            // 报错信息还会指向错误的方向（说 namespace 缺了，其实整个 body 都没填）。
+            put(
+                Category.ANALYSIS to Action.LIST_SOURCES,
+                Route(
+                    invoke = { c, r ->
+                        if (!r.analysisRequest.hasListSources()) {
+                            throw IllegalArgumentException("Missing 'listSources' in payload")
+                        }
+                        AnalysisHandler.listSources(c)
+                    },
+                    wrap = { b, m ->
+                        b.analysis = analysisResponse { listSources = m as AnalysisListSourcesResponse }
+                    },
+                ),
+            )
+            put(
+                Category.ANALYSIS to Action.LIST_TABLES,
+                Route(
+                    invoke = { c, r ->
+                        if (!r.analysisRequest.hasListTables()) {
+                            throw IllegalArgumentException("Missing 'listTables' in payload")
+                        }
+                        AnalysisHandler.listTables(c, r.analysisRequest.listTables)
+                    },
+                    wrap = { b, m ->
+                        b.analysis = analysisResponse { listTables = m as AnalysisListTablesResponse }
+                    },
+                ),
+            )
+            put(
+                Category.ANALYSIS to Action.LIST_COLUMNS,
+                Route(
+                    invoke = { c, r ->
+                        if (!r.analysisRequest.hasListColumns()) {
+                            throw IllegalArgumentException("Missing 'listColumns' in payload")
+                        }
+                        AnalysisHandler.listColumns(c, r.analysisRequest.listColumns)
+                    },
+                    wrap = { b, m ->
+                        b.analysis = analysisResponse { listColumns = m as AnalysisListColumnsResponse }
+                    },
+                ),
+            )
+            put(
+                Category.ANALYSIS to Action.RUN_QUERY,
+                Route(
+                    invoke = { c, r ->
+                        if (!r.analysisRequest.hasRunQuery()) {
+                            throw IllegalArgumentException("Missing 'runQuery' in payload")
+                        }
+                        AnalysisHandler.runQuery(c, r.analysisRequest.runQuery)
+                    },
+                    wrap = { b, m ->
+                        b.analysis = analysisResponse { runQuery = m as AnalysisRunQueryResponse }
+                    },
                 ),
             )
         }

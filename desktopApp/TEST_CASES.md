@@ -152,7 +152,16 @@
 | [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航：默认落在连接管理，点击「数据库浏览」切到第二屏 |
 | [`H2GuiWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/H2GuiWalkthroughTest.kt) | 真 H2 内存库（6 表 / 250 行）走完整主流程并截图：schema 树 → 预览 → 分页 → SQL 补全（表候选优先于关键字、靠右翻转）→ SQL 执行 → 造数并回引擎侧复查 `COUNT(*)` → 树面板宽度拖拽 |
 
-### 2.7 非测试支撑文件
+### 2.7 数据分析模式
+
+| 测试类 | 覆盖的能力 |
+|---|---|
+| [`AnalysisCapabilityContractTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisCapabilityContractTest.kt) | **能力位契约**：MySQL / PostgreSQL 声明 `ANALYSIS_SOURCE`（分析模式的远端数据源）；H2 / DuckDB / SQLite **不**声明（本地库不是数据源 —— 计算引擎是 DuckDB 自己）；能力位以**枚举名**下发 —— 前端比对的是名字而不是下标，下标会随枚举增删而漂移 |
+| [`AnalysisModuleBoundaryTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisModuleBoundaryTest.kt) | `:shared` 的 `analysis/` 包的**结构边界**：不 import `java.*` / `javax.*`、不 import 引擎与协议层（界面只该接收**算好的**数据）、不出现字面量颜色。断言打在**源文件**上 —— 字节码里看不到「只用了类型」的 import |
+| [`AnalysisScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisScreenTest.kt) | 分析工作台的界面契约：只读徽标**可见且没有可点语义**（它是标记，不是开关 —— 远端只读是既定事实）、数据源列表渲染（按 `analysisSourceRowTag` **精确定位到行**，不靠文本猜）、无数据源时的空态文案**说清下一步做什么** |
+| [`AnalysisHandlerIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/AnalysisHandlerIntegrationTest.kt)（在 `:engine`） | 四条分析路由的集成测试：命名空间按 `supportsSchema` 分派（schema 型 / 库型）、`RUN_QUERY` 打在**非嵌入式**方言上被拒、行数到上限时 `truncated` 置位、正好等于上限**不算**截断 |
+
+### 2.8 非测试支撑文件
 
 [`SmokeTarget.kt`](./src/test/kotlin/com/langbiantianya/sundays/SmokeTarget.kt)（五个方言的连接串与直连入口）、[`WalkthroughTarget.kt`](./src/test/kotlin/com/langbiantianya/sundays/WalkthroughTarget.kt)（走查双方言的能力矩阵）、[`TestStrings.kt`](./src/test/kotlin/com/langbiantianya/sundays/TestStrings.kt)。
 

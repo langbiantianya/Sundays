@@ -91,14 +91,31 @@ class ConnectionSession(
         private set
 
     /**
-     * 向引擎要一次方言列表，把连接表单规格收进 [dialectForms]。
+     * 声明了「可作为分析数据源」的方言集合。
      *
-     * 失败时保持空注册表（= 全走旧分支），**不抛** —— 见
-     * [fetchDialectForms] 的 KDoc：连接管理器的第一个用途恰恰是去连一个
-     * 还没连上的库，那时引擎可能正忙。
+     * 分析模式据此筛选数据源：只有在这个集合里的方言，它的连接才会出现在
+     * 分析屏的数据源列表里。
+     *
+     * **判据来自引擎**，不是前端写死的名单 —— 引擎下发的 `DialectInfo.capabilities`
+     * 里带 `ANALYSIS_SOURCE` 的方言才算数。前端自己维护一份「MySQL/PG 可分析」
+     * 的名单就是第二个真相源：引擎改了声明而前端没改，界面就会给出
+     * 「点进去必然失败」的入口。
+     */
+    var analysisCapableDialects by mutableStateOf<Set<DialectType>>(emptySet())
+        private set
+
+    /**
+     * 向引擎要一次方言列表，把连接表单规格收进 [dialectForms]，
+     * 把「可分析」的能力位收进 [analysisCapableDialects]。
+     *
+     * 失败时保持空注册表（= 全走旧分支）与空集合（= 没有可分析的数据源），
+     * **不抛** —— 见 [fetchDialectCatalog] 的 KDoc：连接管理器的第一个用途
+     * 恰恰是去连一个还没连上的库，那时引擎可能正忙。
      */
     suspend fun refreshDialectForms() {
-        dialectForms = runCatching { fetchDialectForms(engine) }.getOrDefault(DialectFormRegistry.EMPTY)
+        val catalog = runCatching { fetchDialectCatalog(engine) }.getOrNull()
+        dialectForms = catalog?.forms ?: DialectFormRegistry.EMPTY
+        analysisCapableDialects = catalog?.analysisCapableDialects ?: emptySet()
     }
 
     /**

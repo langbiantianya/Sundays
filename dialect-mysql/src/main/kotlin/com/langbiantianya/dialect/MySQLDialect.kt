@@ -73,6 +73,10 @@ class MySQLDialect : DatabaseDialect {
             DialectCapability.TRIGGERS,
             DialectCapability.EXPORT,
             DialectCapability.DDL_TRANSACTION,
+            // v2.29: 可作为分析模式的**远端数据源**。
+            // MySQL 是可写方言，所以它进分析模式后，**会话级只读闸门（L4）**
+            // 是唯一挡在数据前面的引擎侧防线 —— 那正是 M2 把闸门建起来的原因。
+            DialectCapability.ANALYSIS_SOURCE,
         )
 
     override fun buildJdbcUrl(
