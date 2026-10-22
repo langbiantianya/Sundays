@@ -160,6 +160,8 @@
 | [`AnalysisModuleBoundaryTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisModuleBoundaryTest.kt) | `:shared` 的 `analysis/` 包的**结构边界**：不 import `java.*` / `javax.*`、不 import 引擎与协议层（界面只该接收**算好的**数据）、不出现字面量颜色。断言打在**源文件**上 —— 字节码里看不到「只用了类型」的 import |
 | [`AnalysisScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisScreenTest.kt) | 分析工作台的界面契约：只读徽标**可见且没有可点语义**（它是标记，不是开关 —— 远端只读是既定事实）、数据源列表渲染（按 `analysisSourceRowTag` **精确定位到行**，不靠文本猜）、无数据源时的空态文案**说清下一步做什么** |
 | [`AnalysisHandlerIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/AnalysisHandlerIntegrationTest.kt)（在 `:engine`） | 四条分析路由的集成测试：命名空间按 `supportsSchema` 分派（schema 型 / 库型）、`RUN_QUERY` 打在**非嵌入式**方言上被拒、行数到上限时 `truncated` 置位、正好等于上限**不算**截断 |
+| [`AnalysisSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisSessionTest.kt) | **分析状态机**：① 两条会话的**只读方向相反**（工作区可写 / 远端源只读）；② 浏览模式那份连接配置**不被就地改写**；③ 空语句不启动查询；④ 源没了选中项被剪枝；⑤ DDL 的 `affectedRows` 是 -1（JDBC 的「不是更新计数」）而不是 0；⑥ SQL 出错收成**失败结果**而不是抛异常；⑦ 工作区目录会被自动建出来 |
+| [`AnalysisWorkspaceIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisWorkspaceIntegrationTest.kt) | **工作区端到端**（真 DuckDB 文件、真引擎）：能建表、**重开连接表还在**（证明真的落盘而不是只在内存里）、目录会被建出来、查询能回行与列。连接配置**直接取会话那份** —— 早先这里照抄了一遍「工作区怎么连」，测试就会对着另一种连法发绿 |
 
 ### 2.8 非测试支撑文件
 

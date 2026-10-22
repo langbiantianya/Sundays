@@ -111,11 +111,13 @@ gRPC 模式:
 | **`desktopApp/`** | [`README.md`](./desktopApp/README.md) · [`ARCHITECTURE.md`](./desktopApp/ARCHITECTURE.md) | Direct 模式集成 / 顶层导航 / 连接管理 / 数据库浏览屏 / 生命周期 |
 | **`packaging/flatpak/`** | [`README.md`](./packaging/flatpak/README.md) | Flatpak 选型结论索引 |
 
-> **规划中：数据分析模式** —— 一个**独立于「连接管理 → 数据库浏览」**的新顶层模式：
+> **在建：数据分析模式** —— 一个**独立于「连接管理 → 数据库浏览」**的新顶层模式：
 > 远程数据源**恒为只读**（六层防线，不是可关的开关），计算引擎默认 **DuckDB**（可切
 > Hive / Impala），当前阶段做 **Excel 报表**，后续迭代接入 AI 做智能分析。
 > **连接配置 / 连接管理器 / 设置页与浏览模式共用同一份**（不另做一套），
 > **通用控件也全部复用 `:shared` 的 `commonMain`**（分析模式只新增 6 个组件）。
+> 进度：M2（只读地基：协议 + 引擎闸门 + 四条只读路由 + 顶层导航 + 只读徽标）**已落地**，
+> M4'（分析工作台：本地 DuckDB 工作区 + 拉取链路 + 结果表）**在推进**。
 > 设计文档（只读防线、连接与组件通用化、报表模型、迭代拆分、风险登记）与可交互 UI 设计图见
 > [`docs/analysis-mode/README.md`](./docs/analysis-mode/README.md)。
 >

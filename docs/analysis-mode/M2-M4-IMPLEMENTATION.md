@@ -240,7 +240,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、工作区状态、拉取阶段枚举、staging 表名规则 | ✅ 已落地（**目前只有数据源条目与行测试标记**；工作区状态与拉取阶段留给第 4~5 片） |
+| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult` | ✅ 已落地 |
+| `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
 | `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ⏳ 第 6 片 |
 | `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 | ⏳ 第 5 片 |
 | `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
@@ -249,7 +250,27 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 ### 5.2 `:desktopApp` 的状态机
 
 `desktopApp/.../AnalysisSession.kt` —— 与 `ConnectionSession` / `DatabaseBrowserState`
-**并列**（不继承、不耦合）：持有源列表、工作区连接、当前 SQL 与结果、当前拉取任务。
+**并列**（不继承、不耦合）：持有远端源的**连接配置**、当前选中源、当前 SQL 与结果、
+运行态，以及工作区文件路径。
+
+`desktopApp/.../AnalysisSourceConnector.kt` —— UI 层的 `ConnectionConfig` →
+引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` **同口径**）。
+
+> 📌 **第 4 片的一处实现期决定：源列表**不**进会话**。
+> 源列表是「连接列表 × 声明了 `ANALYSIS_SOURCE` 的方言」的**派生结果**；
+> 派生数据再存一份，就多一个可能对不上的副本（连接删了、引擎改了能力位声明，
+> 存的那份不会自己跟着变）。所以会话只收**派生不出来的那部分** —— 带凭据的连接配置 ——
+> 以及派生不出的**状态**：选中项、SQL、结果。
+>
+> 另一处：**两条会话的只读方向是相反的**，且各只有一个执行点 ——
+>
+> | 会话 | `read_only` | 执行点 | 弄反了会怎样 |
+> |---|---|---|---|
+> | 远端源 | **开** | `AnalysisSession.sourceConfig()` | 分析模式成了绕过 L4 的后门 |
+> | 本地工作区 | **关** | `AnalysisSession.workspaceConnection()` | 工作区里连 `CREATE TABLE` 都不能做 |
+>
+> 两条都**不会立刻报错**（工作区带只读只是「建表失败」，远端漏只读只是「还能写」），
+> 所以各有断言钉住。
 
 ### 5.3 `:engine`
 
@@ -270,8 +291,10 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
 | `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源列表渲染、无数据源时的空态文案 | ✅ 已落地 |
+| `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、源没了选中项被剪枝、DDL 回 -1、SQL 出错收成**失败结果**而不是异常 | ✅ 已落地（第 4 片） |
+| `desktopApp/.../AnalysisWorkspaceIntegrationTest.kt` | **工作区端到端**（真 DuckDB 文件）：能建表、重开连接表还在、目录会被自动建出来、查询能回行与列 | ✅ 已落地（第 4 片） |
 | `desktopApp/.../AnalysisPullTest.kt` | 拉取链路端到端（真 MySQL → DuckDB） | ⏳ 第 5 片 |
-| `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | staging 表名、临时文件清理规则等纯逻辑 | ⏳ 第 4 片 |
+| `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | 工作区纯规则：staging 表名、标识符清洗（引号 / 分号不得混入）、工作区文件路径 | ✅ 已落地（第 4 片，10 例） |
 
 ### 5.5 i18n
 
@@ -302,12 +325,19 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 ### 6.1 工作区
 
-- **形态**：一个 DuckDB **文件**，放在应用数据目录下（`workspace.duckdb`）。
+- **形态**：一个 DuckDB **文件**，放在**应用配置目录**下（`~/.config/sundays/workspace.duckdb`）。
   **不是**用户连接——主设计 §2.2 读法 B：「DuckDB 是分析模式自带的计算引擎，
   默认且常驻」；读法 A（用户自己建 DuckDB 连接）被明确否掉了。
+  放在配置目录（与 `connection.json` 同处）而不是另立一套目录规则 ——
+  「应用的文件都在哪」多一个答案，就意味着清理 / 备份 / 迁移要记得两处。
 - **生命周期**：跨会话常驻（文件复用），退出时正常关闭。
+- **目录要自己建**：DuckDB 建库时**不会**自动创建上级目录 —— 目录不存在就直接失败。
+  而用户第一次打开分析模式时，那个目录**一定**不存在。
+  所以每次用工作区之前先 `ensureWorkspaceDir`（`AnalysisSession` 的伴生函数）。
 - **staging 表名**：`staging_<源库>_<表名>`（源库与表名都做标识符清洗）。
   带源库前缀是必要的——不同源可能有同名表。
+  清洗是**有损**的：`a-b` 与 `a_b` 会撞成同一个名字；这是刻意的取舍 ——
+  撞名时用户看到的是两个同名的 staging 表，而**不是**一条把别的库的表覆盖掉的查询。
 
 ### 6.2 拉取链路（§2.4 方案 C，零新协议）
 
@@ -391,7 +421,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | 1 | `feat(protocol): 新增 ANALYSIS / REPORT 类别、五条分析动作、连接级只读开关` | proto（`Category.ANALYSIS` / `REPORT`、5 个 Action、`read_only`、`AnalysisRequest` / `AnalysisResponse`）+ Kotlin 映射 | 编译通过；`engine-protocol` 的映射测试全绿 | ✅ **已提交** |
 | 2 | `feat(engine): 只读闸门 —— 会话级 L4 + 方言级 L3，配两级回归测试` | dispatcher 闸门 + `ReadOnlySessionGateTest` + `ReadOnlyDialectTest` | §7.1 / §7.2 全绿，且**变异验证**：去掉闸门后测试变红 | ✅ **已提交** |
 | 3 | `feat(analysis): 分析模式入口 —— 四条只读路由 + 顶层导航 + 不可关闭的只读徽标` | `AnalysisHandler` + 四条路由注册 + `AppDestination.ANALYSIS` + `TopNavBar` + `ReadOnlyBadge` + 主屏骨架 + 能力位声明 + i18n 六语言 | 界面能进；徽标不可关；`AnalysisHandlerIntegrationTest` / `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest` 全绿 | ✅ **本轮落地**（提交标题按此风格） |
-| 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ⏳ 未开始 |
+| 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ✅ **本轮落地** |
 | 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ⏳ 未开始 |
 | 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ⏳ 未开始 |
 
@@ -405,6 +435,19 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > ⚠️ **第 3 片没有做的**：编辑器与结果面板、工作区会话、拉取链路 ——
 > 那是第 4~6 片。`AnalysisScreen` 目前是**骨架**：工具条、数据源树、只读徽标是真的，
 > 右侧主区仍走空态。
+>
+> 📌 **第 4 片的实际落点比原文多两处**：
+> 一是**工作区文件放在配置目录**（`~/.config/sundays/workspace.duckdb`）而不是另立目录规则 ——
+> 原文只说「应用数据目录」，实现时按「应用的文件都在哪只该有一个答案」收敛到既有目录；
+> 二是**源列表不进会话**（§5.2）—— 源列表是派生数据，存一份就多一个可能对不上的副本。
+>
+> ✅ **第 4 片的变异验证（三处，各被抓住）**：
+>
+> | 变异 | 变红的用例 |
+> |---|---|
+> | 工作区连接标上 `read_only = true` | `the workspace connection is writable` |
+> | 远端源不再强制 `read_only = true` | `the remote source session is read only` |
+> | 去掉 `ensureWorkspaceDir` 调用 | `running a statement…` / `a select returns…` / `the workspace directory is created on demand` |
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、

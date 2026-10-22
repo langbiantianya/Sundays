@@ -128,6 +128,10 @@ desktopApp （本模块）
 
 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) | 引擎的方言列表 → 前端要的**两半**（连接表单注册表 + 能力位集合）；一次 `SYSTEM.LIST_DRIVERS`、一次换算（`DialectCatalog`） |
 
+| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
+
+| [`AnalysisSourceConnector.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSourceConnector.kt) | UI 层的 `ConnectionConfig` → 引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` 同口径）；**不**在这里设 `read_only` —— 那是会话的唯一执行点，两处都设就又有了两个可能不一致的产地 |
+
 
 
 **浏览屏（第二屏）** —— 原本是一个 9600 行的 `DatabaseBrowserScreen.kt`，现按功能域拆开。
@@ -436,6 +440,18 @@ desktopApp （本模块）
 | 能力位**一次查询、一次换算** | 连接表单规格与能力位都来自**同一次** `SYSTEM.LIST_DRIVERS`（`DialectCatalog`）；分两次拉会让两个快照**不在同一时刻** —— 方言插件热插拔时前后端看到的方言集合可能对不上 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) |
 
 | 桌面端直接引用**引擎侧同一个**能力位枚举 | `desktopApp` 加了 `implementation(project(":api"))` 就是为了用 `DialectCapability.ANALYSIS_SOURCE` —— 比对的是**枚举名**（下标会随枚举增删而漂移） | `desktopApp/build.gradle.kts` |
+
+| 分析会话**放在 `MainScreen` 这一层** | 放在 `ANALYSIS` 分支里的 `remember` 会随顶层页切换被销毁 —— 用户选好的数据源、写了一半的 SQL 都会丢。而那恰恰是分析模式里用户攒下来的东西 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+
+| 源列表**不进会话**，只进**连接配置** | 源列表是「连接列表 × 可分析能力位」的**派生结果**；派生数据再存一份，就多一个可能对不上的副本（连接删了、引擎改了能力位声明，存的那份不会自己跟着变）。会话只收派生不出来的部分：带凭据的配置、选中项、SQL、结果 | 同上 |
+
+| 两条会话的**只读方向相反**，各只有一个执行点 | 远端源 `read_only = true`（`AnalysisSession.sourceConfig`）、工作区**不**带（`workspaceConnection`）。两边都设就又有了两个可能不一致的产地；而且写反了**都不会立刻报错**（工作区带只读只是「建表失败」，远端漏只读只是「还能写」），所以各有断言钉住 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+
+| 只读**用 `toBuilder()` 复制**后再设 | 原对象是连接管理器里的那一份，在**浏览模式**里是可写的；就地改掉，就把浏览模式也废了。只读是**这次会话**的性质，不是「这条连接是什么」的性质 | 同上 |
+
+| 工作区放在**应用配置目录**（`~/.config/sundays/workspace.duckdb`） | 与 `connection.json` 同处，不另立一套目录规则 —— 「应用的文件都在哪」多一个答案，清理 / 备份 / 迁移就要记得两处 | 同上 |
+
+| DuckDB 的上级目录**自己建** | DuckDB 建库时**不会**自动创建上级目录 —— 目录不存在就直接失败；而用户第一次打开分析模式时，那个目录**一定**不存在 | 同上（`ensureWorkspaceDir`） |
 
 
 ---

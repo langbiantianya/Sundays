@@ -57,3 +57,45 @@ fun analysisSourceRowTag(id: String): String = "analysisSourceRow:$id"
  * 标记把断言钉到**正确的那个节点**上。
  */
 const val ANALYSIS_READ_ONLY_BADGE_TAG: String = "analysisReadOnlyBadge"
+
+/**
+ * 结果表的一列。
+ *
+ * @param name 列名
+ * @param type 类型名（数据库自己说的，如 `VARCHAR` / `INTEGER` / `DECIMAL`）
+ */
+data class AnalysisColumn(
+    val name: String,
+    val type: String,
+)
+
+/**
+ * 一次分析查询的结果。
+ *
+ * ## 为什么行是 `List<List<String?>>` 而不是 `List<Map<String, String?>>`
+ *
+ * proto 的 `Row` 是 `map<string, Value>` —— **无序**的。
+ * 界面上的结果表要按列顺序排，所以行必须按 [columns] 的顺序取值。
+ * 用 map 存行就得在渲染时再排一次序，而排序的键（列名）在两次查询之间可能不同；
+ * 用有序的 list 则「第 i 格就是第 i 列」这件事由构造时就定死了。
+ *
+ * @param columns 列定义（顺序即显示顺序）
+ * @param rows 行数据，每行与 [columns] 一一对应
+ * @param affectedRows 无结果集的语句（建表 / 插入）影响的行数。
+ *   **DDL 回 -1** —— JDBC 约定「这不是更新计数」；`INSERT` 才是真实的行数。
+ *   界面据此区分「0 行」与「不适用」，别把 -1 显示成「-1 行」。
+ * @param truncated 结果被行数上限截断
+ * @param elapsedMs 耗时（毫秒）
+ * @param error 出错时的错误文案；`null` = 成功
+ */
+data class AnalysisResult(
+    val columns: List<AnalysisColumn> = emptyList(),
+    val rows: List<List<String?>> = emptyList(),
+    val affectedRows: Int = 0,
+    val truncated: Boolean = false,
+    val elapsedMs: Long = 0,
+    val error: String? = null,
+) {
+    /** 有错误吗 —— 界面据此决定是显示错误条还是显示结果表。 */
+    val failed: Boolean get() = error != null
+}

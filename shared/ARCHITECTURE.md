@@ -269,11 +269,12 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ### 6.1 数据分析模式的 UI 包（`analysis/`）
 
-[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，三件事：
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，四件事：
 
 | 文件 | 内容 |
 |---|---|
-| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 |
+| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 + 只读徽标的测试标记 + `AnalysisColumn` / `AnalysisResult` |
+| [`AnalysisWorkspace.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisWorkspace.kt) | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗（纯函数，不碰文件系统 → 能进 `commonTest`） |
 | [`ReadOnlyBadge.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/ReadOnlyBadge.kt) | 「⊘ 只读」徽标 —— **不可关闭**（它没有任何开关） |
 | [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（工具条 + 左侧数据源列表 + 右侧主区） |
 

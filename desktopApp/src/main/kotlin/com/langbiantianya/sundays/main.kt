@@ -411,6 +411,45 @@ internal fun MainScreen(
     val scope = rememberCoroutineScope()
     val session = remember(engine) { ConnectionSession(engine, scope) }
 
+    // 分析会话 —— 与浏览模式的 `ConnectionSession` **并列**，不继承、不耦合。
+    //
+    // 为什么放在 MainScreen 这一层（而不是 ANALYSIS 分支里）：
+    // 分支里的 `remember` 会随顶层页切换被销毁 —— 用户选好的数据源、
+    // 写了一半的 SQL 都会丢。而那些恰恰是分析模式里用户攒下来的东西。
+    val analysis = remember(engine) { AnalysisSession(engine, scope) }
+
+    // 分析模式的数据源：**只有**方言声明了 `ANALYSIS_SOURCE` 的连接才进来。
+    //
+    // 判据来自引擎下发的能力位（`session.analysisCapableDialects`），
+    // 不是前端写死的名单 —— 写死的话，引擎改了声明而前端没改，
+    // 界面就会给出「点进去必然失败」的入口。
+    val analysisConnections =
+        remember(session.connectionList.connections, session.analysisCapableDialects) {
+            session.connectionList.connections.filter { it.dialect in session.analysisCapableDialects }
+        }
+    val analysisSources =
+        remember(analysisConnections) {
+            analysisConnections.map { cfg ->
+                AnalysisSourceItem(
+                    id = cfg.id,
+                    name = cfg.name,
+                    dialectLabel = DialectMetadata.of(cfg.dialect).displayName,
+                )
+            }
+        }
+    // 源的**引擎会话配置**（带凭据）—— 只读由会话内部统一加，外面拿不到可写的版本。
+    val analysisSourceConfigs =
+        remember(analysisConnections) {
+            analysisConnections.associate { cfg -> cfg.id to analysisSourceEngineConfig(cfg) }
+        }
+    // 同步进会话 —— 不能在组合过程中直接改状态（Compose 会因此判定为副作用）。
+    //
+    // 源列表本身**不进会话**：它是「连接列表 × 可分析能力位」的派生结果，
+    // 存一份就多一个可能对不上的副本。
+    LaunchedEffect(analysisSourceConfigs) {
+        analysis.setSourceConfigs(analysisSourceConfigs)
+    }
+
     // 方言的连接表单规格 —— 引擎的 SYSTEM.LIST_DRIVERS **一次性**下发（纯元数据查询，
     // 与 SYSTEM.INFO 同性质，不需要连接、不连库）。
     //
@@ -679,33 +718,19 @@ internal fun MainScreen(
                 }
 
                 AppDestination.ANALYSIS -> {
-                    // 分析模式的数据源：**只有**方言声明了 `ANALYSIS_SOURCE` 的连接才进来。
+                    // 选中的数据源由**会话**持有：用户选好之后切去别的顶层页再回来，
+                    // 选择还在 —— 那是分析模式里最容易被忽略的一块「攒下来的东西」。
                     //
-                    // 判据来自引擎下发的能力位（`session.analysisCapableDialects`），
-                    // 不是前端写死的名单 —— 写死的话，引擎改了声明而前端没改，
-                    // 界面就会给出「点进去必然失败」的入口。
-                    val analysisSources =
-                        remember(session.connectionList.connections, session.analysisCapableDialects) {
-                            session.connectionList.connections
-                                .filter { it.dialect in session.analysisCapableDialects }
-                                .map { cfg ->
-                                    AnalysisSourceItem(
-                                        id = cfg.id,
-                                        name = cfg.name,
-                                        dialectLabel = DialectMetadata.of(cfg.dialect).displayName,
-                                    )
-                                }
-                        }
-                    // 选中的数据源：默认第一个；用户改过之后记住他的选择。
-                    var selectedAnalysisSourceId by remember { mutableStateOf<String?>(null) }
+                    // 没选过时退回第一个：界面上总要有一个明确的当前源，
+                    // 否则「数据源：<空>」会让人以为没连上。
                     val effectiveSelection =
-                        selectedAnalysisSourceId?.takeIf { id -> analysisSources.any { it.id == id } }
+                        analysis.selectedSourceId?.takeIf { id -> analysisSources.any { it.id == id } }
                             ?: analysisSources.firstOrNull()?.id
 
                     AnalysisScreen(
                         sources = analysisSources,
                         selectedSourceId = effectiveSelection,
-                        onSelectSource = { selectedAnalysisSourceId = it },
+                        onSelectSource = analysis::selectSource,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
