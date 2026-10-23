@@ -72,6 +72,7 @@ enum Action {
   RUN_QUERY    = 29;  // 在**计算引擎**（本地嵌入式方言）上跑分析 SQL
 
   BUILD_EXCEL  = 30;  // v2.29: ReportSpec → .xlsx（Category.REPORT；M5 落地，本轮只落枚举）
+  PULL_TABLE   = 31;  // v2.29: 远端表 → 本地工作区（DuckDB 联邦直查，零 CSV 中转）
 }
 
 // ============================================================================
@@ -466,6 +467,7 @@ message AnalysisRequest {
     AnalysisListTablesRequest  list_tables  = 2;
     AnalysisListColumnsRequest list_columns = 3;
     AnalysisRunQueryRequest    run_query    = 4;
+    AnalysisPullRequest        pull         = 5;
   }
 }
 
@@ -490,6 +492,36 @@ message AnalysisListColumnsRequest { string namespace = 1; string table = 2; }
 // 见主设计 §3.4：这条路由必须能写（工作区里的 CREATE TABLE tmp AS SELECT …），
 // 所以不能被只读闸门挡；但它绝不能打在远端上，否则就是绕过闸门的后门。
 message AnalysisRunQueryRequest    { string sql = 1; }
+
+// 把远端的一张表拉进**本地工作区**（DuckDB）。
+//
+// ⚠️ 这条路由**不再走「导出 CSV → 导入 CSV」**（那是 v2.29 初稿的做法，
+// 已被证明是绕远路）：DuckDB 自己就能当**联邦查询层** ——
+// 它能直接连远端 JDBC 数据源，把远端的行**流式**读进来。
+// 于是这条路由在引擎侧就是一句话：
+//
+//     CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>
+//
+// 临时文件、磁盘往返、CSV 的 NULL → 空串陷阱，**全部消失**。
+//
+// 为什么远端配置要**单独**放在请求体里（而不是复用 Request.connection）：
+// 一次拉取要碰**两个**数据库 —— 远端（读）与工作区（写）——
+// 而 `Request.connection` 只有一个位置，给了工作区（落点在那儿）。
+// 另一个只能走请求体，这也正是「凭据不进 SQL 文本」的前提：
+// 凭据只存在于这条消息里，绝不会被拼进要执行的 SQL。
+message AnalysisPullRequest {
+  // 远端连接配置（**含凭据**）—— 引擎用它开一条只读的 JDBC 连接。
+  // 凭据只在引擎进程内使用，不回显、不写日志、不进 SQL 文本。
+  ConnectionConfig remote = 1;
+  // 远端的命名空间（MySQL 上是库，PG 上是 schema）。
+  string namespace = 2;
+  // 远端表名。
+  string table = 3;
+  // 工作区里的落点表名（由前端按共享规则算好：`staging_<源库>_<表>`）。
+  // 放在请求体里而不是让引擎自己算 —— 那条命名规则住在前端的共享包里，
+  // 引擎看不见它，两处各写一份就是两个真相源。
+  string staging_table = 4;
+}
 
 // ============================================================================
 // Request envelope
@@ -1131,7 +1163,30 @@ message AnalysisResponse {
     AnalysisListTablesResponse  list_tables  = 2;
     AnalysisListColumnsResponse list_columns = 3;
     AnalysisRunQueryResponse    run_query    = 4;
+    AnalysisPullResponse       pull         = 5;
   }
+}
+
+// 拉取的终态（终止帧携带）。
+message AnalysisPullResponse {
+  string staging_table = 1;  // 落到工作区里的表名
+  int64  rows          = 2;  // 实际落地的行数
+  int64  elapsed_ms    = 3;  // 耗时（毫秒）
+  // 是不是**用户取消**的。
+  //
+  // 为什么要有这个布尔而不是让调用方去比对错误文本：取消**不是失败** ——
+  // 界面上要分开说（"拉取已取消" vs "拉取失败：…"），
+  // 而「靠字符串判断」那种写法在文案一改就会失效。
+  bool   cancelled     = 4;
+}
+
+// 拉取的进度帧 —— 每读完一批行推一帧。
+//
+// ⚠️ 「已扫描行数」是**远端**的行数：联邦扫描是流式的，
+// 行还在路上时它们已经在远端读出来了。
+message AnalysisPullProgressFrame {
+  int64  rows  = 1;   // 已从远端读出的行数
+  string stage = 2;   // 阶段：scan（扫描远端）/ load（写入工作区）
 }
 
 // ============================================================================
@@ -1168,6 +1223,7 @@ message Response {
     SqlSelectRowFrame     sql_row_frame   = 31;
     GenerateProgressFrame gen_progress_frame = 32;
     ImportProgressFrame import_progress = 33;  // v2.16
+    AnalysisPullProgressFrame analysis_pull_progress = 34;  // v2.29
   }
 }
 

@@ -12,14 +12,11 @@ import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.loader.DialectLoader
-import com.langbiantianya.sundays.analysis.PullStage
 import com.langbiantianya.sundays.connection.DialectType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -32,24 +29,23 @@ import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.minutes
 
 /**
- * 拉取链路的**端到端**测试 —— 真 MySQL（内网）→ 临时 CSV → 真 DuckDB 工作区。
+ * 拉取链路的**端到端**测试 —— 真 MySQL（内网）→（DuckDB 联邦直查）→ 真 DuckDB 工作区。
  *
  * ## 这一轮验的四条
  *
  * 1. 一张远端表真的落进工作区，**行数对得上**；
- * 2. 临时 CSV 在**成功**路径上被清理；
- * 3. 工作区里能跑**窗口函数**聚合（M4 的验收原文）；
+ * 2. **全程不落盘** —— 拉完之后连一个临时文件都没有（这是「零 CSV 中转」的判据）；
+ * 3. 工作区里能跑**窗口函数**聚合（M4 的验收原文）—— 而且**不用 TRY_CAST**：
+ *    联邦扫描保留远端的类型（`INT` 落下来还是整数）；
  * 4. 工作区里 `CREATE TABLE tmp AS SELECT …` **成功**（本地写允许）。
  *
- * ## 为什么导出那一半只能对着真库验
+ * ## 为什么必须对着真库验
  *
- * 导出跑在**子进程**里（引擎的 `ExportProcessManager`），它要连远端、
- * 要写文件、要跟父进程通信 —— 假引擎代不了。
- * 而导入那一半不碰远端，由 `AnalysisPullIntegrationTest` 用手写 CSV 覆盖。
- * 两边分工不重叠。
+ * 联邦扫描走的是**真 JDBC 连接**（DuckDB → MySQL 驱动 → 远端），
+ * 假引擎代不了；而 H2 那条路（`AnalysisPullFederationTest`）验的是链路本身，
+ * 验不了 MySQL 的类型与引用形式。两边分工不重叠。
  *
  * ## 远程库不可达时 skip 而不是红
  *
@@ -118,36 +114,32 @@ class AnalysisPullSmokeTest {
         }
     }
 
-    private fun puller() = EngineAnalysisPuller(engine, tempRoot)
+    private fun puller() = EngineAnalysisPuller(engine)
 
     private fun query(sql: String) = runBlocking { runAnalysisQuery(engine, workspaceConfig, sql) }
 
+    /** 拉一次，收集进度帧。 */
+    private fun pull(onProgress: (Long) -> Unit = {}): com.langbiantianya.sundays.analysis.PullResult =
+        runBlocking {
+            puller().pull(
+                requestId = "smoke-pull",
+                source = sourceConfig,
+                workspace = workspaceConfig,
+                workspacePath = workspacePath,
+                namespace = database,
+                table = "analysis_pull_probe",
+            ) { progress -> onProgress(progress.rows) }
+        }
+
     @Test
     fun `a remote table is pulled into the workspace with the right row count`() {
-        val stages = mutableListOf<PullStage>()
+        val rowCounts = mutableListOf<Long>()
 
-        val result =
-            runBlocking {
-                puller().pull(
-                    source = sourceConfig,
-                    workspace = workspaceConfig,
-                    workspacePath = workspacePath,
-                    dialect = DialectType.MYSQL,
-                    namespace = database,
-                    table = "analysis_pull_probe",
-                ) { progress -> stages += progress.stage }
-            }
+        val result = pull { rows -> rowCounts += rows }
 
         assertEquals("staging_${database}_analysis_pull_probe", result.stagingTable)
-        assertEquals(3L, result.rowsExported, "导出的行数")
-        assertEquals(3L, result.rowsImported, "插进工作区的行数")
-        assertEquals(0L, result.rowsFailed, "不该有坏行")
-        assertTrue(result.csvBytes > 0, "临时 CSV 应当有内容")
-
-        // 三段进度都走到了
-        assertTrue(stages.contains(PullStage.EXPORT), "应当走过导出段：$stages")
-        assertTrue(stages.contains(PullStage.CSV), "应当走过 CSV 段：$stages")
-        assertTrue(stages.contains(PullStage.IMPORT), "应当走过导入段：$stages")
+        assertEquals(3L, result.rowsScanned, "从远端读出的行数")
+        assertEquals(3L, result.rowsLanded, "落进工作区的行数")
 
         // 真的落进工作区了
         val counted = query("""SELECT COUNT(*) FROM "${result.stagingTable}"""")
@@ -157,42 +149,50 @@ class AnalysisPullSmokeTest {
     }
 
     @Test
-    fun `the temp csv is gone after a successful pull`() {
-        runBlocking {
-            puller().pull(
-                source = sourceConfig,
-                workspace = workspaceConfig,
-                workspacePath = workspacePath,
-                dialect = DialectType.MYSQL,
-                namespace = database,
-                table = "analysis_pull_probe",
-            ) { }
-        }
+    fun `the pull writes nothing to disk`() {
+        // 「零 CSV 中转」的判据：拉完之后**连一个临时文件都没有**。
+        //
+        // 早先的链路要落一个几百 MB 的 CSV，还要在三条路径上清理它；
+        // 联邦直查不落盘 —— 于是「清理」这件事**整个不存在**，
+        // 也就不可能出现「忘了清理」。
+        pull()
 
         val leftovers = Files.list(tempRoot).use { it.toList() }
-        assertTrue(leftovers.isEmpty(), "拉取结束后不能留下临时目录：$leftovers")
+        assertTrue(leftovers.isEmpty(), "联邦直查不该落任何临时文件：$leftovers")
+    }
+
+    @Test
+    fun `the progress reports how many rows were read`() {
+        val rowCounts = mutableListOf<Long>()
+
+        pull { rows -> rowCounts += rows }
+
+        assertTrue(rowCounts.isNotEmpty(), "拉取过程应当有进度帧")
+        assertEquals(rowCounts.last(), 3L, "最后的进度应当是全部行数")
+        // 进度是**逐帧**往外抛的：只报最终行数等于没报。
+        assertTrue(rowCounts.all { it <= 3L }, "进度不能超过总行数：$rowCounts")
+    }
+
+    @Test
+    fun `the pulled table keeps the remote column types`() {
+        // 联邦扫描把远端的类型**原样**带过来（`INT` 落下来还是整数）。
+        //
+        // 早先的 CSV 中转做不到这件事：CSV 只有文本，类型得靠下游 `TRY_CAST` 重建。
+        val result = pull()
+
+        val summed = query("""SELECT SUM(id) FROM "${result.stagingTable}"""")
+        assertFalse(summed.failed, "整数列应当能直接求和（不需要 TRY_CAST）：${summed.error}")
+        assertEquals("6", summed.rows[0][0])
     }
 
     @Test
     fun `the workspace can run a window function over the pulled data`() {
-        val result =
-            runBlocking {
-                puller().pull(
-                    source = sourceConfig,
-                    workspace = workspaceConfig,
-                    workspacePath = workspacePath,
-                    dialect = DialectType.MYSQL,
-                    namespace = database,
-                    table = "analysis_pull_probe",
-                ) { }
-            }
+        val result = pull()
 
-        // staging 的列是 VARCHAR（原始落地层），所以聚合前要显式转换 ——
-        // `TRY_CAST` 让「转不动」的值落成 NULL，而不是让整条查询失败。
         val windowed =
             query(
                 """
-                SELECT id, sum(TRY_CAST(id AS BIGINT)) OVER (ORDER BY id) AS running
+                SELECT id, sum(id) OVER (ORDER BY id) AS running
                 FROM "${result.stagingTable}"
                 ORDER BY id
                 """.trimIndent(),
@@ -206,23 +206,13 @@ class AnalysisPullSmokeTest {
 
     @Test
     fun `the workspace can create a table from the pulled data`() {
-        val result =
-            runBlocking {
-                puller().pull(
-                    source = sourceConfig,
-                    workspace = workspaceConfig,
-                    workspacePath = workspacePath,
-                    dialect = DialectType.MYSQL,
-                    namespace = database,
-                    table = "analysis_pull_probe",
-                ) { }
-            }
+        val result = pull()
 
         val created =
             query(
                 """
                 CREATE TABLE tmp_model AS
-                SELECT TRY_CAST(id AS BIGINT) AS id, label FROM "${result.stagingTable}"
+                SELECT id, label FROM "${result.stagingTable}"
                 """.trimIndent(),
             )
         assertFalse(created.failed, "工作区里建表必须成功：${created.error}")
@@ -230,44 +220,5 @@ class AnalysisPullSmokeTest {
         val counted = query("SELECT COUNT(*) FROM tmp_model")
         assertFalse(counted.failed, counted.error)
         assertEquals("3", counted.rows[0][0])
-    }
-
-    @Test
-    fun `a cancelled pull leaves no temp directory behind`() {
-        // 「三条路径上都被清理」里的**取消**那条。
-        //
-        // 取消这一条最危险：导出跑在**另一个进程**里，它正开着那个 CSV 文件；
-        // Windows 上文件被占用时删不掉 —— 所以取消时必须**先叫停子进程**再删目录。
-        //
-        // 取消的时机选在**导出已经开跑**之后（进度帧带上了行数）：
-        // 那时临时目录已经建好、导出子进程也已经起来了 ——
-        // 取消一定落在拉取途中，不靠运气。
-        //
-        // ⚠️ 这一条断言的是「临时目录被清干净」；「叫停子进程」那条**判别力更强**的断言
-        // 在 `AnalysisPullCancelTest`（假引擎把导出钉成「永远不结束」，时机是确定的）。
-        val job =
-            scope.launch {
-                runCatching {
-                    puller().pull(
-                        source = sourceConfig,
-                        workspace = workspaceConfig,
-                        workspacePath = workspacePath,
-                        dialect = DialectType.MYSQL,
-                        namespace = database,
-                        table = "analysis_pull_probe",
-                    ) { progress ->
-                        if (progress.stage == PullStage.EXPORT && progress.rows > 0) {
-                            // 用协程自己的 Job，别用外面那个变量 ——
-                            // 外面那个在 launch 返回之前还没赋值。
-                            coroutineContext.job.cancel()
-                        }
-                    }
-                }
-            }
-        runBlocking { job.join() }
-
-        assertTrue(job.isCancelled, "这次拉取应当是被取消的")
-        val leftovers = Files.list(tempRoot).use { it.toList() }
-        assertTrue(leftovers.isEmpty(), "取消路径上也不能留下临时目录：$leftovers")
     }
 }

@@ -164,10 +164,9 @@
 | [`AnalysisHandlerIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/AnalysisHandlerIntegrationTest.kt)（在 `:engine`） | 四条分析路由的集成测试：命名空间按 `supportsSchema` 分派（schema 型 / 库型）、`RUN_QUERY` 打在**非嵌入式**方言上被拒、行数到上限时 `truncated` 置位、正好等于上限**不算**截断 |
 | [`AnalysisSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisSessionTest.kt) | **分析状态机**：① 两条会话的**只读方向相反**（工作区可写 / 远端源只读）；② 浏览模式那份连接配置**不被就地改写**；③ 空语句不启动查询；④ 源没了选中项被剪枝；⑤ DDL 的 `affectedRows` 是 -1（JDBC 的「不是更新计数」）而不是 0；⑥ SQL 出错收成**失败结果**而不是抛异常；⑦ 工作区目录会被自动建出来；⑧ **拉取的三条终态**（完成 / 取消 / 失败各落各的态 —— **取消不是失败**）；⑨ 没选源时拉取不启动 |
 | [`AnalysisWorkspaceIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisWorkspaceIntegrationTest.kt) | **工作区端到端**（真 DuckDB 文件、真引擎）：能建表、**重开连接表还在**（证明真的落盘而不是只在内存里）、目录会被建出来、查询能回行与列。连接配置**直接取会话那份** —— 早先这里照抄了一遍「工作区怎么连」，测试就会对着另一种连法发绿 |
-| [`AnalysisPullIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIntegrationTest.kt) | **拉取的导入那一半**端到端（真 DuckDB + 手写带 BOM 的 CSV）：行数对得上、**空串不毁行**（staging 列一律 VARCHAR 的判据）、重拉替换旧表（不撞「Table already exists」）、表头与列名不匹配时**失败且不留半张表**、列名带空格也落得下、进度回调有帧、**失败路径不留临时目录** |
-| [`AnalysisPullSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullSmokeTest.kt) | **整条链路**端到端（真 MySQL → CSV → 真 DuckDB）：行数对上、**三段进度都走到**、临时目录清空、窗口函数聚合结果正确、工作区里 `CREATE TABLE tmp AS SELECT` 成功、**取消路径不留临时目录**。内网 MySQL 不可达时**显式 skip**（报告里留一条 skipped），不是静默跳过 |
-| [`AnalysisPullCancelTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullCancelTest.kt) | **取消必须叫停导出子进程**：用**假引擎**把导出钉成「永远不结束」，于是「取消发生在导出途中」是**确定**的（真跑一遍要靠时机，那是竞态 —— 3 行的表在两种写法下都能把目录清干净，测不出差别）。断言：按**导出请求的 id** 叫停 + 取消路径清干净临时目录 |
-| [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：三段都在、**当前段被标出来**（按段寻址的状态字形，不靠颜色也不靠「屏上有个 ✓」）、行数与临时文件占用、**没有文件时不报大小**（「临时文件 0 B」是假信息）、取消按钮真的会回调、完成 / 取消 / 失败三种终态各说各的话、**进行中不显示上一次的终态** |
+| [`AnalysisPullIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIntegrationTest.kt) | **整条链路**端到端（前端拉取器 → 真引擎 → 联邦扫描 → 真 DuckDB 工作区）：表真的落进工作区、进度帧真的到得了调用方、失败**不留半张表**、**拉取全程不落盘**、用户取消被报成「取消」而不是「失败」 |
+| [`AnalysisPullSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullSmokeTest.kt) | **真 MySQL** 端到端：行数对上、**全程不落盘**、进度报出行数、**拉下来的表保留远端类型**（`SUM(id)` 直接能跑，不必 `TRY_CAST`）、窗口函数聚合、工作区里 `CREATE TABLE tmp AS SELECT` 成功。内网 MySQL 不可达时**显式 skip**（报告里留一条 skipped），不是静默跳过 |
+| [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**界面上不再出现「临时文件」**（联邦直查不落盘）、取消按钮回调、没给取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 |
 
 ### 2.8 非测试支撑文件
 

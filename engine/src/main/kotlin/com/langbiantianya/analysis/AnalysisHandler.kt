@@ -11,20 +11,28 @@ package com.langbiantianya.analysis
 import com.google.protobuf.Value
 import com.langbiantianya.dialect.DatabaseDialect
 import com.langbiantianya.dialect.DialectCapability
+import com.langbiantianya.engine.StatementRegistry
 import com.langbiantianya.grpc.AnalysisListColumnsRequest
 import com.langbiantianya.grpc.AnalysisListColumnsResponse
 import com.langbiantianya.grpc.AnalysisListSourcesResponse
 import com.langbiantianya.grpc.AnalysisListTablesRequest
 import com.langbiantianya.grpc.AnalysisListTablesResponse
+import com.langbiantianya.grpc.AnalysisPullRequest
+import com.langbiantianya.grpc.AnalysisPullResponse
 import com.langbiantianya.grpc.AnalysisRunQueryRequest
 import com.langbiantianya.grpc.AnalysisRunQueryResponse
 import com.langbiantianya.grpc.ColumnDef
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.PayloadAdapter
+import com.langbiantianya.grpc.Request
+import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.Row
 import com.langbiantianya.grpc.analysisListColumnsResponse
 import com.langbiantianya.grpc.analysisListSourcesResponse
 import com.langbiantianya.grpc.analysisListTablesResponse
+import com.langbiantianya.grpc.analysisPullProgressFrame
+import com.langbiantianya.grpc.analysisPullResponse
+import com.langbiantianya.grpc.analysisResponse
 import com.langbiantianya.grpc.analysisRunQueryResponse
 import com.langbiantianya.grpc.columnDef
 import com.langbiantianya.grpc.row
@@ -34,12 +42,18 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * `ANALYSIS` 类别的四个路由（主设计 §3.5）：列数据源、列表、列列、跑分析 SQL。
@@ -80,6 +94,18 @@ object AnalysisHandler {
      * 而截断的事实由响应里的 `truncated` 字段显式告知，界面据此提示用户。
      */
     private const val MAX_ROWS = 5000
+
+    /**
+     * 拉取进度的阶段名 —— 与前端 `PullStage` 的取值一一对应。
+     *
+     * 为什么是**字符串**而不是枚举：进度帧走 proto，而 proto 里放枚举要多一个
+     * 消息类型；阶段只有两三个值，字符串够用 —— 而且它**只出现在进度帧**里，
+     * 前端拿它去认阶段，认不出就当「不知道」。
+     */
+    private const val PULL_STAGE_SCAN = "scan"
+
+    /** 取消时的错误文案 —— 与前端的「拉取已取消」区分开。 */
+    private const val PULL_CANCELLED_TEXT = "cancelled"
 
     /**
      * 列这个连接的「命名空间」。
@@ -216,6 +242,211 @@ object AnalysisHandler {
                 }
             }
         }
+
+    // ──────────────── 拉取：DuckDB 联邦直查 ────────────────
+
+    /**
+     * 把远端的一张表拉进本地工作区（DuckDB）—— **联邦直查，零 CSV 中转**。
+     *
+     * ## 引擎侧发生了什么
+     *
+     * 1. 借一条远端 JDBC 连接（凭据只在请求体里，**不进 SQL 文本**）；
+     * 2. 在工作区的 DuckDB 上注册一个**纯 Java 表函数** —— 它把这条远端连接
+     *    变成 DuckDB 里的一张表（见 [JdbcScanTableFunction]）；
+     * 3. 执行 `CREATE TABLE <落点> AS SELECT * FROM <表函数>()`。
+     *
+     * 就这么多。**没有导出、没有 CSV、没有临时文件** —— 早先那条
+     * 「远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`」的路已经删掉。
+     *
+     * ## 远端**只读**由构造保证
+     *
+     * 表函数只执行引擎自己拼的那一句 `SELECT * FROM <命名空间>.<表>`，
+     * **不接受**调用方传入的 SQL。所以这条链路上压根没有写入口 ——
+     * 比「会话级只读开关」更强：开关靠每个写入口都记得检查，而这里没有写入口。
+     *
+     * ## 半张表不会留下
+     *
+     * DROP + CREATE 包在一个**事务**里（JDBC 的 `setAutoCommit(false)`）：
+     * 失败 / 取消 → 回滚 → 旧表原样还在，新表一点痕迹都不留。
+     */
+    fun executePull(request: Request): Flow<Response> =
+        flow {
+            val id = request.id
+            val cancelled = AtomicBoolean(false)
+            try {
+                coroutineScope {
+                    val ch = Channel<Response>(Channel.BUFFERED)
+                    val job =
+                        launch(Dispatchers.IO) {
+                            try {
+                                val result =
+                                    runPull(request, cancelled) { rows ->
+                                        // trySend 而不是 send：回调跑在 DuckDB 的线程上，
+                                        // 不能阻塞（进度是尽力而为的，丢了就丢了）。
+                                        ch.trySend(pullProgressFrame(id, rows))
+                                    }
+                                ch.send(pullTerminalFrame(id, result))
+                            } catch (e: Exception) {
+                                val isCancel = cancelled.get()
+                                val message =
+                                    if (isCancel) {
+                                        PULL_CANCELLED_TEXT
+                                    } else {
+                                        e.message ?: e.javaClass.simpleName
+                                    }
+                                ch.send(pullFailedFrame(id, message, isCancel))
+                            } finally {
+                                ch.close()
+                            }
+                        }
+                    for (msg in ch) emit(msg)
+                    job.join()
+                }
+            } finally {
+                StatementRegistry.unregister(id)
+            }
+        }
+
+    /**
+     * 拉取的主体 —— 借连接、注册表函数、在事务里建表。
+     *
+     * @param onRows 每读完一批远端行的回调（累计行数）
+     */
+    private suspend fun runPull(
+        request: Request,
+        cancelled: AtomicBoolean,
+        onRows: (Long) -> Unit,
+    ): AnalysisPullResponse {
+        val pull = request.analysisRequest.pull
+        if (pull.namespace.isBlank()) {
+            throw IllegalArgumentException("Missing 'namespace' in ANALYSIS.PULL_TABLE payload")
+        }
+        if (pull.table.isBlank()) {
+            throw IllegalArgumentException("Missing 'table' in ANALYSIS.PULL_TABLE payload")
+        }
+        if (pull.stagingTable.isBlank()) {
+            throw IllegalArgumentException("Missing 'staging_table' in ANALYSIS.PULL_TABLE payload")
+        }
+        val remote = pull.remote
+
+        val started = System.currentTimeMillis()
+        // 远端的引用形式按**远端方言**（MySQL 是库名，PG 是 schema）。
+        //
+        // 用 `PoolManager.resolveDialect` 而不是 `DialectLoader.getDialect(driver)` ——
+        // 前者在 URL 非空时**按 URL 反查**方言，而连接池也是这么建的；
+        // 两处用同一套解析，引用形式才不会与实际连上的那个库对不上。
+        val remoteDialect = PoolManager.resolveDialect(remote)
+        val selectSql =
+            "SELECT * FROM ${remoteDialect.quoteIdentifier(pull.namespace)}.${remoteDialect.quoteIdentifier(pull.table)}"
+
+        val remoteConnection = PoolManager.getConnection(remote)
+        return try {
+            val workspaceConnection = PoolManager.getConnection(request.connection)
+            try {
+                // 工作区里的表名按**工作区方言**（DuckDB）引用 —— 落点在那儿，不在远端。
+                val workspaceDialect = PoolManager.resolveDialect(request.connection)
+                val staging = workspaceDialect.quoteIdentifier(pull.stagingTable)
+
+                val functionName = JdbcScanRegistry.functionName(remote, pull.namespace, pull.table)
+                JdbcScanRegistry.ensureRegistered(
+                    workspaceConnection,
+                    functionName,
+                    JdbcScanTableFunction(remoteConnection, selectSql, onRows),
+                )
+
+                workspaceConnection.createStatement().use { stmt ->
+                    StatementRegistry.registerCanceler(request.id) {
+                        cancelled.set(true)
+                        runCatching { stmt.cancel() }
+                    }
+                    // 事务：DROP + CREATE AS 一起提交。
+                    //
+                    // 失败 / 取消 → 回滚 → **旧表原样还在**，新表一点痕迹都不留。
+                    // （DuckDB 的 DDL 是事务性的。）
+                    workspaceConnection.autoCommit = false
+                    try {
+                        stmt.execute("DROP TABLE IF EXISTS $staging")
+                        stmt.execute("CREATE TABLE $staging AS SELECT * FROM $functionName()")
+                        workspaceConnection.commit()
+                    } catch (e: Exception) {
+                        throw e
+                    }
+                    // 行数：以工作区里那张表为准（不是「远端读了多少」——
+                    // 两者在失败时可能对不上，而落地的行数才是用户关心的）。
+                    val rows =
+                        stmt.executeQuery("SELECT count(*) FROM $staging").use { rs ->
+                            rs.next()
+                            rs.getLong(1)
+                        }
+                    AnalysisPullResponse
+                        .newBuilder()
+                        .setStagingTable(pull.stagingTable)
+                        .setRows(rows)
+                        .setElapsedMs(System.currentTimeMillis() - started)
+                        .build()
+                }
+            } finally {
+                workspaceConnection.close()
+            }
+        } finally {
+            remoteConnection.close()
+        }
+    }
+
+    /** 进度帧 —— 「已从远端读出多少行」。 */
+    private fun pullProgressFrame(
+        id: String,
+        rows: Long,
+    ): Response =
+        Response
+            .newBuilder()
+            .setId(id)
+            .setSuccess(true)
+            .setStream(true)
+            .setEnd(false)
+            .setAnalysisPullProgress(
+                analysisPullProgressFrame {
+                    this.rows = rows
+                    stage = PULL_STAGE_SCAN
+                },
+            ).build()
+
+    /** 终止帧 —— 成功。 */
+    private fun pullTerminalFrame(
+        id: String,
+        result: AnalysisPullResponse,
+    ): Response =
+        Response
+            .newBuilder()
+            .setId(id)
+            .setSuccess(true)
+            .setStream(true)
+            .setEnd(true)
+            .setAnalysis(analysisResponse { pull = result })
+            .build()
+
+    /** 终止帧 —— 失败 / 取消。 */
+    private fun pullFailedFrame(
+        id: String,
+        message: String,
+        cancelled: Boolean,
+    ): Response =
+        Response
+            .newBuilder()
+            .setId(id)
+            .setSuccess(false)
+            .setStream(true)
+            .setEnd(true)
+            .setError(message)
+            .setAnalysis(
+                analysisResponse {
+                    pull =
+                        AnalysisPullResponse
+                            .newBuilder()
+                            .setCancelled(cancelled)
+                            .build()
+                },
+            ).build()
 
     // ──────────────── 命名空间 / 表 / 列：按方言能力分派 ────────────────
 

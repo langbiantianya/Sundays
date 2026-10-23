@@ -11,62 +11,62 @@ package com.langbiantianya.sundays
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.PullResult
-import com.langbiantianya.sundays.connection.DialectType
 import java.nio.file.Path
 
 /*
  * 拉取链路的**契约**。
  *
- * 真正会碰引擎与文件系统的实现见 `EngineAnalysisPuller`；
+ * 真正会碰引擎的实现见 `EngineAnalysisPuller`；
  * 这里只说清「拉取」这件事的形状。
  */
 
 /**
  * 拉取链路 —— 把远端的一张表搬进**本地 DuckDB 工作区**。
  *
- * ## 三段，零新协议
+ * ## 一条路由，零 CSV 中转
  *
  * ```
- * ① EXPORT.RUN_EXPORT   源会话（read_only）→ CSV      引擎的流式导出 + 进度帧
- * ② ——CSV on disk——     前端知道路径与大小
- * ③ IMPORT.RUN_IMPORT   工作区会话 → staging_<表名>    引擎的流式导入 + 进度帧
+ * ANALYSIS.PULL_TABLE   远端 JDBC 源 →（DuckDB 联邦直查）→ 工作区表
  * ```
  *
- * ## 为什么拆成两次既有调用，而不是一个 `ANALYSIS.PULL_SAMPLE`
+ * DuckDB 自己就能当**联邦查询层**：它能直接把远端的行读进来。
+ * 于是引擎侧就是一句 `CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>` ——
+ * **没有导出、没有 CSV、没有临时文件**。
  *
- * 拉取要碰**两个**数据库（远端读 + 本地写），而**一个 `Request` 只有一份
- * `ConnectionConfig`**。做成单路由，就得在请求体里再塞一份 workspace 配置 ——
- * 「哪个配置才是本次请求的连接」于是有了两个产地。拆成两次既有调用没有这个问题。
+ * ## 为什么远端配置要**单独**放在请求体里
  *
- * ## 临时 CSV 的清理写在**一处** `finally` 里
+ * 一次拉取要碰**两个**数据库 —— 远端（读）与工作区（写）——
+ * 而 `Request.connection` 只有一个位置，给了工作区（落点在那儿）。
+ * 另一个只能走请求体。
  *
- * 成功 / 失败 / 取消**三条路径同一条语句**，不是三个分支各写一遍。
- * 漏一条的代价是「用户拉了一半就关掉窗口，磁盘上留下几百 MB 的 CSV」。
+ * 这同时解决了「凭据不进 SQL 文本」：远端配置（含密码）只在请求体里，
+ * 引擎把它变成一条**只发 SELECT** 的 JDBC 连接，
+ * SQL 文本里既没有凭据，也没有调用方能塞进来的语句。
  *
  * ## 为什么它是个接口
  *
  * 会话（`AnalysisSession`）要靠它把「拉完了 / 拉挂了 / 拉取消了」映射成终态。
- * 那条映射是**状态机**的一部分，值得被确定性地测；
- * 而真实现要连远端、要起导出子进程 —— 在 CI 上既慢又不稳。
+ * 那条映射是**状态机**的一部分，值得被确定性地测。
  * 拆成接口，才能给会话塞一个**立刻返回**的假实现，把三条终态路径各测一遍。
  */
 interface AnalysisPuller {
     /**
      * 拉一张远端表进工作区。
      *
+     * @param requestId 本次请求的 id —— **由调用方生成**，
+     *   这样取消时「叫停引擎那边正在跑的拉取」一定拿得到它。
      * @param source 远端源的会话配置 —— **必须**带 `read_only = true`
      * @param workspace 本地工作区的会话配置 —— **不带** `read_only`（工作区要能写）
      * @param workspacePath 工作区数据库**文件**的路径 —— 用来在开写之前把目录建出来
-     * @param dialect 源库的方言（决定命名空间的引用形式）
      * @param namespace 命名空间（MySQL 上是库，PG 上是 schema）
      * @param table 表名
      * @param onProgress 进度回调（在引擎的协程里调，不是主线程）
      */
     suspend fun pull(
+        requestId: String,
         source: ConnectionConfig,
         workspace: ConnectionConfig,
         workspacePath: Path,
-        dialect: DialectType,
         namespace: String,
         table: String,
         onProgress: suspend (PullProgress) -> Unit,

@@ -1,6 +1,18 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.0** · 2026-10-22
+> **状态**：设计冻结待评审 · **v1.1** · 2026-10-23
+>
+> **v1.1 相对 v1.0 的修改**（拉取链路换成 DuckDB 联邦直查；实现细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
+>
+> 1. **§3.5 的路由表新增 `ANALYSIS.PULL_TABLE`** —— 拉取不再走
+>    「远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`」，而是
+>    **DuckDB 直接读远端的 JDBC 源**（联邦查询）：
+>    `CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>`。
+>    **没有临时文件、没有 CSV 的编码往返**。
+> 2. **§6.4 的组件清单里 `PullStageIndicator` 改名 `PullProgressIndicator`** ——
+>    联邦直查**没有阶段**可分（那三段是绕磁盘逼出来的），也没有「临时文件占多少磁盘」。
+> 3. **§11 的 M4 条目补上「第 7 片已落地」说明**。
 >
 > **v1.0 相对 v0.9 的修改**（M4 第 6 片落地；实现细节见
 > [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
@@ -276,17 +288,33 @@ AI 也不例外——AI 只能产出 `ReportSpec`（含 SQL），不能直接产
 |---|---|---|---|---|
 | **A. DuckDB extension 直连** | DuckDB 的 `hive` / `httpfs` extension 直接读远端 | 无中转、快 | extension 要**联网下载**，内网/离线必挂；Impala **没有**对应 extension | ❌ 不做 |
 | **B. 应用层流式搬运** | 引擎里逐行 `ResultSet` → DuckDB 批量 insert | 不依赖 extension | 要自己写搬运与类型映射 | ⏳ 作为二期优化 |
-| **C. 复用现成导出/导入链路** | 远端 `EXPORT` → CSV → DuckDB `IMPORT` | **链路已存在且有测试**，零新协议，带进度与取消 | 多一次磁盘往返 | ✅ **一期采用** |
+| **C. 复用现成导出/导入链路** | 远端 `EXPORT` → CSV → DuckDB `IMPORT` | **链路已存在且有测试**，零新协议，带进度与取消 | 多一次磁盘往返 | ⚠️ **初稿采用，实施期被 D 替换** |
+| **D. DuckDB 纯 Java 表函数（联邦直查）** | 把远端的一条 JDBC 查询注册成 DuckDB 里的**一张表**，然后 `CREATE TABLE … AS SELECT * FROM <它>` | **不落盘**、不绕 CSV、**保留远端的类型**；只用**已随包发布**的 JDBC 驱动（不联网） | 要写一个表函数（类型映射 + 分块写出） | ✅ **实施期采用** |
 
-**一期选 C**，理由很实际：`EXPORT.RUN_EXPORT`（[engine/handlers/ExportHandler.kt](../../engine/src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt)）
+**初稿选 C，理由很实际**：`EXPORT.RUN_EXPORT`（[engine/handlers/ExportHandler.kt](../../engine/src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt)）
 与 `IMPORT.RUN_IMPORT`（[engine/handlers/ImportHandler.kt](../../engine/src/main/kotlin/com/langbiantianya/handlers/ImportHandler.kt)）
 **都已经实现、都有集成测试**，而且导出跑在**独立子进程**里（`ExportProcessManager` / `ExportSubProcess`），
 大查询不会把 UI 线程拖死。复用它的代价只是一次 CSV 落盘。
 
-把 B（应用层直搬）列为二期性能项：十万行级别 C 完全够用，百万行再上 B。
-
-> ⚠️ 代价要说清楚：C 的磁盘占用是**两份**（CSV + DuckDB 表）。
-> 拉取面板必须显式显示预计占用与临时 CSV 的清理时机，不能让用户莫名其妙吃掉几个 G。
+> ⚠️ **v1.1：初稿的 C 已被 D 替换**（实现期偏离，理由见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2）。
+>
+> 复用 C 的代价不只是「一次 CSV 落盘」—— 那一圈磁盘逼出了一整套东西：
+> 临时目录、**CSV 把 NULL 写成空串**（于是 staging 列只能一律 `VARCHAR`、
+> 下游还得 `TRY_CAST`）、以及在**成功 / 失败 / 取消**三条路径上都得清理临时文件
+> （漏一条就是「用户拉了一半就关窗口，磁盘上留下几百 MB」）。
+>
+> 而 D（DuckDB 自己的**联邦查询**能力）把这一整套**整体消掉了**：
+> 不落盘、类型原样带过来、也就没有「清理」这件事可漏。
+>
+> D 相对 B 的优势是**不用自己写搬运**：B 要自己处理
+> `ResultSet` → DuckDB 的类型映射与分块写出，而 D 里那部分**是 DuckDB 自己的**代码
+> （我们只写一个薄薄的表函数壳）。
+>
+> ⚠️ D 的代价要说清楚：它要**引擎编译依赖** `duckdb_jdbc`（表函数的接口在那个包里），
+> 而 DuckDB 自带的 `mysql_scanner` / `postgres_scanner` 扩展**要联网下载** ——
+> 内网部署装不上。所以我们走**纯 Java 表函数**：只用**已经随包发布**的 JDBC 驱动，
+> 任何有 JDBC 驱动的数据源都能接（MySQL / PostgreSQL / SQLite，将来还有 Hive）。
 
 ---
 
@@ -370,7 +398,7 @@ L4 的落法：
 
 ### 3.5 L5：API 面才是窄门
 
-`Category.ANALYSIS` 下的路由**只有读**：
+`Category.ANALYSIS` 下的路由，**除了拉取**之外都只有读：
 
 | 路由 | 作用 | 状态 |
 |---|---|---|
@@ -378,7 +406,8 @@ L4 的落法：
 | `ANALYSIS.LIST_TABLES` | 列远端表（只读 SPI） | ✅ 已落地 |
 | `ANALYSIS.LIST_COLUMNS` | 列远端列（只读 SPI） | ✅ 已落地 |
 | `ANALYSIS.RUN_QUERY` | 在**计算引擎**上跑分析 SQL | ✅ 已落地 |
-| `ANALYSIS.PULL_SAMPLE` | 从远端拉样本到本地工作区 | ⏳ 不落地（见下） |
+| `ANALYSIS.PULL_TABLE` | 把远端一张表拉进本地工作区（**写**的是工作区，不是远端） | ✅ 已落地 |
+| `ANALYSIS.PULL_SAMPLE` | 从远端拉**样本**到本地工作区 | ⏳ 不落地（见下） |
 
 > ✅ **v0.7：上面四条路由已落地** —— 实现见
 > [`engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt)，
@@ -394,6 +423,22 @@ L4 的落法：
 >   所以不能被 L4 闸门挡；但它**绝不能**打在远端上，否则就是绕过 L4 的后门。
 > - **行数上限 5000**，与浏览模式的 SQL 结果上限同值；超出时响应里的
 >   `truncated` **显式置位**（正好等于上限不算截断 —— 只有真的还有下一行才算）。
+>
+> ✅ **v1.1：`ANALYSIS.PULL_TABLE` 已落地** —— 实现见
+> [`engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt)
+> 与 [`JdbcScanTableFunction.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/JdbcScanTableFunction.kt)。
+>
+> 三处值得记的判据：
+>
+> - **它是 DuckDB 的「联邦直查」，不是「导出 CSV 再导入」** ——
+>   DuckDB 自己就能直接读远端的 JDBC 数据源，于是拉取在引擎侧就是一句
+>   `CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>`：
+>   **没有临时文件、没有 CSV 的编码往返**。
+> - **它写的是工作区，不是远端** —— 所以它**不是** L4 闸门要挡的写路由；
+>   但为了兜底，它仍被列进写路由清单（万一有人拿一个 `read_only` 的连接打这条路由，
+>   闸门会先拦下来）。
+> - **远端的凭据在请求体里，不在 SQL 文本里** —— 引擎把它变成一条**只发 SELECT**
+>   的 JDBC 连接：调用方能传的只有「选哪张表」，不可能是「执行什么语句」。
 
 `Category.REPORT` 下：
 
@@ -408,6 +453,10 @@ L4 的落法：
 > 「哪个配置才是本次请求的连接」于是有了两个产地。按 §2.4 方案 C 拆成
 > 既有的 `EXPORT.RUN_EXPORT` + `IMPORT.RUN_IMPORT` 两次调用，零新协议，
 > 三段进度各自已有实现与测试。
+>
+> ⚠️ **v1.1：上面那条理由已经被 D（联邦直查）解决** ——
+> `ANALYSIS.PULL_TABLE` 把**远端配置放进请求体**（`Request.connection` 给工作区），
+> 「两个产地」的问题就没有了；而 §2.4 方案 C 的「绕磁盘」代价也一并消失。
 >
 > ⚠️ **路由编号以实现篇为准**：§7.4 是 v0.3 的草图，它的路由名
 > （`RUN_ANALYSIS_QUERY`）与本节的路由表对不上；本节为准，编号在实现篇重新排。
@@ -1097,7 +1146,7 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 2 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
 | 3 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
 | 4 | `ReadOnlyBadge` | `shared/.../analysis/ReadOnlyBadge.kt` | `ColumnBadge` 是「类型小标签」（`surfaceVariant` 底、11px 字），只读徽标要 **tertiary 底 + 不可关闭 + ⓘ 说明** —— 语义与视觉都不同 |
-| 5 | `PullStageIndicator` | `shared/.../analysis/PullStageIndicator.kt` | 拉取是**三段**（EXPORT → CSV → IMPORT）跨进程的长任务；`WinProgressIndicator` 是单条进度条，画不出「现在卡在哪一段」 |
+| 5 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
 | 6 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
 
 **共同的底线**：这 6 个组件
@@ -1426,19 +1475,21 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|
 | `shared/src/commonMain/.../analysis/` | `ReportSpec.kt`（报表规格）、`AnalysisScreen.kt`、`ReportDesignerScreen.kt` |
 | `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 数据源行的测试标记 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
-| `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯规则**：三段枚举、进度 / 结果 / 终态模型、staging 列类型（**一律 VARCHAR**）、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 |
+| `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯模型**：进度（已读行数）、结果、终态模型（sealed）、用户取消的专用异常 |
 | `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/6**，§6.4） |
 | `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/6**） |
 | `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/6**） |
 | `shared/src/commonMain/.../analysis/ReadOnlyBadge.kt` | 不可关闭的只读徽标（**新增组件 4/6**） |
-| `shared/src/commonMain/.../analysis/PullStageIndicator.kt` | 拉取三段进度（**新增组件 5/6**） |
+| `shared/src/commonMain/.../analysis/PullProgressIndicator.kt` | 拉取进度（**新增组件 5/6**；原名 `PullStageIndicator` —— 联邦直查没有「阶段」） |
 | `shared/src/commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口）—— 只在**并列的顶层目标**渲染 |
 | `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
 | `desktopApp/src/test/.../AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6）—— 落在 `desktopApp` 而不是 `:shared`：它要读 `:shared` 的**源文件**（按 import 行判定），而 Gradle 跑测试时的工作目录是**模块根** |
 | `desktopApp/src/main/.../AnalysisSession.kt` | 分析模式的会话与状态机（与 `ConnectionSession` / `DatabaseBrowserState` **并列**，不继承） |
 | `desktopApp/src/main/.../AnalysisPuller.kt` | 拉取链路的**契约**（接口）—— 抽出来是为了让会话的终态映射可被**确定性地**测 |
-| `desktopApp/src/main/.../EngineAnalysisPuller.kt` | 拉取链路的**真实现**（引擎 + 临时文件）：三段编排、临时文件清理、取消时叫停导出子进程 |
-| `engine/src/main/.../analysis/AnalysisHandler.kt` | `Category.ANALYSIS` 的路由实现 |
+| `desktopApp/src/main/.../EngineAnalysisPuller.kt` | 拉取链路的**真实现**：一条 `ANALYSIS.PULL_TABLE` 路由（引擎侧是 **DuckDB 联邦直查**，**不落盘、不绕 CSV**）+ 取消时用 `SYSTEM.CANCEL` 叫停引擎 |
+| `engine/src/main/.../analysis/AnalysisHandler.kt` | `Category.ANALYSIS` 的路由实现（含 `executePull` —— 联邦直查的编排） |
+| `engine/src/main/.../analysis/JdbcScanTableFunction.kt` | **纯 Java 表函数**：把一条 JDBC 查询变成 DuckDB 里的一张表（类型映射 + 分块写出） |
+| `engine/src/main/.../analysis/JdbcScanRegistry.kt` | 表函数的**幂等注册**（名字由远端配置派生、查重、并发安全） |
 | `engine/src/main/.../analysis/InsightProvider.kt` | AI 扩展点（v1 只有接口） |
 | `engine/src/main/.../report/ReportBuilder.kt` | `ReportSpec` → .xlsx |
 | `engine/src/main/.../report/ReportCellStyler.kt` | 样式映射（**带缓存**） |
@@ -1698,11 +1749,20 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 > M2 + M4' 的**六个分片至此全部落地**。
 > 实现细节见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §5.1 / §6.6。
 
+> ✅ **v1.1：第 7 片已落地（拉取改成 DuckDB 联邦直查）** ——
+> 拉取不再走「远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`」，
+> 改为**DuckDB 直接读远端的 JDBC 源**（联邦查询）：
+> `CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>`。
+> **没有临时文件、没有 CSV 的编码往返**，而且拉下来的表**保留远端的类型**
+> （`INT` 落下来还是整数，`SUM(id)` 直接能跑，不必再 `TRY_CAST`）。
+> 实现见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2~§6.5。
+>
 - **交付**
   - DuckDB 工作区（**复用 `dialect-duckdb`，零新方言**）
-  - 拉取链路：远端 `EXPORT` → CSV → DuckDB `IMPORT`（§2.4 的方案 C）
+  - 拉取链路：**DuckDB 联邦直查**远端 JDBC 源 → 工作区表（§3.5 的 `PULL_TABLE`；
+    **零 CSV 中转、零临时文件**）
   - SQL 编辑（复用 `CodeEditor`）+ 结果表（复用 `DataTable`，**只读用法见 §6.3.3**）
-  - `SourceTree`（§6.4-1）+ `PullStageIndicator`（§6.4-5，三段式拉取进度）
+  - `SourceTree`（§6.4-1）+ `PullProgressIndicator`（§6.4-5，拉取进度）
   - 结果表右键菜单（复制 / 导出为 CSV）—— ⏳ **还没接**（§6.3.3 的用法表里的一行；
     剪贴板与文件对话框都是平台专属，要由 `desktopApp` 注入回调）
   - 拉取面板显示**预计占用**与临时文件清理时机
@@ -1711,7 +1771,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
     界面显示进度、可取消，落地后可查
   - 在工作区里跑一条**窗口函数**聚合（`OVER (PARTITION BY …)`），结果正确
   - 工作区里 `CREATE TABLE tmp AS SELECT …` **可以成功**（本地写允许，远端写禁止）
-  - 拉取产生的临时 CSV 在**成功/失败/取消**三条路径上都被清理
+  - 拉取**全程不落盘**（联邦直查没有临时文件）—— 拉进来的表**保留远端的类型**
   - 结果表**没有**任何编辑入口（点单元格不进编辑态）—— §6.3.3 的 `onCellEdit = null`
 - **依赖**：M3
 

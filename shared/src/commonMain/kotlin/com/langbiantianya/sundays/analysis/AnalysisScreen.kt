@@ -199,7 +199,7 @@ private fun AnalysisPullStrip(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (progress != null) {
-            PullStageIndicator(
+            PullProgressIndicator(
                 progress = progress,
                 onCancel = onCancel,
             )

@@ -21,14 +21,13 @@ import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
 import com.langbiantianya.sundays.analysis.PULL_OUTCOME_TAG
-import com.langbiantianya.sundays.analysis.PULL_STAGE_INDICATOR_TAG
+import com.langbiantianya.sundays.analysis.PULL_PROGRESS_GLYPH_TAG
+import com.langbiantianya.sundays.analysis.PULL_PROGRESS_INDICATOR_TAG
 import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullOutcomeLine
 import com.langbiantianya.sundays.analysis.PullProgress
+import com.langbiantianya.sundays.analysis.PullProgressIndicator
 import com.langbiantianya.sundays.analysis.PullResult
-import com.langbiantianya.sundays.analysis.PullStage
-import com.langbiantianya.sundays.analysis.PullStageIndicator
-import com.langbiantianya.sundays.analysis.pullStageGlyphTag
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
@@ -38,11 +37,15 @@ import kotlin.test.assertTrue
 /**
  * 拉取进度的界面契约（主设计 §7.4）。
  *
- * ## 这一轮最要紧的一条：三段要**分得清**
+ * ## 这一轮界面变简单了 —— 因为机制变简单了
  *
- * 拉取跨两个数据库、三段耗时差着数量级。指示器若画不出「现在卡在哪一段」，
- * 用户就只能看着一条不动的进度条猜 —— 那跟没有指示器一样。
- * 所以断言落在**每段的状态字形**上，而且按段寻址（不是「屏上有个 ✓」）。
+ * 早先的指示器是三段（导出 → CSV → 导入）外加一行「临时文件多大」。
+ * 那是因为数据要**绕一圈磁盘**。现在拉取是 DuckDB 的**联邦直查** ——
+ * 行从远端直接流进工作区表，中间没有阶段可分，也**没有临时文件**可占。
+ *
+ * 于是界面只剩两件事要说：
+ * 1. 「正在拉取，已读 N 行」；
+ * 2. 取消按钮是真的能点的。
  */
 @OptIn(ExperimentalTestApi::class)
 class AnalysisPullIndicatorTest {
@@ -52,63 +55,40 @@ class AnalysisPullIndicatorTest {
         )
 
     @Test
-    fun `the indicator shows the three stages and marks the current one`() {
+    fun `the indicator says it is pulling and how many rows it read`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
-                        PullStageIndicator(progress = PullProgress(PullStage.CSV, rows = 100))
+                        PullProgressIndicator(progress = PullProgress(rows = 1234))
                     }
                 }
             }
 
-            onNodeWithText("导出到 CSV").assertIsDisplayed()
-            onNodeWithText("写入 CSV").assertIsDisplayed()
-            onNodeWithText("导入工作区").assertIsDisplayed()
-
-            // 状态字形按**段**断言 —— 屏上有个 ✓ 不够，得知道是哪一段的 ✓。
-            onNodeWithTag(pullStageGlyphTag(PullStage.EXPORT), useUnmergedTree = true).assertTextEquals("✓")
-            onNodeWithTag(pullStageGlyphTag(PullStage.CSV), useUnmergedTree = true).assertTextEquals("●")
-            onNodeWithTag(pullStageGlyphTag(PullStage.IMPORT), useUnmergedTree = true).assertTextEquals("○")
+            onNodeWithText("拉取中").assertIsDisplayed()
+            onNodeWithText("已读 1234 行").assertIsDisplayed()
+            // 状态字形单独给一个标记：断言要落在**这一格**上。
+            onNodeWithTag(PULL_PROGRESS_GLYPH_TAG, useUnmergedTree = true).assertTextEquals("●")
         }
     }
 
     @Test
-    fun `the indicator shows the processed rows and the temp file size`() {
+    fun `the indicator does not mention a temp file any more`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
-                        PullStageIndicator(
-                            progress = PullProgress(PullStage.IMPORT, rows = 1234, bytes = 1024L * 1024),
-                        )
+                        PullProgressIndicator(progress = PullProgress(rows = 10))
                     }
                 }
             }
 
-            onNodeWithText("已处理 1234 行").assertIsDisplayed()
-            onNodeWithText("临时文件 1.0 MB").assertIsDisplayed()
-        }
-    }
-
-    @Test
-    fun `the indicator hides the file size before the file exists`() {
-        runComposeUiTest {
-            setContent {
-                SundaysTheme {
-                    ProvideStrings(AppLanguage.ZH_HANS) {
-                        PullStageIndicator(progress = PullProgress(PullStage.EXPORT, rows = 10))
-                    }
-                }
-            }
-
-            onNodeWithText("已处理 10 行").assertIsDisplayed()
-            // 「临时文件 0 B」是**假信息**：用户会以为文件已经建好却只有 0 字节。
-            // 不显示比显示个假的强。
+            onNodeWithText("已读 10 行").assertIsDisplayed()
+            // 联邦直查**不落盘** —— 没有临时文件，也就没有「占了多少磁盘」这回事。
             assertEquals(
                 0,
-                onAllNodesWithText("临时文件 0 B").fetchSemanticsNodes().size,
-                "文件还没落盘时不该报大小",
+                onAllNodesWithText("临时文件", substring = true).fetchSemanticsNodes().size,
+                "拉取不再有临时文件，界面上不该出现它",
             )
         }
     }
@@ -120,8 +100,8 @@ class AnalysisPullIndicatorTest {
             setContent {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
-                        PullStageIndicator(
-                            progress = PullProgress(PullStage.EXPORT, rows = 5),
+                        PullProgressIndicator(
+                            progress = PullProgress(rows = 5),
                             onCancel = { cancelled = true },
                         )
                     }
@@ -134,7 +114,26 @@ class AnalysisPullIndicatorTest {
     }
 
     @Test
-    fun `a finished pull says which table it landed in`() {
+    fun `there is no cancel button when the caller does not offer one`() {
+        runComposeUiTest {
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        PullProgressIndicator(progress = PullProgress(rows = 5))
+                    }
+                }
+            }
+
+            assertEquals(
+                0,
+                onAllNodesWithText("取消拉取").fetchSemanticsNodes().size,
+                "没给取消回调就不该画取消按钮",
+            )
+        }
+    }
+
+    @Test
+    fun `a finished pull says which table it landed in and how many rows`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
@@ -142,7 +141,11 @@ class AnalysisPullIndicatorTest {
                         PullOutcomeLine(
                             outcome =
                                 PullOutcome.Done(
-                                    PullResult(stagingTable = "staging_shop_orders", rowsImported = 12),
+                                    PullResult(
+                                        stagingTable = "staging_shop_orders",
+                                        rowsScanned = 12,
+                                        rowsLanded = 12,
+                                    ),
                                 ),
                         )
                     }
@@ -152,6 +155,7 @@ class AnalysisPullIndicatorTest {
             onNodeWithText("拉取完成").assertIsDisplayed()
             // 不说落在哪张表，用户就不知道下一步该查哪张表。
             onNodeWithText("工作区表 staging_shop_orders").assertIsDisplayed()
+            onNodeWithText("行数 12").assertIsDisplayed()
         }
     }
 
@@ -200,13 +204,13 @@ class AnalysisPullIndicatorTest {
                             sources = sources,
                             selectedSourceId = "c1",
                             onSelectSource = {},
-                            pullProgress = PullProgress(PullStage.EXPORT, rows = 3),
+                            pullProgress = PullProgress(rows = 3),
                         )
                     }
                 }
             }
 
-            onNodeWithTag(PULL_STAGE_INDICATOR_TAG).assertIsDisplayed()
+            onNodeWithTag(PULL_PROGRESS_INDICATOR_TAG).assertIsDisplayed()
         }
     }
 
@@ -220,14 +224,14 @@ class AnalysisPullIndicatorTest {
                             sources = sources,
                             selectedSourceId = "c1",
                             onSelectSource = {},
-                            pullProgress = PullProgress(PullStage.IMPORT, rows = 3),
+                            pullProgress = PullProgress(rows = 3),
                             pullOutcome = PullOutcome.Done(PullResult(stagingTable = "staging_x")),
                         )
                     }
                 }
             }
 
-            onNodeWithTag(PULL_STAGE_INDICATOR_TAG).assertIsDisplayed()
+            onNodeWithTag(PULL_PROGRESS_INDICATOR_TAG).assertIsDisplayed()
             // 正在拉的时候显示「拉取完成」是骗人 —— 那是**上一次**的终态。
             assertEquals(
                 0,

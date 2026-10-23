@@ -23,6 +23,7 @@ import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
+import com.langbiantianya.sundays.analysis.AnalysisPullCancelledException
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
 import com.langbiantianya.sundays.analysis.AnalysisTreeKind
@@ -45,6 +46,7 @@ import kotlinx.coroutines.launch
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 一个远端源在本会话里的全部信息 —— 展示条目 + 引擎配置 + 方言。
@@ -183,6 +185,17 @@ class AnalysisSession(
 
     /** 当前那次拉取的任务 —— 取消要用它。 */
     private var pullJob: Job? = null
+
+    /**
+     * 当前那次拉取的**引擎侧请求 id** —— 取消时靠它叫停引擎。
+     *
+     * 为什么不能靠取消协程：引擎是**另一个进程**（或至少是另一个执行上下文），
+     * 前端取消协程只是「不再等结果」，引擎那边照样在扫远端、照样往工作区里写。
+     */
+    private var pullRequestId: String = ""
+
+    /** 请求 id 的自增尾数 —— 同一毫秒里连点两次也不会撞 id。 */
+    private val pullCounter = AtomicLong(0)
 
     // ──────────────── 数据源树 ────────────────
 
@@ -592,7 +605,10 @@ class AnalysisSession(
     ): Job? {
         if (pulling) return null
         val source = sourceConfig(sourceId) ?: return null
-        val dialect = sourceDialect(sourceId) ?: return null
+        // 请求 id 由**这里**生成 —— 取消时要靠它叫停引擎那边正在跑的拉取
+        // （引擎是另一个进程，取消前端协程并不会让它停下来）。
+        val requestId = "analysis-pull-${System.currentTimeMillis()}-${pullCounter.incrementAndGet()}"
+        pullRequestId = requestId
         pullJob =
             scope.launch {
                 pulling = true
@@ -603,10 +619,10 @@ class AnalysisSession(
                 try {
                     val result =
                         puller.pull(
+                            requestId = requestId,
                             source = source,
                             workspace = workspaceConnection(),
                             workspacePath = workspacePath,
-                            dialect = dialect,
                             namespace = namespace,
                             table = table,
                         ) { progress ->
@@ -615,6 +631,9 @@ class AnalysisSession(
                     pullOutcome = PullOutcome.Done(result)
                     // 拉进来的表就在工作区里 —— 树上要立刻看得见它。
                     refreshWorkspaceChildren()
+                } catch (e: AnalysisPullCancelledException) {
+                    // 用户取消 —— **不是失败**，也不该把协程一起取消掉。
+                    pullOutcome = PullOutcome.Cancelled
                 } catch (e: CancellationException) {
                     // 取消**不是**失败 —— 取消没有错，只是没做完。
                     // 但要原样抛出去：吞掉它会让协程以为自己正常结束，
@@ -661,7 +680,13 @@ class AnalysisSession(
 
     /** 取消当前这次拉取。 */
     fun cancelPull() {
+        val requestId = pullRequestId
         pullJob?.cancel()
+        // 引擎那边也得叫停 —— 前端取消协程，引擎照样在扫远端、照样往工作区里写。
+        // 这一步**尽力而为**：叫停失败不影响前端的终态（那边已经是「用户取消」了）。
+        scope.launch {
+            (puller as? EngineAnalysisPuller)?.cancelPull(workspaceConnection(), requestId)
+        }
     }
 
     /**

@@ -814,6 +814,12 @@ object RequestDispatcher {
             Category.EXPORT to Action.RUN_EXPORT,
             // IMPORT — truncate_first 会清空目标表，dryRun 必须短路（否则「试运行」把用户数据删了）
             Category.IMPORT to Action.RUN_IMPORT,
+            // ANALYSIS.PULL_TABLE — 它在工作区里**建表**（写操作）。
+            // 拉取的落点永远是本地工作区，而工作区是**可写**的（§6.1），
+            // 所以这条路由在正常路径上不会被只读闸门挡；
+            // 但把它列进写路由是为了**兜底**：万一有人拿一个 read_only 的连接打这条路由，
+            // 闸门会先拦下来，而不是让它去建表。
+            Category.ANALYSIS to Action.PULL_TABLE,
         )
 
     /** 该请求是否走流式路径（决定是否需要 timeout 包装）。 */
@@ -822,6 +828,9 @@ object RequestDispatcher {
             request.category == Category.EXPORT && request.action == Action.RUN_EXPORT -> true
 
             request.category == Category.IMPORT && request.action == Action.RUN_IMPORT -> true
+
+            // 拉取是长任务（远端扫描 + 落表），要有进度与可取消 → 走流式。
+            request.category == Category.ANALYSIS && request.action == Action.PULL_TABLE -> true
 
             request.category == Category.DATA && request.action == Action.LIST &&
                 request.dataRequest.hasList() &&
@@ -865,6 +874,11 @@ object RequestDispatcher {
 
             request.category == Category.DATA && request.action == Action.GENERATE -> {
                 streamDataGenerate(request.id, request).collect { sink(it) }
+            }
+
+            // v2.29: 分析模式的拉取 —— DuckDB 联邦直查远端（零 CSV 中转），流式进度 + 可取消
+            request.category == Category.ANALYSIS && request.action == Action.PULL_TABLE -> {
+                AnalysisHandler.executePull(request).collect { sink(it) }
             }
 
             else -> {

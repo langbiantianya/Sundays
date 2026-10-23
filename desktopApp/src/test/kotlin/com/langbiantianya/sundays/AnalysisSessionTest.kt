@@ -92,10 +92,10 @@ class AnalysisSessionTest {
         private val body: suspend () -> PullResult,
     ) : AnalysisPuller {
         override suspend fun pull(
+            requestId: String,
             source: ConnectionConfig,
             workspace: ConnectionConfig,
             workspacePath: Path,
-            dialect: DialectType,
             namespace: String,
             table: String,
             onProgress: suspend (com.langbiantianya.sundays.analysis.PullProgress) -> Unit,
@@ -258,7 +258,7 @@ class AnalysisSessionTest {
 
     @Test
     fun `a finished pull lands in the done outcome`() {
-        val session = newSession(FakePuller { PullResult(stagingTable = "staging_x", rowsImported = 3) })
+        val session = newSession(FakePuller { PullResult(stagingTable = "staging_x", rowsLanded = 3) })
         session.setSources(listOf(binding("c1")))
         session.selectSource("c1")
 

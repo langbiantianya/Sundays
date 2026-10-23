@@ -121,8 +121,8 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
 | **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
 | | **数据源树**：工作区 + 远端源 → 命名空间 → 表，**懒加载** | `shared/analysis/SourceTree.kt` |
-| | **拉取链路**：远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`（**零新协议**），三段进度 + 可取消 | `EngineAnalysisPuller` / `PullStageIndicator` |
-| | 临时 CSV 在**成功 / 失败 / 取消**三条路径上都被清理 | 同上 |
+| | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
+| | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
 | | 「⊘ 只读」徽标**不可关闭** | `ReadOnlyBadge` |

@@ -123,6 +123,20 @@ dependencies {
     // IPC Transport SPI 需要的 Netty shaded（UDS / Windows 命名管道 transport 依赖其内部 channel）
     implementation(libs.grpc.netty.shaded)
 
+    // DuckDB JDBC —— **编译依赖**（不是「只放进 drivers/ 的可插拔驱动」）。
+    //
+    // 为什么它要上类路径：引擎要用 DuckDB 的**纯 Java 表函数** API
+    // （`org.duckdb.DuckDBTableFunction`）把远端 JDBC 数据源注册成 DuckDB 里的一张表，
+    // 从而让「拉一张远端表」变成一句 `CREATE TABLE … AS SELECT * FROM <联邦扫描>`
+    // —— 没有导出、没有 CSV、没有临时文件（见 engine/.../analysis/JdbcScanTableFunction.kt）。
+    //
+    // 它**不能**只待在 drivers/：那个目录由独立 ClassLoader 加载，
+    // 引擎自己的代码看不到那些类（注册表函数时会撞 ClassCastException）。
+    //
+    // 仍在 drivers/ 的那些驱动（MySQL / PostgreSQL / H2 / SQLite）引擎**不编译依赖**，
+    // 它们只是「能被连上的目标」，所以留在可插拔目录里。
+    implementation(libs.duckdb)
+
     // JDBC Drivers — 不编译依赖，构建时复制到 drivers/
     val jdbcDrivers =
         configurations.create("jdbcDrivers") {
@@ -131,7 +145,6 @@ dependencies {
     jdbcDrivers(libs.mysql.connector)
     jdbcDrivers(libs.postgresql)
     jdbcDrivers(libs.h2)
-    jdbcDrivers(libs.duckdb)
     jdbcDrivers(libs.sqlite)
 
     testImplementation(kotlin("test"))

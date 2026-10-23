@@ -242,9 +242,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 |---|---|---|
 | `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult`、**树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） | ✅ 已落地 |
 | `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
-| `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：三段枚举、进度 / 结果 / 终态模型、staging 列类型、建表与删表语句、导出的 SELECT、每段的文案键与状态判定 | ✅ 已落地（第 5 片） |
+| `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 | ✅ 已落地（第 5 片；**第 7 片重写**） |
 | `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ✅ 已落地（第 6 片） |
-| `shared/.../analysis/PullStageIndicator.kt` | 新组件 5/6：EXPORT / CSV / IMPORT 三段 + 一行占用 + 终态行 | ✅ 已落地（第 5 片） |
+| `shared/.../analysis/PullProgressIndicator.kt` | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 | ✅ 已落地（第 5 片；**第 7 片重写** —— 不再有「阶段」与「临时文件」） |
 | `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
 | `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（顶栏 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」） |
 
@@ -301,9 +301,11 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 | 文件 | 内容 |
 |---|---|
-| `engine/.../analysis/AnalysisHandler.kt` | `ANALYSIS` 四个路由的实现 |
-| `engine/.../dispatcher/RequestDispatcher.kt` | **改动**：L4 闸门 + 四条新路由 |
-| `engine/.../handlers/ExportHandler.kt` / `ImportHandler.kt` | **零改动**（拉取复用它们） |
+| `engine/.../analysis/AnalysisHandler.kt` | `ANALYSIS` 五个路由的实现（含 `executePull` —— 联邦直查的编排） |
+| `engine/.../analysis/JdbcScanTableFunction.kt` | **纯 Java 表函数**：把一条 JDBC 查询变成 DuckDB 里的一张表（类型映射 + 单线程 + 分块写出） |
+| `engine/.../analysis/JdbcScanRegistry.kt` | 表函数的**幂等注册**（名字由远端配置派生、查重、并发安全） |
+| `engine/.../dispatcher/RequestDispatcher.kt` | **改动**：L4 闸门 + 五条新路由（`PULL_TABLE` 走流式路径） |
+| `engine/.../handlers/ExportHandler.kt` / `ImportHandler.kt` | **零改动**（浏览模式的导出 / 导入还在用；分析模式的拉取不再走它们） |
 
 ### 5.4 测试
 
@@ -312,6 +314,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../integration/ReadOnlySessionGateTest.kt` | §3.6 的**会话级**回归测试 | ✅ 已落地 |
 | `engine/.../integration/ReadOnlyDialectTest.kt` | §3.6 的**方言级**回归测试 | ✅ 已落地 |
 | `engine/.../integration/AnalysisHandlerIntegrationTest.kt` | 四条路由的集成测试：命名空间分派（schema 型 / 库型）/ 行数截断 / 远端方言被拒 / 只读会话里照常可列 | ✅ 已落地 |
+| `engine/.../analysis/AnalysisPullFederationTest.kt` | **联邦直查的端到端**（真 H2 远端 → 真 DuckDB 工作区）：表真的落进工作区 / 值一字不差 / 失败**不留半张表** / 失败的重新拉取**保住旧表**（事务回滚）/ 缺参数被拒 | ✅ 已落地（第 7 片，5 例） |
+| `engine/.../analysis/JdbcScanTypeMappingTest.kt` | **类型映射**：整数按宽度选（无符号 32 位落到 64 位、无符号 64 位落到 `DECIMAL(20,0)`）、超范围的 DECIMAL 落成文本、未知精度落成文本、每种 kind 都有对应的 DuckDB 类型 | ✅ 已落地（第 7 片，8 例） |
 | `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
@@ -320,12 +324,11 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `desktopApp/.../AnalysisTreeSessionTest.kt` | **会话里的树**：工作区永远在第一位、工作区在树上、方言标签、展开工作区真能列出它的表、点两次收起、收起再展开**不丢已加载的子节点**、加载失败**留下原因**而不是变成「空」、连接列表变了**不抹掉已加载的子节点**、删掉的源从树上消失、把表名加进编辑器（空 / 非空两种） | ✅ 已落地（第 6 片，12 例） |
 | `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、源没了选中项被剪枝、DDL 回 -1、SQL 出错收成**失败结果**而不是异常、**拉取的三条终态**（完成 / 取消 / 失败各落各的态） | ✅ 已落地（第 4 片；第 5 片补 4 例，共 14 例） |
 | `desktopApp/.../AnalysisWorkspaceIntegrationTest.kt` | **工作区端到端**（真 DuckDB 文件）：能建表、重开连接表还在、目录会被自动建出来、查询能回行与列 | ✅ 已落地（第 4 片） |
-| `desktopApp/.../AnalysisPullIntegrationTest.kt` | **导入那一半**端到端（真 DuckDB + 手写带 BOM 的 CSV）：行数对上、空串**不毁行**、重拉替换旧表、表头不匹配时失败且**不留半张表**、列名带空格、进度回调有帧、**失败路径不留临时目录** | ✅ 已落地（第 5 片，7 例） |
-| `desktopApp/.../AnalysisPullSmokeTest.kt` | **整条链路**端到端（真 MySQL → CSV → 真 DuckDB）：行数对上、三段进度走全、临时目录清空、窗口函数聚合、`CREATE TABLE tmp AS SELECT`、**取消路径不留临时目录** | ✅ 已落地（第 5 片，5 例；MySQL 不可达时显式 skip） |
-| `desktopApp/.../AnalysisPullCancelTest.kt` | **取消必须叫停导出子进程**（假引擎把导出钉成「永远不结束」，时机确定）：按**导出请求的 id** 叫停 + 取消路径清干净临时目录 | ✅ 已落地（第 5 片，2 例） |
-| `desktopApp/.../AnalysisPullIndicatorTest.kt` | **拉取进度的界面契约**：三段都在、当前段被标出来（按段寻址）、行数与占用、没有文件时不报大小、取消按钮回调、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 | ✅ 已落地（第 5 片，9 例） |
+| `desktopApp/.../AnalysisPullIntegrationTest.kt` | **整条链路**端到端（前端拉取器 → 真引擎 → 联邦扫描 → 真 DuckDB 工作区）：表真的落进工作区、进度帧真的到得了调用方、失败**不留半张表**、**拉取全程不落盘**、用户取消被报成「取消」而不是「失败」 | ✅ 已落地（第 7 片重写，5 例） |
+| `desktopApp/.../AnalysisPullSmokeTest.kt` | **真 MySQL** 端到端：行数对上、**全程不落盘**、进度报出行数、**拉下来的表保留远端类型**（`SUM(id)` 直接能跑）、窗口函数聚合、`CREATE TABLE tmp AS SELECT` | ✅ 已落地（第 7 片重写，6 例；MySQL 不可达时显式 skip） |
+| `desktopApp/.../AnalysisPullIndicatorTest.kt` | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**不再出现「临时文件」**、取消按钮回调、没有取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 | ✅ 已落地（第 7 片重写，9 例） |
 | `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | 工作区纯规则：staging 表名、标识符清洗（引号 / 分号不得混入）、工作区文件路径 | ✅ 已落地（第 4 片，10 例） |
-| `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯规则：列名**引用**、引号转义、列一律 VARCHAR、删表 `IF EXISTS`、方言各自的引用形式、命名空间为空时退化、三段的状态判定、每段各有各的文案键 | ✅ 已落地（第 5 片，11 例） |
+| `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯模型：进度只有一个数、结果说清落在哪张表与多少行、**终态三选一**、用户取消是**自己的异常**（不是协程取消） | ✅ 已落地（第 7 片重写，5 例） |
 | `shared/.../commonTest/analysis/AnalysisTreeTest.kt` | **树的纯规则**：同名表在不同源下 id 不同、命名空间与表的 id 不撞、只有表是叶子、按 id 找到深处的节点、**按 id 替换**只换该换的那一处、找不到就原样返回、结果列的键**按下标**（重复列名不塌）、列与行用**同一套键**、NULL 仍是 NULL | ✅ 已落地（第 6 片，15 例） |
 
 ### 5.5 i18n
@@ -339,8 +342,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
   `ANALYSIS_WORKSPACE_EMPTY` / `_HINT`、`ANALYSIS_EDITOR_HINT`、
   `ANALYSIS_RESULT_ROWS` / `ANALYSIS_RESULT_TRUNCATED`、
   `ANALYSIS_PULL` / `ANALYSIS_PULLING` / `ANALYSIS_PULL_DONE` /
-  `ANALYSIS_PULL_CANCELLED` / `ANALYSIS_PULL_FAILED`、`ANALYSIS_STAGING_TABLE`、
-  `ANALYSIS_PULL_STAGE_EXPORT` / `_CSV` / `_IMPORT`
+  `ANALYSIS_PULL_CANCELLED` / `ANALYSIS_PULL_FAILED`、`ANALYSIS_STAGING_TABLE`
 - **引擎文案**（走 `Msg.text` / `Msg.format(StrKey, …)`）：`ENGINE_READ_ONLY_REJECTED`（L4 闸门）、
   `DIALECT_READ_ONLY`（方言级只读）、`ENGINE_ANALYSIS_LOCAL_ONLY`（`RUN_QUERY` 打在远端）
 
@@ -352,11 +354,18 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > `ANALYSIS_STAGING_TABLE`（staging 表名）。
 >
 > ✅ **第 5 片再补 3 个键**（六语言同步，共 27 个）：
-> `ANALYSIS_PULL_CANCEL`（取消拉取）、`ANALYSIS_PULL_ROWS`（已处理 {0} 行）、
+> `ANALYSIS_PULL_CANCEL`（取消拉取）、`ANALYSIS_PULL_ROWS`（已读 {0} 行）、
 > `ANALYSIS_PULL_SIZE`（临时文件 {0}）。
 > 这三个是**界面件 `PullStageIndicator` 落地时才发现缺**的：
-> 「取消拉取」没有按钮就点不着，「已处理 N 行」与「临时文件 X」是 §6.5 那两行占用。
+> 「取消拉取」没有按钮就点不着，「已读 N 行」与「临时文件 X」是那两行占用。
 > 补键的规矩不变 —— **六语言一个都不能少**（`StringsIntegrityTest` 盯着）。
+>
+> ⚠️ **第 7 片把其中两个键删了**（随机制一起消失，见下）：
+> `ANALYSIS_PULL_STAGE_EXPORT` / `_CSV` / `_IMPORT`（三段）与
+> `ANALYSIS_PULL_SIZE`（临时文件）—— **联邦直查没有阶段，也没有临时文件**。
+> `ANALYSIS_PULL_ROWS` 的文案也从「已处理 {0} 行」改成「已读 {0} 行」
+> （联邦直查里那行数是**从远端读出来的**，还没落表）。
+> 删除的键同样**六语言一起删** —— 少一个语言就留下一条悬空的文案。
 
 > ✅ **第 6 片再补 9 个键**（六语言同步，共 **36** 个）：
 > `ANALYSIS_RUN`（运行）、`ANALYSIS_EDITOR_TITLE`（SQL 编辑器）、
@@ -396,84 +405,122 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
   清洗是**有损**的：`a-b` 与 `a_b` 会撞成同一个名字；这是刻意的取舍 ——
   撞名时用户看到的是两个同名的 staging 表，而**不是**一条把别的库的表覆盖掉的查询。
 
-### 6.2 拉取链路（§2.4 方案 C，零新协议）
+### 6.2 拉取链路（DuckDB **联邦直查**，零 CSV 中转）
 
 ```
-① EXPORT.RUN_EXPORT   源会话（read_only）→ CSV      ← 已有流式实现与进度帧
-② ——CSV on disk——     前端知道路径与大小
-③ IMPORT.RUN_IMPORT   工作区会话 → staging_<表名>    ← 已有流式实现与进度帧
+ANALYSIS.PULL_TABLE   远端 JDBC 源 →（DuckDB 联邦直查）→ 工作区表
 ```
 
-**为什么拆成两次既有调用，而不是主设计 §3.5 里那张路由表上的单个
-`ANALYSIS.PULL_SAMPLE`**：
+引擎侧就一句话：
 
-- 拉取要碰**两个**数据库（远端读 + 本地写），而**一个 `Request` 只有一份
-  `ConnectionConfig`**。做成单路由，就得在请求体里再塞一份 workspace 配置 ——
-  「哪个配置才是本次请求的连接」于是有了两个产地。拆成两次既有调用没有这个问题。
-- 两段进度**各自已有实现与测试**（`ExportProcessManager` 的进度帧、
-  `ImportProgressFrame`），`PullStageIndicator` 的三段直接映射它们，
-  **不需要新的帧类型**。
-- 主设计 §2.4 方案 C 的原文要求是「**复用现成导出/导入链路，零新协议**」——
-  拆开逐字满足。
+```sql
+CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>()
+```
 
-**这是对主设计 §3.5 路由表的一处实现期偏离**，在此显式记录：
-`ANALYSIS.PULL_SAMPLE` 本轮**不落地**；若 M3 之后确有需要（比如一次请求里
-要带采样比例），再作为新路由补。
+**没有导出、没有 CSV、没有临时文件。**
 
-### 6.3 临时 CSV 的清理
+#### 6.2.1 为什么换掉了「导出 CSV → 导入 CSV」
 
-清理写在**编排函数的一处 `finally`** 里——成功 / 失败 / 取消**三条路径同一条语句**，
-不是三个分支各写一遍（M4 验收要求「三条路径上都被清理」）。
+初稿（v2.29 第 5 片）走的是「远端 `EXPORT` → 临时 CSV → 工作区 `IMPORT`」。
+那条路要落一次盘、经一次 CSV 的编码往返，还踩过两个坑：
 
-`finally` 里跑在 `withContext(NonCancellable)` 中——不这么做的话，
-取消时协程已经是「取消中」态，里面的挂起调用会被立刻取消，清理根本跑不完。
+- CSV 把 **NULL 写成空串** → 导入端 `INSERT INTO t (a) VALUES ('')` 在 `a INTEGER`
+  上**整行失败**（所以那时的 staging 列一律 `VARCHAR`）；
+- 临时文件要在**成功 / 失败 / 取消**三条路径上都被清理 —— 漏一条就是
+  「用户拉了一半就关窗口，磁盘上留下几百 MB」。
 
-**删除带 5 次重试**（每次间隔 200 ms）：取消时导出子进程可能**还没来得及**
-关掉文件句柄，而 Windows 上文件被占用时删不掉。删一次失败就放弃，
-留下的正是「取消之后仍然占着磁盘」的那个文件 —— 恰恰是这条验收要防的。
+而 DuckDB 自己就能当**联邦查询层**：它能直接把远端的行读进来。
+于是那一整套（临时目录、CSV 编码往返、清理重试、`VARCHAR` 落地层）
+**整体消失** —— 不是「做得更小心」，而是**不再需要**。
 
-### 6.3.1 取消时必须**先叫停导出子进程**（实测抓出来的）
+#### 6.2.2 为什么用**纯 Java 表函数**，而不是 DuckDB 的原生扩展
 
-导出跑在**另一个进程**里，它正开着那个临时 CSV。Windows 上文件被占用时删不掉，
-所以取消时的顺序必须是：**先叫停子进程（它放开文件）→ 再删目录**。
+DuckDB 自带 `mysql_scanner` / `postgres_scanner`，`ATTACH ... (TYPE mysql)` 就能把远端
+挂进来 —— 但那些扩展要**联网下载**（`INSTALL mysql`），而本项目的部署形态是**内网**：
+装不上就是一条死路。
 
-叫停走引擎既有的 `EXPORT.RUN_EXPORT` 停止分支（`stop_export_id`），
-而 `stop_export_id` 要带的正是**导出请求自己的 id**。
+**纯 Java 表函数**没有这个前提：它只用**已经随包发布**的 JDBC 驱动，
+于是任何有 JDBC 驱动的数据源都能接（MySQL / PostgreSQL / SQLite，
+将来还有 Hive —— 只要 `hive-jdbc` 在手上）。
 
-> ⚠️ **这里的坑**：导出请求 id **不能在导出返回之后才记**。
-> 取消发生在导出**途中**时，导出根本不会返回，于是「叫停」那一步永远拿不到 id ——
-> 子进程继续开着 CSV，磁盘上留下一个删不掉的孤儿目录。
->
-> 最初的写法把 id 记在 `exportToCsv` 的**返回值**里，实测确实抓到了残留
-> （一个装着 `pull.csv` 的临时目录）。现在的写法：**id 在导出开始之前就定下来**，
-> `finally` 里一定拿得到。
+> 实测（本机 DuckDB 1.5.5.1）：
+> `INSTALL mysql` **能**联网装上，`ATTACH 'mysql://user:pass@host:3306/db' (TYPE mysql)`
+> 也能直接查远端表；但那是**要联网**的路径，内网部署用不了。
+> 纯 Java 表函数两条路都不需要 —— 它连 DuckDB 的原生扩展都不用。
 
-### 6.4 staging 表的列一律 `VARCHAR`
+#### 6.2.3 表函数的三条实测结论
 
-看着「把远端的 `INT` 映成 `INTEGER`」更贴心，但那条路会**整行丢数据**，实测如下：
+写之前先在真驱动上验过三件事（结论直接决定了实现形状）：
 
-1. CSV 导出把 **NULL 写成空串**（`CsvWriter.writeRow`：`it?.toString() ?: ""`）；
-2. 导入侧按**字符串**写值（`ImportHandler.bindRow`：`stmt.setString`）；
-3. 而 `INSERT INTO t (a) VALUES ('')` 在 `a INTEGER` 上**会失败** —— 空串转不成整数。
+| 问题 | 实测结论 | 对实现的影响 |
+|---|---|---|
+| 表函数**跨连接**可见吗？ | **可见** —— 同一 `.duckdb` 文件的**另一条连接**照样能查到它 | 注册一次就够，不用逐条连接注册 |
+| 它会**落盘**吗？ | **不会** —— `.duckdb` 文件里既没有函数名，也没有闭包里的凭据 | 凭据只在内存里，不进文件 |
+| 实例没了它还在吗？ | **不在** —— 它活在 DuckDB **实例**上 | 每次拉取前都要「确保已注册」（幂等） |
 
-于是：源表里只要有一列可空且是数值，**每一行**都会导入失败。
-打开 `ignore_errors` 也救不了 —— 失败的是**整行**，那一行的其它列也跟着没了。
+#### 6.2.4 远端**只读**是由「构造」保证的
 
-staging 因此是**落地层**（数据仓库的惯例：原始层存文本，类型由下游建模决定）。
-要按数值聚合，在工作区里建一张**建模表**即可 ——
-`CREATE TABLE orders AS SELECT TRY_CAST(id AS BIGINT) AS id, … FROM staging_shop_orders`。
-`TRY_CAST`（而不是 `CAST`）让「转不动」的值落成 NULL 而不是让整条查询失败。
+扫描函数**不接受**调用方传入的 SQL —— 它只执行引擎自己拼的那一句
+`SELECT * FROM <命名空间>.<表>`。也就是说：即使这条链路上某处有 bug，
+传进来的也只可能是「选哪张表」，不可能是「执行什么语句」。
 
-> 实测补充：`sum()` 与窗口函数在 `VARCHAR` 上**不工作**（探针 PROBE-3/4 失败），
-> 而 `TIMESTAMP` / `DATE` / `BOOLEAN` / `DECIMAL(38,10)` 接受字符串。
-> 所以「一切皆 VARCHAR」是**对的方向**，但**必须配 `TRY_CAST`** 才能做聚合。
+这比「会话级只读开关」更强：开关靠**每个写入口**都记得检查，
+而这里**压根没有写入口**。
 
-### 6.5 预计占用
+#### 6.2.5 凭据**不进 SQL 文本**
 
-拉取面板显示两行：CSV 文件大小（① 完成后可知）+ 行数（③ 的进度帧给出）。
+远端连接配置（含密码）在**请求体**里（`AnalysisPullRequest.remote`），
+引擎把它变成一条**只发 SELECT** 的 JDBC 连接。
 
-大小在 ① 结束之前**没有值** —— 那时显示「临时文件 0 B」是**假信息**
-（用户会以为文件已经建好却只有 0 字节），所以那之前**不显示**这一项。
+请求 id 由**前端**生成 —— 取消时「叫停引擎那边正在跑的拉取」要靠它
+（引擎是另一个进程，取消前端协程并不会让它停下来；见 §6.5）。
+
+### 6.3 类型映射：**宁可粗一点，也不要让整次拉取失败**
+
+一个装不下的值会让 DuckDB 在写入时**报错** —— 而那意味着**这张表整张拉不下来**。
+所以映射的判据只有这一条。
+
+| 远端类型 | 落到 DuckDB | 为什么 |
+|---|---|---|
+| `BOOLEAN` / `BIT` | `BOOLEAN` | |
+| `INT` / `SMALLINT` / `TINYINT` | `INTEGER`（**无符号则 `BIGINT`**） | MySQL 的 `INT UNSIGNED` 最大 42 亿，装不进 32 位 `INTEGER`（21 亿）—— 那会让整次拉取**失败** |
+| `BIGINT` | `BIGINT`（**无符号则 `DECIMAL(20,0)`**） | 无符号 64 位最大 1.8e19，装不进有符号 64 位 |
+| `FLOAT` / `REAL` | `FLOAT` | |
+| `DOUBLE` | `DOUBLE` | |
+| `DECIMAL(p,s)` | `DECIMAL(p,s)`（**p ≤ 38**），否则 `VARCHAR` | DuckDB 的 DECIMAL 上限 38 位；精度超范围的落成文本 —— 宁可让下游用 `TRY_CAST` 建模，也不要在拉取时炸掉 |
+| `DATE` | `DATE` | |
+| `TIMESTAMP` | `TIMESTAMP` | |
+| 其余（`VARCHAR` / `TEXT` / `BLOB` / `JSON` / `TIME` / 带时区时间戳 / 几何…） | `VARCHAR` | DuckDB 的写出接口没有 `TIME` 与带时区时间戳的对应类型，硬套会丢信息 |
+
+> ✅ **联邦扫描保留远端的类型** —— 这是它比 CSV 中转强的地方：
+> `INT` 落下来还是整数，于是 `SUM(id)` **直接就能跑**，
+> 不必再 `TRY_CAST`（那套「原始层存文本、类型由下游建模」的约定随 CSV 一起消失了）。
+
+### 6.4 半张表不会留下
+
+`DROP TABLE IF EXISTS` 与 `CREATE TABLE … AS SELECT` 包在**一个事务**里
+（JDBC 的 `setAutoCommit(false)`）：
+
+- 失败 / 取消 → 回滚 → **旧表原样还在**，新表一点痕迹都不留；
+- 成功 → 提交 → 新表替换旧表。
+
+> ⚠️ 事务是**必需**的，不是锦上添花：实测把 `autoCommit` 打开（去掉事务），
+> 连**成功的**拉取都会挂（`CREATE TABLE … AS SELECT` 在自动提交下与
+> 表函数的交互不成），失败的重新拉取更会把旧表弄丢。
+
+### 6.5 进度与取消
+
+- **进度**：引擎每读完一批远端行推一帧（`AnalysisPullProgressFrame`），
+  界面显示「正在拉取，已读 N 行」。**只有一段** —— 联邦直查没有
+  「导出 / CSV / 导入」那种阶段可分（那三段是绕磁盘逼出来的）。
+- **取消**：两件事一起做 ——
+  ① 取消前端协程（不再等结果）；② 给引擎发一条 `SYSTEM.CANCEL`，
+  带上**这次请求的 id**。引擎那边 `StatementRegistry` 找到那条 DuckDB 语句，
+  `cancel()` 掉它 → 事务回滚 → 终止帧带上 `cancelled` 标志。
+- **取消不是失败**：终止帧上有一个**独立的布尔**（`AnalysisPullResponse.cancelled`），
+  前端据此抛 `AnalysisPullCancelledException`（与协程的 `CancellationException` 分开），
+  界面显示「拉取已取消」而不是「拉取失败：…」。
+  靠**比对错误文本**判断取消那种写法，在文案一改就会失效。
 
 ### 6.6 数据源树（第 6 片）
 
@@ -622,19 +669,21 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 `AnalysisModuleBoundaryTest` 断言 `shared/.../analysis/` 下的 `.kt`：
 不 import desktopApp 的任何类型、不 import `java.*` / `javax.*`、不出现字面量颜色。
 
-### 7.4 工作台端到端（`AnalysisPullSmokeTest` / `AnalysisPullIntegrationTest` / `AnalysisPullCancelTest`）
+### 7.4 联邦拉取端到端（`AnalysisPullFederationTest` / `AnalysisPullIntegrationTest` / `AnalysisPullSmokeTest`）
 
-- 真 MySQL（`sundays_smoke`）拉一张表进 DuckDB → `staging_<库>_<表>` 存在、**行数对得上**
-- 临时 CSV 在成功 / 失败 / 取消三条路径上都被清理
-- 取消时按**导出请求的 id** 叫停导出子进程（假引擎把导出钉成「永远不结束」，时机确定）
+- 真 H2（引擎侧）/ 真 MySQL（桌面侧）拉一张表进 DuckDB → `staging_<库>_<表>` 存在、**行数对得上**
+- **值一字不差**地搬过来
+- 拉取**全程不落盘** —— 拉完之后连一个临时文件都没有（这是「零 CSV 中转」的判据）
+- 拉下来的表**保留远端的类型**（`INT` 落下来还是整数 → `SUM(id)` 直接能跑）
+- 失败的拉取**不留半张表**；失败的**重新**拉取**保住旧表**（事务回滚）
+- 用户取消被报成「取消」而不是「失败」（终止帧上带独立的 `cancelled` 标志）
 - 工作区里跑一条窗口函数聚合 → 结果正确
 - 工作区里 `CREATE TABLE tmp AS SELECT …` **成功**（本地写允许）
 
 ### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest` / `AnalysisSourceTreeTest`）
 
 - 「⊘ 只读」徽标**没有关闭入口**
-- 拉取三段各自标出「已完成 / 进行中 / 待执行」（按**段**寻址，不看颜色）
-- 没有文件时不报大小（不显示「临时文件 0 B」）
+- 拉取时显示「正在拉取 · 已读 N 行」；**界面上不再出现「临时文件」**（联邦直查不落盘）
 - 完成 / 取消 / 失败三种终态各说各的话；**取消不是失败**
 - 进行中**不显示**上一次的终态
 - **结果表没有编辑入口**（`onCellEdit = null` + `cellEditable = false`）——
@@ -658,8 +707,9 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 | 2 | `feat(engine): 只读闸门 —— 会话级 L4 + 方言级 L3，配两级回归测试` | dispatcher 闸门 + `ReadOnlySessionGateTest` + `ReadOnlyDialectTest` | §7.1 / §7.2 全绿，且**变异验证**：去掉闸门后测试变红 | ✅ **已提交** |
 | 3 | `feat(analysis): 分析模式入口 —— 四条只读路由 + 顶层导航 + 不可关闭的只读徽标` | `AnalysisHandler` + 四条路由注册 + `AppDestination.ANALYSIS` + `TopNavBar` + `ReadOnlyBadge` + 主屏骨架 + 能力位声明 + i18n 六语言 | 界面能进；徽标不可关；`AnalysisHandlerIntegrationTest` / `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest` 全绿 | ✅ **本轮落地**（提交标题按此风格） |
 | 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ✅ **本轮落地** |
-| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ✅ **本轮落地** |
-| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ✅ **本轮落地** |
+| 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ✅ **已提交**（**第 7 片已替换**） |
+| 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ✅ **已提交** |
+| 7 | `feat(analysis): 拉取改走 DuckDB 联邦直查 —— 去掉 CSV 中转` | 协议（`PULL_TABLE`）+ 引擎的**纯 Java 表函数** + 幂等注册 + 拉取路由 + 前端改接 + 模型与 i18n 重写 | §7.4 / §7.5 全绿；**变异验证**四处各被抓住 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——
@@ -740,6 +790,31 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 > 于是它无论只读还是可编辑都恒绿 —— 绿得像模像样，却什么都没守住。
 > 换成**结构判据**（「可编辑的单元格才有的标记」不存在）之后才真正有判别力。
 > **一个测不出来的断言等于没有断言**：宁可换判据，也不能留着一条恒绿的。
+>
+> 📌 **第 7 片：拉取链路整个换掉 —— 「导出 CSV → 导入 CSV」→「DuckDB 联邦直查」**
+>
+> 这是**用户指出**的一处设计错误：绕磁盘搬数据是**能跑通但不该这么跑**的做法。
+> 实现上它牵动四层：协议（`PULL_TABLE` + 请求体带远端配置）、引擎（纯 Java 表函数 +
+> 幂等注册 + 拉取路由）、前端（拉取器 / 会话 / 界面件 / i18n）、文档。
+>
+> 实测里最要紧的三条结论（都在 §6.2.3）：
+> 表函数**跨连接可见**（注册一次就够）、**不落盘**（凭据不进文件）、
+> 但**随实例消失**（所以每次拉取前都要幂等地「确保已注册」）。
+>
+> ✅ **第 7 片的变异验证（三处，各被抓住）**：
+>
+> | 变异 | 变红的用例 |
+> |---|---|
+> | 无符号整数**不扩宽**（`INT UNSIGNED` 也落成 32 位 `INTEGER`） | `an unsigned 32 bit integer widens instead of overflowing` + `an unsigned 64 bit integer becomes a decimal` |
+> | 去掉**事务**（`autoCommit` 打开） | `a remote table lands in the workspace…` + `the scanned rows keep their values…` + `a failed re-pull keeps the old table` |
+> | 前端**忽略**终止帧上的 `cancelled` 标志（取消被当成失败） | `the user cancel is reported as a cancel and not as a failure` |
+>
+> 📌 **第二条为什么值得单独记**：一开始的变异是「去掉那句显式的 `rollback()`」，
+> 结果测试**照样绿** —— 因为连接归还给 Hikari 池时它自己会回滚未提交的事务。
+> 也就是说「失败时旧表还在」这条保证，**真正的提供者是连接池的归还回滚**，
+> 不是我们写的那句 `rollback()`。
+> 把变异换成「**去掉事务**」（`autoCommit` 打开）才真正打到了它 ——
+> 这也说明：断言要打在**行为**上，不能打在「我以为是谁在负责」上。
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、
@@ -754,8 +829,9 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 |---|---|
 | **L4 闸门漏了一条写路由** | 写路由清单集中在**一处**函数里（§4.2 的那张表就是它的唯一产地）；测试逐条覆盖 |
 | `ANALYSIS.RUN_QUERY` 被打到远端 | 引擎侧校验 `EMBEDDED_MODE`（§3.4），不靠前端自觉 |
-| 拉取把远端磁盘写满 | CSV 落临时目录 + 面板显示占用（§6.5）；三段路径都清理（§6.3） |
-| 取消拉取后临时目录删不掉（Windows 上文件被占用） | 取消时**先叫停导出子进程**再删目录（§6.3.1），删除带 5 次重试 |
+| 拉取把远端磁盘写满 | **不再落盘** —— 联邦直查没有临时文件（§6.2）；远端那侧的压力由用户自己的库承担，与工具无关 |
+| 取消拉取后**远端查询还在跑** | 取消走 `SYSTEM.CANCEL`（带请求 id）→ 引擎 `cancel()` 掉那条 DuckDB 语句 → 远端连接随事务回滚关闭（§6.5） |
+| 表函数的**类型映射**让整次拉取失败 | 映射的判据是「宁可粗一点，也不要让整次拉取失败」：装不下的类型一律落到更宽的类型或文本（§6.3） |
 | MySQL / PG 进分析模式削弱了安全性 | **这正是 L4 存在的理由**；且 §3.6 的两类回归测试是它的守门人 |
 | 能力位在前后端两处各写一份 | 前端用引擎 `LIST_DRIVERS` 下发的 `DialectInfo.capabilities`，**不另立真相源** |
 
@@ -771,3 +847,7 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
   **还没接**（§6.6.6）。接线形态已定：`AnalysisScreen` 收 `onCopy` / `onExportCsv`
   两个回调，由 `desktopApp` 注入（剪贴板与文件对话框都是平台专属）。
   它**不是** M4 的验收项，所以不阻塞 M2 + M4' 的收尾。
+- **活体联邦**（不落表，直接把远端表 JOIN 进查询）—— 联邦扫描已经具备这个能力
+  （表函数注册在 DuckDB 实例上，SQL 里可以直接引用它），但**没有做界面**：
+  用户得知道函数名与参数形状。本轮先做「拉取落表」这条最常用的路；
+  活体联邦留给下一片（届时表函数要改成**按源注册**并长期驻留）。
