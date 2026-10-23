@@ -229,6 +229,7 @@ class AnalysisPullIntegrationTest {
 
         val puller = puller()
         val requestId = "int-pull-cancel"
+        val progress = mutableListOf<Long>()
 
         val failure =
             assertFailsWith<AnalysisPullCancelledException> {
@@ -240,8 +241,9 @@ class AnalysisPullIntegrationTest {
                         workspacePath = workspacePath,
                         namespace = "PUBLIC",
                         table = "big",
-                    ) { progress ->
-                        if (progress.rows > 0) {
+                    ) { p ->
+                        progress += p.rows
+                        if (p.rows > 0) {
                             // 收到第一帧进度就取消 —— 模拟用户点「取消拉取」。
                             puller.cancelPull(workspaceConfig, requestId)
                         }
@@ -251,5 +253,17 @@ class AnalysisPullIntegrationTest {
         assertEquals("拉取已取消", failure.message)
         // 取消走的是**事务回滚** —— 工作区里不能留下半张表。
         assertFalse(workspaceHasTable("staging_PUBLIC_big"), "取消不能留下半张表")
+        // ## 取消要**打断扫描**，不是「让它跑完再把结果扔掉」
+        //
+        // 只断言「结果是取消」是不够的：引擎完全可以在扫完之后才发现取消标志，
+        // 回滚了事 —— 用户看到的是「取消」，可那 20 万行**白拉了**
+        // （远端的流量、时间全浪费在了一张用户已经不想要的表上）。
+        //
+        // 所以要断言**最后读到的行数远小于总数** —— 扫描真的被打断了。
+        assertTrue(progress.isNotEmpty(), "取消前至少要收到过一帧进度")
+        assertTrue(
+            progress.last() < 200000L,
+            "取消必须打断扫描（最后只读到 ${progress.last()} 行，不该是 20 万行全读完）",
+        )
     }
 }

@@ -123,6 +123,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **数据源树**：工作区 + 远端源 → 命名空间 → 表，**懒加载** | `shared/analysis/SourceTree.kt` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
+| | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
 | | 「⊘ 只读」徽标**不可关闭** | `ReadOnlyBadge` |

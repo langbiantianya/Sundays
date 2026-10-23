@@ -218,6 +218,39 @@ class AnalysisPullFederationTest : H2Fixture() {
         }
 
     @Test
+    fun `the same table can be pulled twice`() =
+        runBlocking {
+            executeUpdate("""CREATE TABLE "twice" (id INT)""")
+            executeUpdate("""INSERT INTO "twice" VALUES (1),(2)""")
+
+            val first =
+                RequestDispatcher
+                    .dispatch(pullRequest("PUBLIC", "twice", "staging_twice"))
+                    .toList()
+                    .last()
+            assertTrue(first.success, "第一次拉取必须成功：${first.error}")
+            assertEquals(2, first.analysis.pull.rows, "第一次的行数")
+
+            // ## 为什么这条用例必须存在
+            //
+            // 表函数注册在 DuckDB **实例**上，**活得比一次拉取久**。
+            // 而它闭包里的连接在第一次拉取结束时就归还连接池了 ——
+            // 于是「同一张表拉第二次」会复用那个**过期**的闭包，
+            // 报 `Connection is closed`（实测）。
+            //
+            // 症状极具迷惑性：第一次好好的，第二次必失败，
+            // 而失败信息指向「连接」，与「拉了两次同一张表」毫无关系。
+            val second =
+                RequestDispatcher
+                    .dispatch(pullRequest("PUBLIC", "twice", "staging_twice"))
+                    .toList()
+                    .last()
+            assertTrue(second.success, "第二次拉取必须成功：${second.error}")
+            assertEquals(2, second.analysis.pull.rows, "第二次的行数")
+            assertEquals(2L, workspaceRows("staging_twice"), "工作区里那张表必须真的有 2 行")
+        }
+
+    @Test
     fun `a missing namespace or table is rejected`() =
         runBlocking {
             val noNamespace =

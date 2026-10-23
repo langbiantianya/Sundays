@@ -1,6 +1,19 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.1** · 2026-10-23
+> **状态**：设计冻结待评审 · **v1.2** · 2026-10-23
+>
+> **v1.2 相对 v1.1 的修改**（第 8 片：原生扫描器作为**可选加速**；
+> 实现细节见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2.7）：
+>
+> 1. **§2.4 的方案表补上 E（原生扫描器）**，并**更正** A 的一处说法 ——
+>    「DuckDB 的 extension 要联网下载，内网必挂」**是错的**：
+>    `mysql_scanner` / `postgres_scanner` **静态链接在 JDBC 驱动里**
+>    （`duckdb_extensions()` 的 `installed_from = core`）。
+>    纯 Java 表函数当默认路径的真正理由因此变成**覆盖面**（任何有 JDBC 驱动的源）。
+> 2. **原生那条路默认关**（`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）——
+>    两条路的**类型映射不同**，「装没装扩展」不该隐式决定用户拿到的类型；
+>    走不通就**降级**回纯 Java，用户看到的仍是「拉取成功」。
+> 3. **§11 的 M4 条目补上「第 8 片已落地」说明**。
 >
 > **v1.1 相对 v1.0 的修改**（拉取链路换成 DuckDB 联邦直查；实现细节见
 > [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md)）：
@@ -286,10 +299,11 @@ AI 也不例外——AI 只能产出 `ReportSpec`（含 SQL），不能直接产
 
 | 方案 | 做法 | 优点 | 缺点 | 结论 |
 |---|---|---|---|---|
-| **A. DuckDB extension 直连** | DuckDB 的 `hive` / `httpfs` extension 直接读远端 | 无中转、快 | extension 要**联网下载**，内网/离线必挂；Impala **没有**对应 extension | ❌ 不做 |
+| **A. DuckDB extension 直连** | DuckDB 的 `hive` / `httpfs` extension 直接读远端 | 无中转、快 | Impala **没有**对应 extension；`hive` extension 不随 JDBC 驱动发布，要另行准备 | ⚠️ **部分可用**（见下） |
 | **B. 应用层流式搬运** | 引擎里逐行 `ResultSet` → DuckDB 批量 insert | 不依赖 extension | 要自己写搬运与类型映射 | ⏳ 作为二期优化 |
 | **C. 复用现成导出/导入链路** | 远端 `EXPORT` → CSV → DuckDB `IMPORT` | **链路已存在且有测试**，零新协议，带进度与取消 | 多一次磁盘往返 | ⚠️ **初稿采用，实施期被 D 替换** |
-| **D. DuckDB 纯 Java 表函数（联邦直查）** | 把远端的一条 JDBC 查询注册成 DuckDB 里的**一张表**，然后 `CREATE TABLE … AS SELECT * FROM <它>` | **不落盘**、不绕 CSV、**保留远端的类型**；只用**已随包发布**的 JDBC 驱动（不联网） | 要写一个表函数（类型映射 + 分块写出） | ✅ **实施期采用** |
+| **D. DuckDB 纯 Java 表函数（联邦直查）** | 把远端的一条 JDBC 查询注册成 DuckDB 里的**一张表**，然后 `CREATE TABLE … AS SELECT * FROM <它>` | **不落盘**、不绕 CSV、**保留远端的类型**；只用**已随包发布**的 JDBC 驱动（不联网） | 要写一个表函数（类型映射 + 分块写出） | ✅ **实施期采用（默认路径）** |
+| **E. 原生扫描器（`ATTACH`）** | `ATTACH 'mysql://…' (TYPE mysql_scanner, READ_ONLY)`，再 `CREATE TABLE … AS SELECT` | 少一次拷贝；类型用 DuckDB 官方规则 | 只覆盖 MySQL / PostgreSQL；**类型映射与 D 不同**（跨机器会不一致）；没有逐行进度 | ⚠️ **可选加速，默认关**（第 8 片） |
 
 **初稿选 C，理由很实际**：`EXPORT.RUN_EXPORT`（[engine/handlers/ExportHandler.kt](../../engine/src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt)）
 与 `IMPORT.RUN_IMPORT`（[engine/handlers/ImportHandler.kt](../../engine/src/main/kotlin/com/langbiantianya/handlers/ImportHandler.kt)）
@@ -315,6 +329,21 @@ AI 也不例外——AI 只能产出 `ReportSpec`（含 SQL），不能直接产
 > 而 DuckDB 自带的 `mysql_scanner` / `postgres_scanner` 扩展**要联网下载** ——
 > 内网部署装不上。所以我们走**纯 Java 表函数**：只用**已经随包发布**的 JDBC 驱动，
 > 任何有 JDBC 驱动的数据源都能接（MySQL / PostgreSQL / SQLite，将来还有 Hive）。
+
+> ⚠️ **v1.2：上面那段「要联网下载」的说法已被实测推翻**（第 8 片）——
+> DuckDB JDBC 1.5.5.1 把 `mysql_scanner` / `postgres_scanner`
+> **静态链接**进了驱动本体（`duckdb_extensions()` 里 `installed_from = core`），
+> 把扩展目录全指到空目录也照样 `LOAD` 得起来。所以**不需要额外安装**。
+>
+> 真正的理由于是变成**覆盖面**：原生扫描器只覆盖 MySQL / PostgreSQL，
+> 而纯 Java 表函数只要求「有 JDBC 驱动」（SQLite、H2，将来的 Hive 都行）。
+>
+> 原生那条路作为**可选加速**保留（方案 E）：显式打开
+> （`SUNDAYS_DUCKDB_NATIVE_EXT=1`）才用，走不通就**降级**回 D。
+> **默认关**的理由是**类型映射**：两条路落出来的类型不一样
+> （`SMALLINT` → 原生 `SMALLINT` / 我们 `INTEGER`），
+> 「装没装扩展」不该隐式决定用户拿到的类型。细节见
+> [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2.7。
 
 ---
 
@@ -439,6 +468,15 @@ L4 的落法：
 >   闸门会先拦下来）。
 > - **远端的凭据在请求体里，不在 SQL 文本里** —— 引擎把它变成一条**只发 SELECT**
 >   的 JDBC 连接：调用方能传的只有「选哪张表」，不可能是「执行什么语句」。
+>
+> ✅ **v1.2：拉取有**两条后端**（默认纯 Java 表函数，原生扫描器是可选加速）** ——
+> 实现见 [`NativeExtensionScanner.kt`](../../engine/src/main/kotlin/com/langbiantianya/analysis/NativeExtensionScanner.kt)。
+>
+> - **原生那条路默认关**（`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）——
+>   两条路的**类型映射不同**，「装没装扩展」不该隐式决定用户拿到的类型。
+> - **走不通就降级**（这个方言没有扫描器 / 连接串拼不出来 / 挂载失败）——
+>   用户看到的是「拉取成功」，不是「你的扩展没装」。
+> - **原生路径没有逐行进度**（DuckDB 的 CTAS 不吐行数），只在落地后报一次总数。
 
 `Category.REPORT` 下：
 
@@ -1757,10 +1795,26 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 > （`INT` 落下来还是整数，`SUM(id)` 直接能跑，不必再 `TRY_CAST`）。
 > 实现见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2~§6.5。
 >
+> ✅ **v1.2：第 8 片已落地（原生扫描器作为**可选加速**）** ——
+> 拉取有**两条后端**：默认仍是纯 Java 表函数；
+> 显式打开（`SUNDAYS_DUCKDB_NATIVE_EXT=1`）且扩展可用时改走
+> DuckDB 的原生扫描器（`ATTACH` + `CREATE TABLE … AS SELECT`），
+> 走不通就**降级**回纯 Java。
+> **默认关**是因为两条路的**类型映射不同**（`SMALLINT` → 原生 `SMALLINT` /
+> 我们 `INTEGER`）—— 「装没装扩展」不该隐式决定用户拿到的类型。
+>
+> 这一片还修掉了两个**实测抓出来的真 bug**：
+> ① **同一张表拉第二次必失败**（表函数闭包握着已归还的连接 → 改成
+> **无状态** + 每次拉取现给上下文）；
+> ② **取消打不中**（DuckDB 的 `Statement.cancel()` 只认「本语句上正在跑的查询」，
+> 拿一条新语句去 cancel 是**空操作** → 改成取消**正在跑的那条**）。
+> 实现见 [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) §6.2.4 / §6.2.7 / §6.5。
+>
 - **交付**
   - DuckDB 工作区（**复用 `dialect-duckdb`，零新方言**）
   - 拉取链路：**DuckDB 联邦直查**远端 JDBC 源 → 工作区表（§3.5 的 `PULL_TABLE`；
-    **零 CSV 中转、零临时文件**）
+    **零 CSV 中转、零临时文件**）—— 可选切到 DuckDB 的**原生扫描器**（默认关，
+    走不通自动降级回纯 Java 表函数）
   - SQL 编辑（复用 `CodeEditor`）+ 结果表（复用 `DataTable`，**只读用法见 §6.3.3**）
   - `SourceTree`（§6.4-1）+ `PullProgressIndicator`（§6.4-5，拉取进度）
   - 结果表右键菜单（复制 / 导出为 CSV）—— ⏳ **还没接**（§6.3.3 的用法表里的一行；

@@ -302,8 +302,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | 文件 | 内容 |
 |---|---|
 | `engine/.../analysis/AnalysisHandler.kt` | `ANALYSIS` 五个路由的实现（含 `executePull` —— 联邦直查的编排） |
-| `engine/.../analysis/JdbcScanTableFunction.kt` | **纯 Java 表函数**：把一条 JDBC 查询变成 DuckDB 里的一张表（类型映射 + 单线程 + 分块写出） |
-| `engine/.../analysis/JdbcScanRegistry.kt` | 表函数的**幂等注册**（名字由远端配置派生、查重、并发安全） |
+| `engine/.../analysis/JdbcScanTableFunction.kt` | **纯 Java 表函数**：把一条 JDBC 查询变成 DuckDB 里的一张表（类型映射 + 单线程 + 分块写出）。**无状态** —— 每次扫描的上下文由句柄给出（§6.2.4） |
+| `engine/.../analysis/JdbcScanRegistry.kt` | 表函数的**幂等注册**（固定名 `jdbc_scan` + 查重 + 并发安全）与**扫描句柄表**（句柄 → 本次扫描的上下文） |
+| `engine/.../analysis/NativeExtensionScanner.kt` | **可选加速**：原生扫描器的挂载 / 建表 / 摘除三段式（§6.2.7）。默认**关** |
 | `engine/.../dispatcher/RequestDispatcher.kt` | **改动**：L4 闸门 + 五条新路由（`PULL_TABLE` 走流式路径） |
 | `engine/.../handlers/ExportHandler.kt` / `ImportHandler.kt` | **零改动**（浏览模式的导出 / 导入还在用；分析模式的拉取不再走它们） |
 
@@ -314,8 +315,10 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../integration/ReadOnlySessionGateTest.kt` | §3.6 的**会话级**回归测试 | ✅ 已落地 |
 | `engine/.../integration/ReadOnlyDialectTest.kt` | §3.6 的**方言级**回归测试 | ✅ 已落地 |
 | `engine/.../integration/AnalysisHandlerIntegrationTest.kt` | 四条路由的集成测试：命名空间分派（schema 型 / 库型）/ 行数截断 / 远端方言被拒 / 只读会话里照常可列 | ✅ 已落地 |
-| `engine/.../analysis/AnalysisPullFederationTest.kt` | **联邦直查的端到端**（真 H2 远端 → 真 DuckDB 工作区）：表真的落进工作区 / 值一字不差 / 失败**不留半张表** / 失败的重新拉取**保住旧表**（事务回滚）/ 缺参数被拒 | ✅ 已落地（第 7 片，5 例） |
+| `engine/.../analysis/AnalysisPullFederationTest.kt` | **联邦直查的端到端**（真 H2 远端 → 真 DuckDB 工作区）：表真的落进工作区 / 值一字不差 / 失败**不留半张表** / 失败的重新拉取**保住旧表**（事务回滚）/ 缺参数被拒 / **同一张表拉两次**（第 8 片：表函数必须无状态） | ✅ 已落地（第 7 片 5 例 + 第 8 片 1 例，共 6 例） |
 | `engine/.../analysis/JdbcScanTypeMappingTest.kt` | **类型映射**：整数按宽度选（无符号 32 位落到 64 位、无符号 64 位落到 `DECIMAL(20,0)`）、超范围的 DECIMAL 落成文本、未知精度落成文本、每种 kind 都有对应的 DuckDB 类型 | ✅ 已落地（第 7 片，8 例） |
+| `engine/.../analysis/NativeExtensionScannerTest.kt` | **原生扫描器的纯规则**：默认关、方言 → 扫描器映射、MySQL 的 URI 不带库、PG 的 URI 带库、凭据百分号编码、扩展目录（显式配置以配置为准） | ✅ 已落地（第 8 片，8 例） |
+| `engine/.../analysis/AnalysisPullNativeFallbackTest.kt` | **降级**（H2 没有扫描器 → 原生那条路确定走不通）：拉取照样成功、类型是**我们的**映射、开关不改变结果 | ✅ 已落地（第 8 片，2 例） |
 | `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
@@ -435,30 +438,71 @@ CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>()
 
 #### 6.2.2 为什么用**纯 Java 表函数**，而不是 DuckDB 的原生扩展
 
-DuckDB 自带 `mysql_scanner` / `postgres_scanner`，`ATTACH ... (TYPE mysql)` 就能把远端
-挂进来 —— 但那些扩展要**联网下载**（`INSTALL mysql`），而本项目的部署形态是**内网**：
-装不上就是一条死路。
+DuckDB 自带 `mysql_scanner` / `postgres_scanner`，
+`ATTACH ... (TYPE mysql_scanner, READ_ONLY)` 就能把远端挂进来 ——
+走原生那条路，数据从远端**直接**进 DuckDB，少一次拷贝
+（纯 Java 那条是「远端 → Java → DuckDB」）。
 
-**纯 Java 表函数**没有这个前提：它只用**已经随包发布**的 JDBC 驱动，
-于是任何有 JDBC 驱动的数据源都能接（MySQL / PostgreSQL / SQLite，
-将来还有 Hive —— 只要 `hive-jdbc` 在手上）。
+> ⚠️ 初稿这里写的是「那些扩展要**联网下载**（`INSTALL mysql`），内网装不上」——
+> **那是错的**（第 8 片实测推翻）：DuckDB JDBC 1.5.5.1 把这两个扫描器
+> **静态链接**进了驱动本体（官方叫 core extension）：
+>
+> ```
+> SELECT extension_name, installed_from, install_path FROM duckdb_extensions();
+> -- mysql_scanner | core | <extension_directory>\v1.5.5\windows_amd64\mysql_scanner.duckdb_extension
+> ```
+>
+> `installed_from = core` 意味着它**不来自磁盘上的文件** ——
+> 把 `extension_directory` 与 `extension_directories` 全指到一个**空目录**，
+> `LOAD mysql_scanner` 照样成功（实测）。
+> 所以对 JDBC 驱动来说，**不需要额外安装**。
 
-> 实测（本机 DuckDB 1.5.5.1）：
-> `INSTALL mysql` **能**联网装上，`ATTACH 'mysql://user:pass@host:3306/db' (TYPE mysql)`
-> 也能直接查远端表；但那是**要联网**的路径，内网部署用不了。
-> 纯 Java 表函数两条路都不需要 —— 它连 DuckDB 的原生扩展都不用。
+**真正的理由是覆盖面**：原生扫描器只覆盖 MySQL / PostgreSQL，
+而纯 Java 表函数只要求「有 JDBC 驱动」—— SQLite、H2，
+将来的 Hive（只要 `hive-jdbc` 在手上）都能走同一条路。
 
-#### 6.2.3 表函数的三条实测结论
+原生那条路作为**可选加速**另开一扇门（见 §6.2.6），但**默认**走纯 Java ——
+因为它的类型映射是**我们自己定的**，跨机器一致。
 
-写之前先在真驱动上验过三件事（结论直接决定了实现形状）：
+#### 6.2.3 表函数的五条实测结论
+
+写之前先在真驱动上验过五件事（结论直接决定了实现形状）：
 
 | 问题 | 实测结论 | 对实现的影响 |
 |---|---|---|
 | 表函数**跨连接**可见吗？ | **可见** —— 同一 `.duckdb` 文件的**另一条连接**照样能查到它 | 注册一次就够，不用逐条连接注册 |
 | 它会**落盘**吗？ | **不会** —— `.duckdb` 文件里既没有函数名，也没有闭包里的凭据 | 凭据只在内存里，不进文件 |
 | 实例没了它还在吗？ | **不在** —— 它活在 DuckDB **实例**上 | 每次拉取前都要「确保已注册」（幂等） |
+| 同一个名字能注册两次吗？ | **不能** | 查重后再注册，并发撞名要能吞掉 |
+| 它能撑过**两次拉取**吗？ | **不能** —— 注册进去的函数**活得比一次拉取久**，闭包里的连接第一次拉完就归还连接池了 | 注册进去的函数必须**无状态**（见 §6.2.4） |
 
-#### 6.2.4 远端**只读**是由「构造」保证的
+#### 6.2.4 注册进去的表函数必须**无状态**
+
+第 7 片把「连接 + SQL + 进度回调」直接塞进了注册的闭包里，
+于是**同一张表拉第二次必失败**（`Connection is closed`）——
+症状极具迷惑性：第一次好好的，第二次必失败，
+而失败信息指向「连接」，与「拉了两次同一张表」毫无关系。
+
+第 8 片改成：**每次拉取现给一份上下文**（连接 / SQL / 进度回调），
+用一个**句柄**（字符串）指出来，句柄作为 **SQL 参数**传进表函数：
+
+```sql
+CREATE TABLE <落点> AS SELECT * FROM jdbc_scan('scan-42')
+```
+
+表函数只在**绑定那一刻**按句柄去取上下文（绑定数据里存的是那一批的具体东西）。
+于是：
+
+- 注册进去的函数**无状态** → 实例的目录里永远只有一条 `jdbc_scan`，
+  不会随着拉的次数堆积；
+- 凭据**不在注册物里**（每次现给）→ 改密码不需要重新注册；
+- 同一个表拉第几次都拿到**这一次**的连接 ✓。
+
+> 实测：表函数的**位置参数索引是 0 基**的（`getParameter(0)` 取到第一个参数），
+> 且**一条语句执行失败后，那条语句就被关闭了**（后续调用报 `Statement was closed`）——
+> 所以任何一个阶段失败都得**换一条新语句**继续。
+
+#### 6.2.5 远端**只读**是由「构造」保证的
 
 扫描函数**不接受**调用方传入的 SQL —— 它只执行引擎自己拼的那一句
 `SELECT * FROM <命名空间>.<表>`。也就是说：即使这条链路上某处有 bug，
@@ -467,13 +511,59 @@ DuckDB 自带 `mysql_scanner` / `postgres_scanner`，`ATTACH ... (TYPE mysql)` �
 这比「会话级只读开关」更强：开关靠**每个写入口**都记得检查，
 而这里**压根没有写入口**。
 
-#### 6.2.5 凭据**不进 SQL 文本**
+#### 6.2.6 凭据**不进 SQL 文本**
 
 远端连接配置（含密码）在**请求体**里（`AnalysisPullRequest.remote`），
 引擎把它变成一条**只发 SELECT** 的 JDBC 连接。
 
 请求 id 由**前端**生成 —— 取消时「叫停引擎那边正在跑的拉取」要靠它
 （引擎是另一个进程，取消前端协程并不会让它停下来；见 §6.5）。
+
+#### 6.2.7 原生扫描器：**可选加速**（默认关）
+
+| 旋钮 | 系统属性 | 环境变量 | 默认 |
+|---|---|---|---|
+| 是否允许用原生扫描器 | `sundays.duckdb.nativeExtension` | `SUNDAYS_DUCKDB_NATIVE_EXT` | **关** |
+| 扩展搜索目录（`;` 分隔） | `sundays.duckdb.extensionDirs` | `SUNDAYS_DUCKDB_EXTENSION_DIRS` | 应用自带目录 + DuckDB 默认的用户目录 |
+
+**为什么默认关**：两条路的**类型映射不一样**（见 §6.3 的对照表）。
+如果「走哪条路」能**隐式**决定类型，同一张表在两台机器上拉出来类型就可能不同 ——
+那正是「同一个判据写两遍，迟早会不一致」。所以做成**显式开关**：
+默认永远是纯 Java 表函数（行为一致），要性能的用户自己开。
+
+**降级**：原生那条路走不通（这个方言没有扫描器 / 连接串拼不出来 / 挂载失败）
+就**降级**回纯 Java 表函数 —— 用户看到的是「拉取成功」，不是「你的扩展没装」。
+
+**三段式，顺序不能换**：
+
+| 阶段 | 在事务里吗 | 做什么 |
+|---|---|---|
+| 挂载 | **否** | `SET extension_directories` → `LOAD` → `ATTACH … (TYPE mysql_scanner, READ_ONLY)` |
+| 建表 | **是** | `DROP TABLE IF EXISTS` → `CREATE TABLE … AS SELECT * FROM <别名>."<库>"."<表>"` |
+| 摘除 | **否** | `DETACH <别名>` |
+
+**摘除必须在提交之后**（实测）：
+
+```
+TransactionContext Error: Cannot detach database "m" because the current
+transaction has outstanding work on it - commit or rollback first
+```
+
+而这条错误**会中止事务** → 提交落空 → **建出来的表整张消失**
+（症状：「拉取报成功、行数也对，可工作区里查不到那张表」——
+`duckdb_tables()` 是空的）。第 8 片的第一版就栽在这儿。
+
+**必须摘除**：挂着的远端会留在 DuckDB 的目录表里，而那条记录的 `path`
+**含明文密码**（实测：`mysql://root:666666@…`）——
+用户在编辑器里 `SELECT * FROM duckdb_databases()` 就能看见。
+
+**原生路径没有实时行数进度**：DuckDB 的 `CREATE TABLE … AS SELECT` 不吐行数，
+JDBC 也没有公开的进度接口 —— 所以只在落地之后报一次总数。
+
+**限定名**：MySQL 挂载（URI 不带库）时，扫描器把服务器上的**所有库**
+都挂成该挂载点下的 schema，于是限定名统一是 `别名."<库>"."<表>"`；
+PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
+「带不带库」的判据就是既有的 `DatabaseDialect.supportsSchema`。
 
 ### 6.3 类型映射：**宁可粗一点，也不要让整次拉取失败**
 
@@ -496,6 +586,20 @@ DuckDB 自带 `mysql_scanner` / `postgres_scanner`，`ATTACH ... (TYPE mysql)` �
 > `INT` 落下来还是整数，于是 `SUM(id)` **直接就能跑**，
 > 不必再 `TRY_CAST`（那套「原始层存文本、类型由下游建模」的约定随 CSV 一起消失了）。
 
+> **两条路的类型映射不一样**（原生扫描器用 DuckDB 官方规则，上表是我们的规则）：
+>
+> | 远端列 | 原生扫描器 | 纯 Java 表函数（**默认**） |
+> |---|---|---|
+> | `SMALLINT` | `SMALLINT` | `INTEGER` |
+> | `INT UNSIGNED` | `UINTEGER` | `BIGINT` |
+> | `BIGINT UNSIGNED` | `UBIGINT` | `DECIMAL(20,0)` |
+> | `TINYINT(1)` | `BOOLEAN` | `BOOLEAN` ← **不区分** |
+>
+> ⚠️ `TINYINT(1)` **不能**用来判断「走的是哪条路」：MySQL Connector/J 把它
+> 报成 `Types.BIT`（`tinyInt1isBit` 默认开），于是**两条路都是 BOOLEAN**。
+> 真正能区分的是**宽度**（`SMALLINT`）—— 第 8 片一开始就是拿 `TINYINT(1)`
+> 当判据，结论「原生把它落成 BOOLEAN」看着对，其实**两边都一样**。
+
 ### 6.4 半张表不会留下
 
 `DROP TABLE IF EXISTS` 与 `CREATE TABLE … AS SELECT` 包在**一个事务**里
@@ -513,14 +617,27 @@ DuckDB 自带 `mysql_scanner` / `postgres_scanner`，`ATTACH ... (TYPE mysql)` �
 - **进度**：引擎每读完一批远端行推一帧（`AnalysisPullProgressFrame`），
   界面显示「正在拉取，已读 N 行」。**只有一段** —— 联邦直查没有
   「导出 / CSV / 导入」那种阶段可分（那三段是绕磁盘逼出来的）。
+  （走原生扫描器时**没有**逐帧进度 —— DuckDB 的 CTAS 不吐行数，
+  只在落地之后报一次总数。）
 - **取消**：两件事一起做 ——
   ① 取消前端协程（不再等结果）；② 给引擎发一条 `SYSTEM.CANCEL`，
-  带上**这次请求的 id**。引擎那边 `StatementRegistry` 找到那条 DuckDB 语句，
+  带上**这次请求的 id**。引擎那边 `StatementRegistry` 找到**正在跑的那条语句**，
   `cancel()` 掉它 → 事务回滚 → 终止帧带上 `cancelled` 标志。
 - **取消不是失败**：终止帧上有一个**独立的布尔**（`AnalysisPullResponse.cancelled`），
   前端据此抛 `AnalysisPullCancelledException`（与协程的 `CancellationException` 分开），
   界面显示「拉取已取消」而不是「拉取失败：…」。
   靠**比对错误文本**判断取消那种写法，在文案一改就会失效。
+
+> ⚠️ 取消要打在**正在跑的那条语句**上（DuckDB JDBC 实测）：
+> `Statement.cancel()` 的第一件事是 `if (!stmtRefLock.isLocked()) return;` ——
+> 拿一条**新**语句去 cancel 是**空操作**（取消发出去，拉取照跑到底，还报「成功」）。
+> 所以引擎把「本次事务正在用的那条语句」登记给 `StatementRegistry`，
+> 取消时打的就是它。
+>
+> 取消也可能落在**扫描开始之前**（那时还没有语句可打断）——
+> 所以提交前还要再看一眼取消标志：取消了就**回滚**（不留表）并收成「取消」。
+> 光看「结果是取消」不够：引擎完全可以在扫完之后才发现标志、回滚了事 ——
+> 用户看到的是「取消」，可那 20 万行**白拉了**。
 
 ### 6.6 数据源树（第 6 片）
 
@@ -709,7 +826,8 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 | 4 | `feat: 分析工作台 —— DuckDB 本地工作区与状态机` | `AnalysisSession` + 工作区文件管理 + staging 表名 | 工作区能建表、能跑 SQL | ✅ **本轮落地** |
 | 5 | `feat: 拉取链路 —— 远端 EXPORT 到工作区 IMPORT` | 三段编排 + `PullStageIndicator` + 临时 CSV 清理 | §7.4 全绿 | ✅ **已提交**（**第 7 片已替换**） |
 | 6 | `feat: 分析工作区界面 —— SourceTree 与只读结果表` | `SourceTree` + 结果表只读 + 编辑器接通 | §7.5 全绿；端到端可截图 | ✅ **已提交** |
-| 7 | `feat(analysis): 拉取改走 DuckDB 联邦直查 —— 去掉 CSV 中转` | 协议（`PULL_TABLE`）+ 引擎的**纯 Java 表函数** + 幂等注册 + 拉取路由 + 前端改接 + 模型与 i18n 重写 | §7.4 / §7.5 全绿；**变异验证**四处各被抓住 | ✅ **本轮落地** |
+| 7 | `feat(analysis): 拉取改走 DuckDB 联邦直查 —— 去掉 CSV 中转` | 协议（`PULL_TABLE`）+ 引擎的**纯 Java 表函数** + 幂等注册 + 拉取路由 + 前端改接 + 模型与 i18n 重写 | §7.4 / §7.5 全绿；**变异验证**四处各被抓住 | ✅ **已提交** |
+| 8 | `feat(analysis): 原生扫描器作为可选加速 —— 顺带修掉两个真 bug` | 引擎的 `NativeExtensionScanner`（三段式）+ 表函数改**无状态**（句柄参数）+ 取消打在**正在跑的语句**上 + 文档 | §7.4 / §7.5 全绿；**变异验证**四处各被抓住 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——
@@ -815,6 +933,40 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 > 不是我们写的那句 `rollback()`。
 > 把变异换成「**去掉事务**」（`autoCommit` 打开）才真正打到了它 ——
 > 这也说明：断言要打在**行为**上，不能打在「我以为是谁在负责」上。
+>
+> 📌 **第 8 片：原生扫描器作为**可选加速**，顺带修掉两个真 bug**
+>
+> 落点是**引擎侧**（前端零改动）：拉取多一条后端 ——
+> 显式打开（`SUNDAYS_DUCKDB_NATIVE_EXT=1`）且扩展可用时走
+> DuckDB 的原生扫描器（`ATTACH` + `CREATE TABLE … AS SELECT`），
+> 走不通就**降级**回纯 Java 表函数。**默认关** —— 两条路的**类型映射不同**，
+> 「装没装扩展」不该隐式决定用户拿到的类型。
+>
+> 实测推翻了初稿的两处说法：「DuckDB 的 extension 要联网下载」**是错的**
+> （它们**静态链接在 JDBC 驱动里**）；「`TINYINT(1)` 能用来判断走的是哪条路」
+> **也是错的**（Connector/J 把它报成 `Types.BIT`，**两条路都是 BOOLEAN**）。
+> 真能区分的是**宽度**（`SMALLINT`）。
+>
+> 这一片还修掉两个**实测抓出来的真 bug**：
+> ① **同一张表拉第二次必失败**（表函数闭包握着已归还的连接 → 改成**无状态**，
+> 每次拉取现给上下文，用**句柄**当 SQL 参数传进去）；
+> ② **取消打不中**（DuckDB 的 `Statement.cancel()` 只认「本语句上正在跑的查询」，
+> 拿一条新语句去 cancel 是**空操作** → 改成取消**正在跑的那条**）。
+>
+> ✅ **第 8 片的变异验证（四处，各被抓住）**：
+>
+> | 变异 | 变红的用例 |
+> |---|---|
+> | 原生那条路走不通时**不降级**（直接失败） | `the pull falls back to the pure java scan…` + `turning the native scanner on does not change the result…` |
+> | 取消改回「拿一条**新**语句去 cancel」 | `the user cancel is reported as a cancel and not as a failure`（加强后：还断言**扫描真的被打断**了） |
+> | `DETACH` 挪回**事务里**（提交之前） | `the native scanner is used when it is enabled and available`（表整张消失） |
+> | 表函数**永远用第一次的上下文** | `the same table can be pulled twice` + 另外两条联邦用例 |
+>
+> 📌 **第三条为什么值得单独记**：取消那一例一开始**抓不住**那个变异 ——
+> 因为「提交前再看一眼取消标志」这条兜底把结果也收成了「取消」。
+> 于是把断言加强成「**扫描真的被打断**」（最后读到的行数远小于总数），
+> 变异才现形。
+> **断言要打在「行为真的发生了」上**，而不只是「结果看起来对」。
 
 **文档同步**（每次提交内）：`docs/analysis-mode/README.md`（§3.5 路由表 / §5.5 能力位 /
 §13 Q3 决策记录 / §11 里程碑状态）、`shared/ARCHITECTURE.md`、
@@ -832,6 +984,7 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 | 拉取把远端磁盘写满 | **不再落盘** —— 联邦直查没有临时文件（§6.2）；远端那侧的压力由用户自己的库承担，与工具无关 |
 | 取消拉取后**远端查询还在跑** | 取消走 `SYSTEM.CANCEL`（带请求 id）→ 引擎 `cancel()` 掉那条 DuckDB 语句 → 远端连接随事务回滚关闭（§6.5） |
 | 表函数的**类型映射**让整次拉取失败 | 映射的判据是「宁可粗一点，也不要让整次拉取失败」：装不下的类型一律落到更宽的类型或文本（§6.3） |
+| 挂载的远端把**明文密码**留在工作区里 | 挂载点摘除在**提交之后**（事务里 DETACH 会中止事务 → 提交落空 → 表消失，§6.2.7）；摘不掉只记日志 —— 下一轮的别名是新的，不会撞名 |
 | MySQL / PG 进分析模式削弱了安全性 | **这正是 L4 存在的理由**；且 §3.6 的两类回归测试是它的守门人 |
 | 能力位在前后端两处各写一份 | 前端用引擎 `LIST_DRIVERS` 下发的 `DialectInfo.capabilities`，**不另立真相源** |
 

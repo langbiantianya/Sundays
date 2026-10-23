@@ -35,20 +35,24 @@ import java.sql.Types
  * 于是「拉一张远端表」在引擎侧就是一句：
  *
  * ```sql
- * CREATE TABLE staging_x AS SELECT * FROM jdbc_scan_xxx()
+ * CREATE TABLE staging_x AS SELECT * FROM jdbc_scan('scan-42')
  * ```
  *
  * 没有临时文件、没有 CSV、没有编码往返。
  *
  * ## 为什么用**纯 Java** 表函数，而不是 DuckDB 的原生扩展
  *
- * DuckDB 自带 `mysql_scanner` / `postgres_scanner` 等原生扩展，
- * `ATTACH ... (TYPE mysql)` 就能把远端挂进来 —— 但那些扩展要**联网下载**
- * （`INSTALL mysql`），而本项目的部署形态是**内网**：装不上就是一条死路。
+ * 原生扫描器（`mysql_scanner` / `postgres_scanner`）也有，
+ * 而且它们**随 JDBC 驱动一起**发布（静态链接在驱动本体里，见
+ * [NativeExtensionScanner] 的文件头）—— 所以「装不上扩展」从来不是理由。
  *
- * 纯 Java 表函数没有这个前提：它只用**已经随包发布**的 JDBC 驱动，
- * 于是任何有 JDBC 驱动的数据源都能接（MySQL / PostgreSQL / SQLite，
- * 将来还有 Hive —— 只要 `hive-jdbc` 在手上）。
+ * 真正的理由是**覆盖面**：原生扫描器只覆盖 MySQL / PostgreSQL，
+ * 而纯 Java 表函数只要求「有 JDBC 驱动」—— SQLite、H2，
+ * 将来的 Hive（只要 `hive-jdbc` 在手上）都能走同一条路。
+ *
+ * 原生那条路作为**可选加速**另开一扇门（见 [NativeExtensionScanner]），
+ * 但**默认**走的是这条 —— 因为它的类型映射是**我们自己定的**，
+ * 跨机器一致。
  *
  * ## 安全边界：远端**只读**是由「构造」保证的
  *
@@ -60,6 +64,38 @@ import java.sql.Types
  * 这比「会话级只读开关」更强：开关靠**每个写入口**都记得检查，
  * 而这里压根没有写入口。
  */
+
+/**
+ * 一次扫描的上下文 —— **每次拉取现给一份**。
+ *
+ * ## 为什么不能把它塞进「注册好的那个函数」里
+ *
+ * 表函数注册在 DuckDB **实例**上，生命周期比一次拉取长得多。
+ * 而它闭包里的东西会**过期**：
+ *
+ * - 闭包里的 `Connection` —— 拉取一结束就归还给连接池了，
+ *   于是「同一张表拉第二次」会撞上 `Connection is closed`（实测）；
+ * - 闭包里的进度回调 —— 第二次拉取的进度会报到**第一次**那个回调上去。
+ *
+ * 所以上下文必须**每次拉取现给**，而表函数只在**绑定的那一刻**取走它
+ * （绑定数据里存的是那一批的具体东西：结果集 + 列映射 + 回调）。
+ *
+ * 「这次是哪一个上下文」的凭据是一个**句柄**（字符串），
+ * 通过 SQL 参数传给表函数：`SELECT * FROM jdbc_scan('scan-42')`。
+ * 句柄由 [JdbcScanRegistry] 保管 —— 参数里能传的只有字符串，
+ * 真正的东西（连接、回调）留在引擎这一侧。
+ *
+ * @param connection 远端连接 —— **由调用方借出并负责归还**（本类不关它）。
+ *   理由：连接的归还时机必须由**发起方**决定 —— 只有它知道扫描什么时候真的结束了
+ *   （取消 / 异常都可能让扫描半途而废，而那时调用方还握着 finally）。
+ * @param selectSql 要执行的 SELECT —— **必须**由调用方按「只读」的形状拼好。
+ * @param onChunk 每读完一块的回调（累计行数）
+ */
+internal class ScanContext(
+    val connection: Connection,
+    val selectSql: String,
+    val onChunk: (Long) -> Unit,
+)
 
 /** 联邦扫描的列 —— JDBC 类型 → DuckDB 类型的映射结果。 */
 internal enum class ScanColumnKind {
@@ -106,25 +142,41 @@ internal class JdbcScanInitData
 /**
  * 把一条 JDBC 查询注册成 DuckDB 的表函数。
  *
- * @param connection 远端连接 —— **由调用方借出并负责归还**（本类不关它）。
- *   理由：连接的归还时机必须由**发起方**决定 —— 只有它知道扫描什么时候真的结束了
- *   （取消 / 异常都可能让扫描半途而废，而那时调用方还握着 finally）。
- * @param selectSql 要执行的 SELECT —— **必须**由调用方按「只读」的形状拼好。
- * @param onChunk 每读完一块的回调（累计行数）
+ * ## 这个函数是**无状态**的
+ *
+ * 它**不**持有连接、SQL、回调 —— 那些都是**每次拉取**的东西，
+ * 由 SQL 参数里的**句柄**指出来（见 [ScanContext]）。
+ *
+ * 这么做的原因：注册在 DuckDB 实例上的函数**活得比一次拉取久**，
+ * 闭包里的连接和回调会过期（第一次拉取一结束，连接就还回池了 ——
+ * 于是「同一张表拉第二次」会撞上 `Connection is closed`，实测）。
+ *
+ * 无状态还带来第二个好处：**注册一次就够**。
+ * 实例的目录里永远只有一条 `jdbc_scan`，不会随着拉的次数堆积；
+ * 凭据也不在注册物里（每次现给），所以**改密码不需要重新注册**。
+ *
+ * @param resolveContext 句柄 → 上下文（[JdbcScanRegistry] 管着那张表）
  */
 internal class JdbcScanTableFunction(
-    private val connection: Connection,
-    private val selectSql: String,
-    private val onChunk: (Long) -> Unit,
+    private val resolveContext: (String) -> ScanContext,
 ) : DuckDBTableFunction<JdbcScanBindData, JdbcScanInitData, Unit> {
     override fun bind(info: DuckDBTableFunctionBindInfo): JdbcScanBindData {
-        val statement = connection.createStatement()
+        // 参数索引是 **0 基**的（实测：getParameter(0) 取到第一个位置参数）。
+        val parameter = info.getParameter(0)
+        val handle =
+            try {
+                parameter.getString()
+            } finally {
+                parameter.close()
+            }
+        val context = resolveContext(handle)
+        val statement = context.connection.createStatement()
         // fetchSize：一次从远端取多少行。
         // PG 等驱动据此**流式**取数（网络往返次数少、内存占用可控）；
         // MySQL 驱动默认把整个结果集materialize到客户端内存（见 AnalysisHandler 的说明），
         // 但**不会**落盘 —— 那正是我们要替掉的那一段。
         statement.fetchSize = FETCH_SIZE
-        val resultSet = statement.executeQuery(selectSql)
+        val resultSet = statement.executeQuery(context.selectSql)
         val meta = resultSet.metaData
         val columns = (1..meta.columnCount).map { scanColumnOf(meta, it) }
         columns.forEach { column ->
@@ -134,7 +186,7 @@ internal class JdbcScanTableFunction(
                 else -> info.addResultColumn(column.name, DuckDBColumnType.VARCHAR)
             }
         }
-        return JdbcScanBindData(resultSet, columns, onChunk)
+        return JdbcScanBindData(resultSet, columns, context.onChunk)
     }
 
     override fun init(info: DuckDBTableFunctionInitInfo): JdbcScanInitData {

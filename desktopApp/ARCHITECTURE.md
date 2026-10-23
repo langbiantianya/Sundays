@@ -457,6 +457,7 @@ desktopApp （本模块）
 
 | DuckDB 的上级目录**自己建** | DuckDB 建库时**不会**自动创建上级目录 —— 目录不存在就直接失败；而用户第一次打开分析模式时，那个目录**一定**不存在 | 同上（`ensureWorkspaceDir`） |
 | 拉取 = **DuckDB 联邦直查**远端 JDBC 源 | DuckDB 自己就能直接读远端（`CREATE TABLE <落点> AS SELECT * FROM <联邦扫描>`）—— **不落盘、不绕 CSV**，而且保留远端的类型。**零新协议**的那条「`EXPORT` → CSV → `IMPORT`」被换掉了 | [`EngineAnalysisPuller.kt`](./src/main/kotlin/com/langbiantianya/sundays/EngineAnalysisPuller.kt) + 引擎的 `JdbcScanTableFunction.kt` |
+| 拉取默认走**纯 Java 表函数**，原生扫描器只是**可选加速** | 两条路的**类型映射不同**（`SMALLINT` → 原生 `SMALLINT` / 我们 `INTEGER`）—— 「装没装扩展」不该隐式决定用户拿到的类型。原生那条路走不通就**降级**回纯 Java，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner.kt`（`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开） |
 | 拉取的凭据**只在请求体**里，不进 SQL 文本 | 引擎把它变成一条**只发 SELECT** 的 JDBC 连接 —— 调用方能传的只有「选哪张表」。远端恒为只读由**构造**保证，不是靠开关 | 同上 |
 | 拉取的**取消**要显式叫停引擎 | 引擎是**另一个进程**，取消前端协程并不会让它停下来；取消要两件事一起做（取消协程 + `SYSTEM.CANCEL` 带请求 id）。请求 id 由**前端**生成，否则取消方不知道该叫停哪一个 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
 | 拉取的终态是一个 **sealed**，不是三个可空字段 | 「结果 + 错误」两个可空字段表达不了「取消」（两个都空 ⇒ 大概是取消了 —— 那是**推断**不是事实）。`PullOutcome`（`Done` / `Cancelled` / `Failed`）三种情况互斥且穷举，**取消不是失败**，界面上分开说 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) + [`AnalysisPull.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) |

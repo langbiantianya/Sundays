@@ -166,6 +166,7 @@
 | [`AnalysisWorkspaceIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisWorkspaceIntegrationTest.kt) | **工作区端到端**（真 DuckDB 文件、真引擎）：能建表、**重开连接表还在**（证明真的落盘而不是只在内存里）、目录会被建出来、查询能回行与列。连接配置**直接取会话那份** —— 早先这里照抄了一遍「工作区怎么连」，测试就会对着另一种连法发绿 |
 | [`AnalysisPullIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIntegrationTest.kt) | **整条链路**端到端（前端拉取器 → 真引擎 → 联邦扫描 → 真 DuckDB 工作区）：表真的落进工作区、进度帧真的到得了调用方、失败**不留半张表**、**拉取全程不落盘**、用户取消被报成「取消」而不是「失败」 |
 | [`AnalysisPullSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullSmokeTest.kt) | **真 MySQL** 端到端：行数对上、**全程不落盘**、进度报出行数、**拉下来的表保留远端类型**（`SUM(id)` 直接能跑，不必 `TRY_CAST`）、窗口函数聚合、工作区里 `CREATE TABLE tmp AS SELECT` 成功。内网 MySQL 不可达时**显式 skip**（报告里留一条 skipped），不是静默跳过 |
+| [`AnalysisNativePullTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisNativePullTest.kt) | **原生扫描器**（可选加速）的端到端（真 MySQL → 真 DuckDB 工作区）：① 显式打开时走的**确实是**原生那条路（列类型是官方的 `SMALLINT`）；② **默认没打开**时走纯 Java 表函数（列类型是我们的 `INTEGER`）；③ 拉完之后工作区里**没有残留的远端挂载**（挂着的那条目录记录里**含明文密码**）。⚠️ 判据不能用 `TINYINT(1)`：MySQL Connector/J 把它报成 `Types.BIT`，**两条路都是 BOOLEAN** |
 | [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**界面上不再出现「临时文件」**（联邦直查不落盘）、取消按钮回调、没给取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 |
 
 ### 2.8 非测试支撑文件

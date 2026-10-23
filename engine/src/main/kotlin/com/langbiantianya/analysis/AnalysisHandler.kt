@@ -50,10 +50,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
+import java.sql.Statement
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * `ANALYSIS` 类别的四个路由（主设计 §3.5）：列数据源、列表、列列、跑分析 SQL。
@@ -86,6 +89,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 「这个方言是本地嵌入式」。不新造同义能力位。
  */
 object AnalysisHandler {
+    /** 降级这类「用户不该看见」的细节时用它记一笔。 */
+    private val logger = LoggerFactory.getLogger(AnalysisHandler::class.java)
+
     /**
      * 分析查询的行数上限。
      *
@@ -347,49 +353,228 @@ object AnalysisHandler {
                 val workspaceDialect = PoolManager.resolveDialect(request.connection)
                 val staging = workspaceDialect.quoteIdentifier(pull.stagingTable)
 
-                val functionName = JdbcScanRegistry.functionName(remote, pull.namespace, pull.table)
-                JdbcScanRegistry.ensureRegistered(
-                    workspaceConnection,
-                    functionName,
-                    JdbcScanTableFunction(remoteConnection, selectSql, onRows),
-                )
+                // 「正在跑的那条语句」—— 取消要打在**它**身上（见下面的说明）。
+                val runningStatement = AtomicReference<Statement?>(null)
 
-                workspaceConnection.createStatement().use { stmt ->
-                    StatementRegistry.registerCanceler(request.id) {
-                        cancelled.set(true)
-                        runCatching { stmt.cancel() }
-                    }
-                    // 事务：DROP + CREATE AS 一起提交。
+                StatementRegistry.registerCanceler(request.id) {
+                    cancelled.set(true)
+                    // ## 为什么取消要打在**正在跑的那条语句**上
                     //
-                    // 失败 / 取消 → 回滚 → **旧表原样还在**，新表一点痕迹都不留。
-                    // （DuckDB 的 DDL 是事务性的。）
-                    workspaceConnection.autoCommit = false
-                    try {
-                        stmt.execute("DROP TABLE IF EXISTS $staging")
-                        stmt.execute("CREATE TABLE $staging AS SELECT * FROM $functionName()")
-                        workspaceConnection.commit()
-                    } catch (e: Exception) {
-                        throw e
-                    }
-                    // 行数：以工作区里那张表为准（不是「远端读了多少」——
-                    // 两者在失败时可能对不上，而落地的行数才是用户关心的）。
-                    val rows =
-                        stmt.executeQuery("SELECT count(*) FROM $staging").use { rs ->
-                            rs.next()
-                            rs.getLong(1)
-                        }
-                    AnalysisPullResponse
-                        .newBuilder()
-                        .setStagingTable(pull.stagingTable)
-                        .setRows(rows)
-                        .setElapsedMs(System.currentTimeMillis() - started)
-                        .build()
+                    // DuckDB JDBC 的 `Statement.cancel()` 只对「**本语句上正在执行的查询**」
+                    // 生效 —— 源码第一件事就是 `if (!stmtRefLock.isLocked()) return;`。
+                    // 拿一条**新**语句去 cancel 是**空操作**（实测：取消发出去，
+                    // 拉取照跑到底，还报「成功」）。
+                    //
+                    // 而 `SYSTEM.CANCEL` 到引擎时能拿到的只有**请求 id**，
+                    // 引擎得自己知道那条语句是哪一条 —— 所以由 [runInTransaction]
+                    // 把「正在跑的那条」登记到这里。
+                    runCatching { runningStatement.get()?.cancel() }
                 }
+
+                val rows =
+                    loadIntoWorkspace(
+                        workspace = workspaceConnection,
+                        remote = remote,
+                        remoteDialect = remoteDialect,
+                        namespace = pull.namespace,
+                        table = pull.table,
+                        staging = staging,
+                        selectSql = selectSql,
+                        remoteConnection = remoteConnection,
+                        onRows = onRows,
+                        runningStatement = runningStatement,
+                        cancelled = cancelled,
+                    )
+
+                AnalysisPullResponse
+                    .newBuilder()
+                    .setStagingTable(pull.stagingTable)
+                    .setRows(rows)
+                    .setElapsedMs(System.currentTimeMillis() - started)
+                    .build()
             } finally {
                 workspaceConnection.close()
             }
         } finally {
             remoteConnection.close()
+        }
+    }
+
+    /**
+     * 把远端的一张表搬进工作区 —— **两条后端**，先试原生扫描器。
+     *
+     * | 后端 | 什么时候用 | 特点 |
+     * |---|---|---|
+     * | 原生扫描器（`mysql_scanner` / `postgres_scanner`） | **显式开了**（`SUNDAYS_DUCKDB_NATIVE_EXT=1`）且扩展可用 | 少一次拷贝、类型用 DuckDB 官方规则；**没有实时行数进度** |
+     * | 纯 Java 表函数 | **默认** | 任何有 JDBC 驱动的源都能走；实时行数进度；类型映射是我们自己定的（跨机器一致） |
+     *
+     * 原生那条路走不通就**降级**到纯 Java —— 用户看到的是「拉取成功」，
+     * 不是「你的扩展没装」。
+     */
+    private fun loadIntoWorkspace(
+        workspace: Connection,
+        remote: ConnectionConfig,
+        remoteDialect: DatabaseDialect,
+        namespace: String,
+        table: String,
+        staging: String,
+        selectSql: String,
+        remoteConnection: Connection,
+        onRows: (Long) -> Unit,
+        runningStatement: AtomicReference<Statement?>,
+        cancelled: AtomicBoolean,
+    ): Long {
+        // ① 原生扫描器（可选加速）
+        //
+        // 三段式，顺序**不能换**：挂载（事务外）→ 建表（事务内）→ 摘除（提交之后）。
+        // 摘除若落在事务里，DuckDB 会中止事务 → 提交落空 → 整张表消失
+        // （症状是「拉取报成功、可工作区里查不到表」）。详见 [NativeExtensionScanner]。
+        if (NativeExtensionScanner.isEnabled()) {
+            val alias = NativeExtensionScanner.nextAlias()
+            if (NativeExtensionScanner.attach(workspace, remote, remoteDialect, alias)) {
+                val native =
+                    try {
+                        runInTransaction(workspace, runningStatement, cancelled) { stmt ->
+                            NativeExtensionScanner.createStaging(stmt, alias, namespace, table, staging)
+                        }
+                    } catch (e: Exception) {
+                        // 取消**不是**「这条路走不通」—— 取消了就不要再降级重来一遍。
+                        if (e is PullCancelledException) throw e
+                        // 原生这条路失败 → 降级到纯 Java 表函数。
+                        // 失败的原因不该让用户看见：纯 Java 那条路**永远**能走。
+                        logger.warn("原生扫描器拉取失败，改用纯 Java 表函数：{}", e.message)
+                        null
+                    } finally {
+                        // 摘除在**提交之后**（finally 是在 runInTransaction 返回之后才跑的）。
+                        // 挂在工作区上的远端，其目录记录里**含明文密码** —— 必须摘掉。
+                        NativeExtensionScanner.detach(workspace, alias)
+                    }
+                if (native != null) {
+                    // 原生路径**没有实时进度**（DuckDB 的 CTAS 不吐行数），
+                    // 只在落地之后报一次总数。
+                    onRows(native)
+                    return native
+                }
+            }
+        }
+
+        // ② 纯 Java 表函数（默认路径）
+        //
+        // 表函数是**无状态**的：这一次扫描的连接、SQL、进度回调都放在**上下文**里，
+        // 用一个**句柄**（字符串）指出来，句柄作为 SQL 参数传进去。
+        //
+        // 为什么不能把连接直接塞进闭包：注册在 DuckDB 实例上的函数活得比一次拉取久，
+        // 第一次拉取一结束连接就还回池了 —— 第二次拉同一张表就会撞上
+        // `Connection is closed`（实测）。
+        val handle =
+            JdbcScanRegistry.beginScan(
+                ScanContext(
+                    connection = remoteConnection,
+                    selectSql = selectSql,
+                    onChunk = onRows,
+                ),
+            )
+        try {
+            // 注册表函数**必须在事务外** ——
+            // 它自己会开一条语句，用完就关；而 JDBC 规定「语句关闭时若还有未提交的事务，
+            // 事务会被结束」—— 于是事务里的建表跟着一起没了
+            // （症状：拉取报成功、行数也对，可工作区里查不到那张表）。
+            JdbcScanRegistry.ensureRegistered(
+                workspace,
+                JdbcScanTableFunction(JdbcScanRegistry::contextOf),
+            )
+            val rows =
+                runInTransaction(workspace, runningStatement, cancelled) { stmt ->
+                    stmt.execute("DROP TABLE IF EXISTS $staging")
+                    stmt.execute(
+                        "CREATE TABLE $staging AS SELECT * FROM ${JdbcScanRegistry.FUNCTION_NAME}('$handle')",
+                    )
+                    stmt.executeQuery("SELECT count(*) FROM $staging").use { rs ->
+                        rs.next()
+                        rs.getLong(1)
+                    }
+                } ?: 0L
+            onRows(rows)
+            return rows
+        } finally {
+            // 扫描结束（成功 / 失败 / 取消都一样）→ 收掉上下文。
+            // 漏掉就是一次泄漏：表里挂着一个已经关掉的连接。
+            JdbcScanRegistry.endScan(handle)
+        }
+    }
+
+    /**
+     * 在一个事务里做一件事。
+     *
+     * - 成功 → 提交；
+     * - 返回 `null`（这条路不可用）→ **回滚**（可能已经中止了）→ 返回 `null`；
+     * - 抛异常 → 回滚 → 抛出去。
+     *
+     * ## 为什么「回滚」这么要紧
+     *
+     * DuckDB 在一条语句失败时会**中止当前事务** —— 此后同一条连接上的
+     * 任何语句都报「transaction is aborted」。所以「原生那条路失败 →
+     * 降级到纯 Java」必须**换一个干净的事务**，否则降级本身也会失败。
+     *
+     * ## 为什么**提交必须在语句还开着的时候**发生（实测抓出来的）
+     *
+     * JDBC 规定：语句 `close()` 时若还有未提交的事务，事务会被**结束**。
+     * 于是「先 `use { }` 关语句、再 commit」的写法里，commit 落到的是
+     * 一个**已经结束**的事务 —— 建出来的表**整张消失**（症状：拉取报成功、
+     * 行数也对，可工作区里查不到那张表）。
+     *
+     * 所以这里的事务体**共用一条语句**，提交也在它还开着的时候做。
+     *
+     * ## 「正在跑的那条语句」要交出去
+     *
+     * 取消（`SYSTEM.CANCEL`）要打在**本事务正在用的这条语句**上 ——
+     * DuckDB JDBC 的 `Statement.cancel()` 只对「本语句上正在执行的查询」生效
+     * （拿一条新语句去 cancel 是空操作，实测）。
+     * 所以这里把语句登记到 [runningStatement]，取消方拿得到它。
+     *
+     * ## 提交前再看一眼取消标志
+     *
+     * 取消可能落在「扫描还没开始」的时候 —— 那时没有语句可打断，
+     * 但用户**确实**按了取消。所以提交前要再看一眼标志：
+     * 取消了就**回滚**（不留表）并把这次拉取收成「取消」。
+     */
+    private fun <T> runInTransaction(
+        connection: Connection,
+        runningStatement: AtomicReference<Statement?>,
+        cancelled: AtomicBoolean,
+        body: (java.sql.Statement) -> T?,
+    ): T? {
+        connection.autoCommit = false
+        return try {
+            connection.createStatement().use { stmt ->
+                runningStatement.set(stmt)
+                try {
+                    val result = body(stmt)
+                    when {
+                        result == null -> {
+                            runCatching { connection.rollback() }
+                            null
+                        }
+
+                        cancelled.get() -> {
+                            // 取消落在扫描之前 —— 提交就等于「用户不要了还留下表」。
+                            runCatching { connection.rollback() }
+                            throw PullCancelledException()
+                        }
+
+                        else -> {
+                            // 提交必须在语句还开着的时候（见上面的说明）。
+                            connection.commit()
+                            result
+                        }
+                    }
+                } finally {
+                    runningStatement.set(null)
+                }
+            }
+        } catch (e: Exception) {
+            runCatching { connection.rollback() }
+            throw e
         }
     }
 
@@ -559,3 +744,20 @@ object AnalysisHandler {
             }
         }
 }
+
+/**
+ * 拉取被用户取消 —— **内部信号**。
+ *
+ * ## 为什么要有它
+ *
+ * 界面要分开说「用户取消了」和「拉取失败了」—— 前者是**正常的**，
+ * 后者要显示错误信息。而「取消」在引擎里有两种到达方式：
+ *
+ * - 取消打在**正在跑的那条语句**上 → DuckDB 抛「INTERRUPT Error」；
+ * - 取消落在**扫描开始之前** → 没有语句可打断，只能由我们自己收口。
+ *
+ * 两种都要收成同一个「取消」信号，界面的处理才只有**一条**路。
+ * 外层（[AnalysisHandler.executePull]）看到取消标志就把它写成
+ * `cancelled=true` 的终止帧，前端据此抛「已取消」而不是「失败」。
+ */
+internal class PullCancelledException : RuntimeException("pull cancelled")

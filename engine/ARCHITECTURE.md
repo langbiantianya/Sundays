@@ -26,7 +26,7 @@
 | [`engine/`](./src/main/kotlin/com/langbiantianya/engine/IdbEngine.kt) | `IdbEngine`（`EngineClient` 的同进程实现）、`StatementRegistry`（取消通道）、`SqlScriptSplitter`（多语句分句）、`EngineLanguageContext`（请求语言上下文） |
 | [`dispatcher/`](./src/main/kotlin/com/langbiantianya/dispatcher/RequestDispatcher.kt) | `RequestDispatcher`：`(Category, Action)` → handler 的薄路由；dryRun 短路、超时、语言上下文、异常兜底都在这里 |
 | [`handlers/`](./src/main/kotlin/com/langbiantianya/handlers/SystemHandler.kt) | 14 个业务 handler，typed proto 进 / typed proto 出（System / Schema / User / Table / Data / SQL / Function / View / Index / ForeignKey / Trigger / Export / Import / Generate） |
-| [`analysis/`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) | `AnalysisHandler`：`ANALYSIS` 四条路由（列命名空间 / 列表 / 列列 / 在计算引擎上跑分析 SQL）—— 数据分析模式的引擎侧入口 |
+| [`analysis/`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) | `AnalysisHandler`：`ANALYSIS` 五条路由（列命名空间 / 列表 / 列列 / 在计算引擎上跑分析 SQL / **拉取**）—— 数据分析模式的引擎侧入口。拉取走 **DuckDB 联邦直查**（`JdbcScanTableFunction`），原生扫描器是**可选加速**（`NativeExtensionScanner`，默认关） |
 | [`metadata/`](./src/main/kotlin/com/langbiantianya/metadata/JdbcColumnMetadata.kt) | JDBC `getColumns` 的列元数据读取 —— **自增标记**的唯一来源（各方言的 `listColumns` 都不吐这一项） |
 | [`pool/`](./src/main/kotlin/com/langbiantianya/pool/PoolManager.kt) | `PoolManager`（SHA-256 keyed HikariCP 连接池）与 `TransactionManager`（事务会话钉连接） |
 | [`loader/`](./src/main/kotlin/com/langbiantianya/loader/DialectLoader.kt) | JDBC 驱动与方言 SPI 的双通道加载（应用类路径 + `dialects/` 目录） |
@@ -86,6 +86,10 @@
 | 40 | 映射规则抽出来才可单测 | `listDrivers()` 原来把 13 个字段内联在 `dialectInfo { … }` 块里；加上表单规格会变成 20 多个字段的一大块 —— 读起来像一堵墙，而且**没法单测**（要测它得拉起一个引擎、注册方言）。抽成独立对象后，映射规则可以脱离引擎单测 | [`DialectInfoMapper.kt`](./src/main/kotlin/com/langbiantianya/engine/DialectInfoMapper.kt) |
 | 41 | 「命名空间」是中性叫法 | MySQL 上它是**库**、PG 上它是 **schema** —— 两者对 SPI 是 `listTables(conn, namespace)` 的同一个参数位。判据用既有的 `supportsSchema`，**不**用方言名硬判：按名字判等于把「哪个方言有什么概念」复制一份到引擎里，那份副本迟早与方言本身对不上 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
 | 42 | 分析查询只打本地嵌入式方言 | `ANALYSIS.RUN_QUERY` 必须能写（工作区里的 `CREATE TABLE tmp AS SELECT …` 是 M4 的验收要求），所以它**不能**被 L4 只读闸门挡；但它**绝不能**打在远端上 —— 否则它就是绕过 L4 的后门。判据用既有的 `EMBEDDED_MODE`，不新造同义能力位 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
+| 43 | 注册进 DuckDB 的表函数必须**无状态** | 表函数注册在**实例**上，活得比一次拉取久；闭包里的连接在第一次拉取结束时就归还连接池了 —— 于是「同一张表拉第二次」必失败（`Connection is closed`）。改成：每次拉取现给一份上下文（连接 / SQL / 进度回调），用**句柄**（SQL 参数）指出来，表函数只在绑定那一刻取走它 | [`JdbcScanTableFunction.kt`](./src/main/kotlin/com/langbiantianya/analysis/JdbcScanTableFunction.kt) · [`JdbcScanRegistry.kt`](./src/main/kotlin/com/langbiantianya/analysis/JdbcScanRegistry.kt) |
+| 44 | 取消要打在**正在跑的那条语句**上 | DuckDB JDBC 的 `Statement.cancel()` 第一件事是 `if (!stmtRefLock.isLocked()) return;` —— 拿一条**新**语句去 cancel 是**空操作**（取消发出去了，拉取照跑到底还报「成功」）。所以引擎把「本次事务正在用的那条语句」登记给 `StatementRegistry`，取消时打的就是它；取消若落在扫描开始之前，则在**提交前**再看一眼标志 → 回滚并收成「取消」 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
+| 45 | 原生扫描器是**可选加速**，默认关 | `mysql_scanner` / `postgres_scanner` **随 JDBC 驱动发布**（静态链接，`duckdb_extensions()` 里 `installed_from = core`），所以「装没装扩展」不是变量；但两条路的**类型映射不同**（`SMALLINT` → 原生 `SMALLINT` / 我们 `INTEGER`），「装没装扩展」不该隐式决定用户拿到的类型 —— 所以做成显式开关（`SUNDAYS_DUCKDB_NATIVE_EXT=1`），走不通就**降级**回纯 Java | [`NativeExtensionScanner.kt`](./src/main/kotlin/com/langbiantianya/analysis/NativeExtensionScanner.kt) |
+| 46 | 挂载的远端必须**摘掉**，且摘除在**提交之后** | 挂着的远端留在 DuckDB 的目录表里，而那条记录的 `path` **含明文密码**（用户在编辑器里 `SELECT * FROM duckdb_databases()` 就能看见）。而摘除若落在事务里，DuckDB 会中止事务 → 提交落空 → **建出来的表整张消失**（症状：拉取报成功、可工作区里查不到表） | [`NativeExtensionScanner.kt`](./src/main/kotlin/com/langbiantianya/analysis/NativeExtensionScanner.kt) |
 
 ## 4. 请求处理链路
 
