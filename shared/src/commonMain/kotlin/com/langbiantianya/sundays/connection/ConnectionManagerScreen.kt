@@ -234,6 +234,7 @@ fun ConnectionManagerScreen(
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
             onOpenAnalysis = onOpenAnalysis,
+            onSelectConnection = onSelectConnection,
             onTestConnection = onTestConnection,
             onConnect = onConnect,
             onDisconnect = onDisconnect,
@@ -615,6 +616,7 @@ private fun ConnectionWizardPanel(
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
     onOpenAnalysis: (() -> Unit)? = null,
+    onSelectConnection: (ConnectionConfig?) -> Unit,
     onEditConnection: (ConnectionConfig) -> Unit,
     onDeleteConnection: (String) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
@@ -646,6 +648,8 @@ private fun ConnectionWizardPanel(
                     onDisconnect = { onDisconnect(selectedConnection) },
                     onEdit = { onEditConnection(selectedConnection) },
                     onDelete = { onDeleteConnection(selectedConnection.id) },
+                    // 关掉详情 → 取消选中 → 右侧回到空闲引导页（「数据分析」入口在那儿）
+                    onClose = { onSelectConnection(null) },
                 )
             } else {
                 IdlePanel(
@@ -827,6 +831,17 @@ private fun stepIndexOf(
  * 展示引擎侧会话状态与连接信息，并提供 连接 / 断开 / 编辑 / 删除 操作 —— 「连接」的语义是
  * 让引擎用该配置建连接池并做 `isValid` 校验（`IdbEngine.testConnection`），
  * 「断开」是释放该配置的连接池（`IdbEngine.disconnect`）。
+ *
+ * ## 头部那个 ✕ 是干什么的
+ *
+ * 选中一条连接，这块面板就**取代**了空闲引导页 —— 而空闲引导页上挂着
+ * 「数据分析」的入口（顶栏的目标切换 chip 去掉之后，**那条路是唯一的**）。
+ * 所以详情面板必须能**关掉**：点了 ✕ 就取消选中，右侧回到空闲引导页。
+ *
+ * 没有这个 ✕ 的话，用户选中过一条连接之后，那条唯一的入口就再也找不回来了 ——
+ * 只能把应用重启。
+ *
+ * @param onClose 关闭详情（取消选中）→ 回到空闲引导页
  */
 @Composable
 private fun ConnectionOverviewPanel(
@@ -836,6 +851,7 @@ private fun ConnectionOverviewPanel(
     onDisconnect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onClose: () -> Unit,
 ) {
     Column(
         modifier =
@@ -856,6 +872,9 @@ private fun ConnectionOverviewPanel(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            WinIconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = str(StrKey.CLOSE))
             }
         }
 

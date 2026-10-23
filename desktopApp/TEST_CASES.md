@@ -64,7 +64,7 @@
 
 | 测试类 | 覆盖的能力 |
 |---|---|
-| [`ConnectionManagerFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionManagerFlowTest.kt) | 真实点击向导：选方言 → 填字段 → 测试连接 → 连接 → 断开 → `connection.json` 落盘；断言引擎侧效果（池建立/释放、状态流转）；**空闲面板上的「数据分析」入口**在且点了**真的回调**（顶栏的 chip 去掉后，这是分析模式的**唯一**入口） |
+| [`ConnectionManagerFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionManagerFlowTest.kt) | 真实点击向导：选方言 → 填字段 → 测试连接 → 连接 → 断开 → `connection.json` 落盘；断言引擎侧效果（池建立/释放、状态流转）；**空闲面板上的「数据分析」入口**在且点了**真的回调**（顶栏的 chip 去掉后，这是分析模式的**唯一**入口）；**连接详情能关掉**（点 ✕ → 取消选中 → 空闲面板连同那个入口一起回来 —— 详情面板把空闲面板顶掉了，没有 ✕ 的话那条唯一的入口选中一次之后就再也找不回来） |
 | [`ConnectionWizardMouseKeyboardTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionWizardMouseKeyboardTest.kt) | 鼠标点「新建连接」→ 点方言卡 → 连续点「下一步」到测试步（按钮 `enabled` 与字段联动） |
 | [`WizardKeyboardOrderTest`](./src/test/kotlin/com/langbiantianya/sundays/WizardKeyboardOrderTest.kt) | 向导焦点顺序：按 N 次 `Tab` 再回车看 `wizard.step` 变没变 —— 把「猜焦点」变成「数焦点」；方言卡是 `clickable` 不是 `selectable` |
 | [`TestConnectionDoesNotOpenSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/TestConnectionDoesNotOpenSessionTest.kt) | **「测试连接」是探测不是会话**：池归零 / 不动用户的活会话 / 探测失败也归还池 / 状态回填不被在途操作覆盖 |

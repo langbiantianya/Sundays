@@ -420,6 +420,14 @@ body{
 }
 .cm-detail{ flex:1 1 auto; padding:14px 16px; overflow:hidden; }
 .cm-detail-head{ font-size:15px; font-weight:600; color:var(--on-surface); margin-bottom:2px; }
+/* 详情面板头部那行：**名字 + ✕（关闭）**。
+   选中连接后详情把空闲引导页顶掉了，而空闲引导页上挂着「数据分析」的入口 ——
+   没有这个 ✕ 的话，那条唯一的入口选中一次之后就再也找不回来了。 */
+.cm-detail-head-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cm-detail-close{
+  border:1px solid var(--outline-variant); background:var(--surface); color:var(--on-surface-variant);
+  border-radius:var(--r-sm); font-size:12px; line-height:16px; padding:1px 7px; cursor:pointer;
+}
 .cm-detail-sub{ font-size:12px; color:var(--on-surface-variant); margin-bottom:12px; }
 .kv{ display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0 0 14px; font-size:12px; }
 .kv dt{ color:var(--on-surface-variant); }
@@ -764,7 +772,10 @@ body{
 
         <!-- 右侧：选中连接的详情 -->
         <section class="cm-detail">
-          <div class="cm-detail-head">hive_prod</div>
+          <div class="cm-detail-head-row">
+            <div class="cm-detail-head">hive_prod</div>
+            <button class="cm-detail-close" type="button" title="关闭" aria-label="关闭">✕</button>
+          </div>
           <div class="cm-detail-sub">hive.internal:10000 / sales</div>
           <dl class="kv">
             <dt>类型</dt><dd>Hive（只读方言）</dd>

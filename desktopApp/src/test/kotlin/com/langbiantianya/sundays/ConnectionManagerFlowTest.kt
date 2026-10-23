@@ -19,6 +19,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
@@ -29,6 +30,7 @@ import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
+import com.langbiantianya.sundays.connection.CONNECT_OVERVIEW_PANEL_TAG
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionState
@@ -144,6 +146,42 @@ class ConnectionManagerFlowTest {
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).performClick()
         }
         assertEquals(1, opened, "点「数据分析」必须回调一次 —— 入口不能是摆在那里的摆设")
+    }
+
+    @Test
+    fun `the connection detail can be closed and the idle panel comes back`() {
+        // 选中一条连接 → 右侧变成**详情面板**（空闲面板被顶掉了，而「数据分析」入口在那儿）。
+        // 详情面板必须能**关掉**：不然那条唯一的入口就再也找不回来了
+        // （选中过一条连接之后，用户只能把应用重启）。
+        ConnectionStorage.upsert(
+            ConnectionConfig(
+                id = "close-detail-1",
+                name = "待关闭的 H2",
+                dialect = DialectType.H2,
+                database = "shop",
+                jdbcUrl = "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1",
+            ),
+        )
+        runComposeUiTest {
+            val session = newSession()
+            // 空闲面板上带「数据分析」入口（分析模式的唯一入口）——
+            // 关掉详情后它必须**回到**屏幕上。
+            setContent {
+                ProvideTestStrings {
+                    MaterialTheme {
+                        Screen(session, onOpenAnalysis = {})
+                    }
+                }
+            }
+
+            // 选中 → 详情面板
+            onNodeWithText("待关闭的 H2").performClick()
+            onNodeWithTag(CONNECT_OVERVIEW_PANEL_TAG).assertIsDisplayed()
+
+            // 点 ✕ → 取消选中 → 右侧回到空闲面板（「数据分析」入口回来了）
+            onNodeWithContentDescription(zh(StrKey.CLOSE)).performClick()
+            onNodeWithText(zh(StrKey.NAV_ANALYSIS)).assertIsDisplayed()
+        }
     }
 
     @Test

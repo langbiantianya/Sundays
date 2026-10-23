@@ -436,7 +436,7 @@ desktopApp （本模块）
 | `ANALYSIS` 是**并列的顶层目标**，不是浏览模式的子页 | 它有自己的会话（源会话 + 本地工作区），与浏览模式那套「按连接开 sheet」的模型不同；硬塞进 `DATABASE` 会让两套生命周期互相牵扯 | [`AppDestination.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
 
 | 顶层导航条**只在并列的顶层目标**渲染 | `CONNECTIONS` 与 `ANALYSIS` 渲染；浏览屏（`DATABASE`，下钻页）与设置页（`SETTINGS`，覆盖页）**不渲染** —— 给下钻页一个「切换模式」的入口，会让人以为能从分析屏直接跳到「某个连接的浏览页」，而那件事的语义是「选一个连接」 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) |
-| 顶栏**没有**目标切换 chip，「数据分析」的入口在**连接管理的空闲面板** | 「连接管理」是首屏 —— chip 只是把当前项再显示一遍（切过去等于什么都不做）；而「数据分析」是**入口**，该待在用户真正需要它的地方（没选中任何连接时，右侧那一块本来就在问「接下来做什么」）。入口只有一条，分析页工具条上就也得有**返回** —— 否则用户进去就出不来了 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
+| 顶栏**没有**目标切换 chip，「数据分析」的入口在**连接管理的空闲面板** | 「连接管理」是首屏 —— chip 只是把当前项再显示一遍（切过去等于什么都不做）；而「数据分析」是**入口**，该待在用户真正需要它的地方（没选中任何连接时，右侧那一块本来就在问「接下来做什么」）。入口只有一条，分析页工具条上就也得有**返回** —— 否则用户进去就出不来了。**选中连接后详情面板把空闲面板顶掉了，所以详情面板头部还有一个 ✕**（取消选中 → 回到空闲面板），否则那条唯一的入口选中一次之后就再也找不回来了 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
 
 | 分析屏**豁免**浏览模式那条自动切屏 | 浏览模式有「sheet 集合变化就自动切屏」的 `LaunchedEffect`；分析模式与浏览模式是两套独立会话，那条副作用会把分析屏抢走 | 同上 |
 
