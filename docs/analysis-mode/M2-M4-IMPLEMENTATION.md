@@ -548,6 +548,25 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 > 于是那条断言无论只读还是可编辑都恒绿 —— 绿得像模像样，却什么都没守住。
 > 一个测不出来的断言等于没有断言。
 
+主设计 §6.3.3 那张「`DataTable` 零改动」的用法表，本轮**逐行**落地情况：
+
+| 参数 | 本轮传什么 | 状态 |
+|---|---|---|
+| `onCellEdit` | `null` | ✅ |
+| `cellEditable` | `false`（显式，不靠 `onCellEdit` 的默认值联动） | ✅ |
+| `isColumnEditable` / `isCellPending` / `isRowDeleted` | 保持默认 | ✅ |
+| `pageSize` | `PageSize.ALL` —— 结果集是**一次查询返回的完整集合**，分页纯属客户端的视图安排；用默认的「每页 20 行」的话，一张 5000 行的结果得点 250 页 | ✅ |
+| `serverSidePaging` | `false` | ✅ |
+| `totalCount` | `rows.size`（默认值） | ✅ |
+| `contextMenuItems` | 复制 / 导出为 CSV | ⏳ **未接** |
+
+> ⚠️ `contextMenuItems` 那一行**还没接上**：写剪贴板（`ClipboardWriter`，`java.awt`）
+> 与选保存路径（`NativePathPicker`）都在 `desktopApp`，而 `AnalysisScreen` 在 `:shared`，
+> 只能把事件**回调**出去（`onCopy` / `onExportCsv` 两个回调，由 desktopApp 注入）。
+> 它**不是** M4 的验收项，但它是设计的一部分 —— 所以显式记下缺口，不装作已有。
+> 另注：只读表本来就有 `SelectionContainer`，单元格文本可以**拖选复制**，
+> 右键菜单的增量是「按行 / 按整表复制」与「导出为 CSV」。
+
 ### 6.7 主设计 §6.5 的一条规则**作废**（实现期偏离）
 
 主设计 §6.5 写着「组件层不提供写入口：…；SQL 编辑器只放行
@@ -650,8 +669,8 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 > 落点在 `:shared` 的 `commonMain`（纯 Compose，不碰引擎），与 §1.3 的判据一致。
 >
 > ⚠️ **第 3 片没有做的**：编辑器与结果面板、工作区会话、拉取链路 ——
-> 那是第 4~6 片。`AnalysisScreen` 目前是**骨架**：工具条、数据源树、只读徽标是真的，
-> 右侧主区仍走空态。
+> 那是第 4~6 片。**第 3 片当时**的 `AnalysisScreen` 是**骨架**：工具条、数据源树、
+> 只读徽标是真的，右侧主区仍走空态（到第 6 片才补齐，见 §8 的提交切分表）。
 >
 > 📌 **第 4 片的实际落点比原文多两处**：
 > 一是**工作区文件放在配置目录**（`~/.config/sundays/workspace.duckdb`）而不是另立目录规则 ——
@@ -748,3 +767,7 @@ DuckDB 文件，它的 schema 实际上只有 `main` 一个 —— 把它摆在�
 - **R1** `hive-jdbc` 与 `hadoop-common 3.5.0` 版本冲突 —— M3 spike
 - **R2** Impala 走 HS2 的兼容性 —— M3 spike
 - 目标环境 Hive / Impala 的发行版与版本 —— 未定，只影响 M3 的驱动取舍
+- **结果表的右键菜单**（复制 / 导出为 CSV）—— 主设计 §6.3.3 的用法表里的一行，
+  **还没接**（§6.6.6）。接线形态已定：`AnalysisScreen` 收 `onCopy` / `onExportCsv`
+  两个回调，由 `desktopApp` 注入（剪贴板与文件对话框都是平台专属）。
+  它**不是** M4 的验收项，所以不阻塞 M2 + M4' 的收尾。

@@ -170,7 +170,8 @@ import com.langbiantianya.sundays.ui.winShape
  * @param detailPanelRatio 详情面板与主表格的宽度比（默认 `0.35f` = 主 65% / 详情 35%）
  * @param contextMenuItems 右键菜单插槽 —— 在 [DropdownMenuItem] 内调用；目标行通过 [ContextMenuState.payload] 访问
  * @param onCellEdit 单元格编辑回调；**传 `null`（默认）= 只读表格**，与改造前行为完全一致。
- *   非 null 时双击单元格进入内联编辑，`Enter` / 失焦提交、`Esc` 取消。值未变化**不触发**回调。
+ *   非 null 时**单击**单元格进入内联编辑（双击同样进），
+ *   `Enter` / 失焦提交、`Esc` 取消。值未变化**不触发**回调。
  *
  *   ## 为什么默认关着
  *

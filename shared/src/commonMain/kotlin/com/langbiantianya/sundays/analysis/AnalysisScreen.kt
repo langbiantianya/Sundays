@@ -31,6 +31,7 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.table.DataTable
+import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDropdown
@@ -451,6 +452,12 @@ private fun AnalysisResultPanel(
                         // 后者是「这张表能不能改」，两者不是一回事。
                         onCellEdit = null,
                         cellEditable = false,
+                        // `PageSize.ALL` —— 分析结果集是**一次查询返回的完整集合**
+                        // （引擎侧封顶 5000 行），分页纯属**客户端**的视图安排；
+                        // 用默认的「每页 20 行」的话，一张 5000 行的结果要点 250 页。
+                        // 全部行靠 `LazyColumn` 的虚拟滚动扛住。
+                        pageSize = PageSize.ALL,
+                        serverSidePaging = false,
                         // 详情面板是浏览模式的遗产 —— 分析结果要看的是整张表。
                         showDetailPanel = false,
                         modifier = Modifier.fillMaxSize(),
