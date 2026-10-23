@@ -21,7 +21,8 @@
 | **CodeEditor** | 语法高亮 + 行号 + 工具栏 + 格式化 + 补全 + 右键菜单 | [`editor/ui/CodeEditor.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/editor/ui/CodeEditor.kt) |
 | **DataTable** | 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 / 可编辑 + 右键菜单 | [`table/DataTable.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/DataTable.kt) |
 | **ConnectionManagerScreen** | 连接管理（左侧连接列表 + 右侧 4 步 / 3 步向导 + 连接总览） | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
-| **AppDestination** | 顶层导航目标枚举 | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
+| **AppDestination** | 顶层导航目标枚举（`START` 首屏 / `CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`） | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
+| **StartScreen** | **启动首屏** —— 选一个模式进去（连接管理 / 数据分析） | [`navigation/StartScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/StartScreen.kt) |
 | **TopNavBar** | 顶栏（品牌 + ⚙ 设置入口 —— **目标切换 chip 已去掉**，见 `docs/analysis-mode/README.md` v1.4） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
 | **AnalysisScreen / SourceTree / ReadOnlyBadge / PullProgressIndicator** | 数据分析模式的工作台（工具条 + 数据源树 + 编辑器 + 只读结果表）+ **不可关闭**的只读徽标 + 拉取进度 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |

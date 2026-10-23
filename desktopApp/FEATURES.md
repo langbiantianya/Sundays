@@ -64,6 +64,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 
 | 领域 | 能力 | 落点 |
 |---|---|---|
+| **入口** | **启动首屏**：进应用先选一个模式（**连接管理** / **数据分析**）—— 两种活儿是两套会话、两种心智模型，「选模式」在进应用时问一次 | `StartScreen`（`:shared` 的 `navigation/`） |
 | **连接** | 5 个方言：MySQL / PostgreSQL / H2 / DuckDB / SQLite | `dialect-*` SPI 插件 |
 | | 4 步引导 + 快速连接 | `ConnectionManagerScreen` |
 | | **自定义 JDBC URL 连接方式**（每个方言都能选；只给一个 URL 输入框，不给主机/端口/库名 —— 避免两处真相源打架） | `ConnectionType.CUSTOM_URL` → `ConnectionManagerScreen` |
@@ -119,8 +120,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | **工程** | Windows / macOS / Linux 原生安装包（`.msi` / `.dmg` / `.deb`） | `compose.desktop` |
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
-| **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
-| | **数据源树**：工作区 + 远端源 → 命名空间 → 表，**懒加载** | `shared/analysis/SourceTree.kt` |
+| **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` || | **数据源树**：工作区 + 远端源 → 命名空间 → 表，**懒加载** | `shared/analysis/SourceTree.kt` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |

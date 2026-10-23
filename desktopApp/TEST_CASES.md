@@ -149,7 +149,8 @@
 | [`CompactThemeTest`](./src/test/kotlin/com/langbiantianya/sundays/CompactThemeTest.kt) | 紧凑模式（缩放 density） |
 | [`onboarding/OnboardingScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreenTest.kt) | 首次引导页 |
 | [`settings/SettingsScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/settings/SettingsScreenTest.kt) | 设置页 |
-| [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航：默认落在连接管理，点击「数据库浏览」切到第二屏 |
+| [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航（**端到端**）：启动落在**首屏** → 选「数据分析」**直接**进分析工作台；选「连接管理」→ 空闲面板的「数据分析」入口 → 分析工作台 → 「返回」回到连接管理。组件级用例只能证明「回调被调用了」，证明不了**装配点真的接到了目标切换上** |
+| [`StartScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/StartScreenTest.kt) | **启动首屏**：两个模式都在（少一个就等于把这个模式藏起来了），且**各点各的**（两个入口接错线的症状是「点了进错屏」，只有真的点才抓得住） |
 | [`TopNavBarTest`](./src/test/kotlin/com/langbiantianya/sundays/TopNavBarTest.kt) | **顶栏没有目标切换 chip**（只有品牌 + ⚙）：「连接管理」「数据分析」两个 chip 已去掉 —— 目标切换不再发生在顶栏，chip 很容易被「顺手加回来」，而「分析模式的入口在哪儿」是产品契约 |
 | [`H2GuiWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/H2GuiWalkthroughTest.kt) | 真 H2 内存库（6 表 / 250 行）走完整主流程并截图：schema 树 → 预览 → 分页 → SQL 补全（表候选优先于关键字、靠右翻转）→ SQL 执行 → 造数并回引擎侧复查 `COUNT(*)` → 树面板宽度拖拽 |
 

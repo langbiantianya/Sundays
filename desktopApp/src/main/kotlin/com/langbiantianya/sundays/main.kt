@@ -49,6 +49,7 @@ import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.navigation.AppDestination
+import com.langbiantianya.sundays.navigation.StartScreen
 import com.langbiantianya.sundays.navigation.TopNavBar
 import com.langbiantianya.sundays.notifications.NotificationCenter
 import com.langbiantianya.sundays.onboarding.OnboardingScreen
@@ -500,7 +501,9 @@ internal fun MainScreen(
     // releasePools 的异步 disconnect 能跑在长生命周期 scope 上；sheet 关闭时 entry 被移除，
     // 否则 map 的强引用会让该 sheet 的编辑内容一直存活。
     val browsers = remember { mutableMapOf<String, DatabaseBrowserState>() }
-    var destination by remember { mutableStateOf(AppDestination.CONNECTIONS) }
+    // 启动落在**首屏**（选一个模式进去）—— 两种模式是两套会话、两种心智模型，
+    // 「选模式」放在进应用时问一次最合适。
+    var destination by remember { mutableStateOf(AppDestination.START) }
     // 「+ 添加连接」弹窗开关 —— 仅在第二屏渲染（与 destination 联动）
     var addDialogVisible by remember { mutableStateOf(false) }
     // 进入设置页前所在的屏 —— 设置页左上角「返回」按钮据此回到原处，而不是固定回首屏。
@@ -540,9 +543,13 @@ internal fun MainScreen(
     //
     // 「数据分析」页同样不劫持：它与浏览模式是两套独立的会话，
     // 分析页上不该因为别处的 sheet 变化而被抢走界面。
+    //
+    // **首屏**也不劫持：它连 sheet 都没开（用户还没选模式）——
+    // 被这一条拽走的话，选模式那一屏会一闪就没。
     LaunchedEffect(session.openSheets.isEmpty()) {
         if (destination == AppDestination.SETTINGS) return@LaunchedEffect
         if (destination == AppDestination.ANALYSIS) return@LaunchedEffect
+        if (destination == AppDestination.START) return@LaunchedEffect
         destination =
             if (session.openSheets.isEmpty()) {
                 AppDestination.CONNECTIONS
@@ -580,7 +587,11 @@ internal fun MainScreen(
             //
             // 目标切换 chip 已去掉：「连接管理」是首屏（chip 只会把当前项再显示一遍），
             // 「数据分析」的入口挪到了**连接管理的空闲面板**。
-            if (destination == AppDestination.CONNECTIONS || destination == AppDestination.ANALYSIS) {
+            // 启动首屏也渲染它 —— 品牌与设置入口在任何一屏都该有。
+            if (destination == AppDestination.START ||
+                destination == AppDestination.CONNECTIONS ||
+                destination == AppDestination.ANALYSIS
+            ) {
                 TopNavBar(
                     onOpenSettings = ::openSettings,
                 )
@@ -591,6 +602,16 @@ internal fun MainScreen(
             }
 
             when (destination) {
+                AppDestination.START -> {
+                    // 启动首屏 —— 选一个模式进去。
+                    // 「数据分析」那条路直接进分析工作台（跳过连接管理）——
+                    // 这正是加这一屏的意义：想做分析的人不必先经过连接列表。
+                    StartScreen(
+                        onOpenConnections = { destination = AppDestination.CONNECTIONS },
+                        onOpenAnalysis = { destination = AppDestination.ANALYSIS },
+                    )
+                }
+
                 AppDestination.CONNECTIONS -> {
                     ConnectionManagerScreen(
                         connections = session.connectionList.connections,

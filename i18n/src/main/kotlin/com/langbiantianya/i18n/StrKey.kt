@@ -768,6 +768,11 @@ enum class StrKey {
     ANALYSIS_PULL_ROWS,
     ANALYSIS_STAGING_TABLE,
     ENGINE_ANALYSIS_LOCAL_ONLY,
+
+    // ──────────────── 启动选择 ────────────────
+    START_MODE_TITLE,
+    START_MODE_CONNECTIONS_HINT,
+    START_MODE_ANALYSIS_HINT,
     ;
 
     companion object {

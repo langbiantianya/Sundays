@@ -620,4 +620,7 @@ internal val textsJa: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "{0} 行を読み取り済み",
         StrKey.ANALYSIS_STAGING_TABLE to "ワークスペースのテーブル {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析クエリはローカルワークスペースに対してのみ実行でき、リモートデータソースに直接実行することはできません",
+        StrKey.START_MODE_TITLE to "開始するモードを選択",
+        StrKey.START_MODE_CONNECTIONS_HINT to "データベースに接続してテーブルとデータを閲覧します",
+        StrKey.START_MODE_ANALYSIS_HINT to "リモートデータを読み取り専用で参照し、ローカルワークスペースで分析します",
     )

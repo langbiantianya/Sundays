@@ -14,9 +14,11 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.sundays.navigation.START_MODE_CONNECTIONS_TAG
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -93,7 +95,13 @@ class ThemeToggleVisibilityTest {
                 }
             }
 
-            // 首屏（连接管理）标题行只剩 ⚙ 设置入口，不应有日夜切换
+            // 启动首屏（选模式）里也不应有日夜切换
+            toggleDescriptions.forEach { desc ->
+                onAllNodesWithContentDescription(desc).assertCountEquals(0)
+            }
+
+            // 选「连接管理」→ 连接管理那屏的标题行只剩 ⚙ 设置入口，仍不应有日夜切换
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
             toggleDescriptions.forEach { desc ->
                 onAllNodesWithContentDescription(desc).assertCountEquals(0)
             }
@@ -117,6 +125,8 @@ class ThemeToggleVisibilityTest {
 
             // 「切换测试 H2」是上面 seedH2 进去的**连接名**（测试数据，不参与翻译）；
             // 界面语言由 ProvideTestStrings 钉死，与这个名字是不是中文无关。
+            // 启动落在首屏 → 先选「连接管理」，再点连接。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
             onAllNodesWithText("切换测试 H2")[0].performClick()
             onAllNodesWithText(zh(StrKey.CONNECT))[0].performClick()
             waitUntil(timeoutMillis = 10_000) {

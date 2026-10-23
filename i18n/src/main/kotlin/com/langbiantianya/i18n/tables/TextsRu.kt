@@ -620,4 +620,7 @@ internal val textsRu: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "Прочитано строк: {0}",
         StrKey.ANALYSIS_STAGING_TABLE to "Таблица рабочей области {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Аналитические запросы выполняются только в локальной рабочей области, но не напрямую против удалённого источника",
+        StrKey.START_MODE_TITLE to "Выберите режим для начала",
+        StrKey.START_MODE_CONNECTIONS_HINT to "Подключиться к базе и просматривать таблицы и данные",
+        StrKey.START_MODE_ANALYSIS_HINT to "Читать удалённые данные только для чтения и анализировать их в локальной рабочей области",
     )

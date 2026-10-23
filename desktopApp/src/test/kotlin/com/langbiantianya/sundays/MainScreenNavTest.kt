@@ -20,6 +20,8 @@ import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.pool.PoolManager
 import com.langbiantianya.sundays.analysis.ANALYSIS_READ_ONLY_BADGE_TAG
+import com.langbiantianya.sundays.navigation.START_MODE_ANALYSIS_TAG
+import com.langbiantianya.sundays.navigation.START_MODE_CONNECTIONS_TAG
 import com.langbiantianya.sundays.ui.rememberAppearanceState
 import org.junit.After
 import org.junit.Before
@@ -28,20 +30,23 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * **顶层导航**的端到端契约 —— 「连接管理 → 数据分析 → 回来」。
+ * **顶层导航**的端到端契约 —— 「启动首屏 → 连接管理 → 数据分析 → 回来」。
  *
  * ## 现在的导航模型
  *
- * 顶栏**没有**目标切换 chip（只有品牌 + ⚙ 设置）：
+ * 启动落在**首屏**（选一个模式进去）：
  *
- * - 「连接管理」是**首屏** —— chip 只是把当前项再显示一遍；
- * - 「数据分析」的入口在**连接管理的空闲面板**（没选中任何连接时那一块）；
- * - 分析工作台的工具条上有一个**返回**按钮。
+ * - 「连接管理」→ 传统的连库与浏览工具；
+ * - 「数据分析」→ 只读分析工作台（**直接**进，不经过连接列表）。
+ *
+ * 首屏之后：连接管理的空闲面板上挂着「数据分析」入口，
+ * 分析工作台的工具条上有一个**返回**按钮。
  *
  * ## 为什么这条用例必须是**端到端**的
  *
- * 组件级用例（`TopNavBarTest` / `ConnectionManagerFlowTest` / `AnalysisScreenTest`）
- * 只能证明「回调**被调用了**」—— 它们证明不了**装配点真的把回调接到了目标切换上**。
+ * 组件级用例（`TopNavBarTest` / `StartScreenTest` / `ConnectionManagerFlowTest` /
+ * `AnalysisScreenTest`）只能证明「回调**被调用了**」——
+ * 它们证明不了**装配点真的把回调接到了目标切换上**。
  * 而导航接错线（回调调了、屏幕没换）的症状是「点了没反应」，
  * 那种缺陷只有把 `MainScreen` 整个渲染出来才抓得住。
  *
@@ -71,7 +76,7 @@ class MainScreenNavTest {
     }
 
     @Test
-    fun `the analysis entry is in the idle panel and the analysis screen goes back`() {
+    fun `the start screen lets the user pick the analysis mode directly`() {
         runComposeUiTest {
             setContent {
                 ProvideTestStrings {
@@ -81,8 +86,32 @@ class MainScreenNavTest {
                 }
             }
 
-            // 首屏 = 连接管理；空闲面板上有「数据分析」入口（顶栏的 chip 已去掉）
+            // 启动落在**首屏**：两个模式都在，选哪个都能直接进去。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).assertIsDisplayed()
+            onNodeWithTag(START_MODE_ANALYSIS_TAG).assertIsDisplayed()
+
+            // 选「数据分析」→ **直接**进分析工作台（不必先经过连接列表）
+            onNodeWithTag(START_MODE_ANALYSIS_TAG).performClick()
+            onNodeWithTag(ANALYSIS_READ_ONLY_BADGE_TAG).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `the start screen can go to the connection manager and from there into the analysis mode`() {
+        runComposeUiTest {
+            setContent {
+                ProvideTestStrings {
+                    MaterialTheme {
+                        MainScreen(engine, rememberAppearanceState())
+                    }
+                }
+            }
+
+            // 首屏 → 连接管理
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
             onNodeWithText(zh(StrKey.CONNECTION_MANAGER_TITLE)).assertIsDisplayed()
+
+            // 连接管理的空闲面板上有「数据分析」入口（顶栏的 chip 已去掉）
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).assertIsDisplayed()
 
             // 点它 → 切到分析模式（只读徽标是分析工作台特有的）

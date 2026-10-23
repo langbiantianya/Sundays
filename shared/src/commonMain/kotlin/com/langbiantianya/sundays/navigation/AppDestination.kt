@@ -25,6 +25,14 @@ package com.langbiantianya.sundays.navigation
  * 界面却根本不显示它 —— 于是「改了没反应」。
  */
 enum class AppDestination {
+    /**
+     * **启动首屏** —— 让用户选一个模式进去。
+     *
+     * 它是应用的**入口**：两种模式是两套会话、两种心智模型，
+     * 「选模式」这件事放在进应用时问一次最合适（见 [StartScreen] 的 KDoc）。
+     */
+    START,
+
     CONNECTIONS,
     DATABASE,
 

@@ -16,6 +16,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -26,6 +27,7 @@ import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionStorage
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.navigation.START_MODE_CONNECTIONS_TAG
 import com.langbiantianya.sundays.ui.rememberAppearanceState
 import org.junit.After
 import org.junit.Before
@@ -83,6 +85,8 @@ class DatabaseBrowserSheetsTest {
                 ),
             )
             setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
+            // 启动落在**首屏** → 先选「连接管理」，再操作连接列表。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
 
             // 首屏可见，无 sheet —— 顶部 nav 不渲染（连接管理首屏无 chip）
             // 「未连接 H2」是本测试 seed 进去的**连接名**，属于测试数据而非界面文案 ——
@@ -119,6 +123,8 @@ class DatabaseBrowserSheetsTest {
                 ),
             )
             setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
+            // 启动落在**首屏** → 先选「连接管理」，再操作连接列表。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
 
             // 首屏可见该连接
             onNodeWithText("我的 H2").performClick()
@@ -158,6 +164,8 @@ class DatabaseBrowserSheetsTest {
                 ),
             )
             setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
+            // 启动落在**首屏** → 先选「连接管理」，再操作连接列表。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
 
             // 第一个 sheet 打开
             onNodeWithText("现有 H2").performClick()
@@ -318,6 +326,8 @@ class DatabaseBrowserSheetsTest {
                 ),
             )
             setContent { ProvideTestStrings { MaterialTheme { MainScreen(engine, rememberAppearanceState()) } } }
+            // 启动落在**首屏** → 先选「连接管理」，再操作连接列表。
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).performClick()
 
             onNodeWithText("关闭测试 H2").performClick()
             onNodeWithText(zh(StrKey.CONNECT)).performClick()
