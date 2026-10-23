@@ -22,7 +22,7 @@
 | **DataTable** | 虚拟滚动 + 分页 + 详情面板 + 单元格可选中 / 可编辑 + 右键菜单 | [`table/DataTable.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/DataTable.kt) |
 | **ConnectionManagerScreen** | 连接管理（左侧连接列表 + 右侧 4 步 / 3 步向导 + 连接总览） | [`connection/ConnectionManagerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/connection/ConnectionManagerScreen.kt) |
 | **AppDestination** | 顶层导航目标枚举 | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
-| **TopNavBar** | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
+| **TopNavBar** | 顶栏（品牌 + ⚙ 设置入口 —— **目标切换 chip 已去掉**，见 `docs/analysis-mode/README.md` v1.4） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
 | **AnalysisScreen / SourceTree / ReadOnlyBadge / PullProgressIndicator** | 数据分析模式的工作台（工具条 + 数据源树 + 编辑器 + 只读结果表）+ **不可关闭**的只读徽标 + 拉取进度 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |
 | **SettingsScreen / SettingsStorage** | 设置页（左分类 / 右内容）与设置持久化 | [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) |
@@ -191,12 +191,17 @@ shared/
 
 > ✅ **`TopNavBar` 现在存在了**（v2.29 新增）——
 > [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt)：
-> 品牌标记 + 目标切换 chip + ⚙ 设置入口。
+> 品牌标记 + ⚙ 设置入口。
 >
 > **为什么它以前不需要、现在需要**：以前应用是「连接管理 → 数据库浏览」的**单向**两屏结构，
 > 没有回得去的入口 —— 浏览屏是「从某个连接点进去」的**下钻页**，不是并列目标。
 > 数据分析模式是**并列**的顶层目标（连远端只读做分析，与浏览库是两种活儿），
 > 于是需要一个能在两个模式之间切换的地方。
+>
+> ⚠️ **v2.29.10：目标切换 chip 已去掉** —— 顶栏只剩品牌 + ⚙。
+> 「连接管理」是首屏（chip 只是把当前项再显示一遍）；
+> 「数据分析」的入口挪到了**连接管理的空闲面板**（`IdlePanel`），
+> 分析页自己的工具条上留了一个**返回**按钮 —— 入口只有一条，就得也只进得出。
 >
 > **它只放「并列的顶层目标」的 chip**（`CONNECTIONS` 与 `ANALYSIS`）：
 > 浏览屏（`DATABASE`）与设置页（`SETTINGS`）**没有** chip ——
@@ -379,7 +384,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | 不支持 IME composition 输入 | 中文 / 日文输入法合成期间显示可能异常 |
 | `DataTable` 不支持列拖拽 / 多列排序 / 过滤 | 调用方需自己用 `TableColumn.weight` 排列表头、在外层维护排序 / 过滤状态 |
 | `Modifier.onRightClick` 仅响应鼠标右键 / 双指点击 | 触摸设备长按弹出菜单需另写 |
-| 顶层导航条只给**并列的顶层目标** | `CONNECTIONS` / `ANALYSIS` 有 chip；`DATABASE`（下钻页）与 `SETTINGS`（覆盖页）没有 —— 给它们加 chip 会让人以为能从那里直接换模式 |
+| 顶栏**不再有**目标切换 chip | 「连接管理」是首屏（chip 只是把当前项再显示一遍）；「数据分析」的入口在**连接管理的空闲面板**，而分析页工具条上有**返回** —— 入口只有一条，就得也只进得出 |
 
 ---
 

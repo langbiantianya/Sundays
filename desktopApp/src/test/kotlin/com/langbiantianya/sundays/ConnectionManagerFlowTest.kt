@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -91,7 +92,10 @@ class ConnectionManagerFlowTest {
     private fun newSession() = ConnectionSession(engine, CoroutineScope(Dispatchers.Default))
 
     @Composable
-    private fun Screen(session: ConnectionSession) {
+    private fun Screen(
+        session: ConnectionSession,
+        onOpenAnalysis: (() -> Unit)? = null,
+    ) {
         val wizard = session.wizard
         ConnectionManagerScreen(
             connections = session.connectionList.connections,
@@ -114,8 +118,32 @@ class ConnectionManagerFlowTest {
             onTestConnection = session::testConnection,
             onConnect = session::connect,
             onDisconnect = session::disconnect,
+            onOpenAnalysis = onOpenAnalysis,
             modifier = Modifier.fillMaxSize(),
         )
+    }
+
+    @Test
+    fun `the idle panel offers the analysis entry and reports the click`() {
+        // 顶栏的目标切换 chip 去掉之后，「数据分析」的**唯一**入口就在这块空闲面板上 ——
+        // 没选中任何连接时，右侧这一块本来就在问「接下来做什么」。
+        //
+        // 判据：按钮**在**（能看见）+ 点它**真的回调**（不是摆在那里的摆设）。
+        var opened = 0
+        runComposeUiTest {
+            val session = newSession()
+            setContent {
+                ProvideTestStrings {
+                    MaterialTheme {
+                        Screen(session, onOpenAnalysis = { opened++ })
+                    }
+                }
+            }
+
+            onNodeWithText(zh(StrKey.NAV_ANALYSIS)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.NAV_ANALYSIS)).performClick()
+        }
+        assertEquals(1, opened, "点「数据分析」必须回调一次 —— 入口不能是摆在那里的摆设")
     }
 
     @Test

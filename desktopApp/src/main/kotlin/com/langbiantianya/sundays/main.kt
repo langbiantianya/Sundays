@@ -82,7 +82,8 @@ import java.awt.Toolkit
  * 「断开」/ 删除连接 → [EngineClient.disconnect](释放该配置的连接池); 窗口关闭 → [EngineClient.close].
  * 连接列表 / 向导 / 引擎会话状态全部由 [ConnectionSession] 持有, [MainScreen] 只做绑定与顶层导航.
  *
- * **顶层导航**: 连接管理 ↔ 数据库浏览. 切换目标会重建屏幕; 各自的内部状态由屏幕自身 `remember` 持有.
+ * **顶层导航**: 连接管理 ↔ 数据库浏览（多 sheet）↔ 数据分析. 切换目标会重建屏幕;
+ * 各自的内部状态由屏幕自身 `remember` 持有.
  * 导航条本体 (`TopNavBar` / `AppDestination`) 与应用主题 (`SundaysTheme`) 是平台无关的纯 UI,
  * 已上移到 `:shared` 的 `commonMain` —— 本文件只剩「平台窗口 + 引擎实现装配」。
  */
@@ -380,17 +381,19 @@ internal suspend fun fetchSystemInfo(engine: EngineClient): SystemInfo {
 }
 
 /**
- * 顶层屏幕 —— 导航条 + 当前目标屏幕。
+ * 顶层屏幕 —— 顶栏 + 当前目标屏幕。
  *
- * **导航模型：连接管理 ↔ 数据库浏览（多 sheet）**。
+ * **导航模型：连接管理 ↔ 数据库浏览（多 sheet）↔ 数据分析**。
  *
- * - **首屏** = 连接管理（左侧列表 + 右侧总览 / 向导）；无 TopNavBar 渲染。
+ * - **首屏** = 连接管理（左侧列表 + 右侧总览 / 向导）；顶栏只渲染**品牌 + ⚙ 设置**。
  * - **第二屏** = 数据库浏览，多 sheet：
  *   - 每个 sheet 一个标签，对应一条已建立的连接（独立的 `DatabaseBrowserState` + 左树 + 预览标签页）
  *   - 标签条最左边是 `+` 入口 → 弹出 [AddConnectionDialog]，与 `ConnectionManagerScreen`
  *     内的快速连接 / 添加连接配置同源（共享 `ConnectionWizardContent`）。
- * - 顶层 `TopNavBar` 仅在第二屏渲染（只渲染 `数据库浏览` chip —— 不显示「连接管理」入口，
- *   沿用「不要在标签中显示连接管理」约定）。
+ * - **第三屏** = 数据分析模式；顶栏同样只渲染品牌 + ⚙，
+ *   它的入口在**连接管理的空闲面板**上（「数据分析」按钮），
+ *   自己的工具条上有一个**返回**按钮回到连接管理。
+ *   —— 入口只有一条，就得也只进得出。
  * - 首屏「连接」按钮 / 弹窗保存 / 弹窗快速连接 任一行为 → 都同步调用 [ConnectionSession.openSheet]
  *   + 切到第二屏 + `connect()` 触发引擎建池（异步，`DatabaseBrowserScreen` 观察
  *   `CONNECTING → CONNECTED` 状态）。
@@ -573,14 +576,12 @@ internal fun MainScreen(
     // 引导页叠在上层不透明渲染。
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶层导航条 —— 只在**并列的顶层目标**渲染。
+            // 顶层导航条 —— 品牌 + ⚙ 设置。
             //
-            // 浏览屏（DATABASE）是「从某个连接点进去」的下钻页、设置页是覆盖页，
-            // 它们都不是目标之一，给它们渲染切换条只会让人以为能从那里换模式。
+            // 目标切换 chip 已去掉：「连接管理」是首屏（chip 只会把当前项再显示一遍），
+            // 「数据分析」的入口挪到了**连接管理的空闲面板**。
             if (destination == AppDestination.CONNECTIONS || destination == AppDestination.ANALYSIS) {
                 TopNavBar(
-                    current = destination,
-                    onNavigate = { destination = it },
                     onOpenSettings = ::openSettings,
                 )
             }
@@ -617,6 +618,9 @@ internal fun MainScreen(
                         },
                         onDisconnect = session::disconnect,
                         onOpenSettings = ::openSettings,
+                        // 「数据分析」入口 —— 顶栏的 chip 去掉后，这是**唯一**的入口。
+                        // 它挂在空闲面板（没选中任何连接时，右侧那一块在问「接下来做什么」）。
+                        onOpenAnalysis = { destination = AppDestination.ANALYSIS },
                         dialectForms = session.dialectForms,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -760,6 +764,8 @@ internal fun MainScreen(
                         pullProgress = analysis.pullProgress,
                         pullOutcome = analysis.pullOutcome,
                         onCancelPull = analysis::cancelPull,
+                        // 返回连接管理 —— 入口只有一条，就得也只进得出。
+                        onBack = { destination = AppDestination.CONNECTIONS },
                         // 树与展开态同样由会话持有 —— 切去别的顶层页再回来，
                         // 用户展开到一半的树还摊在那儿。
                         treeRoots = analysis.treeRoots,

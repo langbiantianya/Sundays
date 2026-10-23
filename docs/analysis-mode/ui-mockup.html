@@ -107,18 +107,11 @@ body{
   border-bottom:1px solid var(--outline-variant);
   background:var(--surface);
 }
+/* 顶栏只留**品牌 + ⚙ 设置** —— 「连接管理」「数据分析」两个目标切换 chip 已去掉：
+   「连接管理」是首屏（chip 只是把当前项再显示一遍），
+   「数据分析」的入口挪到了**连接管理的空闲面板**（没选中任何连接时那一块）。 */
 .brand{ display:flex; align-items:center; gap:7px; font-size:15px; line-height:21px; font-weight:600; color:var(--on-surface); }
 .brand-mark{ width:15px; height:15px; border-radius:var(--r-xs); background:var(--primary); }
-.nav-chips{ display:flex; align-items:center; gap:4px; }
-.nav-chip{
-  display:inline-flex; align-items:center; height:26px; padding:0 10px;
-  border-radius:var(--r-sm); font-size:13px; line-height:17px; font-weight:500;
-  color:var(--on-surface-variant);
-}
-.nav-chip.is-selected{
-  background:var(--primary-container); color:var(--on-primary-container);
-  box-shadow: inset 0 -2px 0 0 var(--primary);
-}
 .appbar-right{ margin-left:auto; display:flex; align-items:center; gap:4px; }
 /* 右上角只有一个 ⚙ 设置入口（图标按钮，与真实实现的 SettingsEntryButton 一致）。
    主题 / 语言**不放在顶栏** —— 真实应用里明暗与配色只在设置页「个性化」分类切换，
@@ -523,10 +516,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip">连接管理</span>
-          <span class="nav-chip is-selected">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
@@ -585,10 +574,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip">连接管理</span>
-          <span class="nav-chip is-selected">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
@@ -670,10 +655,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip">连接管理</span>
-          <span class="nav-chip is-selected">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
@@ -756,10 +737,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip is-selected">连接管理</span>
-          <span class="nav-chip">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
@@ -816,10 +793,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip is-selected">连接管理</span>
-          <span class="nav-chip">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>
@@ -912,10 +885,6 @@ body{
     <div class="window">
       <header class="appbar">
         <div class="brand"><span class="brand-mark"></span>sundays</div>
-        <nav class="nav-chips">
-          <span class="nav-chip">连接管理</span>
-          <span class="nav-chip is-selected">数据分析</span>
-        </nav>
         <div class="appbar-right">
           <button class="icon-btn" type="button" title="设置" aria-label="设置"><span class="glyph">⚙</span></button>
         </div>

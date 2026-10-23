@@ -100,7 +100,8 @@ class DatabaseBrowserSheetsTest {
 
             // 现在第二屏渲染：sheet tab + ＋ 入口按钮
             onNodeWithContentDescription(zh(StrKey.ADD_CONNECTION)).assertIsDisplayed()
-            // TopNavBar 上现在只有「数据库浏览」chip
+            // 浏览屏**不渲染**顶栏（它是「从某个连接点进去」的下钻页）——
+            // 所以「连接管理」这个词一次都不该出现。
             onAllNodesWithText(zh(StrKey.NAV_CONNECTIONS)).assertCountEquals(0)
         }
 

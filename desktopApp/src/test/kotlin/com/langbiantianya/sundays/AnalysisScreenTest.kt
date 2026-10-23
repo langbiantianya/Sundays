@@ -17,11 +17,13 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.AppLanguage
+import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_READ_ONLY_BADGE_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RESULT_TABLE_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RUN_BUTTON_TAG
@@ -174,6 +176,28 @@ class AnalysisScreenTest {
     }
 
     // ──────────────── 结果表只读 ────────────────
+
+    @Test
+    fun `the back button calls back`() {
+        // 顶栏的目标切换 chip 去掉之后，分析模式只有**一条**入口
+        // （连接管理的空闲面板）—— 若这里没有返回路，用户进去就回不来了。
+        var backs = 0
+        runComposeUiTest {
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            onBack = { backs++ },
+                        )
+                    }
+                }
+            }
+
+            onNodeWithContentDescription(zh(StrKey.BACK)).performClick()
+        }
+        assertEquals(1, backs, "点「返回」必须回调一次")
+    }
 
     @Test
     fun `the source is picked in the tree only and not in the toolbar`() {

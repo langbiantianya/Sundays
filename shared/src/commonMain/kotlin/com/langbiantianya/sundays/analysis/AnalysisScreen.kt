@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +37,7 @@ import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
+import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.str
 
 /**
@@ -74,6 +78,7 @@ import com.langbiantianya.sundays.ui.str
  * @param pullProgress 正在拉取时的进度；`null` = 没在拉
  * @param pullOutcome 最近一次拉取的**终态**；`null` = 还没拉过（或正在拉）
  * @param onCancelPull 「取消拉取」被点时回调；`null` = 不给取消入口
+ * @param onBack 「返回」被点时回调（回到连接管理）；`null` = 不给返回入口
  * @param treeRoots 左侧数据源树的根节点（工作区 + 各远端源）
  * @param expandedNodeIds 当前展开着的树节点 id
  * @param onToggleNode 树的某个**分组**节点被展开 / 收起时回调
@@ -92,6 +97,7 @@ fun AnalysisScreen(
     pullProgress: PullProgress? = null,
     pullOutcome: PullOutcome? = null,
     onCancelPull: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     treeRoots: List<AnalysisTreeNode> = emptyList(),
     expandedNodeIds: Set<String> = emptySet(),
     onToggleNode: (AnalysisTreeNode) -> Unit = {},
@@ -109,6 +115,7 @@ fun AnalysisScreen(
         AnalysisToolbar(
             running = running,
             onRun = onRun,
+            onBack = onBack,
         )
         // 拉取状态条 —— 在工具条**下面**、树与主区**上面**横贯一条。
         // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
@@ -205,7 +212,7 @@ private fun AnalysisPullStrip(
 }
 
 /**
- * 工具条 —— 只读徽标 + 「运行」。
+ * 工具条 —— 返回 + 只读徽标 + 「运行」。
  *
  * ## 为什么**没有**「数据源下拉框」
  *
@@ -219,6 +226,12 @@ private fun AnalysisPullStrip(
  *
  * 源只有一处能选：**左树**。一处就够。
  *
+ * ## 为什么工具条上有**返回**按钮
+ *
+ * 顶栏的目标切换 chip 去掉之后（分析模式的入口挪到了**连接管理的空闲面板**），
+ * 若这里也不给返回路，用户从连接管理点进分析模式就**回不来了** ——
+ * 而「点进去就回不来」是这个仓库最不该出现的东西。
+ *
  * 「生成报表」在稿子里也在这一行，但那是 M5 的东西 ——
  * 与其先摆一个点了必然没反应的按钮，不如先不摆。
  */
@@ -226,6 +239,7 @@ private fun AnalysisPullStrip(
 private fun AnalysisToolbar(
     running: Boolean,
     onRun: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     Row(
         modifier =
@@ -236,6 +250,15 @@ private fun AnalysisToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (onBack != null) {
+            WinIconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = str(StrKey.BACK),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         ReadOnlyBadge()
         Spacer(modifier = Modifier.weight(1f))
         WinButton(

@@ -64,7 +64,7 @@
 
 | 测试类 | 覆盖的能力 |
 |---|---|
-| [`ConnectionManagerFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionManagerFlowTest.kt) | 真实点击向导：选方言 → 填字段 → 测试连接 → 连接 → 断开 → `connection.json` 落盘；断言引擎侧效果（池建立/释放、状态流转） |
+| [`ConnectionManagerFlowTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionManagerFlowTest.kt) | 真实点击向导：选方言 → 填字段 → 测试连接 → 连接 → 断开 → `connection.json` 落盘；断言引擎侧效果（池建立/释放、状态流转）；**空闲面板上的「数据分析」入口**在且点了**真的回调**（顶栏的 chip 去掉后，这是分析模式的**唯一**入口） |
 | [`ConnectionWizardMouseKeyboardTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectionWizardMouseKeyboardTest.kt) | 鼠标点「新建连接」→ 点方言卡 → 连续点「下一步」到测试步（按钮 `enabled` 与字段联动） |
 | [`WizardKeyboardOrderTest`](./src/test/kotlin/com/langbiantianya/sundays/WizardKeyboardOrderTest.kt) | 向导焦点顺序：按 N 次 `Tab` 再回车看 `wizard.step` 变没变 —— 把「猜焦点」变成「数焦点」；方言卡是 `clickable` 不是 `selectable` |
 | [`TestConnectionDoesNotOpenSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/TestConnectionDoesNotOpenSessionTest.kt) | **「测试连接」是探测不是会话**：池归零 / 不动用户的活会话 / 探测失败也归还池 / 状态回填不被在途操作覆盖 |
@@ -150,6 +150,7 @@
 | [`onboarding/OnboardingScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreenTest.kt) | 首次引导页 |
 | [`settings/SettingsScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/settings/SettingsScreenTest.kt) | 设置页 |
 | [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航：默认落在连接管理，点击「数据库浏览」切到第二屏 |
+| [`TopNavBarTest`](./src/test/kotlin/com/langbiantianya/sundays/TopNavBarTest.kt) | **顶栏没有目标切换 chip**（只有品牌 + ⚙）：「连接管理」「数据分析」两个 chip 已去掉 —— 目标切换不再发生在顶栏，chip 很容易被「顺手加回来」，而「分析模式的入口在哪儿」是产品契约 |
 | [`H2GuiWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/H2GuiWalkthroughTest.kt) | 真 H2 内存库（6 表 / 250 行）走完整主流程并截图：schema 树 → 预览 → 分页 → SQL 补全（表候选优先于关键字、靠右翻转）→ SQL 执行 → 造数并回引擎侧复查 `COUNT(*)` → 树面板宽度拖拽 |
 
 ### 2.7 数据分析模式
@@ -158,7 +159,7 @@
 |---|---|
 | [`AnalysisCapabilityContractTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisCapabilityContractTest.kt) | **能力位契约**：MySQL / PostgreSQL 声明 `ANALYSIS_SOURCE`（分析模式的远端数据源）；H2 / DuckDB / SQLite **不**声明（本地库不是数据源 —— 计算引擎是 DuckDB 自己）；能力位以**枚举名**下发 —— 前端比对的是名字而不是下标，下标会随枚举增删而漂移 |
 | [`AnalysisModuleBoundaryTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisModuleBoundaryTest.kt) | `:shared` 的 `analysis/` 包的**结构边界**：不 import `java.*` / `javax.*`、不 import 引擎与协议层（界面只该接收**算好的**数据）、不出现字面量颜色。断言打在**源文件**上 —— 字节码里看不到「只用了类型」的 import |
-| [`AnalysisScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisScreenTest.kt) | 分析工作台的界面契约：只读徽标**可见且没有可点语义**（它是标记，不是开关 —— 远端只读是既定事实）、**数据源树**渲染（按 `analysisTreeRowTag` **精确定位到行**，不靠文本猜）、**源只在树里选**（工具条**没有**「数据源」下拉框 —— 那是**两份可能对不上的真相**：下拉框选了 A 源而树上点了 B 源的表，不报错却拉错库；判据是源的名字在屏幕上**只出现一次**）、无数据源时的空态文案**说清下一步做什么**、**结果表没有任何编辑入口**（判据是「可编辑的单元格才有的标记」—— 点一下看有没有输入框是**假绿**，实测可编辑时也点不出来）、结果表显示列与行、失败时显示错误原文、「▶ 运行」会回调且**运行中禁用**、编辑器里有当前 SQL |
+| [`AnalysisScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisScreenTest.kt) | 分析工作台的界面契约：只读徽标**可见且没有可点语义**（它是标记，不是开关 —— 远端只读是既定事实）、**数据源树**渲染（按 `analysisTreeRowTag` **精确定位到行**，不靠文本猜）、**源只在树里选**（工具条**没有**「数据源」下拉框 —— 那是**两份可能对不上的真相**：下拉框选了 A 源而树上点了 B 源的表，不报错却拉错库；判据是源的名字在屏幕上**只出现一次**）、**返回按钮点了真的回调**（顶层 chip 去掉后，分析模式的**唯一**入口在连接管理的空闲面板 —— 入口只有一条，就得也只进得出）、无数据源时的空态文案**说清下一步做什么**、**结果表没有任何编辑入口**（判据是「可编辑的单元格才有的标记」—— 点一下看有没有输入框是**假绿**，实测可编辑时也点不出来）、结果表显示列与行、失败时显示错误原文、「▶ 运行」会回调且**运行中禁用**、编辑器里有当前 SQL |
 | [`AnalysisSourceTreeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisSourceTreeTest.kt) | **数据源树的界面契约**：每行有标记、**工作区那一行显示固定名**（「本地工作区」是应用自带的引擎，名字由界面按 `StrKey` 取，会话不传字符串）、源行带方言标签、点扭子与点分组行都回调「展开」、**点表回调「选中」而不是「展开」**（两个后果不同：选中远端表会**拉数据**）、展开后子节点出现、**表行没有扭子**（叶子给个点了没反应的箭头）、空树不崩 |
 | [`AnalysisTreeSessionTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisTreeSessionTest.kt) | **会话里的树**：工作区**永远在第一位**且**没有远端源时也在**、源行带方言标签、展开工作区真能列出它的表（真 DuckDB）、点两次收起、**收起再展开不丢已加载的子节点**（收起只是「不看」，不是「忘掉」）、加载失败**留下原因**而不是变成「空列表」、连接列表变了**不抹掉已加载的子节点**、删掉的源从树上消失、把工作区的表名加进编辑器（空编辑器给一条能跑的语句 / 非空编辑器追加一个引用 / 名字带空格也要引用） |
 | [`AnalysisHandlerIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/AnalysisHandlerIntegrationTest.kt)（在 `:engine`） | 四条分析路由的集成测试：命名空间按 `supportsSchema` 分派（schema 型 / 库型）、`RUN_QUERY` 打在**非嵌入式**方言上被拒、行数到上限时 `truncated` 置位、正好等于上限**不算**截断 |

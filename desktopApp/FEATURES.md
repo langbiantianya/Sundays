@@ -127,6 +127,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
 | | 「⊘ 只读」徽标**不可关闭** | `ReadOnlyBadge` |
+| | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析页工具条上有**返回** —— 入口只有一条，就得也只进得出 | `ConnectionManagerScreen` / `AnalysisScreen` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 

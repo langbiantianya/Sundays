@@ -8,21 +8,25 @@
 
 package com.langbiantianya.sundays.navigation
 
-import com.langbiantianya.i18n.StrKey
-
 /**
  * 顶层导航目标 —— 应用当前渲染哪个主屏幕。
  *
  * 由调用方的顶层屏幕持有（如 desktopApp 的 `MainScreen`）；切换路由会重建目标屏幕
  * （保留每个屏幕自身的 `remember` 状态）。
  *
- * [labelKey] 是文案键而非文案本身 —— 导航条的 chip 文字同样要跟着界面语言走。
+ * ## 这里为什么**没有**文案键
+ *
+ * 早先每个目标带一个 `labelKey` —— 那是给**顶栏的目标切换 chip**用的。
+ * chip 去掉之后（见 `docs/analysis-mode/README.md` v1.4），
+ * 顶栏只剩品牌 + ⚙，而「数据分析」的入口文案在**连接管理的空闲面板**上
+ * （那里直接用 `StrKey.NAV_ANALYSIS`）。
+ *
+ * 留着没人读的字段就是**可能对不上的第二份真相**：哪天有人改了 `labelKey`，
+ * 界面却根本不显示它 —— 于是「改了没反应」。
  */
-enum class AppDestination(
-    val labelKey: StrKey,
-) {
-    CONNECTIONS(StrKey.NAV_CONNECTIONS),
-    DATABASE(StrKey.NAV_DATABASE),
+enum class AppDestination {
+    CONNECTIONS,
+    DATABASE,
 
     /**
      * 数据分析模式（v2.29）。
@@ -31,7 +35,7 @@ enum class AppDestination(
      * （源会话 + 本地工作区），与浏览模式那套「按连接开 sheet」的模型不同，
      * 硬塞进 `DATABASE` 会让两套生命周期互相牵扯。
      */
-    ANALYSIS(StrKey.NAV_ANALYSIS),
+    ANALYSIS,
 
-    SETTINGS(StrKey.SETTINGS_TITLE),
+    SETTINGS,
 }

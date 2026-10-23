@@ -154,6 +154,16 @@ fun ConnectionManagerScreen(
     // 模态弹窗里跳去改应用级设置会让人失去「当前处于什么界面」的判断。
     isEmbeddedInDialog: Boolean = false,
     onOpenSettings: () -> Unit = {},
+    /**
+     * 进入**数据分析模式**的入口；`null` = 不给这个入口。
+     *
+     * 顶栏的目标切换 chip 去掉之后，这条路是**唯一**的入口 ——
+     * 所以它挂在**空闲面板**（没选中任何连接时，右侧那一块正好在问「接下来做什么」）。
+     *
+     * 弹窗（[AddConnectionDialog]）复用同一个空闲面板，但**不给**这个入口：
+     * 弹窗是「加一个连接」，不是「换个模式」。
+     */
+    onOpenAnalysis: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     /**
@@ -223,6 +233,7 @@ fun ConnectionManagerScreen(
             onUpdateEditingConnection = onUpdateEditingConnection,
             onNewConnection = onNewConnection,
             onQuickConnect = onQuickConnect,
+            onOpenAnalysis = onOpenAnalysis,
             onTestConnection = onTestConnection,
             onConnect = onConnect,
             onDisconnect = onDisconnect,
@@ -603,6 +614,7 @@ private fun ConnectionWizardPanel(
     onUpdateEditingConnection: (ConnectionConfig) -> Unit,
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
+    onOpenAnalysis: (() -> Unit)? = null,
     onEditConnection: (ConnectionConfig) -> Unit,
     onDeleteConnection: (String) -> Unit,
     onTestConnection: (suspend (ConnectionConfig) -> TestResult)? = null,
@@ -639,6 +651,7 @@ private fun ConnectionWizardPanel(
                 IdlePanel(
                     onNewConnection = onNewConnection,
                     onQuickConnect = onQuickConnect,
+                    onOpenAnalysis = onOpenAnalysis,
                 )
             }
         },
@@ -955,11 +968,19 @@ private fun ConnectionOverviewPanel(
     }
 }
 
-/** 空闲状态面板 —— IDLE 时显示入口按钮（新建 / 快速连接）。可在 ConnectionManagerScreen 全屏使用，也可在 [AddConnectionDialog] 内复用（弹窗场景不渲染左侧连接列表与总览）。 */
+/**
+ * 空闲状态面板 —— IDLE 时显示入口按钮（新建 / 快速连接 / 数据分析）。
+ * 可在 ConnectionManagerScreen 全屏使用，也可在 [AddConnectionDialog] 内复用
+ * （弹窗场景不渲染左侧连接列表与总览）。
+ *
+ * @param onOpenAnalysis 进入**数据分析模式**；`null` = 不给这个入口
+ *   （弹窗复用时不给 —— 弹窗是「加一个连接」，不是「换个模式」）
+ */
 @Composable
 internal fun IdlePanel(
     onNewConnection: () -> Unit,
     onQuickConnect: () -> Unit,
+    onOpenAnalysis: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -994,6 +1015,18 @@ internal fun IdlePanel(
             Icon(Icons.Default.Add, null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(str(StrKey.NEW_CONNECTION))
+        }
+        // 「数据分析」入口 —— 顶栏的目标切换 chip 去掉之后，这条路就是**唯一**的入口。
+        //
+        // 放在这里而不是顶栏：这一块面板本来就在问「接下来做什么」，
+        // 而分析模式要的正是**远端只读源**（连接列表里方言声明了「可分析」的那些）。
+        if (onOpenAnalysis != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            WinOutlinedButton(onClick = onOpenAnalysis, shape = SundaysPalette.buttonShape) {
+                Icon(Icons.Default.Insights, null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(str(StrKey.NAV_ANALYSIS))
+            }
         }
     }
 }
