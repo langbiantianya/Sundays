@@ -597,7 +597,6 @@ body{
       <div class="work">
         <!-- 工具条 -->
         <div class="work-toolbar">
-          <span class="select-btn">数据源：<b>hive_prod</b><span class="caret">▾</span></span>
           <span class="badge-readonly" title="远程数据源恒为只读：分析模式没有「关闭只读」的开关，引擎会拒绝一切写入操作">
             <span class="glyph">⊘</span>只读
           </span>
@@ -629,7 +628,7 @@ body{
           <!-- 右侧主区 -->
           <div class="work-main">
             <div class="panel panel-editor">
-              <div class="panel-head">SQL 编辑器<span class="sub">hive_prod · DuckDB · Ctrl + Enter 运行</span></div>
+              <div class="panel-head">SQL 编辑器<span class="sub">在本地工作区（DuckDB）上写分析 SQL</span></div>
               <div class="editor"><span class="kw">SELECT</span> region, count(*) <span class="kw">AS</span> 订单数, sum(amount) <span class="kw">AS</span> 金额
 <span class="kw">FROM</span> staging_orders
 <span class="kw">WHERE</span> dt &gt;= <span class="str">'2026-10-01'</span> <span class="kw">GROUP BY</span> region <span class="kw">ORDER BY</span> 金额 <span class="kw">DESC</span>

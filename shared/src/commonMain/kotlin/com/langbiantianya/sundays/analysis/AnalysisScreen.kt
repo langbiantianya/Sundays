@@ -34,7 +34,6 @@ import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
-import com.langbiantianya.sundays.ui.WinDropdown
 import com.langbiantianya.sundays.ui.str
 
 /**
@@ -45,7 +44,7 @@ import com.langbiantianya.sundays.ui.str
  * 稿子里的画面 2（`data-screen="work"`）是三段式：
  *
  * ```
- * ├─ work-toolbar   数据源下拉 ｜ ⊘ 只读 ｜ … ｜ ▶ 运行
+ * ├─ work-toolbar   ⊘ 只读 ｜ … ｜ ▶ 运行
  * ├─ 左树 .tree     头（数据源 + 注） / 列表 / 脚（一句话说明）
  * │   └─ 右主区 .work-main   编辑器面板 + 结果面板 + 状态栏
  * ```
@@ -70,9 +69,8 @@ import com.langbiantianya.sundays.ui.str
  * 在结果表上给编辑入口，等于给远端数据开了一个写入的口子。
  * 所以 `onCellEdit = null`：这一层**不提供**编辑入口，只读由引擎与方言保证（§6.5）。
  *
- * @param sources 可分析的远端数据源（已按「方言声明了可分析」过滤过）—— 供工具条的下拉框用
- * @param selectedSourceId 当前选中的数据源 id；`null` = 未选中
- * @param onSelectSource 选中某个数据源时回调
+ * @param sources 可分析的远端数据源（已按「方言声明了可分析」过滤过）—— 供**空态**判断用：
+ *   一个都没有时，右侧要说清「下一步做什么」，而不是摆一张空表
  * @param pullProgress 正在拉取时的进度；`null` = 没在拉
  * @param pullOutcome 最近一次拉取的**终态**；`null` = 还没拉过（或正在拉）
  * @param onCancelPull 「取消拉取」被点时回调；`null` = 不给取消入口
@@ -91,8 +89,6 @@ import com.langbiantianya.sundays.ui.str
 @Composable
 fun AnalysisScreen(
     sources: List<AnalysisSourceItem>,
-    selectedSourceId: String?,
-    onSelectSource: (String) -> Unit,
     pullProgress: PullProgress? = null,
     pullOutcome: PullOutcome? = null,
     onCancelPull: (() -> Unit)? = null,
@@ -111,9 +107,6 @@ fun AnalysisScreen(
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         AnalysisToolbar(
-            sources = sources,
-            selectedSourceId = selectedSourceId,
-            onSelectSource = onSelectSource,
             running = running,
             onRun = onRun,
         )
@@ -212,16 +205,25 @@ private fun AnalysisPullStrip(
 }
 
 /**
- * 工具条 —— 数据源选择 + 只读徽标 + 「运行」。
+ * 工具条 —— 只读徽标 + 「运行」。
+ *
+ * ## 为什么**没有**「数据源下拉框」
+ *
+ * 早先这里摆过一个下拉框，让用户选「当前数据源」。但它是**纯装饰**：
+ * 拉取走的是**树上那张具体的表**（表节点自带 `sourceId`），
+ * 从不下拉框里取源 —— 下拉框里的那个 id 全程只有它自己在读。
+ *
+ * 而它带来的是**两份可能对不上的真相**：用户在下拉框里选了 A 源，
+ * 却在树上点了 B 源的表 —— 界面上「当前源是 A」，拉下去的却是 B 源的同名表，
+ * 而那**不会报错**，只是数据悄悄换了来源。
+ *
+ * 源只有一处能选：**左树**。一处就够。
  *
  * 「生成报表」在稿子里也在这一行，但那是 M5 的东西 ——
  * 与其先摆一个点了必然没反应的按钮，不如先不摆。
  */
 @Composable
 private fun AnalysisToolbar(
-    sources: List<AnalysisSourceItem>,
-    selectedSourceId: String?,
-    onSelectSource: (String) -> Unit,
     running: Boolean,
     onRun: () -> Unit,
 ) {
@@ -234,25 +236,6 @@ private fun AnalysisToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = "${str(StrKey.ANALYSIS_SOURCE_HEAD)}：",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        // 没有数据源时**不渲染下拉框**：一个点不开的下拉框只会让人反复点它，
-        // 而「没有可分析的数据源」这句话由右侧主区的空态承担（说一遍就够）。
-        if (sources.isNotEmpty()) {
-            WinDropdown(
-                value = sources.firstOrNull { it.id == selectedSourceId }?.name.orEmpty(),
-                onValueChange = { label ->
-                    sources.firstOrNull { it.name == label }?.let { onSelectSource(it.id) }
-                },
-                items = sources,
-                itemLabel = { it.name },
-                enabled = true,
-                modifier = Modifier.width(220.dp),
-            )
-        }
         ReadOnlyBadge()
         Spacer(modifier = Modifier.weight(1f))
         WinButton(

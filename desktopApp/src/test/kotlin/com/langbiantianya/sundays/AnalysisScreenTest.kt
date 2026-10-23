@@ -10,11 +10,13 @@ package com.langbiantianya.sundays
 
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -101,8 +103,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                         )
                     }
                 }
@@ -141,8 +141,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             treeRoots = treeRoots,
                         )
                     }
@@ -164,8 +162,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = emptyList(),
-                            selectedSourceId = null,
-                            onSelectSource = {},
                         )
                     }
                 }
@@ -180,6 +176,33 @@ class AnalysisScreenTest {
     // ──────────────── 结果表只读 ────────────────
 
     @Test
+    fun `the source is picked in the tree only and not in the toolbar`() {
+        runComposeUiTest {
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            treeRoots = treeRoots,
+                        )
+                    }
+                }
+            }
+
+            // 源**只有一处**能选：左树。
+            //
+            // 早先工具条上还有一个「数据源」下拉框 —— 那是**两份可能对不上的真相**：
+            // 下拉框里选了 A 源、树上点了 B 源的表，界面上「当前源是 A」，
+            // 拉下去的却是 B 源的**同名表** —— 而那**不会报错**（只要恰好有那张表），
+            // 只是数据悄悄换了来源。
+            //
+            // 判据：源的名字在屏幕上**只出现一次**（树里那一行）。
+            // 下拉框在的时候是两次 —— 判据因此有分辨力。
+            onAllNodesWithText("本地 MySQL").assertCountEquals(1)
+        }
+    }
+
+    @Test
     fun `the result table has no editing entry`() {
         runComposeUiTest {
             registerBuiltinEditors()
@@ -188,8 +211,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             result = result,
                         )
                     }
@@ -224,8 +245,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             result = result,
                         )
                     }
@@ -249,8 +268,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             result = AnalysisResult(error = "Catalog Error: Table with name orders does not exist"),
                         )
                     }
@@ -274,8 +291,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             onRun = { runs++ },
                         )
                     }
@@ -297,8 +312,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             running = true,
                             onRun = {},
                         )
@@ -323,8 +336,6 @@ class AnalysisScreenTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             sql = "SELECT * FROM staging_shop_orders",
                         )
                     }

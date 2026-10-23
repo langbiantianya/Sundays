@@ -753,19 +753,8 @@ internal fun MainScreen(
                 }
 
                 AppDestination.ANALYSIS -> {
-                    // 选中的数据源由**会话**持有：用户选好之后切去别的顶层页再回来，
-                    // 选择还在 —— 那是分析模式里最容易被忽略的一块「攒下来的东西」。
-                    //
-                    // 没选过时退回第一个：界面上总要有一个明确的当前源，
-                    // 否则「数据源：<空>」会让人以为没连上。
-                    val effectiveSelection =
-                        analysis.selectedSourceId?.takeIf { id -> analysisSources.any { it.id == id } }
-                            ?: analysisSources.firstOrNull()?.id
-
                     AnalysisScreen(
                         sources = analysisSources,
-                        selectedSourceId = effectiveSelection,
-                        onSelectSource = analysis::selectSource,
                         // 拉取状态由**会话**持有：它跨页面切换存活，
                         // 拉一半切去别的页再回来，进度条还在动。
                         pullProgress = analysis.pullProgress,

@@ -202,8 +202,6 @@ class AnalysisPullIndicatorTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             pullProgress = PullProgress(rows = 3),
                         )
                     }
@@ -222,8 +220,6 @@ class AnalysisPullIndicatorTest {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
                             sources = sources,
-                            selectedSourceId = "c1",
-                            onSelectSource = {},
                             pullProgress = PullProgress(rows = 3),
                             pullOutcome = PullOutcome.Done(PullResult(stagingTable = "staging_x")),
                         )

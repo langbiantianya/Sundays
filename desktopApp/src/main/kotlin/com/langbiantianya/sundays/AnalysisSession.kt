@@ -136,15 +136,11 @@ class AnalysisSession(
      * 派生数据再存一份，就有了两个可能对不上的副本
      * （连接删了、引擎改了能力位声明，存的那份不会自己跟着变）。
      * 所以列表留在调用方现算，这里只收**派生不出来的那部分** ——
-     * 凭据、方言，以及派生不出的**状态**：选中项、SQL、结果。
+     * 凭据、方言，以及派生不出的**状态**：SQL、结果、树的展开态与拉取进度。
      *
      * 它**不是** Compose 状态：没有界面读它，不需要重组。
      */
     private var sourceBindings: Map<String, AnalysisSourceBinding> = emptyMap()
-
-    /** 当前选中的数据源 id。 */
-    var selectedSourceId by mutableStateOf<String?>(null)
-        private set
 
     /** 编辑器里的当前 SQL。 */
     var sql by mutableStateOf("")
@@ -247,17 +243,10 @@ class AnalysisSession(
     /**
      * 同步可分析的远端源。
      *
-     * ## 为什么要剪枝选中项
-     *
-     * 连接被删掉后，选中项若还留着，界面会指向一个**不存在的源** ——
-     * 后续拉取会拿着一个查无此人的 id 去引擎。宁可退回「未选中」。
+     * 源列表一变就要重建树 —— 否则树里会留着已经删掉的源。
      */
     fun setSources(bindings: List<AnalysisSourceBinding>) {
         sourceBindings = bindings.associateBy { it.item.id }
-        val current = selectedSourceId
-        if (current != null && !sourceBindings.containsKey(current)) {
-            selectedSourceId = null
-        }
         refreshTree()
     }
 
@@ -485,11 +474,6 @@ class AnalysisSession(
         }
     }
 
-    /** 换数据源。 */
-    fun selectSource(id: String) {
-        selectedSourceId = id
-    }
-
     /**
      * 更新当前 SQL（编辑器每次改动都调）。
      *
@@ -585,9 +569,10 @@ class AnalysisSession(
      *
      * ## 为什么要**显式传 sourceId**，而不是用「当前选中的源」
      *
-     * 早先的写法用 `selectedSourceId`（工具条下拉框里的那个）。但树上点的是
+     * 早先的写法读会话里的「当前选中的源」（那会儿工具条上还有个下拉框，
+     * 现在**已经去掉了** —— 源只有一处能选：左树）。但树上点的是
      * **某一张具体的表** —— 它属于哪个源是那棵树自己知道的（表节点带着 `sourceId`），
-     * 而下拉框里的「当前源」可能压根不是这张表的源。
+     * 而「当前选中的源」可能压根不是这张表的源。
      *
      * 两者不一致时，「拉 A 源里的表」会变成「拉 B 源里的同名表」——
      * 而后者**不会报错**（只要 B 源里恰好有那张表），只是数据悄悄换了来源。

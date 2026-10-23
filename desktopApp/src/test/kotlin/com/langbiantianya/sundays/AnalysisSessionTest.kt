@@ -167,18 +167,6 @@ class AnalysisSessionTest {
     }
 
     @Test
-    fun `the selection is pruned when the source disappears`() {
-        // 连接被删掉后，选中项若还留着，后续拉取会拿着一个查无此人的 id 去引擎。
-        val session = newSession()
-        session.setSources(listOf(binding("c1")))
-        session.selectSource("c1")
-        assertEquals("c1", session.selectedSourceId)
-
-        session.setSources(emptyList())
-        assertNull(session.selectedSourceId, "源没了，选中项不能还留着")
-    }
-
-    @Test
     fun `the staging name follows the shared rule`() {
         // 规则本体在 :shared，这里只验「会话转出来的名字与那条规则一致」——
         // 两边各写一份拼表名的代码，就是两个真相源。
@@ -260,7 +248,6 @@ class AnalysisSessionTest {
     fun `a finished pull lands in the done outcome`() {
         val session = newSession(FakePuller { PullResult(stagingTable = "staging_x", rowsLanded = 3) })
         session.setSources(listOf(binding("c1")))
-        session.selectSource("c1")
 
         runBlocking { session.pull("c1", "demo", "orders")?.join() }
 
@@ -275,7 +262,6 @@ class AnalysisSessionTest {
         // 取消不是失败 —— 显示成失败会让用户以为出了错。
         val session = newSession(FakePuller { throw CancellationException("cancelled") })
         session.setSources(listOf(binding("c1")))
-        session.selectSource("c1")
 
         runBlocking { session.pull("c1", "demo", "orders")?.join() }
 
@@ -288,7 +274,6 @@ class AnalysisSessionTest {
     fun `a failed pull lands in the failed outcome with the reason`() {
         val session = newSession(FakePuller { throw IllegalStateException("表不存在") })
         session.setSources(listOf(binding("c1")))
-        session.selectSource("c1")
 
         runBlocking { session.pull("c1", "demo", "orders")?.join() }
 

@@ -44,17 +44,6 @@ data class AnalysisSourceItem(
 )
 
 /**
- * 数据源行的测试标记 —— `analysisSourceRow:<id>`。
- *
- * ## 为什么不给它一个更花哨的标记
- *
- * 这个标记存在的原因是**断言要精确**：数据源的名字同时出现在工具条的下拉框里
- * 和左树的行里，只按文本找会一次命中两个节点，断言就只能说「至少有一个」。
- * 而「左树里那行显示的是哪个源」正是要守的东西 —— 按标记找就没有这个歧义。
- */
-fun analysisSourceRowTag(id: String): String = "analysisSourceRow:$id"
-
-/**
  * 只读徽标的测试标记 —— `analysisReadOnlyBadge`。
  *
  * ## 为什么需要它（一次假绿换来的）
