@@ -465,6 +465,7 @@ desktopApp （本模块）
 | 拉取的终态是一个 **sealed**，不是三个可空字段 | 「结果 + 错误」两个可空字段表达不了「取消」（两个都空 ⇒ 大概是取消了 —— 那是**推断**不是事实）。`PullOutcome`（`Done` / `Cancelled` / `Failed`）三种情况互斥且穷举，**取消不是失败**，界面上分开说 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) + [`AnalysisPull.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) |
 | 树与展开态都归**会话**管 | 会话比界面活得久（顶层切走再回来，`AnalysisScreen` 会离开组合，而会话是 `remember(engine)` 建的、一直都在）。展开态放界面侧的话，用户「展开树 → 去连个库 → 回来」会发现树缩回去了 —— 那不是「界面没保存」，是**放错了地方** | 同上 |
 | 树的展开是**懒加载**的 | 子节点在点开的时候才去查 —— 启动时把每个源的每个库都列一遍，意味着「打开分析模式」要先连一遍所有远端，而远端可能压根连不上 | 同上 |
+| 分析树的**根只有工作区** | 连接配置**属于连接管理器** —— 同一份配置在浏览模式、连接管理器、分析树里各列一遍，就会变成**两份可能对不上的真相**（改了名字只更新一处、两处列的表不一样）。分析树是「**我的工作区里有什么**」的视图。代价：远端表不再出现在树上，「拉取远端表」在界面上暂时没有入口（能力仍在） | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
 | 树加载**失败**不算「这个节点是空的」 | 保持 `loaded = false`（再点一次就能重试），错误原文摆在树脚下。把失败当成空列表，用户会以为是自己连错了库 | 同上 |
 | 拉取要**显式传源 id** | 树上点的是**某一张具体的表**，它属于哪个源是树自己知道的；用「当前选中的源」会拉错库的同名表 —— 而那**不会报错**（只要恰好有那张表），只是数据悄悄换了来源 | 同上 |
 | 分析工作台**没有「数据源」下拉框** | 它是**纯装饰**：拉取走的是树上那张表（表节点自带 `sourceId`），从不下拉框里取源 —— 那个 id 全程只有它自己在读。而它带来的是**两份可能对不上的真相**：下拉框里选了 A 源、树上点了 B 源的表，界面上「当前源是 A」而拉下去的却是 B 源的同名表。源只有一处能选：**左树** | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |

@@ -98,15 +98,19 @@ class AnalysisTreeSessionTest {
     // ──────────────── 根 ────────────────
 
     @Test
-    fun `the tree starts with the workspace and then the sources`() {
+    fun `the tree holds the workspace only and not the saved connections`() {
+        // 树是「**我的分析工作区里有什么**」的视图：工作区 + 已经拉进来的表。
+        // 保存的连接配置**属于连接管理器** —— 同一份配置在两处都列一遍，
+        // 就会变成**两份可能对不上的真相**（改了名字只更新一处、两处列的表不一样）。
         val session = newSession()
         session.setSources(listOf(binding("c1"), binding("c2")))
 
-        assertEquals(3, session.treeRoots.size, "工作区 + 两个源")
-        assertEquals(ANALYSIS_WORKSPACE_NODE_ID, session.treeRoots[0].id, "工作区必须在第一位")
+        assertEquals(1, session.treeRoots.size, "树里只有工作区一个根")
+        assertEquals(ANALYSIS_WORKSPACE_NODE_ID, session.treeRoots[0].id)
         assertEquals(AnalysisTreeKind.WORKSPACE, session.treeRoots[0].kind)
-        assertEquals("c1", session.treeRoots[1].id)
-        assertEquals("c2", session.treeRoots[2].id)
+        assertEquals("DuckDB", session.treeRoots[0].dialectLabel, "工作区要标出引擎")
+        assertNull(findAnalysisNode(session.treeRoots, "c1"), "保存的连接不能出现在分析树的根里")
+        assertNull(findAnalysisNode(session.treeRoots, "c2"), "保存的连接不能出现在分析树的根里")
     }
 
     @Test
@@ -122,11 +126,12 @@ class AnalysisTreeSessionTest {
 
     @Test
     fun `the source rows keep their dialect label`() {
+        // 源行已经不在分析树里了（树只显示 DuckDB 那一支）——
+        // 这条留下的只有一个根：工作区标着它的引擎。
         val session = newSession()
         session.setSources(listOf(binding("c1")))
 
-        assertEquals("MySQL", session.treeRoots[1].dialectLabel, "用户要一眼看出这是哪种远端库")
-        assertEquals("DuckDB", session.treeRoots[0].dialectLabel, "工作区也要标出引擎")
+        assertEquals("DuckDB", session.treeRoots[0].dialectLabel, "工作区要标出引擎")
     }
 
     // ──────────────── 懒加载 ────────────────
@@ -191,19 +196,25 @@ class AnalysisTreeSessionTest {
 
     @Test
     fun `a failing load reports the reason instead of pretending the node is empty`() {
-        // 引擎里**没有**这个方言 —— 请求必然失败。
-        // 失败若被当成「这个源下一个库都没有」，用户会以为是自己连错了库。
-        val session = newSession()
-        session.setSources(listOf(binding("c1", driver = "NoSuchDialect")))
+        // 引擎里**没有**这个工作区 —— 请求必然失败（工作区所在的目录根本不存在，
+        // DuckDB 连文件都建不出来）。
+        // 失败若被当成「这里一个子节点都没有」，用户会以为是自己弄丢了表。
+        val session =
+            AnalysisSession(
+                engine = engine,
+                scope = scope,
+                workspaceFile = "${tempHome.absolutePath}/no-such-dir/workspace.duckdb",
+            )
+        session.setSources(emptyList())
 
-        runBlocking { session.toggleNode(session.treeRoots[1])?.join() }
+        runBlocking { session.toggleNode(workspaceNode(session))?.join() }
 
         val error = assertNotNull(session.treeError, "加载失败必须留下原因")
         assertTrue(error.isNotBlank(), "错误不能是空串")
         assertFalse(session.treeLoading, "跑完必须把 loading 落回去")
         assertEquals(
             emptyList(),
-            findAnalysisNode(session.treeRoots, "c1")?.children,
+            workspaceNode(session).children,
             "失败的节点不能被填成「空列表」——那是「查过了，确实没有」",
         )
     }
@@ -227,14 +238,22 @@ class AnalysisTreeSessionTest {
     }
 
     @Test
-    fun `a removed source disappears from the tree`() {
+    fun `the connection list does not change the tree at all`() {
+        // 树里只有工作区 —— 所以连接列表怎么变（加连接、删连接、改名），
+        // 树都**不受影响**：它是「我的工作区里有什么」，不是「我连了哪些库」。
         val session = newSession()
+        session.updateSql("CREATE TABLE survive_probe (id INT)")
+        runBlocking { session.run()?.join() }
+        session.setSources(emptyList())
+        runBlocking { session.toggleNode(workspaceNode(session))?.join() }
+
         session.setSources(listOf(binding("c1"), binding("c2")))
+        session.setSources(emptyList())
 
-        session.setSources(listOf(binding("c1")))
-
-        assertEquals(2, session.treeRoots.size, "工作区 + 剩下的那个源")
-        assertNull(findAnalysisNode(session.treeRoots, "c2"), "删掉的源不能还留在树上")
+        assertEquals(1, session.treeRoots.size, "树里始终只有工作区")
+        val workspace = workspaceNode(session)
+        assertTrue(workspace.loaded, "已经加载过的节点不该被重新变成「没加载」")
+        assertEquals(listOf("survive_probe"), workspace.children.map { it.label })
     }
 
     // ──────────────── 把表名加进编辑器 ────────────────

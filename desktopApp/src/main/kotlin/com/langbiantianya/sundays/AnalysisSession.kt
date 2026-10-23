@@ -196,7 +196,7 @@ class AnalysisSession(
     // ──────────────── 数据源树 ────────────────
 
     /**
-     * 数据源树的根节点 —— 工作区 + 各远端源。
+     * 数据源树的根节点 —— **只有本地工作区**。
      *
      * ## 为什么树住在会话里而不是界面里
      *
@@ -243,7 +243,9 @@ class AnalysisSession(
     /**
      * 同步可分析的远端源。
      *
-     * 源列表一变就要重建树 —— 否则树里会留着已经删掉的源。
+     * 源**不在分析树里**（树只显示 DuckDB 工作区那一支，见 [buildTreeRoots]），
+     * 但它们仍然是**拉取**的来源 —— 拉取要靠源 id 找到引擎侧的连接配置。
+     * 所以这里留着绑定，只是不再拿它们去拼树。
      */
     fun setSources(bindings: List<AnalysisSourceBinding>) {
         sourceBindings = bindings.associateBy { it.item.id }
@@ -272,9 +274,16 @@ class AnalysisSession(
     }
 
     /**
-     * 树的根节点 —— 工作区 + 各远端源。
+     * 树的根节点 —— **只有本地工作区**。
      *
-     * 工作区**永远**在第一位：它是分析模式的默认落点（拉进来的表都在那儿）。
+     * ## 为什么远端源不在这棵树里
+     *
+     * 树是「**我的分析工作区里有什么**」的视图：工作区（DuckDB 文件）
+     * + 里面已经拉进来的表。保存的连接配置**属于连接管理器**——
+     * 同一份连接配置在浏览模式与分析模式里都出现一遍，就会变成
+     * **两份可能对不上的真相**（改了名字只更新一处、两处列的表不一样）。
+     *
+     * 所以这棵树**只显示 DuckDB 这一支**：一个根节点，没有兄弟。
      */
     private fun buildTreeRoots(): List<AnalysisTreeNode> {
         val workspace =
@@ -284,16 +293,7 @@ class AnalysisSession(
                 kind = AnalysisTreeKind.WORKSPACE,
                 dialectLabel = "DuckDB",
             )
-        val sources =
-            sourceBindings.values.map { binding ->
-                AnalysisTreeNode(
-                    id = binding.item.id,
-                    label = binding.item.name,
-                    kind = AnalysisTreeKind.SOURCE,
-                    dialectLabel = binding.item.dialectLabel,
-                )
-            }
-        return listOf(workspace) + sources
+        return listOf(workspace)
     }
 
     /** 工作区文件名 —— 只作诊断用（界面上工作区那一行显示的是固定名）。 */

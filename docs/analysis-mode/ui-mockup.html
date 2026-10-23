@@ -644,20 +644,14 @@ body{
         <div class="work-body">
           <!-- 左树 -->
           <aside class="tree">
-            <div class="tree-head">数据源<span class="tree-head-note">来自连接列表</span></div>
+            <div class="tree-head">工作区<span class="tree-head-note">本地 DuckDB</span></div>
             <div class="tree-list">
               <div class="tree-row is-group lvl0"><span class="tw">▾</span><span class="name">本地工作区</span><span class="tag-tertiary">DuckDB</span></div>
               <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">orders</span></div>
-
-              <div class="tree-row is-group lvl0"><span class="tw">▾</span><span class="name">hive_prod</span><span class="tag-xs">Hive</span></div>
-              <div class="tree-row lvl1"><span class="tw">▾</span><span class="name">sales</span></div>
-              <div class="tree-row lvl2"><span class="tw"></span><span class="name">orders</span></div>
-              <div class="tree-row lvl2"><span class="tw"></span><span class="name">items</span></div>
-
-              <div class="tree-row is-group lvl0"><span class="tw">▸</span><span class="name">impala_crm</span><span class="tag-xs">Impala</span></div>
-              <div class="tree-row lvl1"><span class="tw"></span><span class="name">contacts</span></div>
+              <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">staging_orders</span></div>
+              <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">staging_items</span></div>
             </div>
-            <div class="tree-foot">远程数据源恒为只读（方言级）· 计算引擎 DuckDB</div>
+            <div class="tree-foot">分析工作区 · 计算引擎 DuckDB</div>
           </aside>
 
           <!-- 右侧主区 -->
