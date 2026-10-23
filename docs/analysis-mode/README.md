@@ -1103,11 +1103,27 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 层 | 做什么 | 不做什么 |
 |---|---|---|
 | 引擎 / 方言（L3 / L4） | 真正拦住写操作 | —— |
-| 组件层 | 不提供写入口：`DataTable` 的 `onCellEdit = null`；SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句；徽标**不可关闭** | **不自己判断「这条 SQL 算不算写」** |
+| 组件层 | 不提供**远端**的写入口：`DataTable` 的 `onCellEdit = null`；**远端没有 SQL 编辑器**（分析模式的 SQL 只打在本地工作区上）；徽标**不可关闭** | **不自己判断「这条 SQL 算不算写」** |
 
 > 为什么组件层不判断：同一个判据写两遍，迟早会不一致。而「界面拦住了、引擎放行了」这种不一致，
 > 会让用户以为「这条语句不安全」—— 其实引擎是拦得住的。这是**降低**而非提高安全性，
 > 与 §3.2「主防线必须在方言级」是同一条道理。
+
+> ⚠️ **v1.0 更正：「SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句」这条作废。**
+>
+> 原文把「编辑器只放行只读语句」当成通用规则，但**分析模式的编辑器不是远端会话的编辑器** ——
+> 它打的是**本地工作区**（DuckDB 文件），而工作区是**可写**的：
+> M4 的验收原文写着「工作区里 `CREATE TABLE tmp AS SELECT …` **可以成功**」（§11 M4 验收）。
+> 按原文把编辑器拦成只读，那条验收就**永远通不过**。
+>
+> 真正的只读边界是**「远端不可写」**，它由三件事表达：
+> ① 远端**根本没有** SQL 编辑器 —— `RUN_QUERY` 只允许打在声明了 `EMBEDDED_MODE`
+> 的方言上（引擎侧硬拦，不是前端自觉）；② 远端的元数据只走 `LIST_*`；
+> ③ 结果表 `onCellEdit = null` —— 分析结果不是一张可以改的表。
+>
+> 所以本轮实现是：**编辑器不拦写**（它写的是工作区），
+> **远端路径上根本没有可写的入口**。远端恒为只读的**保证**仍在引擎的 L3 / L4 ——
+> 组件层一个判断都不做。
 
 ### 6.6 组件复用的可验证判据
 
@@ -1127,7 +1143,7 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 里程碑 | 本节对应的动作 |
 |---|---|
 | **M1** | §6.3.1（方言档位注册表化）、§6.3.2（前端方言元数据收进一处）、§6.3.4（`WinDropdown`） |
-| **M2** | §6.5 的组件层表达（只读徽标、编辑器只读判据） |
+| **M2** | §6.5 的组件层表达（只读徽标、结果表 `onCellEdit = null`；「编辑器只放行只读语句」那条已作废 —— 见 §6.5 的更正） |
 | **M3** | Hive / Impala 档位**注册**进档位注册表 —— 前端零改动（这是 §6.3.1 的验收现场） |
 | **M4** | `SourceTree` + `DataTable` 的只读用法（§6.3.3） |
 | **M5 / M6** | `ReportBlockList` / `ReportColumnSpecRow` / `PullStageIndicator` |
@@ -1543,8 +1559,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 - **M1 未做（留给 M3 或后续）**
   - `properties` 里 secret 字段的 UI 脱敏与导出剔除
   - 连接管理器按能力位分组 + 只读徽标（§5.5）—— 那要等 M3 的 `ANALYSIS_SOURCE` 真有成员
-  - `AnalysisModuleBoundaryTest`（§6.6）—— 要等 M2 的 `analysis/` 包真的建起来
-- **验收**
+- **M1 验收**
   - **加一个假方言**（3 个自定义字段 + 2 种认证方式）→ 连接管理器**自动**渲染出这 3 个字段与认证下拉，
     **前端零改动**（§5.7）✅
   - **现有 5 个方言的连接向导与 `connection.json` 测试全绿且未修改** ✅
@@ -1554,9 +1569,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - v2 的 `connection.json` 加载后自动补齐新字段 ✅
   - `properties` 里的 secret 字段在 UI 脱敏、在导出配置时剔除 ⏳（M3）
   - **运行时注册一个假方言档位** → `CodeEditor(languageId = "sql-fake")` 立刻有高亮、
-    格式化按钮可用（§6.3.1）⏳（M2 的分析工作台用得上）
+    格式化按钮可用（§6.3.1）✅ —— `SqlDialectProfileTest` 的
+    `a profile registered at runtime gets a language and a formatter`
   - `WinDropdown` 在 **10 种配色**下都不出现 Material3 圆角（现代三套 6px / Win2000 全 0 / WinXP 递增）✅
-  - `AnalysisModuleBoundaryTest` 绿（无 `desktopApp` 依赖、无 `java.*`、无字面量颜色）⏳（M2）
+  - `AnalysisModuleBoundaryTest` 绿（无 `desktopApp` 依赖、无 `java.*`、无字面量颜色）✅
+    —— M2 建起 `analysis/` 包时一并落地（`desktopApp` 侧跑：它读 `:shared` 的**源文件**，
+    而 Gradle 跑测试时的工作目录是**模块根**）
 - **依赖**：无
 - **风险**：R9（前端表单迁移期的新旧两套渲染分叉 —— 用「优先读 spec + 回退」控制）、
   R12（组件复用退化 —— 用 §6.6 的结构测试钉住）
@@ -1572,8 +1590,9 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - proto：`Category.ANALYSIS` / `Category.REPORT` / 新 Action / `ConnectionConfig.read_only`
   - 引擎：`RequestDispatcher` 的只读闸门（L4）；`ANALYSIS` 的**四条**只读路由
     （`LIST_SOURCES` / `LIST_TABLES` / `LIST_COLUMNS` / `RUN_QUERY`）
-  - UI：`AppDestination.ANALYSIS` + 空壳主屏 + **不可关闭**的只读徽标（§6.4-4）
-  - 组件层只读表达（§6.5）：SQL 编辑器只放行 `DangerousSql.isReadOnlyQuery` 判定为只读的语句
+  - UI：`AppDestination.ANALYSIS` + 分析工作台主屏 + **不可关闭**的只读徽标（§6.4-4）
+  - 组件层只读表达（§6.5）：结果表 `onCellEdit = null`、**远端没有 SQL 编辑器**、
+    徽标不可关闭（原文那条「编辑器只放行只读语句」已作废，见 §6.5 的更正）
   - 测试：§3.6 的两类回归测试（方言级 + 会话级）
 - **M2 已落地（v0.7，分三片）** ✅
   - **片1 协议** —— `Category.ANALYSIS` / `Category.REPORT`、**五个** Action
@@ -1593,13 +1612,15 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
       前端按**引擎下发的**能力位筛数据源（`DialectCatalog` 一次换算表单与能力位），
       **不另写一份**「MySQL / PG 可分析」的名单
     - UI：`AppDestination.ANALYSIS` + [`shared/.../navigation/TopNavBar.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt)
-      （品牌 + 两个 chip + ⚙ 设置入口）+ `shared/.../analysis/`（`AnalysisModels.kt` /
-      `ReadOnlyBadge.kt` / `AnalysisScreen.kt` 骨架）
+      （品牌 + 两个 chip + ⚙ 设置入口）+ `shared/.../analysis/`
+      （`AnalysisModels.kt` / `ReadOnlyBadge.kt` / `AnalysisScreen.kt`）
     - 测试：引擎的 `AnalysisHandlerIntegrationTest`（12 例）+ `desktopApp` 的
       `AnalysisCapabilityContractTest` / `AnalysisModuleBoundaryTest` / `AnalysisScreenTest`
-    - i18n：**24 个**新文案键**六语言同步**
-  - ⏳ **还没做的**：§6.5 的「组件层只读表达」（编辑器只放行 `DangerousSql.isReadOnlyQuery`
-    判定为只读的语句）—— 分析屏目前是骨架，编辑器随工作台一起接上
+    - i18n：**36 个**新文案键**六语言同步**（片3 的 24 + 片4/5/6 的 12）
+  - ⏳ **M2 范围内还没做的**：无。
+    （原文列的「§6.5 的组件层只读表达：编辑器只放行只读语句」已**作废** ——
+    分析模式的编辑器打的是**可写**的工作区，按原文拦成只读会让 M4 的验收
+    「工作区里 `CREATE TABLE tmp AS SELECT …` 可以成功」永远通不过。见 §6.5 的更正。）
 - **验收**
   - 在只读会话里发 `TABLE.CREATE` / `DATA.INSERT` / `IMPORT.RUN_IMPORT` / `SQL.EXECUTE("INSERT …")`
     —— **全部**返回明确的只读错误，且**不进入 handler**

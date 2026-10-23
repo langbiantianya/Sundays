@@ -263,13 +263,13 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
 | `WinDropdown` / `WinDropdownMenu` | 下拉选择器 | 经典档是「凹陷取值区 + 凸起箭头」两块拼接的 Win 味道，现代档是一整块描边面；`value` 用 `String` 与 `WinTextField` 同口径，**标签必须互不相同**（靠文本反查选中项） | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
-| `analysis/`（数据分析模式 UI） | 分析工作台骨架 + 不可关闭的只读徽标 + 数据源条目 | 见 §6.1 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
+| `analysis/`（数据分析模式 UI） | 分析工作台（工具条 + 数据源树 + 编辑器 + 只读结果表 + 状态栏）+ 不可关闭的只读徽标 + 拉取三段进度 | 见 §6.1 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 
 界面语言的完整设计见 [`../i18n/README.md`](../i18n/README.md)。语言状态放在 `AppearanceState` 里 —— 落盘写的是**整份** `AppSettings`，语言若由调用方单独持有，用户改一次配色就会把已选语言抹掉。
 
 ### 6.1 数据分析模式的 UI 包（`analysis/`）
 
-[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，五件事：
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，七个文件：
 
 | 文件 | 内容 |
 |---|---|
