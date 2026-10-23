@@ -11,7 +11,6 @@ package com.langbiantianya.sundays
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -30,7 +29,7 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * **顶层导航**的端到端契约 —— 「启动首屏 → 连接管理 → 数据分析 → 回来」。
+ * **顶层导航**的端到端契约 —— 「启动首屏 → 连接管理 → 数据分析」。
  *
  * ## 现在的导航模型
  *
@@ -39,8 +38,8 @@ import java.nio.file.Files
  * - 「连接管理」→ 传统的连库与浏览工具；
  * - 「数据分析」→ 只读分析工作台（**直接**进，不经过连接列表）。
  *
- * 首屏之后：连接管理的空闲面板上挂着「数据分析」入口，
- * 分析工作台的工具条上有一个**返回**按钮。
+ * 首屏之后：连接管理的空闲面板上挂着「数据分析」入口。
+ * 分析工作台**没有返回按钮**（它是一块**独立**的工作区，不是「退掉这个功能」）。
  *
  * ## 为什么这条用例必须是**端到端**的
  *
@@ -117,11 +116,6 @@ class MainScreenNavTest {
             // 点它 → 切到分析模式（只读徽标是分析工作台特有的）
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).performClick()
             onNodeWithTag(ANALYSIS_READ_ONLY_BADGE_TAG).assertIsDisplayed()
-
-            // 分析页的「返回」→ 回到连接管理
-            // 入口只有一条，就得也只进得出 —— 进得去出不来是这个仓库最不该出现的东西。
-            onNodeWithContentDescription(zh(StrKey.BACK)).performClick()
-            onNodeWithText(zh(StrKey.CONNECTION_MANAGER_TITLE)).assertIsDisplayed()
         }
     }
 }

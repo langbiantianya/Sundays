@@ -785,8 +785,6 @@ internal fun MainScreen(
                         pullProgress = analysis.pullProgress,
                         pullOutcome = analysis.pullOutcome,
                         onCancelPull = analysis::cancelPull,
-                        // 返回连接管理 —— 入口只有一条，就得也只进得出。
-                        onBack = { destination = AppDestination.CONNECTIONS },
                         // 树与展开态同样由会话持有 —— 切去别的顶层页再回来，
                         // 用户展开到一半的树还摊在那儿。
                         treeRoots = analysis.treeRoots,
