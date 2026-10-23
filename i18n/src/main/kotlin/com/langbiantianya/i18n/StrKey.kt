@@ -737,8 +737,6 @@ enum class StrKey {
 
     // ──────────────── 数据分析模式 ────────────────
     NAV_ANALYSIS,
-    ANALYSIS_READONLY_BADGE,
-    ANALYSIS_READONLY_HINT,
     ANALYSIS_SOURCE_HEAD,
     ANALYSIS_SOURCE_NOTE,
     ANALYSIS_SOURCE_FOOT,

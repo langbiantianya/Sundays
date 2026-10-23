@@ -106,11 +106,7 @@ fun AnalysisScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        AnalysisToolbar(
-            running = running,
-            onRun = onRun,
-        )
-        // 拉取状态条 —— 在工具条**下面**、树与主区**上面**横贯一条。
+        // 拉取状态条 —— 在树与主区**上面**横贯一条。
         // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
         // 结果落在右边的分析区里，中间那条横贯的带子正是它俩的连接。
         if (pullProgress != null || pullOutcome != null) {
@@ -141,6 +137,8 @@ fun AnalysisScreen(
                 AnalysisEditorPanel(
                     sql = sql,
                     onSqlChange = onSqlChange,
+                    running = running,
+                    onRun = onRun,
                     modifier = Modifier.weight(EDITOR_PANEL_WEIGHT),
                 )
                 AnalysisResultPanel(
@@ -205,57 +203,53 @@ private fun AnalysisPullStrip(
 }
 
 /**
- * 工具条 —— 只读徽标 + 「运行」。
+ * 编辑器面板 —— 面板头 + SQL 编辑器（**工具条上带「格式化」与「运行」**）。
  *
- * ## 为什么**没有**「数据源下拉框」
+ * ## 为什么固定成 DuckDB 方言
  *
- * 早先这里摆过一个下拉框，让用户选「当前数据源」。但它是**纯装饰**：
- * 拉取走的是**树上那张具体的表**（表节点自带 `sourceId`），
- * 从不下拉框里取源 —— 下拉框里的那个 id 全程只有它自己在读。
+ * 分析 SQL **只在本地工作区上跑**（引擎的 `RUN_QUERY` 只允许打在
+ * `EMBEDDED_MODE` 的方言上），而工作区就是 DuckDB。
+ * 所以编辑器的语言是 `sql-duckdb`，而且**隐藏语言切换器** ——
+ * 摆一个能让用户切到 Lua 的下拉框，只会让「这条 SQL 到底打在哪」变得含糊。
  *
- * 而它带来的是**两份可能对不上的真相**：用户在下拉框里选了 A 源，
- * 却在树上点了 B 源的表 —— 界面上「当前源是 A」，拉下去的却是 B 源的同名表，
- * 而那**不会报错**，只是数据悄悄换了来源。
+ * ## 为什么「运行」跟「格式化」同一行
  *
- * 源只有一处能选：**左树**。一处就够。
- *
- * ## 为什么也**没有**返回按钮
- *
- * 分析模式的退路是**顶栏的品牌标记**（点它回首屏）——
- * 顶栏是应用级的公共区域，而工具条是这一屏自己的；
- * 把「回到根」放在工具条上，会让它看起来像「退掉这个功能」，
- * 而它其实是「回到应用的两个模式入口」。
- *
- * 「生成报表」在稿子里也在这一行，但那是 M5 的东西 ——
- * 与其先摆一个点了必然没反应的按钮，不如先不摆。
+ * 它俩都是**对编辑器里这段 SQL 的动作** —— 分开放两行就让人多扫一眼，
+ * 而且分析模式原来那条工具条（只读徽标 + 运行）本来就是一行没别的内容的行，
+ * 去掉徽标之后**整行都空了**。
  */
 @Composable
-private fun AnalysisToolbar(
+private fun AnalysisEditorPanel(
+    sql: String,
+    onSqlChange: (String) -> Unit,
     running: Boolean,
     onRun: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ReadOnlyBadge()
-        Spacer(modifier = Modifier.weight(1f))
-        WinButton(
-            onClick = onRun,
-            // 正在跑的时候禁掉：连点两下就是两条并发查询，
-            // 而工作区是**一个** DuckDB 文件 —— 后一条会把前一条的结果盖掉。
-            enabled = !running,
-            modifier = Modifier.testTag(ANALYSIS_RUN_BUTTON_TAG),
-        ) {
-            Text(text = "▶ ${str(StrKey.ANALYSIS_RUN)}")
-        }
+    Column(modifier = modifier.fillMaxWidth()) {
+        AnalysisPanelHead(
+            title = str(StrKey.ANALYSIS_EDITOR_TITLE),
+            sub = str(StrKey.ANALYSIS_EDITOR_HINT, "DuckDB"),
+        )
+        CodeEditorWithToolbar(
+            text = sql,
+            onTextChange = onSqlChange,
+            languageId = SqlDialectProfile.DUCKDB.languageId,
+            showLanguageSwitcher = false,
+            actions = {
+                WinButton(
+                    onClick = onRun,
+                    // 正在跑的时候禁掉：连点两下就是两条并发查询，
+                    // 而工作区是**一个** DuckDB 文件 —— 后一条会把前一条的结果盖掉。
+                    enabled = !running,
+                    modifier = Modifier.testTag(ANALYSIS_RUN_BUTTON_TAG),
+                ) {
+                    Text(text = "▶ ${str(StrKey.ANALYSIS_RUN)}")
+                }
+            },
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp, vertical = 6.dp),
+        )
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /**

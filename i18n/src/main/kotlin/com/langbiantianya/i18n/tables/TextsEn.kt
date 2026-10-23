@@ -589,8 +589,6 @@ internal val textsEn: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "Write operation rejected in a read-only session: {0}",
         StrKey.DIALECT_READ_ONLY to "{0} is a read-only dialect and does not allow writes",
         StrKey.NAV_ANALYSIS to "Data Analysis",
-        StrKey.ANALYSIS_READONLY_BADGE to "Read-only",
-        StrKey.ANALYSIS_READONLY_HINT to "Remote data sources are always read-only: analysis mode has no switch to turn read-only off, and the engine rejects every write",
         StrKey.ANALYSIS_SOURCE_HEAD to "Data sources",
         StrKey.ANALYSIS_SOURCE_NOTE to "From the connection list",
         StrKey.ANALYSIS_SOURCE_FOOT to "Remote sources are always read-only (dialect level) · Compute engine {0}",

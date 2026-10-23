@@ -18,7 +18,6 @@ import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.pool.PoolManager
-import com.langbiantianya.sundays.analysis.ANALYSIS_READ_ONLY_BADGE_TAG
 import com.langbiantianya.sundays.navigation.START_MODE_ANALYSIS_TAG
 import com.langbiantianya.sundays.navigation.START_MODE_CONNECTIONS_TAG
 import com.langbiantianya.sundays.ui.rememberAppearanceState
@@ -91,7 +90,7 @@ class MainScreenNavTest {
 
             // 选「数据分析」→ **直接**进分析工作台（不必先经过连接列表）
             onNodeWithTag(START_MODE_ANALYSIS_TAG).performClick()
-            onNodeWithTag(ANALYSIS_READ_ONLY_BADGE_TAG).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.ANALYSIS_EDITOR_TITLE)).assertIsDisplayed()
         }
     }
 
@@ -113,9 +112,9 @@ class MainScreenNavTest {
             // 连接管理的空闲面板上有「数据分析」入口（顶栏的 chip 已去掉）
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).assertIsDisplayed()
 
-            // 点它 → 切到分析模式（只读徽标是分析工作台特有的）
+            // 点它 → 切到分析模式（分析工作台的编辑器标题是它的锚点）
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).performClick()
-            onNodeWithTag(ANALYSIS_READ_ONLY_BADGE_TAG).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.ANALYSIS_EDITOR_TITLE)).assertIsDisplayed()
         }
     }
 }

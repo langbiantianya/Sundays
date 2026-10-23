@@ -24,7 +24,7 @@
 | **AppDestination** | 顶层导航目标枚举（`START` 首屏 / `CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`） | [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) |
 | **StartScreen** | **启动首屏** —— 选一个模式进去（连接管理 / 数据分析） | [`navigation/StartScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/StartScreen.kt) |
 | **TopNavBar** | 顶栏（品牌 + ⚙ 设置入口 —— **目标切换 chip 已去掉**，见 `docs/analysis-mode/README.md` v1.4） | [`navigation/TopNavBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/TopNavBar.kt) |
-| **AnalysisScreen / SourceTree / ReadOnlyBadge / PullProgressIndicator** | 数据分析模式的工作台（工具条 + 数据源树 + 编辑器 + 只读结果表）+ **不可关闭**的只读徽标 + 拉取进度 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
+| **AnalysisScreen / SourceTree / PullProgressIndicator** | 数据分析模式的工作台（工作区树 + 编辑器 + 只读结果表）+ 拉取进度 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | **SundaysTheme / ThemePalette / SundaysPalette** | 三轴外观（配色 / 明暗 / 尺度）+ 视觉规范 | [`ui/Theme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/Theme.kt) |
 | **SettingsScreen / SettingsStorage** | 设置页（左分类 / 右内容）与设置持久化 | [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) |
 | **OnboardingScreen** | 首次启动外观引导（配色 / 明暗 / 密度 / 语言） | [`onboarding/OnboardingScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreen.kt) |
@@ -269,7 +269,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
 | `WinDropdown` / `WinDropdownMenu` | 下拉选择器 | 经典档是「凹陷取值区 + 凸起箭头」两块拼接的 Win 味道，现代档是一整块描边面；`value` 用 `String` 与 `WinTextField` 同口径，**标签必须互不相同**（靠文本反查选中项） | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
-| `analysis/`（数据分析模式 UI） | 分析工作台（工具条 + 数据源树 + 编辑器 + 只读结果表 + 状态栏）+ 不可关闭的只读徽标 + 拉取进度 | 见 §6.1 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
+| `analysis/`（数据分析模式 UI） | 分析工作台（工作区树 + 编辑器 + 只读结果表 + 状态栏）+ 拉取进度 | 见 §6.1 | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 
 界面语言的完整设计见 [`../i18n/README.md`](../i18n/README.md)。语言状态放在 `AppearanceState` 里 —— 落盘写的是**整份** `AppSettings`，语言若由调用方单独持有，用户改一次配色就会把已选语言抹掉。
 
@@ -279,13 +279,12 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 | 文件 | 内容 |
 |---|---|
-| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 + 只读徽标的测试标记 + `AnalysisColumn` / `AnalysisResult` + **树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） |
+| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ 数据源行的测试标记 + `AnalysisColumn` / `AnalysisResult` + **树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） |
 | [`AnalysisWorkspace.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisWorkspace.kt) | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗（纯函数，不碰文件系统 → 能进 `commonTest`） |
 | [`AnalysisPull.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) | **拉取的纯模型**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 |
-| [`SourceTree.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/SourceTree.kt) | 数据源树：工作区 + 远端源 → 命名空间 → 表，**懒加载**（子节点由调用方查好后给它）；点分组 = 展开 / 收起，点表 = 选中它（两个后果不同，不混成一种手势） |
-| [`ReadOnlyBadge.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/ReadOnlyBadge.kt) | 「⊘ 只读」徽标 —— **不可关闭**（它没有任何开关） |
+| [`SourceTree.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/SourceTree.kt) | 数据源树：**工作区 + 里面的表**（保存的连接配置不进这棵树 —— 那是连接管理器的事）；**懒加载**（子节点由调用方查好后给它）；点分组 = 展开 / 收起，点表 = 选中它（两个后果不同，不混成一种手势） |
 | [`PullProgressIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullProgressIndicator.kt) | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 —— 用**静态字形**（`●`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
-| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（工具条 + 拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**） |
+| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行 |
 
 三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
 
@@ -296,8 +295,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 3. **不出现字面量颜色** —— 颜色一律取自 `MaterialTheme.colorScheme`；
    写死的颜色在五套配色里只有一套是对的，而且不跟明暗档位走。
 
-> 💡 **为什么只读徽标不可关闭**：会话级 `read_only` 是**请求级**标记（不落 `connection.json`），
-> 方言级只读更是**实现事实** —— 引擎里压根没有往它写入的路径。
+> 💡 **为什么远端只读不在组件层表达**：分析屏上原本有个「⊘ 只读」徽标，> 方言级只读更是**实现事实** —— 引擎里压根没有往它写入的路径。
 > 给了又关不掉的东西，用户点了发现没反应，下次就不信这个徽标了，
 > 而它恰恰是最该被信的那句话。
 

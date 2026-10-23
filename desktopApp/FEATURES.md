@@ -126,7 +126,6 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
-| | 「⊘ 只读」徽标**不可关闭** | `ReadOnlyBadge` |
 | | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析工作台**没有返回按钮**（它是一块独立的工作区） | `ConnectionManagerScreen` / `AnalysisScreen` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）

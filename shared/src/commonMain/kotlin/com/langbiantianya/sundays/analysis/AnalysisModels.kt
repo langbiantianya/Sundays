@@ -44,20 +44,6 @@ data class AnalysisSourceItem(
 )
 
 /**
- * 只读徽标的测试标记 —— `analysisReadOnlyBadge`。
- *
- * ## 为什么需要它（一次假绿换来的）
- *
- * 「徽标不可关」这条判据，查的是**徽标那个容器**上有没有可点语义。
- * 按文本找节点会找到徽标**里面那个 Text**（两个短字「⊘ 只读」）——
- * 而可点语义挂在**容器**上，Text 自己没有，于是断言恒绿。
- *
- * 这就是「断言落错层」的典型：测试绿着，功能却是错的。
- * 标记把断言钉到**正确的那个节点**上。
- */
-const val ANALYSIS_READ_ONLY_BADGE_TAG: String = "analysisReadOnlyBadge"
-
-/**
  * 结果表的一列。
  *
  * @param name 列名

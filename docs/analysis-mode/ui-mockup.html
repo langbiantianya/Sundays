@@ -216,6 +216,10 @@ body{
   display:flex; align-items:center; gap:10px; height:42px; padding:0 10px;
   border-bottom:1px solid var(--outline-variant); background:var(--surface);
 }
+/* 编辑器工具条：「格式化」与「▶ 运行」同一行 —— 它俩都是对编辑器里这段 SQL 的动作 */
+.editor-toolbar{
+  display:flex; align-items:center; gap:8px; padding:4px 8px 0;
+}
 .work-body{ flex:1 1 auto; display:flex; min-height:0; }
 .tree{
   width:250px; flex:none; display:flex; flex-direction:column;
@@ -630,16 +634,10 @@ body{
       </header>
 
       <div class="work">
-        <!-- 工具条 -->
-        <div class="work-toolbar">
-          <span class="badge-readonly" title="远程数据源恒为只读：分析模式没有「关闭只读」的开关，引擎会拒绝一切写入操作">
-            <span class="glyph">⊘</span>只读
-          </span>
-          <span class="spacer"></span>
-          <button class="btn btn-primary" type="button"><span class="glyph">▶</span>运行</button>
-          <button class="btn btn-tonal" type="button"><span class="glyph">⤓</span>生成报表</button>
-          <button class="icon-btn" type="button" title="刷新元数据"><span class="glyph">⟳</span></button>
-        </div>
+        <!-- 分析工作台**没有**独立工具条（v1.8）：原来那条只挂着「⊘ 只读」徽标
+             与「运行」的行，去掉徽标后**整行都空了** —— 于是整条都去掉。
+             「运行」挪进了编辑器的工具条，与「格式化」同一行 ——
+             它俩都是对编辑器里这段 SQL 的动作。 -->
 
         <div class="work-body">
           <!-- 左树 -->
@@ -658,6 +656,11 @@ body{
           <div class="work-main">
             <div class="panel panel-editor">
               <div class="panel-head">SQL 编辑器<span class="sub">在本地工作区（DuckDB）上写分析 SQL</span></div>
+              <!-- 编辑器工具条：「格式化」与「▶ 运行」同一行（v1.8） -->
+              <div class="editor-toolbar">
+                <button class="btn" type="button">格式化</button>
+                <button class="btn btn-primary" type="button"><span class="glyph">▶</span>运行</button>
+              </div>
               <div class="editor"><span class="kw">SELECT</span> region, count(*) <span class="kw">AS</span> 订单数, sum(amount) <span class="kw">AS</span> 金额
 <span class="kw">FROM</span> staging_orders
 <span class="kw">WHERE</span> dt &gt;= <span class="str">'2026-10-01'</span> <span class="kw">GROUP BY</span> region <span class="kw">ORDER BY</span> 金额 <span class="kw">DESC</span>
@@ -943,7 +946,7 @@ body{
           <span class="cmp-head-sub">每个界面区域由哪个现成组件渲染</span>
           <span class="cmp-stat">
             <span class="tag-xs">零改动复用 19 项</span>
-            <span class="tag-tertiary">新增 6 个</span>
+            <span class="tag-tertiary">新增 5 个</span>
             <span>全部落在 :shared 的 commonMain</span>
           </span>
         </div>
@@ -955,7 +958,6 @@ body{
 
           <div class="cmp-group">② 分析工作区</div>
           <div class="cmp-row"><span class="cmp-area">顶栏按钮</span><span class="cmp-comp">WinButton / WinOutlinedButton / WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
-          <div class="cmp-row"><span class="cmp-area">只读徽标</span><span class="cmp-comp">ReadOnlyBadge</span><span class="cmp-path">shared/…/analysis/ReadOnlyBadge.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">SourceTree</span><span class="cmp-path">shared/…/analysis/SourceTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
@@ -983,7 +985,7 @@ body{
         <div class="cmp-foot">
           <b>判据（三条同时满足才叫复用）</b>：① 平台无关（不 import <span class="cmp-comp">java.*</span> / <span class="cmp-comp">desktopApp</span>）；
           ② 状态无关（不依赖 <span class="cmp-comp">DatabaseBrowserState</span>）；③ 可寻址（说得出它在哪一屏的哪个位置）。
-          <br><b>只读由引擎与方言保证</b>，组件层只做表达 —— 徽标不可关闭、结果表不提供编辑入口；组件<b>不</b>自己判断「这条 SQL 算不算写」。
+          <br><b>只读由引擎与方言保证</b>，组件层只做表达 —— 结果表不提供编辑入口；组件<b>不</b>自己判断「这条 SQL 算不算写」。
           <br><b>顶栏右上角只留一个 ⚙ 设置入口</b>：主题与语言都在设置页「个性化」里，顶栏不放 —— 与浏览模式同一个 SettingsEntryButton。
         </div>
       </div>

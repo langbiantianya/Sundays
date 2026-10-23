@@ -589,8 +589,6 @@ internal val textsJa: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "読み取り専用セッションでは書き込み操作を拒否しました：{0}",
         StrKey.DIALECT_READ_ONLY to "{0} は読み取り専用の方言であり、書き込みは許可されていません",
         StrKey.NAV_ANALYSIS to "データ分析",
-        StrKey.ANALYSIS_READONLY_BADGE to "読み取り専用",
-        StrKey.ANALYSIS_READONLY_HINT to "リモートデータソースは常に読み取り専用です。分析モードには読み取り専用を解除するスイッチがなく、エンジンはすべての書き込みを拒否します",
         StrKey.ANALYSIS_SOURCE_HEAD to "データソース",
         StrKey.ANALYSIS_SOURCE_NOTE to "接続一覧から",
         StrKey.ANALYSIS_SOURCE_FOOT to "リモートデータソースは常に読み取り専用（方言レベル）· 計算エンジン {0}",

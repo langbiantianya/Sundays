@@ -589,8 +589,6 @@ internal val textsRu: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "Операция записи отклонена в сеансе только для чтения: {0}",
         StrKey.DIALECT_READ_ONLY to "{0} — диалект только для чтения, запись запрещена",
         StrKey.NAV_ANALYSIS to "Анализ данных",
-        StrKey.ANALYSIS_READONLY_BADGE to "Только чтение",
-        StrKey.ANALYSIS_READONLY_HINT to "Удалённые источники всегда доступны только для чтения: в режиме анализа нет переключателя отключения, а движок отклоняет любую запись",
         StrKey.ANALYSIS_SOURCE_HEAD to "Источники данных",
         StrKey.ANALYSIS_SOURCE_NOTE to "Из списка подключений",
         StrKey.ANALYSIS_SOURCE_FOOT to "Удалённые источники всегда только для чтения (на уровне диалекта) · Вычислительный движок {0}",

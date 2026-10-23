@@ -589,8 +589,6 @@ internal val textsDe: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "Schreibvorgang in einer schreibgeschützten Sitzung abgelehnt: {0}",
         StrKey.DIALECT_READ_ONLY to "{0} ist ein schreibgeschützter Dialekt und erlaubt keine Schreibvorgänge",
         StrKey.NAV_ANALYSIS to "Datenanalyse",
-        StrKey.ANALYSIS_READONLY_BADGE to "Schreibgeschützt",
-        StrKey.ANALYSIS_READONLY_HINT to "Externe Datenquellen sind immer schreibgeschützt: Im Analysemodus gibt es keinen Schalter zum Aufheben, und die Engine lehnt jeden Schreibvorgang ab",
         StrKey.ANALYSIS_SOURCE_HEAD to "Datenquellen",
         StrKey.ANALYSIS_SOURCE_NOTE to "Aus der Verbindungsliste",
         StrKey.ANALYSIS_SOURCE_FOOT to "Externe Quellen sind immer schreibgeschützt (Dialektebene) · Rechenengine {0}",

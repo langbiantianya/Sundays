@@ -589,8 +589,6 @@ internal val textsZhHant: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "唯讀工作階段拒絕寫入操作：{0}",
         StrKey.DIALECT_READ_ONLY to "{0} 是唯讀方言，不允許寫入",
         StrKey.NAV_ANALYSIS to "資料分析",
-        StrKey.ANALYSIS_READONLY_BADGE to "唯讀",
-        StrKey.ANALYSIS_READONLY_HINT to "遠端資料來源恆為唯讀：分析模式沒有「關閉唯讀」的開關，引擎會拒絕一切寫入操作",
         StrKey.ANALYSIS_SOURCE_HEAD to "資料來源",
         StrKey.ANALYSIS_SOURCE_NOTE to "來自連線清單",
         StrKey.ANALYSIS_SOURCE_FOOT to "遠端資料來源恆為唯讀（方言層級）· 計算引擎 {0}",

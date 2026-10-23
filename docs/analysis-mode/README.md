@@ -1,6 +1,17 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.7** · 2026-10-24
+> **状态**：设计冻结待评审 · **v1.8** · 2026-10-24
+>
+> **v1.8 相对 v1.7 的修改**（**分析工作台的顶栏整条去掉**）：
+>
+> 1. **「▶ 运行」挪进编辑器的工具条**，跟「格式化」**同一行** —— 它俩都是
+>    **对编辑器里这段 SQL 的动作**，分开放两行就让人多扫一眼。
+> 2. **「⊘ 只读」徽标去掉**，于是**那条只挂着徽标与运行按钮的工具条**整条
+>    都不剩了 → **一整行空白**（原本就不含别的内容）一并去掉。
+> 3. **§6.4 的组件清单从 6 个改成 5 个**（`ReadOnlyBadge` 连同它的两个
+>    i18n 键一起删掉）—— 远端恒为只读这件事**没变**：保证在引擎的 L3 / L4
+>    闸门与方言级只读上（§3），徽标从来只是**表达**。
+> 4. **§9.1 画面 ② 与 §9.3 组件对照表同步**。
 >
 > **v1.7 相对 v1.6 的修改**（**分析工作台的树只显示 DuckDB 工作区**）：
 >
@@ -199,7 +210,7 @@
 | **当前阶段交付** | **Excel 报表**（.xlsx）。 |
 | **后续迭代** | 接入 **AI** 做智能分析与报表生成（见 §8）。 |
 | **复用什么** | **连接配置 + 连接管理器 + 连接向导 + 设置页**（同一份 `connection.json`，同一个设置界面）。 |
-| **组件** | **通用控件全部来自 `:shared` 的 `commonMain`**（`CodeEditor` / `DataTable` / `DragHandle` / `EmptyHint` / `WinControls` / `ContextMenuState` / `DangerousSql` …），**零改动**；本模式**只新增 6 个组件**，且全部落在 `:shared`（见 §6）。 |
+| **组件** | **通用控件全部来自 `:shared` 的 `commonMain`**（`CodeEditor` / `DataTable` / `DragHandle` / `EmptyHint` / `WinControls` / `ContextMenuState` / `DangerousSql` …），**零改动**；本模式**只新增 5 个组件**，且全部落在 `:shared`（见 §6）。 |
 | **不复用什么** | 浏览屏的 sheet 标签条 / `DatabaseBrowserState` / 对象树 / 预览标签页 / SQL 工作台**屏幕**。 |
 | **前置条件** | **连接管理器必须先通用化**（§5）—— 否则 Hive / Impala 会把专用表单的 if-else 再加两轮。**组件侧同样要先通用化**（§6.3）：方言档位注册表化、前端方言元数据收进一处。 |
 | **样式** | **完全复用**现有主题系统：5 套配色 × 明暗 2 档，一行新样式代码都不写（见 §9.1）。 |
@@ -989,7 +1000,7 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 > 本节回答评审意见的第三条：**组件和控件也尽量复用，可以优化组件更加通用**。
 >
 > **结论先行**：分析模式**不新写一套控件**。所有颜色 / 圆角 / 字号来自现有主题系统（§9.1），
-> 所有通用控件来自 `:shared` 的 `commonMain`；本模式**只新增 6 个组件**，且**全部落在 `:shared`**
+> 所有通用控件来自 `:shared` 的 `commonMain`；本模式**只新增 5 个组件**，且**全部落在 `:shared`**
 > —— 这样浏览模式将来也能用。
 
 ### 6.1 判据：什么叫「可以复用」
@@ -1240,18 +1251,23 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 本设计的立场是**不夹带** —— 那是浏览模式的内部重构，与数据分析模式无关，
 混进来会让本设计的大范围改动更难评审。
 
-### 6.4 确需新建的组件（6 个，全部落在 `:shared`）
+### 6.4 确需新建的组件（5 个，全部落在 `:shared`）
 
 | # | 组件 | 位置 | 为什么现有的不够用 |
 |---|---|---|---|
 | 1 | `SourceTree` | `shared/.../analysis/SourceTree.kt` | `desktopApp/SchemaTree.kt` 的语义是**可写浏览**（含建表 / 改表 / 删表的右键菜单），分析模式一个都不要；且它深度耦合 `DatabaseBrowserState`（§6.3.5） |
 | 2 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
 | 3 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
-| 4 | `ReadOnlyBadge` | `shared/.../analysis/ReadOnlyBadge.kt` | `ColumnBadge` 是「类型小标签」（`surfaceVariant` 底、11px 字），只读徽标要 **tertiary 底 + 不可关闭 + ⓘ 说明** —— 语义与视觉都不同 |
-| 5 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
-| 6 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
+| 4 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
+| 5 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
 
-**共同的底线**：这 6 个组件
+> ⚠️ **v1.8：原第 4 个组件 `ReadOnlyBadge`（「⊘ 只读」徽标）被删掉了** ——
+> 分析屏上不再摆它（那一条工具条整个去掉了）。远端恒为只读这件事**没变**：
+> 保证在引擎的 L3 / L4 闸门与方言级只读上（§3），组件层从来只是**表达**。
+> 徽标没了，**组件层就没有任何「可切换」的东西**了 ——
+> 而那本来就是它存在的理由（「远端恒为只读，没有开关可拨」）。
+
+**共同的底线**：这 5 个组件
 
 - 一律落在 `:shared` 的 `commonMain`（**不引入 expect/actual**）
 - 只用 `UiChrome.kt` 的 token（`winShape` / `controlShape` / `uiBevel` / `selectionColorsFor`）
@@ -1266,7 +1282,7 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 层 | 做什么 | 不做什么 |
 |---|---|---|
 | 引擎 / 方言（L3 / L4） | 真正拦住写操作 | —— |
-| 组件层 | 不提供**远端**的写入口：`DataTable` 的 `onCellEdit = null`；**远端没有 SQL 编辑器**（分析模式的 SQL 只打在本地工作区上）；徽标**不可关闭** | **不自己判断「这条 SQL 算不算写」** |
+| 组件层 | 不提供**远端**的写入口：`DataTable` 的 `onCellEdit = null`；**远端没有 SQL 编辑器**（分析模式的 SQL 只打在本地工作区上） | **不自己判断「这条 SQL 算不算写」** |
 
 > 为什么组件层不判断：同一个判据写两遍，迟早会不一致。而「界面拦住了、引擎放行了」这种不一致，
 > 会让用户以为「这条语句不安全」—— 其实引擎是拦得住的。这是**降低**而非提高安全性，
@@ -1306,7 +1322,7 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 里程碑 | 本节对应的动作 |
 |---|---|
 | **M1** | §6.3.1（方言档位注册表化）、§6.3.2（前端方言元数据收进一处）、§6.3.4（`WinDropdown`） |
-| **M2** | §6.5 的组件层表达（只读徽标、结果表 `onCellEdit = null`；「编辑器只放行只读语句」那条已作废 —— 见 §6.5 的更正） |
+| **M2** | §6.5 的组件层表达（结果表 `onCellEdit = null`；「编辑器只放行只读语句」那条已作废 —— 见 §6.5 的更正） |
 | **M3** | Hive / Impala 档位**注册**进档位注册表 —— 前端零改动（这是 §6.3.1 的验收现场） |
 | **M4** | `SourceTree` + `DataTable` 的只读用法（§6.3.3） |
 | **M5 / M6** | `ReportBlockList` / `ReportColumnSpecRow` / `PullStageIndicator` |
@@ -1522,8 +1538,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|---|---|
 | ⓪ 启动选择 | 两张模式卡片（图标 + 标题 + 说明，整块可点） | `StartScreen`（`Surface` + `winShape` + `uiBevel`） | ★ 新增（`:shared` 的 `navigation/`） |
 | ① 顶层导航 | 顶栏本体（品牌 + ⚙ 设置 —— **目标 chip 已去掉**，见 v1.4） | `TopNavBar` + `SettingsEntryButton` | ★ 新增（`:shared` 的 `navigation/`） |
-| ② 分析工作区 | 工具条按钮（运行） | `WinButton` / `WinOutlinedButton` / `WinIconButton` | —— |
-| ② 分析工作区 | 顶栏「⊘ 只读」徽标 | `ReadOnlyBadge` | ★ 新增（§6.4-4） |
+| ② 分析工作区 | 编辑器工具条上的**「格式化」与「▶ 运行」**（同一行） | `WinButton` / `WinOutlinedButton` / `WinIconButton` | —— |
+| ② 分析工作区 | **没有**「⊘ 只读」徽标（v1.8 删掉了 —— 远端恒为只读的保证在引擎与方言层，组件层不再摆它） | —— | —— |
 | ② 分析工作区 | 左侧**工作区树**（`SourceTree` —— 内部用 `EmptyHint` / `ColumnBadge` / `focusRing` / `onRightClick` / `winShape`） | ★ 新增（§6.4-1） |
 | ② 分析工作区 | 中间 SQL 编辑器 | `CodeEditorWithToolbar` / `CodeEditorState` / `SqlFormatter` | —— |
 | ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
@@ -1540,7 +1556,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | 全部 | 主题 / 圆角 / 立体边 / 选中色 | `SundaysTheme` / `UiChrome` token | —— |
 | 全部 | 文案 | `str(StrKey)` + `i18n` 的 6 语言表 | —— |
 
-> **统计**：本模式**零改动复用的组件 19 项**，**新增组件 6 项**（其中 1 项是扩充 `WinControls`）。
+> **统计**：本模式**零改动复用的组件 19 项**，**新增组件 5 项**（其中 1 项是扩充 `WinControls`）。
 > 没有一项是「另写一套看起来差不多的」。
 
 > ⚠️ **顶栏右上角只放一个 ⚙ 设置入口**（与浏览模式同一个 `SettingsEntryButton`），
@@ -1557,7 +1573,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|
 | **⓪ 启动选择（首屏）** | 顶栏只有**品牌 + ⚙ 设置**；中间是「选择要进入的模式」+ 两张模式卡片（**连接管理** / **数据分析**），各带一句话说明。选完一路走下去 |
 | **① 分析模式说明** | 讲清本模式的边界与「复用什么」。 |
-| **② 分析工作区** | 左：**工作区树**（只有本地 DuckDB 工作区 + 里面已经拉进来的表；**保存的连接配置不进这棵树** —— 那是连接管理器的事，两处都列一遍就成了两份可能对不上的真相）。中：SQL 编辑器 + 结果表（带占比条形）。工具条：`⊘ 只读` **不可关闭**的徽标 + 运行 / 生成报表（**没有返回按钮** —— 分析模式是一块独立的工作区）。 |
+| **② 分析工作区** | 左：**工作区树**（只有本地 DuckDB 工作区 + 里面已经拉进来的表；**保存的连接配置不进这棵树** —— 那是连接管理器的事，两处都列一遍就成了两份可能对不上的真相）。中：SQL 编辑器（**工具条上「格式化」旁边就是「▶ 运行」**）+ 结果表（带占比条形）。分析屏上**没有**独立工具条，也没有只读徽标。 |
 | **③ 报表设计器** | 左：区块列表（可增删排序）。中：区块配置（列规格 / 类型 / 数字格式 / 样式）。右：Excel 观感预览（标题 + 元信息 + 表头 + 斑马纹）。 |
 | **④ 连接管理器（复用 + 通用化后）** | **同一个**连接管理器：列表按「可浏览 / 可分析」分组、只读方言带 ⓘ 徽标；右侧是选中连接的详情（含「只读方言」说明与「在数据分析中打开」）。 |
 | **⑤ 新增连接向导（复用 + 通用化后）** | **同一个**添加连接弹窗，但表单由**方言自描述**渲染：认证方式下拉（账密 / Kerberos）、方言特有字段、「高级属性」折叠区、以及**自定义 JDBC URL** 逃生舱。 |
@@ -1580,11 +1596,10 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../analysis/` | `ReportSpec.kt`（报表规格）、`AnalysisScreen.kt`、`ReportDesignerScreen.kt` |
 | `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 数据源行的测试标记 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
 | `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯模型**：进度（已读行数）、结果、终态模型（sealed）、用户取消的专用异常 |
-| `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/6**，§6.4） |
-| `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/6**） |
-| `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/6**） |
-| `shared/src/commonMain/.../analysis/ReadOnlyBadge.kt` | 不可关闭的只读徽标（**新增组件 4/6**） |
-| `shared/src/commonMain/.../analysis/PullProgressIndicator.kt` | 拉取进度（**新增组件 5/6**；原名 `PullStageIndicator` —— 联邦直查没有「阶段」） |
+| `shared/src/commonMain/.../analysis/SourceTree.kt` | 数据源树（**新增组件 1/5**，§6.4） |
+| `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/5**） |
+| `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/5**） |
+| `shared/src/commonMain/.../analysis/PullProgressIndicator.kt` | 拉取进度（**新增组件 4/5**；原名 `PullStageIndicator` —— 联邦直查没有「阶段」） |
 | `shared/src/commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口）—— 只在**并列的顶层目标**渲染 |
 | `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
 | `desktopApp/src/test/.../AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6）—— 落在 `desktopApp` 而不是 `:shared`：它要读 `:shared` 的**源文件**（按 import 行判定），而 Gradle 跑测试时的工作目录是**模块根** |
@@ -1630,7 +1645,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/.../connection/DialectMetadata.kt` | **新增**：前端方言元数据的唯一真相源（`mapOf` 表） |
 | `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
-| `shared/.../ui/WinControls.kt` | **加** `WinDropdown` / `WinDropdownMenu`（**新增组件 6/6**，§6.3.4） |
+| `shared/.../ui/WinControls.kt` | **加** `WinDropdown` / `WinDropdownMenu`（**新增组件 5/5**，§6.3.4） |
 | `shared/.../editor/SqlDialectProfileRegistry.kt` | **新增**：方言档位注册表（§6.3.1） |
 | `shared/.../editor/language/SqlDialectProfile.kt` | `ALL` 降级为快照；新增 `SqlDialectProfileRegistry`（§6.3.1） |
 | `shared/.../editor/formatter/SqlFormatter.kt` | `register()` 改成遍历**注册表**而非 `ALL`（§6.3.1） |

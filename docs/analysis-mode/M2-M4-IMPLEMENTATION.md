@@ -10,7 +10,7 @@
 
 | 做什么 | 不做什么（及原因） |
 |---|---|
-| **M2** 只读地基：proto 新类别 / 新动作 / `read_only` 标记、引擎 L4 闸门、`ANALYSIS` 四个读路由、顶层导航、不可关闭的只读徽标、§3.6 两类回归测试 | **M3** Hive / Impala：卡在驱动版本取舍（R1）与目标环境发行版版本未定，设计文档要求先对着真实 HiveServer2 做 spike |
+| **M2** 只读地基：proto 新类别 / 新动作 / `read_only` 标记、引擎 L4 闸门、`ANALYSIS` 四个读路由、顶层导航、§3.6 两类回归测试 | **M3** Hive / Impala：卡在驱动版本取舍（R1）与目标环境发行版版本未定，设计文档要求先对着真实 HiveServer2 做 spike |
 | **M4'** 分析工作台：DuckDB 本地工作区、拉取链路、SQL 编辑 + 只读结果表、`SourceTree`、`PullStageIndicator` | **M5 / M6** 报表模型与报表设计器：等本轮的地基与工作台跑通后再做 |
 | 能力位：给 **MySQL / PostgreSQL** 补声明 `ANALYSIS_SOURCE`（见 §4.1） | **M7** AI 洞察：不在 v1 范围 |
 
@@ -240,13 +240,12 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、只读徽标标记、`AnalysisColumn` / `AnalysisResult`、**树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） | ✅ 已落地 |
+| `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、`AnalysisColumn` / `AnalysisResult`、**树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） | ✅ 已落地 |
 | `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
 | `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 | ✅ 已落地（第 5 片；**第 7 片重写**） |
 | `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ✅ 已落地（第 6 片） |
 | `shared/.../analysis/PullProgressIndicator.kt` | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 | ✅ 已落地（第 5 片；**第 7 片重写** —— 不再有「阶段」与「临时文件」） |
-| `shared/.../analysis/ReadOnlyBadge.kt` | 新组件 4/6：`⊘ 只读`，**不可关闭** | ✅ 已落地 |
-| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（工具条 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」；**第 9 片**去掉「数据源」下拉框；**第 10 片**加返回按钮） |
+| `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（拉取状态条 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」；**第 9 片**去掉「数据源」下拉框；**第 10 片**加返回按钮；**第 14 片**「▶ 运行」挪进编辑器的工具条、去掉只读徽标与那条空工具条） |
 | `shared/.../navigation/StartScreen.kt` | **启动首屏**：标题 + 两张模式卡片（连接管理 / 数据分析），整块可点 | ✅ 已落地（第 11 片） |
 
 ### 5.2 `:desktopApp` 的状态机
@@ -323,7 +322,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
-| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：只读徽标可见且**没有可点语义**、数据源树渲染、**源只在树里选**（工具条没有「数据源」下拉框 —— 源的名字在屏幕上只出现一次）、无数据源时的空态文案、**结果表没有编辑入口**、结果表显示列与行、失败结果显示原文、运行按钮回调且运行中禁用、编辑器里有当前 SQL | ✅ 已落地（第 3 片；第 6 片补 6 例；第 9 片补 1 例，共 10 例） |
+| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：**「▶ 运行」与「格式化」同一行**（几何判据：垂直位置重合）、**没有**只读徽标、数据源树渲染、**源只在树里选**（工具条没有「数据源」下拉框 —— 源的名字在屏幕上只出现一次）、无数据源时的空态文案、**结果表没有编辑入口**、结果表显示列与行、失败结果显示原文、运行按钮回调且运行中禁用、编辑器里有当前 SQL | ✅ 已落地（第 3 片；第 6 片补 6 例；第 9 片补 1 例；第 14 片改 1 例，共 10 例） |
 | `desktopApp/.../AnalysisSourceTreeTest.kt` | **树的界面契约**：每行有标记、工作区那一行显示**固定名**、源行带方言标签、点扭子 / 点分组行都回调「展开」、**点表回调「选中」而不是「展开」**、展开后子节点出现、表行**没有扭子**、空树不崩 | ✅ 已落地（第 6 片，8 例） |
 | `desktopApp/.../AnalysisTreeSessionTest.kt` | **会话里的树**：树里**只有工作区**（保存的连接配置不在分析树里 —— 那是连接管理器的事）、工作区永远在第一位、方言标签标出 DuckDB 引擎、展开工作区真能列出它的表、点两次收起、收起再展开**不丢已加载的子节点**、加载失败**留下原因**而不是变成「空」、**连接列表变了也不影响树**、把工作区的表名加进编辑器（空 / 非空两种） | ✅ 已落地（第 6 片，12 例；第 13 片改 4 例） |
 | `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、DDL 回 -1、SQL 出错收成**失败结果**而不是异常、**拉取的三条终态**（完成 / 取消 / 失败各落各的态） | ✅ 已落地（第 4 片；第 5 片补 4 例；第 9 片删 1 例，共 13 例） |
@@ -340,8 +339,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 新文案键**六语言同步**（`TextsZhHans` / `TextsEn` / `TextsJa` / `TextsDe` / `TextsRu` /
 `TextsZhHant`）。键分两类：
 
-- **前端文案**（走 `str(StrKey)`）：`NAV_ANALYSIS`、`ANALYSIS_READONLY_BADGE` /
-  `ANALYSIS_READONLY_HINT`、`ANALYSIS_SOURCE_HEAD` / `_NOTE` / `_FOOT`、
+- **前端文案**（走 `str(StrKey)`）：`NAV_ANALYSIS`、
+  `ANALYSIS_SOURCE_HEAD` / `_NOTE` / `_FOOT`、
   `ANALYSIS_NO_SOURCE` / `_HINT`、`ANALYSIS_LOCAL_WORKSPACE`、
   `ANALYSIS_WORKSPACE_EMPTY` / `_HINT`、`ANALYSIS_EDITOR_HINT`、
   `ANALYSIS_RESULT_ROWS` / `ANALYSIS_RESULT_TRUNCATED`、
@@ -388,6 +387,13 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > 而前端硬抄一份 5000 就是**两份真相源**（引擎改宽了，前端还在说 5000）。
 > 截断时 `rows.size` **就是**上限（引擎正好停在上限那一行），
 > 所以一个占位符足够，而且它顺带把上限告诉了用户。
+
+> ⚠️ **第 14 片把两个键删了**（随徽标组件一起消失）：
+> `ANALYSIS_READONLY_BADGE` / `ANALYSIS_READONLY_HINT` ——
+> 分析屏上不再摆「⊘ 只读」徽标了，那条只挂着徽标的工具条整条都没了。
+> 远端**恒为只读**这件事**没变**：保证在引擎的 L3 / L4 闸门与方言级只读上，
+> 徽标从来只是**表达**，删掉它不动那条保证。
+> 删除的键同样**六语言一起删** —— 少一个语言就留下一条悬空的文案。
 
 ---
 
@@ -936,7 +942,8 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 10 | `refactor(analysis): 顶栏去掉「连接管理 / 数据分析」chip，入口挪到连接管理的空闲面板` | `TopNavBar`（只留品牌 + ⚙）+ `IdlePanel` 的「数据分析」入口 + `AnalysisScreen` 的返回按钮 + `main.kt` 接线 | 顶栏没有 chip；空闲面板有入口且点了回调；**变异验证**两处各被抓住 | ✅ **已提交** |
 | 11 | `feat(app): 启动首屏 —— 选一个模式进去` | `StartScreen`（新）+ `AppDestination.START` + `main.kt` 的初始目标与分支 | 首屏两个模式都在且各点各的；选「数据分析」直接进分析工作台；**变异验证**：两个入口接错线 → 两条用例都变红 | ✅ **已提交** |
 | 12 | `refactor(analysis): 分析工作台去掉工具条上的返回按钮` | `AnalysisScreen` / `AnalysisToolbar`（去掉 `onBack` 与按钮）+ 两条测试 | 分析工作台的工具条上**没有**返回按钮；其余导航路径不受影响 | ✅ **已提交** |
-| 13 | `refactor(analysis): 分析工作台的树只显示 DuckDB 工作区` | 会话的 `buildTreeRoots()`（只留工作区）+ 四条树会话测试 + UI 设计图 | 树里只有工作区一个根；连接列表怎么变都不影响树 | ✅ **本轮落地** |
+| 13 | `refactor(analysis): 分析工作台的树只显示 DuckDB 工作区` | 会话的 `buildTreeRoots()`（只留工作区）+ 四条树会话测试 + UI 设计图 | 树里只有工作区一个根；连接列表怎么变都不影响树 | ✅ **已提交** |
+| 14 | `refactor(analysis): 「▶ 运行」挪到格式化那行，去掉只读徽标与那条空工具条` | `AnalysisScreen`（去掉工具条、运行按钮进编辑器的 `actions` 插槽）+ 删掉 `ReadOnlyBadge` 组件与两个 i18n 键 + UI 设计图 | 「运行」与「格式化」同一行（几何判据）；屏上没有只读徽标 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——

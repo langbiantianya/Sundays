@@ -8,21 +8,19 @@
 
 package com.langbiantianya.sundays
 
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.AppLanguage
-import com.langbiantianya.sundays.analysis.ANALYSIS_READ_ONLY_BADGE_TAG
+import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_RESULT_TABLE_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RUN_BUTTON_TAG
 import com.langbiantianya.sundays.analysis.AnalysisColumn
@@ -39,6 +37,7 @@ import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 分析工作台的界面契约（主设计 §7.5）。
@@ -51,7 +50,7 @@ import kotlin.test.assertFalse
  *
  * 所以 `onCellEdit = null`：点单元格**不进编辑态**。
  *
- * ## 另一条：只读徽标**不可关**
+ * ## 另一条：界面上**没有**「关闭只读」的入口
  *
  * 分析模式连的是远端，而远端**恒为只读**。这不只是「现在开着只读」，
  * 而是「根本关不掉」——
@@ -62,7 +61,12 @@ import kotlin.test.assertFalse
  *   更无从「解除」。
  *
  * 所以界面上**不能**出现任何「关闭只读」的入口。给了又关不掉的东西，
- * 用户点了发现没反应，下次就不信这个徽标了 —— 而它恰恰是最该被信的那句话。
+ * 用户点了发现没反应，下次就不信这句话了。
+ *
+ * v1.8 起，连那个**不可关闭的徽标**也一并去掉了：徽标表达的是
+ * 「远端恒为只读」，而这句话在**引擎的 L3 / L4 闸门**上已经兑现了
+ * （见实现文档 §5.5「第 14 片把两个键删了」那条补记）。
+ * 组件层于是**不再**摆任何只读标记 —— 少一个表达，少一处可能对不上的真相。
  */
 @OptIn(ExperimentalTestApi::class)
 class AnalysisScreenTest {
@@ -96,7 +100,7 @@ class AnalysisScreenTest {
         )
 
     @Test
-    fun `the read only badge is shown and has no close affordance`() {
+    fun `the run button sits on the same row as the format button and the badge is gone`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
@@ -108,28 +112,20 @@ class AnalysisScreenTest {
                 }
             }
 
-            val badge = onNodeWithText("只读")
-            badge.assertIsDisplayed()
-
-            // 判据落在**徽标容器**上，不是里面那个 Text。
+            // 「运行」跟「格式化」**同一行** —— 它俩都是**对编辑器里这段 SQL 的动作**，
+            // 分开放两行就让人多扫一眼。
             //
-            // ⚠️ 这里踩过一次假绿：按文本找会找到「⊘ 只读」那两个字的 Text 节点，
-            // 而可点语义挂在**容器**（Surface）上 —— Text 自己没有可点语义，
-            // 于是「徽标不可关」这条断言恒绿，哪怕徽标其实做成了开关。
-            // 变异验证（给徽标加上 onClick 语义）必须让这条断言变红。
-            val badgeBox = onNodeWithTag(ANALYSIS_READ_ONLY_BADGE_TAG)
-            assertFalse(
-                badgeBox.fetchSemanticsNode().config.contains(SemanticsActions.OnClick),
-                "只读徽标不能可点：它不是开关，远端只读是既定事实",
+            // 判据用**几何**（垂直位置重合）而不是父节点：父节点链会跳过没有语义的
+            // 布局节点，Compose 改一改层级就断，而「同一行」本来就是几何事实。
+            val runBounds = onNodeWithText("▶ ${zh(StrKey.ANALYSIS_RUN)}").fetchSemanticsNode().boundsInRoot
+            val formatBounds = onNodeWithText(zh(StrKey.FORMAT_CODE)).fetchSemanticsNode().boundsInRoot
+            assertTrue(
+                kotlin.math.abs(runBounds.center.y - formatBounds.center.y) < runBounds.height,
+                "「运行」必须与「格式化」同一行：运行 y=${runBounds.center.y}，格式化 y=${formatBounds.center.y}",
             )
 
-            // 更宽的一条：整屏**不该有任何开关**（Switch / Checkbox 之类）。
-            // 远端恒为只读 —— 界面上放一个能拨的东西，就是在骗用户。
-            assertEquals(
-                0,
-                onAllNodes(isToggleable()).fetchSemanticsNodes().size,
-                "分析屏不该有任何可切换的控件 —— 远端只读是既定事实，没有开关可拨",
-            )
+            // 「⊘ 只读」徽标去掉了 —— 分析屏上不该再有它。
+            onNodeWithText("只读").assertDoesNotExist()
         }
     }
 

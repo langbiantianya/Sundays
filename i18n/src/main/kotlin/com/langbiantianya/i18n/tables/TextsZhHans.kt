@@ -589,8 +589,6 @@ internal val textsZhHans: Map<StrKey, String> =
         StrKey.ENGINE_READ_ONLY_REJECTED to "只读会话中拒绝写操作：{0}",
         StrKey.DIALECT_READ_ONLY to "{0} 是只读方言，不允许写入",
         StrKey.NAV_ANALYSIS to "数据分析",
-        StrKey.ANALYSIS_READONLY_BADGE to "只读",
-        StrKey.ANALYSIS_READONLY_HINT to "远程数据源恒为只读：分析模式没有「关闭只读」的开关，引擎会拒绝一切写入操作",
         StrKey.ANALYSIS_SOURCE_HEAD to "数据源",
         StrKey.ANALYSIS_SOURCE_NOTE to "来自连接列表",
         StrKey.ANALYSIS_SOURCE_FOOT to "远程数据源恒为只读（方言级）· 计算引擎 {0}",
