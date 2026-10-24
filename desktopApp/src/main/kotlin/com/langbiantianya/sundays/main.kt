@@ -469,16 +469,15 @@ internal fun MainScreen(
         analysis.setSources(analysisBindings)
     }
 
-    // 树上点一张表 —— 把表名加进编辑器。
+    // 树上点一张表 → 把表名加进编辑器。
     //
     // 分析树里**只有工作区那一支**（保存的连接配置属于连接管理器），
     // 所以树上的表**一定**在工作区里 —— 点它就是「我要查这张表」。
     //
-    // 远端表的「拉进工作区」另有其事：拉取能力仍在（会话的 `pull()`），
-    // 但界面上没有触发它的入口（见主设计 v1.7 的记录）——
-    // 那个入口要么放在连接管理器里，要么等「活体联邦」的方向定下来。
+    // ⚠️ 引用要**带 schema**：「添加数据源」把每个源的表放进自己的 schema，
+    // 不带前缀的话查的可能是 `main` 里的**同名表** —— 而且不报错。
     val onTreeTableSelected: (ObjectTreeNode) -> Unit = { node ->
-        analysis.appendToSql(node.label)
+        analysis.appendToSql(node.label, node.namespace)
     }
 
     // 点一个字段 —— 把「表.字段」加进编辑器。
@@ -487,7 +486,7 @@ internal fun MainScreen(
     val onTreeColumnSelected: (ObjectTreeNode) -> Unit = { node ->
         val table = node.parentLabel
         if (table != null) {
-            analysis.appendColumnToSql(table, node.label)
+            analysis.appendColumnToSql(table, node.label, node.namespace)
         }
     }
 
@@ -508,6 +507,12 @@ internal fun MainScreen(
     var destination by remember { mutableStateOf(AppDestination.START) }
     // 「+ 添加连接」弹窗开关 —— 仅在第二屏渲染（与 destination 联动）
     var addDialogVisible by remember { mutableStateOf(false) }
+    // 「+ 添加数据源」弹窗开关 —— 分析模式**专属**（不共用上面那个「添加连接」）。
+    //
+    // 为什么单独一个开关：它俩加的是**两种东西** —— 「添加连接」加的是
+    // `connection.json` 里的连接（浏览模式用），「添加数据源」加的是
+    // **工作区 DuckDB 里**的数据源（分析模式用）。
+    var sourceDialogVisible by remember { mutableStateOf(false) }
     // 进入设置页前所在的屏 —— 设置页左上角「返回」按钮据此回到原处，而不是固定回首屏。
     var destinationBeforeSettings by remember { mutableStateOf(AppDestination.CONNECTIONS) }
     // 「重新打开外观引导」的浮层开关（设置 → 个性化底部那个按钮）。
@@ -796,6 +801,11 @@ internal fun MainScreen(
                         onSelectTreeColumn = { node -> onTreeColumnSelected(node) },
                         treeLoading = analysis.treeLoading,
                         treeError = analysis.treeError,
+                        // 「+」→ 打开分析模式**专属**的「添加数据源」对话框。
+                        // 它**不共用**浏览模式的「添加连接」：那边存的是
+                        // `connection.json`（浏览模式的连接清单），
+                        // 这边存的是**工作区 DuckDB 里**的登记表（分析模式自己的清单）。
+                        onAddSource = { sourceDialogVisible = true },
                         sql = analysis.sql,
                         onSqlChange = analysis::updateSql,
                         result = analysis.result,
@@ -805,6 +815,21 @@ internal fun MainScreen(
                     )
                 }
             }
+        }
+
+        // 「添加数据源」对话框 —— 分析模式**专属**（不共用浏览模式的「添加连接」）。
+        //
+        // 它画在**最外层**而不是分析分支里：对话框是屏级浮层，
+        // 放分支里的话，切走分析页时它会跟着被移出组合而突然消失。
+        if (sourceDialogVisible) {
+            AnalysisSourceDialog(
+                session = analysis,
+                // 可选的方言来自**引擎下发的能力位**（`ANALYSIS_SOURCE`），
+                // 不写死名单 —— 否则引擎改了声明而前端没改，
+                // 界面就会给出「点进去必然失败」的入口。
+                dialects = session.analysisCapableDialects.toList(),
+                onDismiss = { sourceDialogVisible = false },
+            )
         }
 
         if (onboardingReplay) {

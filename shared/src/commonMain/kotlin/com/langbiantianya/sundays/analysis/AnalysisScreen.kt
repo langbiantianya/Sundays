@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +41,7 @@ import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
+import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.str
 
 /**
@@ -85,6 +89,8 @@ import com.langbiantianya.sundays.ui.str
  * @param onSelectTreeColumn 树里的某个**字段**被点时回调
  * @param treeLoading 树里正有节点在加载；界面据此显示「加载中」
  * @param treeError 树加载失败的原因；`null` = 没有错误
+ * @param onAddSource 「添加数据源」被点时回调 —— 加的东西**直接进工作区 DuckDB**
+ *   （它自己的清单，不跟连接管理器共用）
  * @param sql 编辑器里的当前 SQL
  * @param onSqlChange 编辑器内容变化时回调
  * @param result 最近一次查询的结果；`null` = 还没跑过
@@ -104,6 +110,7 @@ fun AnalysisScreen(
     onSelectTreeColumn: (ObjectTreeNode) -> Unit = {},
     treeLoading: Boolean = false,
     treeError: String? = null,
+    onAddSource: () -> Unit = {},
     sql: String = "",
     onSqlChange: (String) -> Unit = {},
     result: AnalysisResult? = null,
@@ -130,6 +137,7 @@ fun AnalysisScreen(
                 onToggleNode = onToggleNode,
                 onSelectTable = onSelectTreeTable,
                 onSelectColumn = onSelectTreeColumn,
+                onAddSource = onAddSource,
                 loading = treeLoading,
                 error = treeError,
                 modifier = Modifier.width(TREE_PANEL_WIDTH).fillMaxHeight(),
@@ -166,6 +174,9 @@ const val ANALYSIS_RESULT_TABLE_TAG: String = "analysisResultTable"
 
 /** 「运行」按钮的测试标记。 */
 const val ANALYSIS_RUN_BUTTON_TAG: String = "analysisRunButton"
+
+/** 「添加数据源」按钮的测试标记。 */
+const val ANALYSIS_ADD_SOURCE_BUTTON_TAG: String = "analysisAddSourceButton"
 
 /** 左树的宽度。 */
 private val TREE_PANEL_WIDTH = 240.dp
@@ -278,6 +289,7 @@ private fun AnalysisTreePanel(
     onToggleNode: (ObjectTreeNode) -> Unit,
     onSelectTable: (ObjectTreeNode) -> Unit,
     onSelectColumn: (ObjectTreeNode) -> Unit,
+    onAddSource: () -> Unit,
     loading: Boolean,
     error: String?,
     modifier: Modifier = Modifier,
@@ -295,16 +307,39 @@ private fun AnalysisTreePanel(
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Text(
-                text = str(StrKey.ANALYSIS_SOURCE_HEAD),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = str(StrKey.ANALYSIS_SOURCE_NOTE),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = str(StrKey.ANALYSIS_SOURCE_HEAD),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = str(StrKey.ANALYSIS_SOURCE_NOTE),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 「+」—— **添加数据源**。
+                //
+                // 它住在树的**上边**（树面板的头部），因为它加的东西**就是树上的东西**：
+                // 加一个源 → 树上多一根 → 展开就是它的表与字段。
+                //
+                // 这个按钮**不共用**浏览模式的「添加连接」：那条路存的是
+                // `connection.json`（浏览模式的连接清单），而分析模式的数据源
+                // 存在**工作区 DuckDB 里**（它自己的清单）。共用一份表单
+                // 只会让用户以为两边是同一件事 —— 而它们是**两套会话**。
+                WinIconButton(
+                    onClick = onAddSource,
+                    modifier = Modifier.testTag(ANALYSIS_ADD_SOURCE_BUTTON_TAG),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = str(StrKey.ANALYSIS_ADD_SOURCE),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 

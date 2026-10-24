@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays
 
 import com.langbiantianya.engine.IdbEngine
+import com.langbiantianya.grpc.AnalysisAccessMode
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.loader.DialectLoader
@@ -98,6 +99,9 @@ class AnalysisSessionTest {
             workspacePath: Path,
             namespace: String,
             table: String,
+            targetSchema: String,
+            targetTable: String,
+            accessMode: AnalysisAccessMode,
             onProgress: suspend (com.langbiantianya.sundays.analysis.PullProgress) -> Unit,
         ): PullResult = body()
     }

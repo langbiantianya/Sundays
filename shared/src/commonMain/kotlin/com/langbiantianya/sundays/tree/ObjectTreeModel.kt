@@ -114,6 +114,11 @@ data class ObjectTreeObjectGroup(
  *   点击它（把它加进编辑器）与右键它（复制它的引用）都必须知道的事。
  *   与其让每个调用方去解析节点 id（那样格式一变就全错），
  *   不如让模型直接把上下文带在身上。
+ * @param namespace 这一行所在的**命名空间**（schema / 库）。
+ *   与 [parentLabel] 的区别：字段的 [parentLabel] 是**表**，
+ *   而它的命名空间是**表所在的那个 schema** ——
+ *   写引用时两样都要（`"库"."表"."列"`），所以分开记。
+ *   单一容器时它可以为空（浏览模式的对象树就是那样：它靠 `TreeTarget` 记上下文）。
  * @param labelKey 固定文案键 —— **有它就用它代替 [label]**。
  *   用于「名字由应用定、不是用户起名」的那一行（分析模式的「本地工作区」）。
  *   放在模型里而不是让界面各处特判，是为了让「这一行的名字是固定的」
@@ -135,6 +140,7 @@ data class ObjectTreeNode(
     val kind: ObjectTreeKind,
     val badge: String? = null,
     val parentLabel: String? = null,
+    val namespace: String? = null,
     val labelKey: StrKey? = null,
     val children: List<ObjectTreeNode> = emptyList(),
     val loaded: Boolean = true,

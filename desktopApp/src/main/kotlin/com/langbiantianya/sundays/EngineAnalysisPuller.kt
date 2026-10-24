@@ -10,6 +10,7 @@ package com.langbiantianya.sundays
 
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
+import com.langbiantianya.grpc.AnalysisAccessMode
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.analysisPullRequest
@@ -38,6 +39,9 @@ class EngineAnalysisPuller(
         workspacePath: Path,
         namespace: String,
         table: String,
+        targetSchema: String,
+        targetTable: String,
+        accessMode: AnalysisAccessMode,
         onProgress: suspend (PullProgress) -> Unit,
     ): PullResult {
         // DuckDB 不会自动建上级目录 —— 目录不存在就直接失败。
@@ -45,7 +49,7 @@ class EngineAnalysisPuller(
         val dirError = AnalysisSession.ensureWorkspaceDir(workspacePath)
         if (dirError != null) throw IllegalStateException(dirError)
 
-        val staging = stagingTableName(namespace, table)
+        val staging = targetTable
         val req =
             request {
                 id = requestId
@@ -60,6 +64,8 @@ class EngineAnalysisPuller(
                                 this.namespace = namespace
                                 this.table = table
                                 stagingTable = staging
+                                this.targetSchema = targetSchema
+                                this.accessMode = accessMode
                             }
                     }
             }

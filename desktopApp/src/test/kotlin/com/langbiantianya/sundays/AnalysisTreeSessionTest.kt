@@ -243,14 +243,18 @@ class AnalysisTreeSessionTest {
 
     @Test
     fun `a failing load reports the reason instead of pretending the node is empty`() {
-        // 引擎里**没有**这个工作区 —— 请求必然失败（工作区所在的目录根本不存在，
-        // DuckDB 连文件都建不出来）。
+        // 工作区**打不开** —— 路径指向的是一个**目录**，DuckDB 开不了它。
+        //
+        // ⚠️ 为什么不能写成「目录根本不存在」：会话在启动时会**把工作区的目录建出来**
+        // （`ensureWorkspaceDir`）—— 于是「目录不存在」这条理由当场失效，
+        // 工作区反而能打开了，测的就不是「打不开」而是「建得出来」。
         // 失败若被当成「这里一个子节点都没有」，用户会以为是自己弄丢了表。
         val session =
             AnalysisSession(
                 engine = engine,
                 scope = scope,
-                workspaceFile = "${tempHome.absolutePath}/no-such-dir/workspace.duckdb",
+                // 指向 tempHome **这个目录**本身 —— 它不是文件，DuckDB 开不了。
+                workspaceFile = tempHome.absolutePath,
             )
         session.setSources(emptyList())
 
@@ -263,6 +267,12 @@ class AnalysisTreeSessionTest {
             emptyList(),
             workspaceNode(session).children,
             "失败的节点不能被填成「空列表」——那是「查过了，确实没有」",
+        )
+        // 错误还要落在**那个节点**上 —— 共享树组件在节点脚下显示它，
+        // 用户一眼就知道是哪一个节点出了问题（而不是整棵树都坏了）。
+        assertNotNull(
+            workspaceNode(session).error,
+            "失败的原因必须落在那个节点上",
         )
     }
 

@@ -93,7 +93,7 @@ data class AnalysisResult(
  * 分析模式与浏览模式**共用同一个树组件**（`com.langbiantianya.sundays.tree.ObjectTree`），
  * 节点的形状与 id 规则也共用一套 —— 这里只留下「分析模式特有的那几条规则」。
  */
-const val ANALYSIS_WORKSPACE_NODE_ID: String = "workspace"
+const val ANALYSIS_WORKSPACE_NODE_ID: String = "schema:main"
 
 /**
  * 工作区的默认 schema —— DuckDB 的 `main`。
@@ -114,27 +114,36 @@ const val ANALYSIS_WORKSPACE_NODE_ID: String = "workspace"
 const val WORKSPACE_SCHEMA: String = "main"
 
 /**
- * 表节点的 id —— `table:<命名空间>:<表名>`。
+ * 表节点的 id —— `table:<schema>:<表名>`。
  *
- * 带上命名空间是为了**同名表不撞**：两个 schema 里都有一张 `orders` 时，
+ * 带上 schema 是为了**同名表不撞**：两个 schema 里都有一张 `orders` 时，
  * 它们必须是两个不同的节点，否则树上第二张会顶掉第一张，
  * 用户点到的表与看到的不一致。
  */
 fun analysisTableNodeId(
-    namespace: String,
+    schema: String,
     table: String,
-): String = "table:$namespace:$table"
+): String = "table:$schema:$table"
 
 /**
- * 字段节点的 id —— `column:<表名>:<字段名>`。
+ * 字段节点的 id —— `column:<schema>:<表名>:<字段名>`。
  *
  * 表名必须在里面：不同表里都叫 `id` 的字段很常见，
  * 而它们是要分别展开、分别选中的。
  */
 fun analysisColumnNodeId(
+    schema: String,
     table: String,
     column: String,
-): String = "column:$table:$column"
+): String = "column:$schema:$table:$column"
+
+/**
+ * 数据源节点的 id —— `schema:<schema 名>`。
+ *
+ * 数据源在工作区里占**一个 schema**，而那个 schema 就以它命名 ——
+ * 同名就不用再记一份「显示名 ↔ schema 名」的映射。
+ */
+fun analysisSchemaNodeId(schema: String): String = "schema:$schema"
 
 // ──────────────── 结果 → 表格 ────────────────
 

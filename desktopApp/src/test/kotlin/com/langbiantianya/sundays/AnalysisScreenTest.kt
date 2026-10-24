@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.sundays.analysis.ANALYSIS_ADD_SOURCE_BUTTON_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RESULT_TABLE_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RUN_BUTTON_TAG
 import com.langbiantianya.sundays.analysis.AnalysisColumn
@@ -156,6 +157,29 @@ class AnalysisScreenTest {
             // 「⊘ 只读」徽标去掉了 —— 分析屏上不该再有它。
             onNodeWithText("只读").assertDoesNotExist()
         }
+    }
+
+    @Test
+    fun `the tree header has an add source button that reports back`() {
+        var asked = false
+        runComposeUiTest {
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            onAddSource = { asked = true },
+                        )
+                    }
+                }
+            }
+
+            // 「+」在**树的上边**（树面板的头部）—— 它加的东西就是树上的东西。
+            val button = onNodeWithTag(ANALYSIS_ADD_SOURCE_BUTTON_TAG).assertIsDisplayed()
+            button.performClick()
+        }
+
+        assertTrue(asked, "点「+」必须回调 —— 它是分析模式添加数据源的入口")
     }
 
     @Test

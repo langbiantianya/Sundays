@@ -39,7 +39,7 @@ class AnalysisTreeTest {
     fun `table and column ids never collide`() {
         // 撞了的话「按 id 替换节点」会替换掉错的那个。
         val table = analysisTableNodeId("main", "orders")
-        val column = analysisColumnNodeId("orders", "orders")
+        val column = analysisColumnNodeId("main", "orders", "orders")
         assertTrue(table != column, "表节点与字段节点的 id 必须不同：$table vs $column")
     }
 
@@ -49,10 +49,22 @@ class AnalysisTreeTest {
     }
 
     @Test
-    fun `the column id carries the table it belongs to`() {
-        // 不同表里都叫 `id` 的字段很常见 —— 它们要能分别展开、分别选中。
-        assertEquals("column:orders:id", analysisColumnNodeId("orders", "id"))
-        assertEquals("column:items:id", analysisColumnNodeId("items", "id"))
+    fun `the column id carries the schema and the table it belongs to`() {
+        // 而**同名表**在不同 schema 里也不该撞（每个数据源一个 schema）。
+        assertEquals("column:main:orders:id", analysisColumnNodeId("main", "orders", "id"))
+        assertEquals("column:main:items:id", analysisColumnNodeId("main", "items", "id"))
+        assertEquals("column:crm:orders:id", analysisColumnNodeId("crm", "orders", "id"))
+    }
+
+    @Test
+    fun `a source node id is built from the schema it occupies`() {
+        // 数据源在工作区里占**一个 schema**，而那个 schema 就以它命名 ——
+        // 所以 id 与 schema 名是对应的（`schema:订单文件`）。
+        assertEquals("schema:订单文件", analysisSchemaNodeId("订单文件"))
+        assertTrue(
+            analysisSchemaNodeId("订单文件") != analysisTableNodeId("main", "订单文件"),
+            "数据源节点与表节点的 id 不能撞",
+        )
     }
 
     // ──────────────── 结果 → 表格 ────────────────

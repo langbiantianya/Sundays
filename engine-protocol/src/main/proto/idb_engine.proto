@@ -493,6 +493,31 @@ message AnalysisListColumnsRequest { string namespace = 1; string table = 2; }
 // 所以不能被只读闸门挡；但它绝不能打在远端上，否则就是绕过闸门的后门。
 message AnalysisRunQueryRequest    { string sql = 1; }
 
+// 远端的那张表**怎么**进到工作区。
+//
+// ## 为什么要有这个选择
+//
+// 两条通路的**类型映射不一样**：
+//
+// | 远端列 | 纯 Java 表函数（我们的映射） | DuckDB 官方扩展 |
+// |---|---|---|
+// | MySQL `TINYINT(1)` | `INTEGER` | `BOOLEAN` |
+// | MySQL `BIT(1)` | `INTEGER` | `BOOLEAN` |
+//
+// 「拉取远端表」一直用**纯 Java** —— 类型映射是我们定的，跨机器一致。
+// 而「添加数据源」要的是**DuckDB 原生接入**（官方扩展优先，走不通再退回 JDBC）。
+//
+// 两种诉求都合理，于是**由请求说明走哪条** —— 而不是拧一个全局开关、
+// 让两条路由悄悄换掉类型映射（那样「同一张表」从不同入口进来类型可能不同，
+// 而用户看到的表是同一张）。
+enum AnalysisAccessMode {
+  // 纯 Java 表函数（**当前实现**）：类型映射是我们定的，跨机器一致。
+  ANALYSIS_ACCESS_MODE_UNSPECIFIED = 0;
+  // **DuckDB 官方扩展优先**；扩展走不通（没装 / 加载失败 / 远端不认这个 URI）
+  // 就**退回**纯 Java 表函数 —— 用户看到的是「成功」，不是「你的扩展没装」。
+  ANALYSIS_ACCESS_MODE_EXTENSION_FIRST = 1;
+}
+
 // 把远端的一张表拉进**本地工作区**（DuckDB）。
 //
 // ⚠️ 这条路由**不再走「导出 CSV → 导入 CSV」**（那是 v2.29 初稿的做法，
@@ -521,6 +546,15 @@ message AnalysisPullRequest {
   // 放在请求体里而不是让引擎自己算 —— 那条命名规则住在前端的共享包里，
   // 引擎看不见它，两处各写一份就是两个真相源。
   string staging_table = 4;
+  // 落点所在的 **schema**（工作区里的）。空串 = 落点就在 `main` 里
+  // （「拉取远端表」那条路由一直以来的行为）。
+  //
+  // 为什么要有它：「添加数据源」把每个数据源的表放进**自己的 schema**
+  // （`src_<源>`）—— 那样两个源里有同名表也不会撞，
+  // 而且树里能按源分组。引擎只管把表落进去，不决定它落在哪。
+  string target_schema = 5;
+  // 走哪条通路（见 [AnalysisAccessMode]）。不填 = 纯 Java 表函数。
+  AnalysisAccessMode access_mode = 6;
 }
 
 // ============================================================================

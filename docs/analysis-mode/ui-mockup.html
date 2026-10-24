@@ -225,6 +225,12 @@ body{
   width:250px; flex:none; display:flex; flex-direction:column;
   border-right:1px solid var(--outline-variant); background:var(--surface);
 }
+/* 树头上的「+」—— 添加数据源（分析模式**专属**，不共用浏览模式的「添加连接」） */
+.tree-add{
+  width:20px; height:20px; flex:none; padding:0; cursor:pointer;
+  font-size:14px; line-height:18px; color:var(--on-surface-variant);
+  background:var(--surface-variant); border:1px solid var(--outline-variant); border-radius:3px;
+}
 .tree-head{
   padding:6px 10px; font-size:11px; line-height:14px; font-weight:600; letter-spacing:.04em;
   color:var(--on-surface-variant); border-bottom:1px solid var(--outline-variant);
@@ -651,15 +657,18 @@ body{
         <div class="work-body">
           <!-- 左树 -->
           <aside class="tree">
-            <div class="tree-head">工作区<span class="tree-head-note">本地 DuckDB</span></div>
+            <div class="tree-head"><span>工作区<span class="tree-head-note">本地 DuckDB</span></span><button class="tree-add" type="button" title="添加数据源" aria-label="添加数据源">＋</button></div>
             <div class="tree-list">
               <!-- 树与浏览模式的对象树**同一个组件**：库 → 表 → 字段。
-                   展开一张表就能看到它的字段（名字 / 类型 / PK / 非空）。 -->
+                   根 = 工作区的各个 schema：`main` 是工作区自己的表，
+                   每个**数据源**一个（源在工作区里占一个 schema）。
+                   树头上的「+」= 添加数据源（分析模式专属）。 -->
               <div class="tree-row is-group lvl0"><span class="tw">▾</span><span class="name">本地工作区</span><span class="tag-tertiary">DuckDB</span></div>
               <div class="tree-row is-local lvl1"><span class="tw">▾</span><span class="name">orders</span></div>
               <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">id</span><span class="type">INTEGER</span><span class="badge">PK</span></div>
               <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">amount</span><span class="type">DECIMAL(10,2)</span></div>
               <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">dt</span><span class="type">DATE</span><span class="badge">非空</span></div>
+              <div class="tree-row is-group lvl0"><span class="tw">▸</span><span class="name">订单文件</span><span class="tag-tertiary">CSV</span></div>
               <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_orders</span></div>
               <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_items</span></div>
             </div>

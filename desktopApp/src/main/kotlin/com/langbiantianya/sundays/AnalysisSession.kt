@@ -14,9 +14,11 @@ import androidx.compose.runtime.setValue
 import com.google.protobuf.Value
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
+import com.langbiantianya.grpc.AnalysisAccessMode
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.analysisListColumnsRequest
+import com.langbiantianya.grpc.analysisListSourcesRequest
 import com.langbiantianya.grpc.analysisListTablesRequest
 import com.langbiantianya.grpc.analysisRequest
 import com.langbiantianya.grpc.analysisRunQueryRequest
@@ -31,6 +33,7 @@ import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.analysisColumnNodeId
+import com.langbiantianya.sundays.analysis.analysisSchemaNodeId
 import com.langbiantianya.sundays.analysis.analysisTableNodeId
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
@@ -70,6 +73,144 @@ data class AnalysisSourceBinding(
     val engineConfig: ConnectionConfig,
     val dialect: DialectType,
 )
+
+/**
+ * 分析模式的一个数据源 —— **两类**。
+ *
+ * | 类 | 是什么 | 怎么进工作区 |
+ * |---|---|---|
+ * | [REMOTE] | 远端数据库（MySQL / PostgreSQL …） | **DuckDB 官方扩展优先**（`ATTACH` → 建表 → 摘除），走不通就退回 JDBC 表函数 |
+ * | [FILE] | 文件或文件夹（parquet / csv / Excel / jsonl） | DuckDB 自己的读法（`read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx`），**建一个视图** |
+ *
+ * ## 为什么分析模式**自己**有一份清单
+ *
+ * 连接管理器里的连接是**浏览模式**的东西；分析模式要的是「我在这里加的数据源」。
+ * 两者**不共用** —— 共用就会变成「两份可能对不上的真相」
+ * （同一个 MySQL 在两处各存一份，改了密码只改一处，另一处连不上）。
+ * 所以分析模式的清单**存在工作区 DuckDB 里**（见 [AnalysisSession.REGISTRY_SCHEMA]），
+ * 随工作区一起走。
+ */
+enum class AnalysisSourceKind {
+    REMOTE,
+    FILE,
+}
+
+/**
+ * 文件的四种形态 —— 各对应 DuckDB 的一个读法。
+ *
+ * 为什么不用「一个万能读法」：DuckDB 的 `read_csv_auto` 只认 CSV，
+ * `read_parquet` 只认 parquet —— 它们**各管各的格式**，
+ * 而一个万能函数就得自己猜格式（猜错了报错比不给还糟）。
+ */
+enum class AnalysisFileFormat(
+    val reader: String,
+) {
+    PARQUET("read_parquet"),
+    CSV("read_csv_auto"),
+    JSONL("read_json_auto"),
+    EXCEL("read_xlsx"),
+    ;
+
+    companion object {
+        /**
+         * 从**扩展名**猜格式 —— 猜不到就 `null`（让用户自己选）。
+         *
+         * ## 为什么只认扩展名
+         *
+         * 猜内容（读几个字节看魔数）在这个场景里**不划算**：
+         * parquet 与 csv 的差别一眼就能从文件名看出来，
+         * 而「文件夹里装的是什么」本来就只能问用户。
+         */
+        fun fromPath(path: String): AnalysisFileFormat? {
+            val lower = path.lowercase()
+            return when {
+                lower.endsWith(".parquet") || lower.endsWith(".pq") -> PARQUET
+                lower.endsWith(".csv") || lower.endsWith(".tsv") -> CSV
+                lower.endsWith(".jsonl") || lower.endsWith(".ndjson") || lower.endsWith(".json") -> JSONL
+                lower.endsWith(".xlsx") || lower.endsWith(".xls") -> EXCEL
+                else -> null
+            }
+        }
+    }
+}
+
+/**
+ * 对话框填出来的「待添加的数据源」—— **还没**落进工作区。
+ *
+ * @param name 显示名 —— **同时**是它在工作区里占的 schema 名
+ *   （同名就不用再记一份「显示名 ↔ schema 名」的映射）；
+ *   树上的那一行显示的就是它。
+ * @param kind 源的类型
+ * @param dialect 远程源的方言；文件源恒为 [DialectType.DUCKDB]
+ *   （文件是 DuckDB 自己读的，不经 JDBC）
+ * @param jdbcUrl 远程源的 JDBC URL —— 由对话框按方言拼出来
+ * @param database 远程源的库名（留空 = 该服务器上的全部库）
+ * @param user 远程源的用户名
+ * @param password 远程源的密码
+ * @param path 文件 / 文件夹的路径
+ * @param format 文件的格式 —— `null` = 让用户选
+ */
+data class AnalysisSourceDraft(
+    val name: String,
+    val kind: AnalysisSourceKind,
+    val dialect: DialectType = DialectType.DUCKDB,
+    val jdbcUrl: String = "",
+    val database: String = "",
+    val user: String = "",
+    val password: String = "",
+    val path: String = "",
+    val format: AnalysisFileFormat? = null,
+)
+
+/**
+ * 预览里勾中的一张远端表。
+ *
+ * @param namespace 远端的命名空间（MySQL 上是库，PG 上是 schema）
+ * @param table 表名
+ */
+data class AnalysisSelectedTable(
+    val namespace: String,
+    val table: String,
+)
+
+/**
+ * 预览的结果 —— 远端的一个库 + 它的表。
+ *
+ * @param namespace 库 / schema
+ * @param tables 表名
+ */
+data class AnalysisRemotePreview(
+    val namespace: String,
+    val tables: List<String>,
+)
+
+/**
+ * 登记在册的一个数据源 —— 「分析模式能用的一个源」。
+ *
+ * @param name 显示名（同时是它在工作区里占的 schema 名）
+ * @param kind 源的类型
+ * @param dialect 方言名（远端源用它；文件源是 `DuckDB`）
+ * @param jdbcUrl 远程源的 JDBC URL
+ * @param database 远程源的库名
+ * @param user 远程源的用户名
+ * @param password 远程源的密码
+ * @param path 文件 / 文件夹的路径
+ * @param format 文件的格式（`Parquet` / `CSV` / …）
+ */
+data class AnalysisRegisteredSource(
+    val name: String,
+    val kind: AnalysisSourceKind,
+    val dialect: String,
+    val jdbcUrl: String,
+    val database: String,
+    val user: String,
+    val password: String,
+    val path: String,
+    val format: String,
+) {
+    /** 它在工作区里占的 schema 名 —— 与 [name] 同名。 */
+    val schemaName: String get() = name
+}
 
 /**
  * 分析模式的状态机 —— 源列表、工作区、当前 SQL 与结果、拉取任务。
@@ -255,63 +396,98 @@ class AnalysisSession(
     }
 
     /**
-     * 重建树的**根**，但保住已经加载出来的子节点。
+     * 重建树的**根**（工作区的各个 schema），但保住已经加载出来的子节点。
      *
      * ## 为什么要「重建根但保留子节点」
      *
-     * 连接列表一变（加一个连接、改个名字）就要重建根 —— 否则树里会留着
+     * 工作区里多了一个数据源（或者少了一个）就要重建根 —— 否则树里会留着
      * 已经删掉的源。但**直接重建**会把用户展开的节点连同它的子节点一起抹掉：
-     * 改个连接名，用户的树就缩回去了。
+     * 加一个源，用户的树就缩回去了。
      *
      * 所以这里只换「根节点自己」（名字、方言标签），
      * 已经加载出来的 `children` 与 `loaded` 原样带走。
      */
-    private fun refreshTree() {
+    private fun refreshTree(): Job {
+        // 工作区那一根**同步**给出去 —— 它不需要查任何东西，
+        // 而树的第一行不该因为「去列一下有哪些源」而晚半秒才出现。
         val previous = treeRoots.associateBy { it.id }
+        val workspace = workspaceRoot()
         treeRoots =
-            buildTreeRoots().map { node ->
-                val old = previous[node.id] ?: return@map node
-                node.copy(children = old.children, loaded = old.loaded)
+            listOf(
+                previous[workspace.id]?.let { old ->
+                    workspace.copy(children = old.children, loaded = old.loaded)
+                } ?: workspace,
+            )
+        return scope.launch {
+            try {
+                val sources = listSourceSchemas()
+                if (sources.isEmpty()) return@launch
+                treeRoots = treeRoots + sources
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 根列不出来（工作区文件还读不出来）**不是**致命错误 ——
+                // 树上至少还有「本地工作区」那一行。
+                treeError = e.message
             }
+        }
     }
 
     /**
-     * 树的根节点 —— **只有本地工作区**。
+     * 树的根节点 —— 工作区的各个 **schema**。
      *
-     * ## 为什么远端源不在这棵树里
+     * ## 为什么根是 schema，而不是「工作区」一个
      *
-     * 树是「**我的分析工作区里有什么**」的视图：工作区（DuckDB 文件）
-     * + 里面已经拉进来的表。保存的连接配置**属于连接管理器**——
-     * 同一份连接配置在浏览模式与分析模式里都出现一遍，就会变成
-     * **两份可能对不上的真相**（改了名字只更新一处、两处列的表不一样）。
+     * 「添加数据源」把每个数据源的表放进**自己的 schema** ——
+     * 那样两个源里有同名表也不会撞，而且 DuckDB 自己就是按 schema 分组的。
+     * 于是树直接照着 DuckDB 的目录来：**根 = schema，表 = 表，字段 = 列**。
      *
-     * 所以这棵树**只显示 DuckDB 这一支**：一个根节点，没有兄弟。
+     * ## 为什么 `main` **恒在**第一位
      *
-     * ## 为什么工作区是「数据库」那一种节点
-     *
-     * 分析模式与浏览模式**共用同一个树组件**（`tree/ObjectTree.kt`），
-     * 那棵树的三层是「库 → 表 → 字段」。工作区是本地 DuckDB 文件，
-     * 它装的正是「一批表」—— 与浏览模式里的数据库是**同一种位置**，
-     * 所以用同一种节点（[ObjectTreeKind.DATABASE]）。
-     *
-     * 显示的名字是**固定**的（「本地工作区」——它是应用自带的引擎，
-     * 不是用户起名的），所以走 [ObjectTreeNode.labelKey]：
-     * 名字由界面按 `StrKey` 取，会话不传字符串，也就传不错语言。
+     * 工作区自己的表住在 `main` 里。它**恒在**，哪怕工作区文件此刻还读不出来
+     * （第一次用时目录都还没建）—— 树的第一行不该因为「文件还没建」就空着。
      */
-    private fun buildTreeRoots(): List<ObjectTreeNode> {
-        val workspace =
-            ObjectTreeNode(
-                id = ANALYSIS_WORKSPACE_NODE_ID,
-                label = workspaceFileName(),
-                labelKey = StrKey.ANALYSIS_LOCAL_WORKSPACE,
-                kind = ObjectTreeKind.DATABASE,
-                badge = "DuckDB",
-                // ⚠️ **必须是「还没加载」** —— 工作区的表是**懒加载**的：
-                // 展开它的时候才去查。标成「已加载」的话，展开动作会以为
-                // 「查过了，不用再查」，于是树上永远一张表都没有。
-                loaded = false,
+    private fun workspaceRoot(): ObjectTreeNode =
+        ObjectTreeNode(
+            id = ANALYSIS_WORKSPACE_NODE_ID,
+            label = WORKSPACE_SCHEMA,
+            labelKey = StrKey.ANALYSIS_LOCAL_WORKSPACE,
+            kind = ObjectTreeKind.DATABASE,
+            badge = "DuckDB",
+            // ⚠️ **必须是「还没加载」** —— 工作区的表是**懒加载**的：
+            // 展开它的时候才去查。标成「已加载」的话，展开动作会以为
+            // 「查过了，不用再查」，于是树上永远一张表都没有。
+            loaded = false,
+        )
+
+    /**
+     * 工作区里**除 `main` 之外**的 schema —— 每个数据源占一个。
+     *
+     * 登记表自己的 schema（`sundays`）**不进树** ——
+     * 它是应用的内务，不是用户的数据源。
+     */
+    private suspend fun listSourceSchemas(): List<ObjectTreeNode> {
+        val schemas =
+            runWorkspaceQuery(
+                "SELECT schema_name FROM information_schema.schemata " +
+                    "WHERE schema_name NOT IN ('main', 'information_schema', 'pg_catalog', '$REGISTRY_SCHEMA') " +
+                    "ORDER BY schema_name",
             )
-        return listOf(workspace)
+        if (schemas.failed) return emptyList()
+        val registered = loadRegisteredSources().associateBy { it.schemaName }
+        return schemas.rows
+            .mapNotNull { it.firstOrNull() }
+            .filter { it.isNotBlank() }
+            .map { schema ->
+                val source = registered[schema]
+                ObjectTreeNode(
+                    id = analysisSchemaNodeId(schema),
+                    label = schema,
+                    kind = ObjectTreeKind.DATABASE,
+                    badge = source?.dialect,
+                    loaded = false,
+                )
+            }
     }
 
     /** 工作区文件名 —— 只作诊断用（界面上工作区那一行显示的是固定名）。 */
@@ -379,7 +555,7 @@ class AnalysisSession(
      * 按节点的 kind 决定「该查什么」。
      *
      * 两层，各查各的：
-     * - 容器（工作区）→ 它的表（DuckDB 的 `main` schema）
+     * - 容器（schema）→ 它的表
      * - 表 → 它的字段
      *
      * 字段这一层是**后加**的：分析页的树以前到表为止，用户看不到
@@ -388,25 +564,27 @@ class AnalysisSession(
      */
     private suspend fun fetchChildren(node: ObjectTreeNode): List<ObjectTreeNode> =
         when (node.kind) {
-            ObjectTreeKind.DATABASE -> listWorkspaceTables()
-            ObjectTreeKind.TABLE -> listWorkspaceColumns(node.label)
+            ObjectTreeKind.DATABASE -> listWorkspaceTables(node.label)
+            ObjectTreeKind.TABLE -> listWorkspaceColumns(node.parentLabel.orEmpty(), node.label)
             ObjectTreeKind.COLUMN -> emptyList()
         }
 
     /**
-     * 工作区里的表。
+     * 一个 schema 里的表。
      *
      * 走的是**同一套** `ANALYSIS.LIST_TABLES` 路由，只是连接换成了工作区 ——
      * 不另写一条「列工作区表」的通路，免得两处的分派规则各说各话。
+     *
+     * @param schema 工作区里的 schema（`main` = 工作区自己的表；别的 = 某个数据源）
      */
-    private suspend fun listWorkspaceTables(): List<ObjectTreeNode> {
+    private suspend fun listWorkspaceTables(schema: String): List<ObjectTreeNode> {
         val response =
             engine.invoke(workspaceConnection()) {
                 category = Category.ANALYSIS
                 action = Action.LIST_TABLES
                 analysisRequest =
                     analysisRequest {
-                        listTables = analysisListTablesRequest { namespace = WORKSPACE_SCHEMA }
+                        listTables = analysisListTablesRequest { namespace = schema }
                     }
             }
         if (!response.success) {
@@ -414,9 +592,12 @@ class AnalysisSession(
         }
         return response.analysis.listTables.itemsList.map { item ->
             ObjectTreeNode(
-                id = analysisTableNodeId(WORKSPACE_SCHEMA, item.name),
+                id = analysisTableNodeId(schema, item.name),
                 label = item.name,
                 kind = ObjectTreeKind.TABLE,
+                // 表行的「上级」是它所在的 schema —— 列字段时要用。
+                parentLabel = schema,
+                namespace = schema,
                 // 表的**字段**也是懒加载的 —— 展开这张表的时候才去查。
                 // 标成「已加载」的话，展开动作会以为「查过了」，字段就永远出不来。
                 loaded = false,
@@ -430,8 +611,14 @@ class AnalysisSession(
      * 走的是 `ANALYSIS.LIST_COLUMNS` 路由 —— 与浏览模式列字段是**同一条**引擎路由，
      * 只是连接换成了工作区。所以两棵树里的字段信息来自同一处，
      * 不会出现「浏览模式说有三个字段、分析模式说有两个」。
+     *
+     * @param schema 表所在的 schema
+     * @param table 表名
      */
-    private suspend fun listWorkspaceColumns(table: String): List<ObjectTreeNode> {
+    private suspend fun listWorkspaceColumns(
+        schema: String,
+        table: String,
+    ): List<ObjectTreeNode> {
         val response =
             engine.invoke(workspaceConnection()) {
                 category = Category.ANALYSIS
@@ -440,7 +627,7 @@ class AnalysisSession(
                     analysisRequest {
                         listColumns =
                             analysisListColumnsRequest {
-                                namespace = WORKSPACE_SCHEMA
+                                namespace = schema
                                 this.table = table
                             }
                     }
@@ -450,11 +637,14 @@ class AnalysisSession(
         }
         return response.analysis.listColumns.itemsList.map { col ->
             ObjectTreeNode(
-                id = analysisColumnNodeId(table, col.name),
+                id = analysisColumnNodeId(schema, table, col.name),
                 label = col.name,
                 kind = ObjectTreeKind.COLUMN,
                 // 字段行的「上级」是表 —— 点它时要把 `表.字段` 一起加进编辑器。
                 parentLabel = table,
+                // 而它的命名空间是**表所在的那个 schema** ——
+                // 写引用时两样都要（`"库"."表"."列"`）。
+                namespace = schema,
                 column =
                     ObjectTreeColumn(
                         name = col.name,
@@ -478,7 +668,7 @@ class AnalysisSession(
         val workspace = findObjectTreeNode(treeRoots, ANALYSIS_WORKSPACE_NODE_ID) ?: return
         scope.launch {
             try {
-                val children = listWorkspaceTables()
+                val children = listWorkspaceTables(WORKSPACE_SCHEMA)
                 treeRoots =
                     replaceObjectTreeNode(treeRoots, workspace.id) {
                         it.copy(children = children, loaded = true, loading = false)
@@ -490,6 +680,269 @@ class AnalysisSession(
                 // 这时候报一个错会让用户以为拉取失败了 —— 那比树少刷新一次严重得多。
                 treeError = e.message
             }
+        }
+    }
+
+    // ──────────────── 数据源登记（工作区 DuckDB 里） ────────────────
+
+    /**
+     * 预览远端 —— 用**对应驱动**列出它的库与表。
+     *
+     * ## 为什么**先**用驱动预览，而不是直接用 DuckDB 扩展
+     *
+     * DuckDB 的扩展（`mysql_scanner`）列的是它**挂上去之后**能看见的东西 ——
+     * 而挂载是**连接级**的：挂上去、查完、还得摘掉（摘早了表会整张消失，
+     * 见 [NativeExtensionScanner]）。而「这个服务器上有哪些库、哪些表」
+     * 用驱动问一句就有，**还不碰工作区**。
+     *
+     * 所以分工是：**驱动负责预览，DuckDB 负责接入**。
+     *
+     * @param draft 待预览的远端源
+     * @return 每个库 + 它的表
+     */
+    suspend fun previewRemote(draft: AnalysisSourceDraft): List<AnalysisRemotePreview> {
+        val config = remoteEngineConfig(draft)
+        return listRemoteNamespaces(config).map { namespace ->
+            AnalysisRemotePreview(namespace = namespace, tables = listRemoteTables(config, namespace))
+        }
+    }
+
+    /**
+     * 把一个数据源接进工作区。
+     *
+     * ## 两条路分别怎么接
+     *
+     * | 源 | 怎么接 | 结果 |
+     * |---|---|---|
+     * | 远程数据库 | **DuckDB 官方扩展优先**（`ATTACH` → 建表 → 摘除），走不通就退回 JDBC 表函数 | 工作区里的一张**表** |
+     * | 文件 / 文件夹 | DuckDB 自己的读法（`read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx`） | 工作区里的一个**视图**（文件改了，查询跟着变） |
+     *
+     * ## 源占**自己的 schema**
+     *
+     * 那样两个源里有同名表也不会撞，而且 DuckDB 自己就是按 schema 分组的 ——
+     * 树直接照着它的目录来（根 = schema，表 = 表，字段 = 列）。
+     *
+     * @param draft 对话框填出来的源
+     * @param tables 远程源里勾中的表（文件源为空）
+     * @param onProgress 拉表时的进度回调
+     * @param onFailure 失败时的原因（说清为什么，别让用户对着「没反应」发呆）
+     * @param onSuccess 成功时的回调（对话框据此关掉）
+     * @return 启动的任务；`null` = 没启动（源没有名字）
+     */
+    fun addSource(
+        draft: AnalysisSourceDraft,
+        tables: List<AnalysisSelectedTable> = emptyList(),
+        onProgress: suspend (PullProgress) -> Unit = {},
+        onFailure: (String) -> Unit = {},
+        onSuccess: () -> Unit = {},
+    ): Job? {
+        val name = draft.name.trim()
+        if (name.isBlank()) return null
+        return scope.launch {
+            try {
+                ensureRegistry()
+                runWorkspaceStatement("CREATE SCHEMA IF NOT EXISTS ${quoteIdent(name)}")
+                when (draft.kind) {
+                    AnalysisSourceKind.FILE -> addFileSource(draft, name)
+                    AnalysisSourceKind.REMOTE -> addRemoteSource(draft, name, tables, onProgress)
+                }
+                registerSource(draft, name)
+                // **等**树刷新完 —— 否则「加完源回头看树」可能还差半秒，
+                // 而那半秒里树上没有它（用户会以为没加上）。
+                refreshTree().join()
+                onSuccess()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 失败要说清为什么 —— 用户刚填了一堆参数，
+                // 最怕的是「点了没反应」。
+                onFailure(e.message ?: "添加数据源失败")
+            }
+        }
+    }
+
+    /**
+     * 文件 / 文件夹 → 工作区里的一个**视图**。
+     *
+     * ## 为什么是视图而不是表
+     *
+     * 文件会变（今天导出的 CSV，明天是新的）。视图每次查询都重读文件 ——
+     * 用户看到的是**最新的那份**，不用「重新添加一次数据源」。
+     */
+    private suspend fun addFileSource(
+        draft: AnalysisSourceDraft,
+        schema: String,
+    ) {
+        val path = draft.path.trim()
+        if (path.isBlank()) throw IllegalStateException("路径不能为空")
+        val format =
+            draft.format
+                ?: AnalysisFileFormat.fromPath(path)
+                ?: throw IllegalStateException("看不出这是什么格式，请手动选一个")
+        // 视图的名字取路径的最后一段（去掉扩展名）——
+        // 「orders.parquet」在树里显示成「orders」更像一张表。
+        //
+        // ⚠️ 分隔符**两种**都要认：Windows 的路径用 `\`，而用户从
+        // 别的工具里复制过来的路径可能是 `/`。只认一种的话，
+        // 视图名会变成一整条路径（`C:\Users\...\orders`）。
+        val trimmed = path.trimEnd('/', '\\')
+        val leaf = trimmed.substringAfterLast('/').substringAfterLast('\\').trimEnd('\\')
+        val viewName = leaf.substringBeforeLast('.', leaf)
+        runWorkspaceStatement(
+            "CREATE OR REPLACE VIEW ${quoteIdent(schema)}.${quoteIdent(viewName)} AS " +
+                // ⚠️ `escapeLiteral` 已经**含**两侧的引号 —— 外面不要再加一层，
+                // 否则 SQL 里会变成 `''路径''`（解析成「空串 + 路径」）。
+                "SELECT * FROM ${format.reader}(${escapeLiteral(path)})",
+        )
+    }
+
+    /**
+     * 远程源 → 工作区里的**表**（一张一张来）。
+     *
+     * 走的是**扩展优先**的拉取（见 `AnalysisAccessMode`）：
+     * DuckDB 官方扩展能直连就直连（少一次拷贝、类型用 DuckDB 官方规则），
+     * 走不通就退回纯 Java 表函数 —— 用户看到的是「成功」，不是「你的扩展没装」。
+     */
+    private suspend fun addRemoteSource(
+        draft: AnalysisSourceDraft,
+        schema: String,
+        tables: List<AnalysisSelectedTable>,
+        onProgress: suspend (PullProgress) -> Unit,
+    ) {
+        val source = remoteEngineConfig(draft)
+        for (selected in tables) {
+            puller.pull(
+                requestId = "analysis-source-${System.currentTimeMillis()}-${pullCounter.incrementAndGet()}",
+                source = source,
+                workspace = workspaceConnection(),
+                workspacePath = workspacePath,
+                namespace = selected.namespace,
+                table = selected.table,
+                targetSchema = schema,
+                // 落点用**原名** —— 那个源里的表就叫那个名字，
+                // 而「拉取远端表」那条老路落的是 `staging_<源库>_<表>`。
+                targetTable = selected.table,
+                accessMode = AnalysisAccessMode.ANALYSIS_ACCESS_MODE_EXTENSION_FIRST,
+                onProgress = onProgress,
+            )
+        }
+    }
+
+    /** 把这个源登记在册（下次启动还在）。 */
+    private suspend fun registerSource(
+        draft: AnalysisSourceDraft,
+        schema: String,
+    ) {
+        runWorkspaceStatement(
+            "DELETE FROM ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} " +
+                "WHERE name = ${escapeLiteral(schema)}",
+        )
+        runWorkspaceStatement(
+            "INSERT INTO ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} " +
+                "(name, kind, dialect, jdbc_url, db_name, user_name, password, path, format, created_at) " +
+                "VALUES (${escapeLiteral(schema)}, ${escapeLiteral(draft.kind.name)}, " +
+                "${escapeLiteral(draft.dialect.name)}, ${escapeLiteral(draft.jdbcUrl)}, " +
+                "${escapeLiteral(draft.database)}, ${escapeLiteral(draft.user)}, " +
+                "${escapeLiteral(draft.password)}, ${escapeLiteral(draft.path)}, " +
+                "${escapeLiteral(draft.format?.name.orEmpty())}, current_timestamp)",
+        )
+    }
+
+    /** 登记在册的数据源。 */
+    suspend fun registeredSources(): List<AnalysisRegisteredSource> = loadRegisteredSources()
+
+/** 登记在册的数据源。 */
+    private suspend fun loadRegisteredSources(): List<AnalysisRegisteredSource> {
+        val result =
+            runWorkspaceQuery(
+                "SELECT name, kind, dialect, jdbc_url, db_name, user_name, password, path, format " +
+                    "FROM ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} ORDER BY created_at",
+            )
+        if (result.failed) return emptyList()
+        return result.rows.mapNotNull { row ->
+            val name = row.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AnalysisRegisteredSource(
+                name = name,
+                kind =
+                    if (row.getOrNull(1) == AnalysisSourceKind.FILE.name) {
+                        AnalysisSourceKind.FILE
+                    } else {
+                        AnalysisSourceKind.REMOTE
+                    },
+                dialect = row.getOrNull(2).orEmpty(),
+                jdbcUrl = row.getOrNull(3).orEmpty(),
+                database = row.getOrNull(4).orEmpty(),
+                user = row.getOrNull(5).orEmpty(),
+                password = row.getOrNull(6).orEmpty(),
+                path = row.getOrNull(7).orEmpty(),
+                format = row.getOrNull(8).orEmpty(),
+            )
+        }
+    }
+
+    /** 确保登记表在 —— 幂等（工作区文件可能被用户删了）。 */
+    private suspend fun ensureRegistry() {
+        runWorkspaceStatement("CREATE SCHEMA IF NOT EXISTS ${quoteIdent(REGISTRY_SCHEMA)}")
+        runWorkspaceStatement(
+            "CREATE TABLE IF NOT EXISTS ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} (" +
+                "name VARCHAR, kind VARCHAR, dialect VARCHAR, jdbc_url VARCHAR, db_name VARCHAR, " +
+                "user_name VARCHAR, password VARCHAR, path VARCHAR, format VARCHAR, created_at TIMESTAMP)",
+        )
+    }
+
+    /** 在工作区上跑一句查询 —— 失败收成**结果**（带错误），不抛异常。 */
+    private suspend fun runWorkspaceQuery(sql: String): AnalysisResult {
+        val dirError = ensureWorkspaceDir(workspacePath)
+        if (dirError != null) return AnalysisResult(error = dirError)
+        return runAnalysisQuery(engine, workspaceConnection(), sql)
+    }
+
+    /** 在工作区上跑一句语句 —— **失败就抛**（调用点要的是「要么成，要么说清为什么」）。 */
+    private suspend fun runWorkspaceStatement(sql: String) {
+        val result = runWorkspaceQuery(sql)
+        if (result.failed) throw IllegalStateException(result.error ?: "工作区执行失败")
+    }
+
+    /** 远端源的引擎配置 —— **恒为只读**（分析模式对远端只有读的需求）。 */
+    private fun remoteEngineConfig(draft: AnalysisSourceDraft): ConnectionConfig =
+        connectionConfig {
+            driver = draft.dialect.engineDriverName
+            jdbcUrl = draft.jdbcUrl
+            user = draft.user
+            password = draft.password
+            if (draft.database.isNotBlank()) database = draft.database
+            readOnly = true
+        }
+
+    /** 远端的命名空间（MySQL 上是库，PG 上是 schema）。 */
+    private suspend fun listRemoteNamespaces(config: ConnectionConfig): List<String> {
+        val response =
+            engine.invoke(config) {
+                category = Category.ANALYSIS
+                action = Action.LIST_SOURCES
+                analysisRequest = analysisRequest { listSources = analysisListSourcesRequest { } }
+            }
+        if (!response.success) throw IllegalStateException(response.error.ifBlank { "列库失败" })
+        return response.analysis.listSources.itemsList
+    }
+
+    /** 某个命名空间下的表。 */
+    private suspend fun listRemoteTables(
+        config: ConnectionConfig,
+        namespace: String,
+    ): List<String> {
+        val response =
+            engine.invoke(config) {
+                category = Category.ANALYSIS
+                action = Action.LIST_TABLES
+                analysisRequest =
+                    analysisRequest {
+                        listTables = analysisListTablesRequest { this.namespace = namespace }
+                    }
+            }
+        if (!response.success) throw IllegalStateException(response.error.ifBlank { "列表失败" })
+        return response.analysis.listTables.itemsList.map { item ->
+            item.name
         }
     }
 
@@ -629,9 +1082,10 @@ class AnalysisSession(
                             workspacePath = workspacePath,
                             namespace = namespace,
                             table = table,
-                        ) { progress ->
-                            pullProgress = progress
-                        }
+                            onProgress = { progress ->
+                                pullProgress = progress
+                            },
+                        )
                     pullOutcome = PullOutcome.Done(result)
                     // 拉进来的表就在工作区里 —— 树上要立刻看得见它。
                     refreshWorkspaceChildren()
@@ -654,7 +1108,14 @@ class AnalysisSession(
     }
 
     /**
-     * 把一张工作区的表名加进编辑器。
+     * 把一张表加进编辑器 —— **带它所在的 schema**。
+     *
+     * ## 为什么 schema 不能省
+     *
+     * 「添加数据源」把每个源的表放进**自己的 schema** ——
+     * 于是同一张表名可以在两个源里各有一份（`shop.orders` 与 `crm.orders`）。
+     * 不带 schema 的引用落在 `main` 里，于是查的可能是**另一个**表 ——
+     * 而且**不报错**（`main` 里恰好有同名表的话），只是数据悄悄换了来源。
      *
      * ## 规则只有一条，例外只有一个
      *
@@ -671,9 +1132,13 @@ class AnalysisSession(
      * 用户看得到自己多了什么，也能自己挪。
      *
      * @param name 表名（未引用）
+     * @param namespace 表所在的 schema；`null` 或 `main` = 不带前缀
      */
-    fun appendToSql(name: String) {
-        val quoted = SqlIdentifier.quote(DialectType.DUCKDB, name)
+    fun appendToSql(
+        name: String,
+        namespace: String? = null,
+    ) {
+        val quoted = qualify(name, namespace)
         sql =
             if (sql.isBlank()) {
                 "SELECT * FROM $quoted"
@@ -691,20 +1156,42 @@ class AnalysisSession(
      *
      * @param table 表名（未引用）
      * @param column 列名（未引用）
+     * @param namespace 表所在的 schema；`null` 或 `main` = 不带前缀
      */
     fun appendColumnToSql(
         table: String,
         column: String,
+        namespace: String? = null,
     ) {
         val quotedTable = SqlIdentifier.quote(DialectType.DUCKDB, table)
         val quotedColumn = SqlIdentifier.quote(DialectType.DUCKDB, column)
-        val reference = "$quotedTable.$quotedColumn"
+        val tableRef = qualify(table, namespace)
+        val reference = "$tableRef.$quotedColumn"
         sql =
             if (sql.isBlank()) {
-                "SELECT $reference FROM $quotedTable"
+                "SELECT $reference FROM $tableRef"
             } else {
                 sql.trimEnd() + "\n" + reference
             }
+    }
+
+    /**
+     * 表的**限定引用** —— `"schema"."表"`，而 `main` 里的表就只写 `"表"`。
+     *
+     * ## 为什么 `main` 不带前缀
+     *
+     * 工作区自己的表都在 `main` 里 —— 而那是最常见的情况。
+     * 每次都写成 `"main"."orders"` 的话，用户复制到别处（另一条 SQL、
+     * 另一个工具）就多了一截前缀，而那截前缀**大多数时候是多余的**。
+     */
+    private fun qualify(
+        name: String,
+        namespace: String?,
+    ): String {
+        val quotedName = SqlIdentifier.quote(DialectType.DUCKDB, name)
+        if (namespace.isNullOrBlank() || namespace == WORKSPACE_SCHEMA) return quotedName
+        val quotedNamespace = SqlIdentifier.quote(DialectType.DUCKDB, namespace)
+        return "$quotedNamespace.$quotedName"
     }
 
     /** 取消当前这次拉取。 */
@@ -735,6 +1222,22 @@ class AnalysisSession(
         }
 
     companion object {
+        /**
+         * 数据源登记表的 schema —— 它自己的东西，**不跟用户的表混在一起**。
+         *
+         * ## 为什么登记表住在**工作区**里
+         *
+         * 分析模式的数据源是**它自己的**清单（不跟连接管理器共用 ——
+         * 共用就会变成「两份可能对不上的真相」：同一个 MySQL 在两处各存一份，
+         * 改了密码只改一处，另一处连不上）。
+         * 而工作区 DuckDB 文件就是这个模式唯一的家：源登记在这儿，
+         * 随工作区一起走，换机器时一起搬。
+         */
+        const val REGISTRY_SCHEMA: String = "sundays"
+
+        /** 数据源登记表（工作区里的）。 */
+        const val REGISTRY_TABLE: String = "sources"
+
         /**
          * 建好工作区目录。
          *
@@ -769,6 +1272,35 @@ private fun columnTypeText(
     type: String,
     size: Int,
 ): String = if (size > 0) "$type($size)" else type
+
+/**
+ * 标识符引用 —— `"名字"`（里面的双引号**加倍**）。
+ *
+ * ## 为什么写死 DuckDB 的引用符
+ *
+ * 落点**永远在工作区里**，而工作区恒为 DuckDB —— 没有第二个方言可选。
+ * 用方言的引用符（`SqlIdentifier.quote`）在这里反而是**多此一举**：
+ * 它会让人以为「落点也可能落在远端」。
+ */
+private fun quoteIdent(name: String): String = "\"" + name.replace("\"", "\"\"") + "\""
+
+/**
+ * 字符串字面量 —— `'文本'`（**含**两侧的引号）。
+ *
+ * ## 为什么只转义单引号
+ *
+ * DuckDB 的**普通**字符串字面量**不认反斜杠转义** —— 实测
+ * `SELECT 'C:\Users\x'` 原样得到 `C:\Users\x`。
+ * （认转义的是 `E'...'` 那种写法；这里不用它。）
+ * 所以反斜杠**不能**加倍 —— 加了路径里就真多出两个反斜杠。
+ *
+ * ## 为什么单引号要加倍
+ *
+ * 路径里完全可能有单引号（`C:\O'Brien\data.csv`）。不转义的话，
+ * 那条 `CREATE VIEW` 会在**别的**字符串上结束 —— 于是路径被截断，
+ * 而错误信息指向一个莫名其妙的地方。
+ */
+private fun escapeLiteral(text: String): String = "'" + text.replace("'", "''") + "'"
 
 /**
  * 发一条分析查询并把响应转成界面要的结果。

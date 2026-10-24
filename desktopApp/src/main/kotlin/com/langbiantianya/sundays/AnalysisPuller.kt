@@ -8,9 +8,11 @@
 
 package com.langbiantianya.sundays
 
+import com.langbiantianya.grpc.AnalysisAccessMode
 import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.PullResult
+import com.langbiantianya.sundays.analysis.stagingTableName
 import java.nio.file.Path
 
 /*
@@ -60,7 +62,20 @@ interface AnalysisPuller {
      * @param workspacePath 工作区数据库**文件**的路径 —— 用来在开写之前把目录建出来
      * @param namespace 命名空间（MySQL 上是库，PG 上是 schema）
      * @param table 表名
+     * @param targetSchema 落点所在的 **schema** —— 空串 = 落进 `main`
+     *   （「拉取远端表」那条老行为）。「添加数据源」给的是**这个源自己的 schema**，
+     *   那样两个源里有同名表也不会撞。
+     * @param targetTable 落点的**表名** —— 「拉取远端表」落成 `staging_<源库>_<表>`，
+     *   「添加数据源」落成**原名**（那个源里的表就叫那个名字）。
+     * @param accessMode 走哪条通路（见 `AnalysisAccessMode`）：
+     *   默认是纯 Java 表函数（类型映射跨机器一致）；
+     *   「添加数据源」要的是 **DuckDB 官方扩展优先**，走不通再退回 JDBC。
      * @param onProgress 进度回调（在引擎的协程里调，不是主线程）
+     *
+     * ⚠️ **`onProgress` 刻意放在最后** —— 尾随 lambda 绑的是**最后一个**参数，
+     * 调用点写 `pull(…) { progress -> … }` 才是「那个进度回调」。
+     * 把新参数加在它**后面**的话，所有这样的调用点都会静默变成
+     * 「把 lambda 传给 accessMode」—— 编译期才发现，代价是全仓改一遍。
      */
     suspend fun pull(
         requestId: String,
@@ -69,6 +84,9 @@ interface AnalysisPuller {
         workspacePath: Path,
         namespace: String,
         table: String,
+        targetSchema: String = "",
+        targetTable: String = stagingTableName(namespace, table),
+        accessMode: AnalysisAccessMode = AnalysisAccessMode.ANALYSIS_ACCESS_MODE_UNSPECIFIED,
         onProgress: suspend (PullProgress) -> Unit,
     ): PullResult
 }

@@ -121,7 +121,8 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
 | **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
-| | **工作区树**：只有本地 DuckDB 工作区 + 里面已经拉进来的表（**保存的连接配置不进这棵树** —— 那是连接管理器的事）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
+| | **工作区树**：**根 = 工作区的各个 schema**（`main` 是工作区自己的表，每个**数据源**一个）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
+| | **「+」添加数据源**（分析模式**专属**，不共用浏览模式的「添加连接」）：**远程数据库**（方言 / 主机 / 端口 / 库 / 用户 / 密码 → **用对应驱动预览**库与表 → **可多选可单选** → **DuckDB 官方扩展优先**，走不通退回 JDBC）与**文件 / 文件夹**（parquet / csv / Excel / jsonl → 直接用 DuckDB 的 `read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx` 建**视图**）。加完的源**直接在工作区 DuckDB 里**（登记表 `sundays.sources`），树里立刻多一根 | `AnalysisSourceDialog.kt` / `AnalysisSession` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |

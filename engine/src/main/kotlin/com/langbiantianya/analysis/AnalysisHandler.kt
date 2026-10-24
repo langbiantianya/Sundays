@@ -12,6 +12,7 @@ import com.google.protobuf.Value
 import com.langbiantianya.dialect.DatabaseDialect
 import com.langbiantianya.dialect.DialectCapability
 import com.langbiantianya.engine.StatementRegistry
+import com.langbiantianya.grpc.AnalysisAccessMode
 import com.langbiantianya.grpc.AnalysisListColumnsRequest
 import com.langbiantianya.grpc.AnalysisListColumnsResponse
 import com.langbiantianya.grpc.AnalysisListSourcesResponse
@@ -366,7 +367,15 @@ object AnalysisHandler {
             try {
                 // 工作区里的表名按**工作区方言**（DuckDB）引用 —— 落点在那儿，不在远端。
                 val workspaceDialect = PoolManager.resolveDialect(request.connection)
-                val staging = workspaceDialect.quoteIdentifier(pull.stagingTable)
+                // 落点可以带 schema（「添加数据源」把每个源的表放进自己的 schema）。
+                // 两段都**分别**引用 —— 拼成一段再引用会把 schema 名里的引号吃掉。
+                val staging =
+                    if (pull.targetSchema.isBlank()) {
+                        workspaceDialect.quoteIdentifier(pull.stagingTable)
+                    } else {
+                        "${workspaceDialect.quoteIdentifier(pull.targetSchema)}." +
+                            workspaceDialect.quoteIdentifier(pull.stagingTable)
+                    }
 
                 // 「正在跑的那条语句」—— 取消要打在**它**身上（见下面的说明）。
                 val runningStatement = AtomicReference<Statement?>(null)
@@ -399,6 +408,7 @@ object AnalysisHandler {
                         onRows = onRows,
                         runningStatement = runningStatement,
                         cancelled = cancelled,
+                        preferExtension = pull.accessMode == AnalysisAccessMode.ANALYSIS_ACCESS_MODE_EXTENSION_FIRST,
                     )
 
                 AnalysisPullResponse
@@ -420,11 +430,16 @@ object AnalysisHandler {
      *
      * | 后端 | 什么时候用 | 特点 |
      * |---|---|---|
-     * | 原生扫描器（`mysql_scanner` / `postgres_scanner`） | **显式开了**（`SUNDAYS_DUCKDB_NATIVE_EXT=1`）且扩展可用 | 少一次拷贝、类型用 DuckDB 官方规则；**没有实时行数进度** |
-     * | 纯 Java 表函数 | **默认** | 任何有 JDBC 驱动的源都能走；实时行数进度；类型映射是我们自己定的（跨机器一致） |
+     * | 原生扫描器（`mysql_scanner` / `postgres_scanner`） | 请求说「扩展优先」，或全局开关**显式开了** | 少一次拷贝、类型用 DuckDB 官方规则；**没有实时行数进度** |
+     * | 纯 Java 表函数 | 其余情况 | 任何有 JDBC 驱动的源都能走；实时行数进度；类型映射是我们自己定的（跨机器一致） |
      *
      * 原生那条路走不通就**降级**到纯 Java —— 用户看到的是「拉取成功」，
      * 不是「你的扩展没装」。
+     *
+     * @param preferExtension 请求说的是「扩展优先」吗（见 `AnalysisAccessMode`）。
+     *   「拉取远端表」一直走纯 Java（类型映射跨机器一致）；
+     *   「添加数据源」要的是 DuckDB **原生接入**，所以由请求说明 —— 而不是拧一个
+     *   全局开关，让两条路由悄悄换掉类型映射。
      */
     private fun loadIntoWorkspace(
         workspace: Connection,
@@ -438,13 +453,14 @@ object AnalysisHandler {
         onRows: (Long) -> Unit,
         runningStatement: AtomicReference<Statement?>,
         cancelled: AtomicBoolean,
+        preferExtension: Boolean,
     ): Long {
-        // ① 原生扫描器（可选加速）
+        // ① 原生扫描器
         //
         // 三段式，顺序**不能换**：挂载（事务外）→ 建表（事务内）→ 摘除（提交之后）。
         // 摘除若落在事务里，DuckDB 会中止事务 → 提交落空 → 整张表消失
         // （症状是「拉取报成功、可工作区里查不到表」）。详见 [NativeExtensionScanner]。
-        if (NativeExtensionScanner.isEnabled()) {
+        if (preferExtension || NativeExtensionScanner.isEnabled()) {
             val alias = NativeExtensionScanner.nextAlias()
             if (NativeExtensionScanner.attach(workspace, remote, remoteDialect, alias)) {
                 val native =
