@@ -778,6 +778,10 @@ enum class StrKey {
     ANALYSIS_STAGING_TABLE,
     ENGINE_ANALYSIS_LOCAL_ONLY,
 
+    // ──────────────── 树面板（浏览与分析共用） ────────────────
+    TREE_PANE_COLLAPSE,
+    TREE_PANE_EXPAND,
+
     // ──────────────── 启动选择 ────────────────
     START_MODE_TITLE,
     START_MODE_CONNECTIONS_HINT,

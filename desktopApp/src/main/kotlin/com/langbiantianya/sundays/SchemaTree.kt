@@ -65,6 +65,7 @@ import com.langbiantianya.sundays.tree.ObjectTreeColumn
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.tree.ObjectTreeObjectGroup
+import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
@@ -230,6 +231,7 @@ internal fun SchemaTreePanel(
     state: DatabaseBrowserState,
     connected: Boolean,
     onOpenTable: (schema: String, table: String) -> Unit,
+    onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // **必须显式持有** —— LazyColumn 不传 state 时内部用的是 `rememberLazyListState()`，
@@ -272,6 +274,11 @@ internal fun SchemaTreePanel(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
+                // 「收起左树」—— 与分析模式的树面板头**同一个按钮**
+                // （`TreePaneToggleButton`）：两侧的手感必须一致，
+                // 不能出现「这边能收、那边不能收」。
+                Spacer(Modifier.weight(1f))
+                TreePaneToggleButton(collapsed = false, onClick = onCollapse)
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 

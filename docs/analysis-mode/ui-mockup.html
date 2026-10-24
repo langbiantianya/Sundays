@@ -231,6 +231,28 @@ body{
   font-size:14px; line-height:18px; color:var(--on-surface-variant);
   background:var(--surface-variant); border:1px solid var(--outline-variant); border-radius:3px;
 }
+/* v1.12：树头上的「‹」—— 把左树**折叠到侧边**（收成 44dp 窄轨，把宽度让给右边）。
+   与浏览模式的树面板头**同一个按钮**，两侧手感一致。 */
+.tree-collapse{
+  width:20px; height:20px; flex:none; padding:0; cursor:pointer; margin-left:4px;
+  font-size:14px; line-height:18px; color:var(--on-surface-variant);
+  background:var(--surface-variant); border:1px solid var(--outline-variant); border-radius:3px;
+}
+.tree-head-actions{ display:flex; align-items:center; flex:none; }
+/* 折叠态：**贴到屏幕左边的窄轨** —— 一个展开按钮 + 一枚「被收起来的是什么」的图标。
+   树的内容**整体不在屏上**（44dp 塞不下树，画一截残影既没法看也没法点）。 */
+.tree-rail{
+  width:44px; flex:none; display:flex; flex-direction:column; align-items:center;
+  border-right:1px solid var(--outline-variant); background:var(--surface);
+}
+.tree-rail .tree-expand{
+  width:24px; height:24px; margin-top:6px; padding:0; cursor:pointer;
+  font-size:14px; line-height:22px; color:var(--on-surface-variant);
+  background:var(--surface-variant); border:1px solid var(--outline-variant); border-radius:3px;
+}
+.tree-rail .rail-icon{ margin-top:6px; font-size:14px; color:var(--on-surface-variant); opacity:.85; }
+/* `hidden` 是 UA 样式（优先级低于上面的 `display:flex`）—— 得自己压一道 */
+.tree-rail[hidden], .tree[hidden]{ display:none; }
 .tree-head{
   padding:6px 10px; font-size:11px; line-height:14px; font-weight:600; letter-spacing:.04em;
   color:var(--on-surface-variant); border-bottom:1px solid var(--outline-variant);
@@ -655,9 +677,16 @@ body{
              它俩都是对编辑器里这段 SQL 的动作。 -->
 
         <div class="work-body">
+          <!-- v1.12：左树可**折叠到侧边** —— 收成贴到屏幕左边的 44dp 窄轨，
+               把宽度让给右边的编辑器与结果表。树的内容**整体不在屏上**
+               （44dp 塞不下树，画一截残影既没法看也没法点）。 -->
+          <aside class="tree-rail" id="tree-rail" hidden>
+            <button class="tree-expand" type="button" title="展开左树" aria-label="展开左树">›</button>
+            <span class="rail-icon" title="工作区">🗄</span>
+          </aside>
           <!-- 左树 -->
-          <aside class="tree">
-            <div class="tree-head"><span>工作区<span class="tree-head-note">本地 DuckDB</span></span><button class="tree-add" type="button" title="添加数据源" aria-label="添加数据源">＋</button></div>
+          <aside class="tree" id="tree">
+            <div class="tree-head"><span>工作区<span class="tree-head-note">本地 DuckDB</span></span><span class="tree-head-actions"><button class="tree-add" type="button" title="添加数据源" aria-label="添加数据源">＋</button><button class="tree-collapse" type="button" title="折叠左树" aria-label="折叠左树">‹</button></span></div>
             <div class="tree-list">
               <!-- 树与浏览模式的对象树**同一个组件**：库 → 表 → 字段。
                    根 = 工作区的各个 schema：`main` 是工作区自己的表，
@@ -982,6 +1011,7 @@ body{
           <div class="cmp-group">② 分析工作区</div>
           <div class="cmp-row"><span class="cmp-area">顶栏按钮</span><span class="cmp-comp">WinButton / WinOutlinedButton / WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">ObjectTree</span><span class="cmp-path">shared/…/tree/ObjectTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">左树面板外壳</span><span class="cmp-comp">TreePaneShell / TreePaneToggleButton</span><span class="cmp-path">shared/…/tree/TreePaneShell.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">「+ 添加数据源」对话框</span><span class="cmp-comp">WinSurface / WinButton / WinTextField / WinDivider</span><span class="cmp-path">desktopApp/…/AnalysisSourceDialog.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">文件 / 文件夹选择</span><span class="cmp-comp">NativePathPicker</span><span class="cmp-path">desktopApp/…/NativePathPicker.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
@@ -1266,6 +1296,19 @@ document.addEventListener("click", function(e){
   if (!btn) return;
   if (btn.hasAttribute("data-mode")) setMode(btn.getAttribute("data-mode"));
   if (btn.hasAttribute("data-screen")) applyScreen(btn.getAttribute("data-screen"));
+});
+
+/* ---------- v1.12：左树折叠到侧边（设计图里能真的点） ----------
+   折叠 = 树整体从屏上消失，左边只剩一条 44dp 窄轨（一个展开按钮 + 一枚图标）；
+   窄轨上**没有**拖宽把手 —— 44dp 没有「可调宽」可言。 */
+document.addEventListener("click", function(e){
+  var b = e.target.closest ? e.target.closest(".tree-collapse, .tree-expand") : null;
+  if (!b) return;
+  var tree = document.getElementById("tree");
+  var rail = document.getElementById("tree-rail");
+  if (!tree || !rail) return;
+  if (b.classList.contains("tree-collapse")) { tree.hidden = true; rail.hidden = false; }
+  else { tree.hidden = false; rail.hidden = true; }
 });
 
 /* ---------- 初始状态 ---------- */

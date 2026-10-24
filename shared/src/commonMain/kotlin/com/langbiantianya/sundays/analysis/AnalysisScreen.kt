@@ -11,6 +11,7 @@ package com.langbiantianya.sundays.analysis
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,14 +24,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
@@ -39,6 +47,9 @@ import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
+import com.langbiantianya.sundays.tree.TreePaneShell
+import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinIconButton
@@ -96,6 +107,12 @@ import com.langbiantianya.sundays.ui.str
  * @param result 最近一次查询的结果；`null` = 还没跑过
  * @param running 正在跑 —— 界面据此禁用「运行」按钮
  * @param onRun 「运行」被点时回调
+ * @param treePaneHoverIcon 左树分隔条悬停时的指针图标。`null` = 不改指针。
+ *
+ *   **为什么由调用方给**：「左右拉伸」箭头是**平台专属**资源
+ *   （AWT 里只有 `E_RESIZE_CURSOR` / `W_RESIZE_CURSOR`），公共 Compose API 造不出来。
+ *   `:shared` 只管「什么时候用」，平台侧管「长什么样」——
+ *   与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker` / `DragHandle` 的 `hoverIcon`）。
  */
 @Composable
 fun AnalysisScreen(
@@ -116,8 +133,19 @@ fun AnalysisScreen(
     result: AnalysisResult? = null,
     running: Boolean = false,
     onRun: () -> Unit = {},
+    treePaneHoverIcon: PointerIcon? = null,
     modifier: Modifier = Modifier,
 ) {
+    // 左树的**宽度**与**折叠态** —— 与浏览模式的树面板同一套理由：
+    // 布局是**窗口级偏好**，不是「树的数据」的一部分，因此不进会话状态机。
+    //
+    // 放在这一层（而不是 `AnalysisSession` 里）是因为分析模式**同一时刻只有一个实例**：
+    // 切到别的顶层页再切回来，这一屏会被拆掉重建 —— 那时宽度回到默认值，
+    // 与浏览模式「切顶层页也会复位」的行为一致（浏览模式保的是**切 sheet**不丢，
+    // 那是它把状态放在 `DatabaseBrowserScreen` 的原因）。
+    var treePaneWidth by remember { mutableStateOf(ANALYSIS_TREE_PANEL_DEFAULT_WIDTH) }
+    var treePaneCollapsed by remember { mutableStateOf(false) }
+
     Column(modifier = modifier.fillMaxSize()) {
         // 拉取状态条 —— 在树与主区**上面**横贯一条。
         // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
@@ -130,40 +158,59 @@ fun AnalysisScreen(
             )
         }
 
-        Row(modifier = Modifier.fillMaxSize()) {
-            AnalysisTreePanel(
-                roots = treeRoots,
-                expandedNodeIds = expandedNodeIds,
-                onToggleNode = onToggleNode,
-                onSelectTable = onSelectTreeTable,
-                onSelectColumn = onSelectTreeColumn,
-                onAddSource = onAddSource,
-                loading = treeLoading,
-                error = treeError,
-                modifier = Modifier.width(TREE_PANEL_WIDTH).fillMaxHeight(),
-            )
-            Column(
-                modifier =
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surface),
-            ) {
-                AnalysisEditorPanel(
-                    sql = sql,
-                    onSqlChange = onSqlChange,
-                    running = running,
-                    onRun = onRun,
-                    modifier = Modifier.weight(EDITOR_PANEL_WEIGHT),
-                )
-                AnalysisResultPanel(
-                    result = result,
-                    // 一个远端源都没有时，空态要说的是「去建连接」而不是「去跑一条 SQL」——
-                    // 没有源就拉不到任何表，跑出来的结果只能是工作区里原有的东西。
-                    noSources = sources.isEmpty(),
-                    modifier = Modifier.weight(RESULT_PANEL_WEIGHT),
-                )
-                AnalysisStatusBar(result = result)
+        // 宽度上限按容器比例给（与浏览模式同一个常量）—— 窗口窄时若还允许拉到固定 dp，
+        // 右侧的编辑器与结果表会被挤到没法用。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val maxPaneWidth = maxWidth * TREE_PANE_MAX_WIDTH_RATIO
+            Row(modifier = Modifier.fillMaxSize()) {
+                TreePaneShell(
+                    collapsed = treePaneCollapsed,
+                    onToggleCollapsed = { treePaneCollapsed = !treePaneCollapsed },
+                    width = treePaneWidth,
+                    onWidthChange = { treePaneWidth = it },
+                    defaultWidth = ANALYSIS_TREE_PANEL_DEFAULT_WIDTH,
+                    minWidth = ANALYSIS_TREE_PANEL_MIN_WIDTH,
+                    maxWidth = maxPaneWidth,
+                    collapsedIcon = Icons.Filled.Storage,
+                    handleModifier = Modifier.testTag(ANALYSIS_TREE_DRAG_HANDLE_TAG),
+                    hoverIcon = treePaneHoverIcon,
+                ) { paneModifier ->
+                    AnalysisTreePanel(
+                        roots = treeRoots,
+                        expandedNodeIds = expandedNodeIds,
+                        onToggleNode = onToggleNode,
+                        onSelectTable = onSelectTreeTable,
+                        onSelectColumn = onSelectTreeColumn,
+                        onAddSource = onAddSource,
+                        onCollapse = { treePaneCollapsed = !treePaneCollapsed },
+                        loading = treeLoading,
+                        error = treeError,
+                        modifier = paneModifier.testTag(ANALYSIS_TREE_PANEL_TAG),
+                    )
+                }
+                Column(
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surface),
+                ) {
+                    AnalysisEditorPanel(
+                        sql = sql,
+                        onSqlChange = onSqlChange,
+                        running = running,
+                        onRun = onRun,
+                        modifier = Modifier.weight(EDITOR_PANEL_WEIGHT),
+                    )
+                    AnalysisResultPanel(
+                        result = result,
+                        // 一个远端源都没有时，空态要说的是「去建连接」而不是「去跑一条 SQL」——
+                        // 没有源就拉不到任何表，跑出来的结果只能是工作区里原有的东西。
+                        noSources = sources.isEmpty(),
+                        modifier = Modifier.weight(RESULT_PANEL_WEIGHT),
+                    )
+                    AnalysisStatusBar(result = result)
+                }
             }
         }
     }
@@ -178,8 +225,17 @@ const val ANALYSIS_RUN_BUTTON_TAG: String = "analysisRunButton"
 /** 「添加数据源」按钮的测试标记。 */
 const val ANALYSIS_ADD_SOURCE_BUTTON_TAG: String = "analysisAddSourceButton"
 
-/** 左树的宽度。 */
-private val TREE_PANEL_WIDTH = 240.dp
+/** 左树的默认宽度 —— 双击分隔条即复位到这个值。 */
+val ANALYSIS_TREE_PANEL_DEFAULT_WIDTH: Dp = 240.dp
+
+/** 左树宽度的下限 —— 再窄就看不到表名了。 */
+val ANALYSIS_TREE_PANEL_MIN_WIDTH: Dp = 180.dp
+
+/** 左树面板的 UI 测试 tag —— 面板本身无语义，量宽度得靠它。 */
+const val ANALYSIS_TREE_PANEL_TAG: String = "analysisTreePanel"
+
+/** 左树分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
+const val ANALYSIS_TREE_DRAG_HANDLE_TAG: String = "analysisTreeDragHandle"
 
 /** 编辑器面板占主区的高度比例 —— 剩下的给结果表。 */
 private const val EDITOR_PANEL_WEIGHT = 0.42f
@@ -281,6 +337,11 @@ private fun AnalysisEditorPanel(
  * 与浏览模式的对象树一模一样（同一个组件、同一套画法）。
  * 分析模式以前自己画了一棵树（`SourceTree`），两边的扭子、行高、
  * 「表能不能展开」全不一样；统一之后，用户在两个模式里看到的是同一棵树。
+ *
+ * ## 面板外壳也是**与浏览模式同一个**
+ *
+ * [TreePaneShell] —— 折叠到侧边（窄轨）与拖拽调宽。
+ * 两侧的树面板因此有一模一样的手感，不会出现「浏览模式能拖、分析模式不能拖」。
  */
 @Composable
 private fun AnalysisTreePanel(
@@ -290,6 +351,7 @@ private fun AnalysisTreePanel(
     onSelectTable: (ObjectTreeNode) -> Unit,
     onSelectColumn: (ObjectTreeNode) -> Unit,
     onAddSource: () -> Unit,
+    onCollapse: () -> Unit,
     loading: Boolean,
     error: String?,
     modifier: Modifier = Modifier,
@@ -339,6 +401,10 @@ private fun AnalysisTreePanel(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
+                // 「收起左树」—— 与浏览模式的树面板头**同一个按钮**
+                // （`TreePaneToggleButton`）：两侧的手感必须一致。
+                Spacer(modifier = Modifier.width(2.dp))
+                TreePaneToggleButton(collapsed = false, onClick = onCollapse)
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

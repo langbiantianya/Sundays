@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,7 +43,8 @@ import com.langbiantianya.sundays.browser.BrowserToolBar
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
-import com.langbiantianya.sundays.ui.DragHandle
+import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
+import com.langbiantianya.sundays.tree.TreePaneShell
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
@@ -58,6 +61,11 @@ internal const val TABLE_CLEAR_BTN_TAG = "tableClearBtn"
  * 激活 sheet 的内容：连接选择条 + 左侧 schema 树 + 右侧 preview 标签页区。
  * 与原单连接 [DatabaseBrowserScreen] 行为完全一致 —— 只是 `bindConnection` / `refreshDatabases`
  * 作用的 [browser] 由激活 sheet 持有，与其它 sheet 互不影响。
+ *
+ * @param schemaPanelWidth 左树面板的宽度 —— **窗口级偏好**，由 [DatabaseBrowserScreen] 持有
+ * @param onSchemaPanelWidthChange 拖拽分隔条时的实时回调
+ * @param schemaPanelCollapsed 左树面板是不是折叠成了贴边的窄轨
+ * @param onSchemaPanelCollapsedChange 折叠 / 展开时的回调
  */
 @Composable
 internal fun ActiveSheetContent(
@@ -66,6 +74,8 @@ internal fun ActiveSheetContent(
     onDisconnect: (ConnectionConfig) -> Unit,
     schemaPanelWidth: Dp,
     onSchemaPanelWidthChange: (Dp) -> Unit,
+    schemaPanelCollapsed: Boolean,
+    onSchemaPanelCollapsedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 注入当前连接（连接变化时清空派生状态），随后在已连接时自动加载数据库列表。
@@ -115,31 +125,33 @@ internal fun ActiveSheetContent(
         // 宽度上限按容器比例给，而不是固定 dp：窗口窄时若还允许拉到 600dp，
         // 右侧工作台会被挤到没法用。0.62 留足了右栏的最低可读宽度。
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val maxPanelWidth = maxWidth * 0.62f
+            val maxPanelWidth = maxWidth * TREE_PANE_MAX_WIDTH_RATIO
             Row(modifier = Modifier.fillMaxSize()) {
-                SchemaTreePanel(
-                    state = sheet.browser,
-                    connected = sheet.status.state == ConnectionState.CONNECTED,
-                    onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
-                    modifier =
-                        Modifier
-                            .width(schemaPanelWidth)
-                            .fillMaxHeight(),
-                )
-                DragHandle(
+                // 树面板外壳 —— **折叠到侧边**与**拖拽调宽**两件事都在里面，
+                // 与分析模式的左树是同一个组件（`TreePaneShell`）。
+                TreePaneShell(
+                    collapsed = schemaPanelCollapsed,
+                    onToggleCollapsed = { onSchemaPanelCollapsedChange(!schemaPanelCollapsed) },
                     width = schemaPanelWidth,
                     onWidthChange = onSchemaPanelWidthChange,
                     defaultWidth = SCHEMA_PANEL_DEFAULT_WIDTH,
                     minWidth = SCHEMA_PANEL_MIN_WIDTH,
                     maxWidth = maxPanelWidth,
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    highlightColor = MaterialTheme.colorScheme.primary,
+                    collapsedIcon = Icons.Filled.Folder,
+                    // testTag：分隔条画出来只有 1dp 宽，没有 tag 的话测试只能靠坐标猜
+                    handleModifier = Modifier.testTag(SCHEMA_DRAG_HANDLE_TAG),
                     // 悬停时换「左右拉伸」指针：分隔条在鼠标下必须看起来可拖，
                     // 否则拖拽功能「存在但没人发现」—— 指针始终是箭头时没人会去试。
                     hoverIcon = ewResizePointerIcon(),
-                    // testTag：分隔条画出来只有 1dp 宽，没有 tag 的话测试只能靠坐标猜
-                    modifier = Modifier.testTag(SCHEMA_DRAG_HANDLE_TAG),
-                )
+                ) { paneModifier ->
+                    SchemaTreePanel(
+                        state = sheet.browser,
+                        connected = sheet.status.state == ConnectionState.CONNECTED,
+                        onOpenTable = { schema, table -> sheet.browser.openTab(schema, table) },
+                        onCollapse = { onSchemaPanelCollapsedChange(!schemaPanelCollapsed) },
+                        modifier = paneModifier,
+                    )
+                }
                 when (sheet.browser.activePane) {
                     BrowserPane.TABLE -> {
                         PreviewTabArea(

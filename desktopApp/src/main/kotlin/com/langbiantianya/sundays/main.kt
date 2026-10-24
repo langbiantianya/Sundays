@@ -811,6 +811,9 @@ internal fun MainScreen(
                         result = analysis.result,
                         running = analysis.running,
                         onRun = { analysis.run() },
+                        // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
+                        // （`:shared` 只决定「什么时候用」）。
+                        treePaneHoverIcon = ewResizePointerIcon(),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

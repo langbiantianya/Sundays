@@ -627,6 +627,8 @@ internal val textsZhHant: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "已讀取 {0} 行",
         StrKey.ANALYSIS_STAGING_TABLE to "工作區資料表 {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析查詢只能跑在本機工作區上，不能直接對遠端資料來源執行",
+        StrKey.TREE_PANE_COLLAPSE to "收合樹面板",
+        StrKey.TREE_PANE_EXPAND to "展開樹面板",
         StrKey.START_MODE_TITLE to "選擇要進入的模式",
         StrKey.START_MODE_CONNECTIONS_HINT to "連線資料庫，瀏覽資料表結構與資料",
         StrKey.START_MODE_ANALYSIS_HINT to "唯讀遠端資料，在本地工作區裡做分析",

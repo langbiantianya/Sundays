@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.28（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.30（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -284,6 +284,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | [`AnalysisPull.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) | **拉取的纯模型**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 |
 | [`ObjectTreeModel.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/ObjectTreeModel.kt) | **两棵树共用的模型**（纯数据，不碰引擎 → 能进 `commonTest`）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换 / 谁可以展开」等纯规则。节点的 `namespace` 记着它所在的**容器**（schema / 库）—— 写引用时要用（`"库"."表"."列"`） |
 | [`ObjectTree.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/ObjectTree.kt) | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调。**浏览模式**（`desktopApp/SchemaTree.kt`）与**分析模式**（`analysis/AnalysisScreen.kt`）都喂它 —— 同一个概念只有一份实现 |
+| [`TreePaneShell.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreePaneShell.kt) | **两棵树共用的面板外壳**：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）。**浏览模式**与**分析模式**都套它 —— 折叠到侧边与拖拽调宽因此是同一份实现、同一套手感。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属） |
 | [`PullProgressIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullProgressIndicator.kt) | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 —— 用**静态字形**（`●`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
 | [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行 |
 
@@ -411,3 +412,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖） |
 | v2.27 | **① `TableStructureDialog` 保存失败时必须显示错误** —— 早先把 `state.error` 记成 `remember(state.draft)` 的快照，而保存失败时 `state.draft` 并不变，remember 的 key 也就没变，快照永远停在初始值；再叠加一层 `if (state.loading) state.error else draft.validate()` 的门控，失败原因被彻底吞掉。改为每次重组都从 `state.error` 读，弹窗里那行红字才真的会出现。**② 读回表结构时「长度」要按类型过滤**（`ColumnTypeCatalog.lengthFor`）—— 引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）而不是长度，照搬进长度框就成了「BIGINT 长度 19」 |
 | v2.28 | **① 分隔条悬停要有「左右拉伸」指针** —— 此前 `DragHandle` 只管拖拽不管指针，鼠标停上去永远是默认箭头，拖拽功能「存在但没人发现」。新增 `hoverIcon: PointerIcon?` 参数：**图标由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」），因为 Compose 公共 API 只有默认 / 十字 / 文本 / 手型四种指针，左右拉伸箭头是平台专属资源 —— 与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker`）。**② 只在「真的拖得动」时才显示箭头**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄，只有上下限相等才是真动不了）—— 顶死还摆「可拖」箭头是在骗用户，而且这种「图标在骗人」的缺陷比「图标没有」更难查 |
+| v2.30 | **树面板外壳上移** —— 新增 `tree/TreePaneShell.kt`：**两棵树的面板外壳共用一个组件**。展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（一个展开按钮 + 一枚图标，把宽度让给右边）。**宽度不由它持有**（受控组件 —— 布局宽度是窗口级偏好，应提升到「同一时刻只渲染一个实例」的那一层之外）；**指针图标由调用方给**（同 `DragHandle` 的分界）。折叠时树**整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点；代价是滚动位置回顶部（**展开态不丢**，它在会话状态里） |

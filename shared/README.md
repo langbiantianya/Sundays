@@ -38,6 +38,7 @@
 | `EmptyHint` / `ColumnBadge` / `TabRenameDialog` | 空态提示、字段类型徽标、标签重命名弹窗 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 | `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 浏览器的**标签条 / 工作台切换 / 空态引导** —— 纯展示，只认窄数据形状 | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
 | `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 通知中心（状态 + 面板 + 铃铛入口）—— 跨界面收集错误 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
+| `ObjectTree` / `ObjectTreeModel` / `TreePaneShell` / `TreePaneToggleButton` | **两棵数据库树共用的组件与外壳**：库 → 表 → 字段的渲染与纯模型；面板外壳（**折叠到侧边的 44dp 窄轨** + **可拖拽调宽**的分隔条）与折叠 / 展开按钮 | [`tree/`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/) |
 
 **扩展方式**：新增语言 / formatter 走 SPI 注册；替换菜单项、详情面板、工具栏动作走 Composable lambda 插槽
 （`contextMenuItems` / `detailPanel` / `actions`）—— 不是 `List<UIElement>` 数据驱动。各扩展点的契约见

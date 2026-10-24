@@ -90,6 +90,7 @@
 | [`ConnectedSourceEndToEndTest`](./src/test/kotlin/com/langbiantianya/sundays/ConnectedSourceEndToEndTest.kt) | **「连得上」与「连上之后能用」之间那道缝**：真引擎建库播种 → `ConnectionSession.connect()` 真连上 → 界面真点树与表 → 读数据 → 过滤/排序/搜索下推 → SQL 工作台执行 → 多语句/事务/只读 → 断开。**五个方言全过** |
 | [`ColumnInfoDisplayTest`](./src/test/kotlin/com/langbiantianya/sundays/ColumnInfoDisplayTest.kt) | 字段展示：带长度拼类型 / 长度为 0 不加括号 / 字段名与类型独立 / 约束标记不混进类型 / 默认可空不标「非空」 |
 | [`SchemaPanelWidthTest`](./src/test/kotlin/com/langbiantianya/sundays/SchemaPanelWidthTest.kt) | 树面板宽度：拖拽 / 双击复位 / 钳在 `[180dp, 容器宽 × 62%]` |
+| [`TreePaneCollapseTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneCollapseTest.kt) | **树面板的折叠到侧边与宽度可调（浏览与分析两侧都要成立）**：分析模式**能拖宽**（此前写死 240dp）、折叠后**树整体不在屏上**且右边**真的宽出空间**、窄轨**没有分隔条**（44dp 没有「可调宽」可言）、再点一下原样回来、浏览模式折叠**不丢**拖好的宽度 |
 | [`PointerIconsTest`](./src/test/kotlin/com/langbiantianya/sundays/PointerIconsTest.kt) | 平台专属指针图标：「左右拉伸」箭头造得出来、就是 `java.awt.Cursor.E_RESIZE_CURSOR`（**AWT 里没有 `EW_RESIZE_CURSOR`**）、且是**稳定单例**（每次重组新建 AWT 光标会让 modifier 节点反复比对，表现为光标抖一下） |
 | [`TreeContextMenuStateTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuStateTest.kt) | 对象树右键菜单状态机：复制名称 / 复制引用名（按方言）/ 复制建表 DDL 的可见性与文案；PG 三段式与四段式、字段节点无 DDL 项、剪贴板注入 |
 | [`TreeContextMenuUiTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuUiTest.kt) | 右键菜单真点击：菜单项点完菜单消失 / 焦点环 / 字段行复制引用 |
@@ -172,6 +173,7 @@
 | [`AnalysisPullSmokeTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullSmokeTest.kt) | **真 MySQL** 端到端：行数对上、**全程不落盘**、进度报出行数、**拉下来的表保留远端类型**（`SUM(id)` 直接能跑，不必 `TRY_CAST`）、窗口函数聚合、工作区里 `CREATE TABLE tmp AS SELECT` 成功。内网 MySQL 不可达时**显式 skip**（报告里留一条 skipped），不是静默跳过 |
 | [`AnalysisNativePullTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisNativePullTest.kt) | **原生扫描器**（可选加速）的端到端（真 MySQL → 真 DuckDB 工作区）：① 显式打开时走的**确实是**原生那条路（列类型是官方的 `SMALLINT`）；② **默认没打开**时走纯 Java 表函数（列类型是我们的 `INTEGER`）；③ 拉完之后工作区里**没有残留的远端挂载**（挂着的那条目录记录里**含明文密码**）。⚠️ 判据不能用 `TINYINT(1)`：MySQL Connector/J 把它报成 `Types.BIT`，**两条路都是 BOOLEAN** |
 | [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**界面上不再出现「临时文件」**（联邦直查不落盘）、取消按钮回调、没给取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 |
+| [`TreePaneCollapseTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneCollapseTest.kt) | **分析模式左树的面板契约**：左树**能拖宽**（此前写死 240dp）、**能折叠成侧边窄轨**（树整体从屏上消失、右边结果区**真的变宽**）、窄轨上**没有**拖宽把手、再点一下原样回来 —— 与浏览模式**同一个组件**（`TreePaneShell`） |
 
 ### 2.8 非测试支撑文件
 

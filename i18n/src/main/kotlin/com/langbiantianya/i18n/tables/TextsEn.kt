@@ -627,6 +627,8 @@ internal val textsEn: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "{0} rows read",
         StrKey.ANALYSIS_STAGING_TABLE to "Workspace table {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Analysis queries can only run against the local workspace, not directly against a remote data source",
+        StrKey.TREE_PANE_COLLAPSE to "Collapse tree panel",
+        StrKey.TREE_PANE_EXPAND to "Expand tree panel",
         StrKey.START_MODE_TITLE to "Choose a mode to start",
         StrKey.START_MODE_CONNECTIONS_HINT to "Connect to a database and browse its tables and data",
         StrKey.START_MODE_ANALYSIS_HINT to "Read remote data read-only and analyze it in the local workspace",

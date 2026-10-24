@@ -86,6 +86,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
 | | 树面板宽度**可拖拽**（双击复位，范围钳位），悬停显示**左右拉伸指针** | `shared/ui/DragHandle.kt` |
+| | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度 | `shared/tree/TreePaneShell.kt` |
 | | **对象树右键菜单**：复制名称 / 复制引用名（按方言限定）/ 复制建表 DDL | `SqlIdentifier` + `TABLE.GET_DDL` |
 | **SQL 工作台** | 多 sheet，各自独立文本 / 光标 / 滚动 / 结果 | `SqlSheet` |
 | | 语法高亮，**随连接方言切换词表** | `SqlDialectProfile` → `CodeEditor` |
@@ -122,6 +123,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
 | **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
 | | **工作区树**：**根 = 工作区的各个 schema**（`main` 是工作区自己的表，每个**数据源**一个）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
+| | **左树可折叠到侧边、宽度可调** —— 与浏览模式**同一个面板外壳**（`shared/tree/TreePaneShell.kt`）：折叠成 44dp 窄轨把宽度让给右边的编辑器与结果表；展开态拖分隔条调宽（此前是写死的 240dp） | `shared/tree/TreePaneShell.kt` |
 | | **「+」添加数据源**（分析模式**专属**，不共用浏览模式的「添加连接」）：**远程数据库**（方言 / 主机 / 端口 / 库 / 用户 / 密码 → **用对应驱动预览**库与表 → **可多选可单选** → **DuckDB 官方扩展优先**，走不通退回 JDBC）与**文件 / 文件夹**（parquet / csv / Excel / jsonl → 直接用 DuckDB 的 `read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx` 建**视图**）。加完的源**直接在工作区 DuckDB 里**（登记表 `sundays.sources`），树里立刻多一根。路径可**调系统文件 / 文件夹选择器**挑（文本框仍在：网络路径与无头环境只能手输）；格式**能手选**（文件夹没有扩展名） | `AnalysisSourceDialog.kt` / `AnalysisSession` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |

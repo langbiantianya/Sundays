@@ -627,6 +627,8 @@ internal val textsDe: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "{0} Zeilen gelesen",
         StrKey.ANALYSIS_STAGING_TABLE to "Arbeitsbereichstabelle {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Analyseabfragen können nur gegen den lokalen Arbeitsbereich laufen, nicht direkt gegen eine externe Datenquelle",
+        StrKey.TREE_PANE_COLLAPSE to "Baumbereich einklappen",
+        StrKey.TREE_PANE_EXPAND to "Baumbereich ausklappen",
         StrKey.START_MODE_TITLE to "Modus zum Starten wählen",
         StrKey.START_MODE_CONNECTIONS_HINT to "Mit einer Datenbank verbinden und Tabellen und Daten durchsehen",
         StrKey.START_MODE_ANALYSIS_HINT to "Remote-Daten nur lesend und im lokalen Arbeitsbereich auswerten",

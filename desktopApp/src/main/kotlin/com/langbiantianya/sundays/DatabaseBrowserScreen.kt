@@ -219,6 +219,12 @@ fun DatabaseBrowserScreen(
     // 与这里的纯布局宽度是两回事，别混。
     var schemaPanelWidth by remember { mutableStateOf(SCHEMA_PANEL_DEFAULT_WIDTH) }
 
+    // 左树是不是折叠成窄轨 —— 与宽度**同一层**、同一套理由：
+    // 它也是布局偏好（不是「树的数据」的一部分），切 sheet 时不该重置。
+    //
+    // 折叠的收益是**把宽度让给右边** —— 表格宽一点、SQL 长一点都少横向滚动。
+    var schemaPanelCollapsed by remember { mutableStateOf(false) }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
@@ -251,6 +257,8 @@ fun DatabaseBrowserScreen(
                     onDisconnect = onDisconnect,
                     schemaPanelWidth = schemaPanelWidth,
                     onSchemaPanelWidthChange = { schemaPanelWidth = it },
+                    schemaPanelCollapsed = schemaPanelCollapsed,
+                    onSchemaPanelCollapsedChange = { schemaPanelCollapsed = it },
                     modifier = Modifier.weight(1f),
                 )
             }

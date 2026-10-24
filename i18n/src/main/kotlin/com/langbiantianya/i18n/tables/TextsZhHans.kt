@@ -627,6 +627,8 @@ internal val textsZhHans: Map<StrKey, String> =
         StrKey.ANALYSIS_PULL_ROWS to "已读 {0} 行",
         StrKey.ANALYSIS_STAGING_TABLE to "工作区表 {0}",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析查询只能跑在本地工作区上，不能直接对远端数据源执行",
+        StrKey.TREE_PANE_COLLAPSE to "折叠树面板",
+        StrKey.TREE_PANE_EXPAND to "展开树面板",
         StrKey.START_MODE_TITLE to "选择要进入的模式",
         StrKey.START_MODE_CONNECTIONS_HINT to "连接数据库，浏览表结构与数据",
         StrKey.START_MODE_ANALYSIS_HINT to "只读远端数据，在本地工作区里做分析",

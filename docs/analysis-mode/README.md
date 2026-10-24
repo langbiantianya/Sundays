@@ -1,6 +1,22 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.11** · 2026-10-25
+> **状态**：设计冻结待评审 · **v1.12** · 2026-10-25
+>
+> **v1.12 相对 v1.11 的修改**（**左树能折叠到侧边，宽度也能调了**）：
+>
+> 1. **分析模式的左树此前是写死的 240dp** —— 想看长表名只能干瞪眼，
+>    而浏览模式的树早就能拖宽。两侧是**同一个概念**（左边的数据库树），
+>    却有两套布局 —— 现在合成**同一个面板外壳**
+>    （`:shared` 的 `tree/TreePaneShell.kt`），手感一致。
+> 2. **折叠到侧边** —— 收成贴到屏幕左边的 **44dp 窄轨**
+>    （一个展开按钮 + 一枚图标），**把宽度让给右边**：
+>    编辑器与结果表因此宽出 196dp（240 − 44），SQL 少横向滚动、结果表少横滚。
+> 3. **窄轨上没有拖宽把手** —— 44dp 没有「可调宽」可言；
+>    留个把手在那儿就是「看起来能拖，拖了纹丝不动」。
+> 4. **折叠时树整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点。
+>    代价是**滚动位置回顶部**（**展开态不丢**：哪些库 / 哪些表是张开的
+>    住在会话状态里，折叠再展开还是原来那棵树）。
+> 5. **§9.1 画面 ② 与 §9.3 组件对照表同步**。
 >
 > **v1.11 相对 v1.10 的修改**（**「添加数据源」对话框的两处收拾**）：
 >
@@ -1321,15 +1337,16 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 本设计的立场是**不夹带** —— 那是浏览模式的内部重构，与数据分析模式无关，
 混进来会让本设计的大范围改动更难评审。
 
-### 6.4 确需新建的组件（5 个，全部落在 `:shared`）
+### 6.4 确需新建的组件（6 个，全部落在 `:shared`）
 
 | # | 组件 | 位置 | 为什么现有的不够用 |
 |---|---|---|---|
 | 1 | `ObjectTree` | `shared/.../tree/ObjectTree.kt`（**两棵树共用**） | ⚠️ **v1.9**：原第 1 个组件是分析模式**自建**的 `SourceTree`，现在**删掉**，改用这一个 —— 形状（库 → 表 → 字段）与浏览模式的对象树**完全同形**。模型在 `tree/ObjectTreeModel.kt`，是**纯数据**（不碰引擎），所以两边都能喂它 |
-| 2 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
-| 3 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
-| 4 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
-| 5 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
+| 2 | `TreePaneShell` | `shared/.../tree/TreePaneShell.kt`（**两棵树共用**） | ⚠️ **v1.12**：分析模式的左树此前是写死的 240dp，而浏览模式的树面板能拖宽 —— **同一个概念**（左边的数据库树）却有两套布局。新组件把「折叠到侧边（44dp 窄轨）」与「拖拽调宽」收进**一个外壳**，两侧共用。`DragHandle` 只管分隔条，**不管折叠**，也不管「折叠态长什么样」 |
+| 3 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
+| 4 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
+| 5 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
+| 6 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
 
 > ⚠️ **v1.9：第 1 个组件从「分析模式自建」变成「两棵树共用」。**
 >
@@ -1624,7 +1641,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ② 分析工作区 | 树头上 **「+ 添加数据源」**（分析模式**专属**——不共用浏览模式的「添加连接」） | `WinIconButton` + `Icons.Filled.Add` | —— |
 | ② 分析工作区 | 中间 SQL 编辑器 | `CodeEditorWithToolbar` / `CodeEditorState` / `SqlFormatter` | —— |
 | ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
-| ② 分析工作区 | 中右分隔条 | `DragHandle`（`hoverIcon` 由桌面端注入） | —— |
+| ② 分析工作区 | 左树面板的**外壳**（可拖宽的分隔条 + **折叠到侧边的 44dp 窄轨** + 折叠 / 展开按钮） | `TreePaneShell` / `TreePaneToggleButton`（**与浏览模式同一个组件**） | ★ 新增（§6.4-2，**两棵树共用**） |
 | ② 分析工作区 | 底部状态条 | `WinProgressIndicator` / `WinTextField`（只读展示） | —— |
 | ② 分析工作区 | 右键菜单 | `ContextMenuState` + `onRightClick` | —— |
 | ③ 报表设计器 | 左侧区块列表 | `ReportBlockList` | ★ 新增（§6.4-2） |
@@ -1679,10 +1696,11 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯模型**：进度（已读行数）、结果、终态模型（sealed）、用户取消的专用异常 |
 | `shared/src/commonMain/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换」等纯规则 |
 | `shared/src/commonMain/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 |
+| `shared/src/commonMain/.../tree/TreePaneShell.kt` | **两棵树共用的面板外壳**（**新增组件 2/6**）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`TreePaneToggleButton`）。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属） |
 | `desktopApp/src/main/.../AnalysisSourceDialog.kt` | **「添加数据源」对话框** —— 分析模式**专属**（不共用浏览模式的「添加连接」）：远程数据库（方言 / 主机 / 端口 / 库 / 用户 / 密码 + **驱动预览**库与表 + **勾选**）与文件 / 文件夹（路径 + 格式） |
-| `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 2/5**） |
-| `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 3/5**） |
-| `shared/src/commonMain/.../analysis/PullProgressIndicator.kt` | 拉取进度（**新增组件 4/5**；原名 `PullStageIndicator` —— 联邦直查没有「阶段」） |
+| `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 3/6**） |
+| `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 4/6**） |
+| `shared/src/commonMain/.../analysis/PullProgressIndicator.kt` | 拉取进度（**新增组件 5/6**；原名 `PullStageIndicator` —— 联邦直查没有「阶段」） |
 | `shared/src/commonMain/.../navigation/TopNavBar.kt` | 顶层导航条（品牌 + 目标切换 chip + ⚙ 设置入口）—— 只在**并列的顶层目标**渲染 |
 | `shared/src/commonMain/.../editor/language/SqlDialectProfileRegistry.kt` | 方言档位注册表（§6.3.1） |
 | `desktopApp/src/test/.../AnalysisModuleBoundaryTest.kt` | 组件复用结构测试（§6.6）—— 落在 `desktopApp` 而不是 `:shared`：它要读 `:shared` 的**源文件**（按 import 行判定），而 Gradle 跑测试时的工作目录是**模块根** |
