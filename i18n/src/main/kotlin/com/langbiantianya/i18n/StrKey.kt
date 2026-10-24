@@ -730,6 +730,7 @@ enum class StrKey {
     // ──────────────── 原生文件选择 ────────────────
     PICK_EXPORT_FILE,
     PICK_OUTPUT_DIR,
+    PICK_DATA_SOURCE_PATH,
 
     // ──────────────── 只读闸门 ────────────────
     ENGINE_READ_ONLY_REJECTED,

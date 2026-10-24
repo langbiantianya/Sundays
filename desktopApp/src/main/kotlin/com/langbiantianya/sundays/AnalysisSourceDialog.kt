@@ -13,15 +13,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,14 +36,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.connection.DialectMetadata
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
+import com.langbiantianya.sundays.ui.WinDivider
 import com.langbiantianya.sundays.ui.WinOutlinedButton
 import com.langbiantianya.sundays.ui.WinProgressIndicator
+import com.langbiantianya.sundays.ui.WinSurface
 import com.langbiantianya.sundays.ui.WinTextButton
 import com.langbiantianya.sundays.ui.WinTextField
 import com.langbiantianya.sundays.ui.str
@@ -61,6 +71,13 @@ import kotlinx.coroutines.launch
  * 共用一份表单，会让用户以为「加在这儿 = 加在那儿」——
  * 而实际上是**两套会话、两份清单**（共用就会变成「两份可能对不上的真相」：
  * 同一个 MySQL 在两处各存一份，改了密码只改一处，另一处连不上）。
+ *
+ * ## 样式**跟着全局走**
+ *
+ * 用的是仓库那一套 Win 控件（[WinSurface] / [WinButton] / [WinTextField] /
+ * [WinDivider]），而不是 Material3 的 `AlertDialog` ——
+ * 后者在复古档里仍然是一块**现代圆角卡片**，和满屏的 Win 风格对不上。
+ * 这与 [ExportDialog] 是同一套做法。
  */
 
 /** 对话框的测试标记。 */
@@ -69,8 +86,20 @@ const val ANALYSIS_SOURCE_DIALOG_TAG: String = "analysisSourceDialog"
 /** 「预览」按钮的测试标记。 */
 const val ANALYSIS_SOURCE_PREVIEW_BUTTON_TAG: String = "analysisSourcePreview"
 
+/** 「浏览…」按钮（系统文件 / 文件夹选择器）的测试标记。 */
+const val ANALYSIS_SOURCE_BROWSE_BUTTON_TAG: String = "analysisSourceBrowse"
+
 /** 「确定」按钮的测试标记。 */
 const val ANALYSIS_SOURCE_CONFIRM_BUTTON_TAG: String = "analysisSourceConfirm"
+
+/** 「名称」输入框的测试标记。 */
+const val ANALYSIS_SOURCE_NAME_FIELD_TAG: String = "analysisSourceNameField"
+
+/** 「路径」输入框的测试标记。 */
+const val ANALYSIS_SOURCE_PATH_FIELD_TAG: String = "analysisSourcePathField"
+
+/** 「主机」输入框的测试标记。 */
+const val ANALYSIS_SOURCE_HOST_FIELD_TAG: String = "analysisSourceHostField"
 
 /**
  * 「添加数据源」对话框。
@@ -117,184 +146,259 @@ internal fun AnalysisSourceDialog(
             format = format,
         )
 
-    AlertDialog(
-        modifier = Modifier.testTag(ANALYSIS_SOURCE_DIALOG_TAG),
+    // ⚠️ 用底层 [Dialog] 而不是 Material3 的 `AlertDialog`：
+    // `AlertDialog` 会把内容包在 `sizeIn(minWidth = 280.dp, maxWidth = 560.dp)`
+    // 的容器里（`DefaultBasicAlertDialogOverride`），宽度上限**恒为 560dp**，
+    // 而且它的容器是**现代圆角卡片** —— 复古档里满屏 Win 风格中间浮一块
+    // Material 卡片，样式就断了。
+    // 自己用 [WinSurface] 铺一块，形状、斜面、描边全跟着主题走 ✓。
+    Dialog(
         onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text(str(StrKey.ANALYSIS_ADD_SOURCE)) },
-        text = {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // 两类源 —— 用两个按钮而不是下拉框：
-                // 「远程」与「文件」是**两种完全不同的形状**（连接参数 vs 一个路径），
-                // 摆成两个按钮一眼就分得清；下拉框要多点一次才知道还有另一个。
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WinOutlinedButton(
-                        onClick = { kind = AnalysisSourceKind.REMOTE },
-                        enabled = kind != AnalysisSourceKind.REMOTE,
-                    ) {
-                        Text(str(StrKey.ANALYSIS_SOURCE_KIND_REMOTE))
-                    }
-                    WinOutlinedButton(
-                        onClick = { kind = AnalysisSourceKind.FILE },
-                        enabled = kind != AnalysisSourceKind.FILE,
-                    ) {
-                        Text(str(StrKey.ANALYSIS_SOURCE_KIND_FILE))
-                    }
-                }
-
-                WinTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(str(StrKey.NAME)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        WinSurface(
+            modifier =
+                Modifier
+                    .fillMaxWidth(0.92f)
+                    .testTag(ANALYSIS_SOURCE_DIALOG_TAG),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // ---- 标题行 ----
+                Text(
+                    text = str(StrKey.ANALYSIS_ADD_SOURCE),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
+                Spacer(Modifier.height(10.dp))
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                if (kind == AnalysisSourceKind.REMOTE) {
-                    RemoteSourceForm(
-                        dialects = dialects,
-                        dialect = dialect,
-                        onDialect = { dialect = it },
-                        host = host,
-                        onHost = { host = it },
-                        port = port,
-                        onPort = { port = it },
-                        database = database,
-                        onDatabase = { database = it },
-                        user = user,
-                        onUser = { user = it },
-                        password = password,
-                        onPassword = { password = it },
-                    )
-                } else {
+                Column(
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // 两类源 —— 用两个按钮而不是下拉框：
+                    // 「远程」与「文件」是**两种完全不同的形状**（连接参数 vs 一个路径），
+                    // 摆成两个按钮一眼就分得清；下拉框要多点一次才知道还有另一个。
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        WinOutlinedButton(
+                            onClick = { kind = AnalysisSourceKind.REMOTE },
+                            enabled = kind != AnalysisSourceKind.REMOTE,
+                            shape = SundaysPalette.buttonShape,
+                        ) {
+                            Text(str(StrKey.ANALYSIS_SOURCE_KIND_REMOTE))
+                        }
+                        WinOutlinedButton(
+                            onClick = { kind = AnalysisSourceKind.FILE },
+                            enabled = kind != AnalysisSourceKind.FILE,
+                            shape = SundaysPalette.buttonShape,
+                        ) {
+                            Text(str(StrKey.ANALYSIS_SOURCE_KIND_FILE))
+                        }
+                    }
+
                     WinTextField(
-                        value = path,
-                        onValueChange = {
-                            path = it
-                            // 换了路径，格式跟着变 —— 但**不覆盖**用户手选过的那个
-                            // （手选是更明确的意图）。
-                            if (format == null) format = AnalysisFileFormat.fromPath(it)
-                        },
-                        label = { Text(str(StrKey.ANALYSIS_SOURCE_PATH)) },
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(str(StrKey.NAME)) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag(ANALYSIS_SOURCE_NAME_FIELD_TAG),
                     )
-                    Text(
-                        text = str(StrKey.ANALYSIS_SOURCE_FILE_HINT),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val currentFormat = format
-                    if (currentFormat != null) {
+
+                    if (kind == AnalysisSourceKind.REMOTE) {
+                        RemoteSourceForm(
+                            dialects = dialects,
+                            dialect = dialect,
+                            onDialect = { dialect = it },
+                            host = host,
+                            onHost = { host = it },
+                            port = port,
+                            onPort = { port = it },
+                            database = database,
+                            onDatabase = { database = it },
+                            user = user,
+                            onUser = { user = it },
+                            password = password,
+                            onPassword = { password = it },
+                        )
+                    } else {
+                        // 路径：**文本框 + 系统选择器**并排。
+                        //
+                        // 文本框不能拿掉 —— 网络路径、UNC、刚在别处复制来的路径，
+                        // 以及无头 / CI 环境里压根弹不出系统对话框时，
+                        // 手动输入是唯一走得通的路。
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            WinTextField(
+                                value = path,
+                                onValueChange = {
+                                    path = it
+                                    // 换了路径，格式跟着变 —— 但**不覆盖**用户手选过的那个
+                                    // （手选是更明确的意图）。
+                                    if (format == null) format = AnalysisFileFormat.fromPath(it)
+                                },
+                                label = { Text(str(StrKey.ANALYSIS_SOURCE_PATH)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).testTag(ANALYSIS_SOURCE_PATH_FIELD_TAG),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            WinOutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        val picked = NativePathPicker.pickPath(path) ?: return@launch
+                                        path = picked
+                                        if (format == null) format = AnalysisFileFormat.fromPath(picked)
+                                    }
+                                },
+                                shape = SundaysPalette.buttonShape,
+                                modifier = Modifier.testTag(ANALYSIS_SOURCE_BROWSE_BUTTON_TAG),
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(str(StrKey.BROWSE))
+                            }
+                        }
                         Text(
-                            text = str(StrKey.FORMAT) + "：" + formatLabel(currentFormat),
+                            text = str(StrKey.ANALYSIS_SOURCE_FILE_HINT),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                }
-
-                if (kind == AnalysisSourceKind.REMOTE) {
-                    WinOutlinedButton(
-                        onClick = {
-                            error = null
-                            previewing = true
-                            scope.launch {
-                                try {
-                                    preview = session.previewRemote(draft)
-                                    selected = emptySet()
-                                } catch (e: Exception) {
-                                    error = e.message
-                                } finally {
-                                    previewing = false
+                        // 格式**必须能手选** —— 文件夹没有扩展名，
+                        // 自动推断不出来（「这个文件夹里是 csv 还是 parquet」）。
+                        Text(
+                            text = str(StrKey.FORMAT),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AnalysisFileFormat.entries.forEach { candidate ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(
+                                        selected = format == candidate,
+                                        onClick = { format = candidate },
+                                    )
+                                    Text(
+                                        text = formatLabel(candidate),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
                                 }
                             }
-                        },
-                        enabled = !previewing && host.isNotBlank(),
-                        modifier = Modifier.testTag(ANALYSIS_SOURCE_PREVIEW_BUTTON_TAG),
-                    ) {
-                        Text(str(if (previewing) StrKey.PREVIEWING else StrKey.PREVIEW))
+                        }
                     }
-                    if (previewing) {
-                        WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+
+                    if (kind == AnalysisSourceKind.REMOTE) {
+                        WinOutlinedButton(
+                            onClick = {
+                                error = null
+                                previewing = true
+                                scope.launch {
+                                    try {
+                                        preview = session.previewRemote(draft)
+                                        selected = emptySet()
+                                    } catch (e: Exception) {
+                                        error = e.message
+                                    } finally {
+                                        previewing = false
+                                    }
+                                }
+                            },
+                            enabled = !previewing && host.isNotBlank(),
+                            shape = SundaysPalette.buttonShape,
+                            modifier = Modifier.testTag(ANALYSIS_SOURCE_PREVIEW_BUTTON_TAG),
+                        ) {
+                            Text(str(if (previewing) StrKey.PREVIEWING else StrKey.PREVIEW))
+                        }
+                        if (previewing) {
+                            WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                        }
+                        preview.forEach { group ->
+                            PreviewGroup(
+                                group = group,
+                                selected = selected,
+                                onToggle = { table ->
+                                    selected =
+                                        if (table in selected) {
+                                            selected - table
+                                        } else {
+                                            selected + table
+                                        }
+                                },
+                                onToggleAll = {
+                                    val tables =
+                                        group.tables.map { AnalysisSelectedTable(group.namespace, it) }
+                                    selected =
+                                        if (tables.all { it in selected }) {
+                                            selected - tables.toSet()
+                                        } else {
+                                            selected + tables
+                                        }
+                                },
+                            )
+                        }
                     }
-                    preview.forEach { group ->
-                        PreviewGroup(
-                            group = group,
-                            selected = selected,
-                            onToggle = { table ->
-                                selected =
-                                    if (table in selected) {
-                                        selected - table
-                                    } else {
-                                        selected + table
-                                    }
-                            },
-                            onToggleAll = {
-                                val tables =
-                                    group.tables.map { AnalysisSelectedTable(group.namespace, it) }
-                                selected =
-                                    if (tables.all { it in selected }) {
-                                        selected - tables.toSet()
-                                    } else {
-                                        selected + tables
-                                    }
-                            },
+
+                    error?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
 
-                error?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                Spacer(Modifier.height(10.dp))
+                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    WinTextButton(
+                        onClick = onDismiss,
+                        enabled = !saving,
+                        shape = SundaysPalette.buttonShape,
+                    ) {
+                        Text(str(StrKey.CANCEL))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    WinButton(
+                        onClick = {
+                            error = null
+                            saving = true
+                            scope.launch {
+                                session.addSource(
+                                    draft = draft,
+                                    tables = selected.toList(),
+                                    onProgress = { _: PullProgress -> },
+                                    onFailure = { reason ->
+                                        saving = false
+                                        error = reason
+                                    },
+                                    onSuccess = {
+                                        saving = false
+                                        onDismiss()
+                                    },
+                                )
+                            }
+                        },
+                        enabled =
+                            !saving &&
+                                name.isNotBlank() &&
+                                (kind == AnalysisSourceKind.FILE || selected.isNotEmpty()),
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(ANALYSIS_SOURCE_CONFIRM_BUTTON_TAG),
+                    ) {
+                        Text(str(StrKey.ANALYSIS_ADD_SOURCE))
+                    }
                 }
             }
-        },
-        confirmButton = {
-            WinButton(
-                onClick = {
-                    error = null
-                    saving = true
-                    scope.launch {
-                        session.addSource(
-                            draft = draft,
-                            tables = selected.toList(),
-                            onProgress = { _: PullProgress -> },
-                            onFailure = { reason ->
-                                saving = false
-                                error = reason
-                            },
-                            onSuccess = {
-                                saving = false
-                                onDismiss()
-                            },
-                        )
-                    }
-                },
-                enabled =
-                    !saving &&
-                        name.isNotBlank() &&
-                        (kind == AnalysisSourceKind.FILE || selected.isNotEmpty()),
-                modifier = Modifier.testTag(ANALYSIS_SOURCE_CONFIRM_BUTTON_TAG),
-            ) {
-                Text(str(StrKey.ANALYSIS_ADD_SOURCE))
-            }
-        },
-        dismissButton = {
-            WinTextButton(onClick = onDismiss, enabled = !saving) {
-                Text(str(StrKey.CANCEL))
-            }
-        },
-    )
+        }
+    }
 }
 
 /**
@@ -329,6 +433,7 @@ private fun RemoteSourceForm(
                 WinOutlinedButton(
                     onClick = { onDialect(candidate) },
                     enabled = candidate != dialect,
+                    shape = SundaysPalette.buttonShape,
                 ) {
                     Text(DialectMetadata.of(candidate).displayName)
                 }
@@ -339,7 +444,7 @@ private fun RemoteSourceForm(
             onValueChange = onHost,
             label = { Text(str(StrKey.HOST)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(ANALYSIS_SOURCE_HOST_FIELD_TAG),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WinTextField(
@@ -399,7 +504,7 @@ private fun PreviewGroup(
             Text(
                 text = group.namespace,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                fontWeight = FontWeight.Medium,
             )
             Spacer(Modifier.width(4.dp))
             Text(

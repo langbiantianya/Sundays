@@ -586,6 +586,7 @@ internal val textsZhHans: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0}含有分号",
         StrKey.PICK_EXPORT_FILE to "选择导出文件",
         StrKey.PICK_OUTPUT_DIR to "选择输出目录",
+        StrKey.PICK_DATA_SOURCE_PATH to "选择数据源文件或文件夹",
         StrKey.ENGINE_READ_ONLY_REJECTED to "只读会话中拒绝写操作：{0}",
         StrKey.DIALECT_READ_ONLY to "{0} 是只读方言，不允许写入",
         StrKey.NAV_ANALYSIS to "数据分析",

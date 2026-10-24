@@ -586,6 +586,7 @@ internal val textsEn: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0} contains semicolon",
         StrKey.PICK_EXPORT_FILE to "Choose export file",
         StrKey.PICK_OUTPUT_DIR to "Choose output directory",
+        StrKey.PICK_DATA_SOURCE_PATH to "Choose data source file or folder",
         StrKey.ENGINE_READ_ONLY_REJECTED to "Write operation rejected in a read-only session: {0}",
         StrKey.DIALECT_READ_ONLY to "{0} is a read-only dialect and does not allow writes",
         StrKey.NAV_ANALYSIS to "Data Analysis",

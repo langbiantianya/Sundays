@@ -315,6 +315,18 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 >
 > 代价要说清：**密码是明文存在 DuckDB 文件里的**（与 `connection.json` 一样，
 > 后者靠 0600 权限挡着）。DuckDB 文件的权限粒度更粗 —— 这是这个选择的代价。
+>
+> 📌 **第 17 片：对话框的两处收拾**
+>
+> - **样式跟着全局走** —— 用的是仓库那套 Win 控件
+>   （`WinSurface` / `WinButton` / `WinTextField` / `WinDivider`）自拼，
+>   **不是** Material3 的 `AlertDialog`：后者在复古档里仍是一块
+>   **现代圆角卡片**，满屏 Win 风格中间浮一块 Material，样式就断了。
+>   与 `desktopApp` 的**导出对话框**同一套做法 ✓。
+> - **文件走系统选择器** —— 路径框旁加「浏览」，调
+>   `NativePathPicker.pickPath`（新增：**文件与文件夹都收** —— 到底是哪个
+>   从扩展名**推断**得出，而文件夹没有扩展名，所以由用户**手选格式**）。
+>   文本框**仍然保留**：网络路径、UNC、无头 / CI 环境下手动输入是唯一走得通的路。
 
 > 📌 **第 5 片的一处实现期决定：拉取器拆成「接口 + 实现」**。
 > 真实现要连远端、还要起导出子进程，在 CI 上既慢又不稳；
@@ -1020,7 +1032,8 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 13 | `refactor(analysis): 分析工作台的树只显示 DuckDB 工作区` | 会话的 `buildTreeRoots()`（只留工作区）+ 四条树会话测试 + UI 设计图 | 树里只有工作区一个根；连接列表怎么变都不影响树 | ✅ **已提交** |
 | 14 | `refactor(analysis): 「▶ 运行」挪到格式化那行，去掉只读徽标与那条空工具条` | `AnalysisScreen`（去掉工具条、运行按钮进编辑器的 `actions` 插槽）+ 删掉 `ReadOnlyBadge` 组件与两个 i18n 键 + UI 设计图 | 「运行」与「格式化」同一行（几何判据）；屏上没有只读徽标 | ✅ **本轮落地** |
 | 15 | `refactor(analysis): 两棵树合成一棵 —— 分析页的树与浏览模式共用组件，并展开到字段` | 新增 `:shared` 的 `tree/ObjectTree.kt` + `tree/ObjectTreeModel.kt`（浏览模式那套画法上移）；删掉 `analysis/SourceTree.kt`；`SchemaTree` 改用共享组件；会话新增**字段层**（`ANALYSIS.LIST_COLUMNS`）；引擎的分析路由补上「自增」标记 | 两边的树**同一形状**（库 → 表 → 字段）；分析页展开一张表能看到字段；浏览模式的行为**一点没变**（右键菜单 / 弹窗 / 标记都在） | ✅ **已提交** |
-| 16 | `feat(analysis): 分析模式能自己加数据源 —— 树头上一个「+」，加完直接进 DuckDB` | 协议（`AnalysisPullRequest` 加 `target_schema` / `access_mode`）+ 会话的**数据源登记表**（工作区 DuckDB 里的 `sundays.sources`）+ **「添加数据源」对话框**（驱动预览 + 勾选表 / 文件路径）+ 树按 **schema** 组织 | 加一个 CSV → 工作区里有它、树上看得见、换个会话还在；远程源走**扩展优先、JDBC 兜底** | ✅ **本轮落地** |
+| 16 | `feat(analysis): 分析模式能自己加数据源 —— 树头上一个「+」，加完直接进 DuckDB` | 协议（`AnalysisPullRequest` 加 `target_schema` / `access_mode`）+ 会话的**数据源登记表**（工作区 DuckDB 里的 `sundays.sources`）+ **「添加数据源」对话框**（驱动预览 + 勾选表 / 文件路径）+ 树按 **schema** 组织 | 加一个 CSV → 工作区里有它、树上看得见、换个会话还在；远程源走**扩展优先、JDBC 兜底** | ✅ **已提交** |
+| 17 | `fix(analysis): 「添加数据源」对话框跟着全局主题走，文件改用系统选择器` | 对话框从 Material3 `AlertDialog` 换成仓库的 Win 控件自拼（`WinSurface` / `WinButton` / `WinTextField` / `WinDivider`）；路径框旁加「浏览」→ `NativePathPicker.pickPath`（系统文件 / 文件夹选择器）；格式改成**能手选**（文件夹没有扩展名）；i18n 加一个键 | 对话框在复古档里也是 Win 风格；路径不必手抄；文件夹的格式能选 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——

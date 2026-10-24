@@ -111,6 +111,37 @@ object NativePathPicker {
         }
 
     /**
+     * 选一个**文件或文件夹**（两者都收），返回**完整绝对路径**。
+     *
+     * ## 为什么要有这一条
+     *
+     * 「添加数据源」的文件源既可能是**一个文件**（`orders.csv`），
+     * 也可能是**一个文件夹**（里面一堆 parquet）—— 而到底是哪个，
+     * 是从路径的扩展名**推断**出来的（`AnalysisFileFormat.fromPath`），
+     * **不是**用户先选好的。
+     *
+     * 所以选择器得**两个都收**：让用户先点「我要选文件」还是「我要选文件夹」
+     * 再点「浏览」，那是把一个答案推给用户 —— 而答案文件自己会告诉他。
+     *
+     * @param initialDir 起始目录（一般传当前输入框里的路径）
+     * @return 完整绝对路径；取消 / 无头环境返回 `null`
+     */
+    suspend fun pickPath(initialDir: String): String? =
+        withContext(Dispatchers.IO) {
+            val start = File(initialDir.takeIf { it.isNotBlank() } ?: userHome())
+            if (start.isDirectory) start.mkdirs()
+            val chosen =
+                choose(
+                    start = start,
+                    fileName = "",
+                    title = Msg.text(StrKey.PICK_DATA_SOURCE_PATH),
+                    approveText = Msg.text(StrKey.CHOOSE),
+                    saveMode = false,
+                ) { it.fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES } ?: return@withContext null
+            File(chosen).absolutePath
+        }
+
+    /**
      * 弹一次选择器，返回**绝对路径**或 `null`（取消 / 无头不可用）。
      *
      * `configure` 在弹之前拿到 chooser，用于切文件/目录模式。

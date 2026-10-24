@@ -586,6 +586,7 @@ internal val textsJa: Map<StrKey, String> =
         StrKey.IDENT_HAS_SEMICOLON to "{0} にセミコロンが含まれています",
         StrKey.PICK_EXPORT_FILE to "エクスポートするファイルを選択",
         StrKey.PICK_OUTPUT_DIR to "出力先ディレクトリを選択",
+        StrKey.PICK_DATA_SOURCE_PATH to "データソースのファイルまたはフォルダを選択",
         StrKey.ENGINE_READ_ONLY_REJECTED to "読み取り専用セッションでは書き込み操作を拒否しました：{0}",
         StrKey.DIALECT_READ_ONLY to "{0} は読み取り専用の方言であり、書き込みは許可されていません",
         StrKey.NAV_ANALYSIS to "データ分析",
