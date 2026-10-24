@@ -16,29 +16,31 @@ import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.ConnectionConfig
-import com.langbiantianya.grpc.analysisListSourcesRequest
+import com.langbiantianya.grpc.analysisListColumnsRequest
 import com.langbiantianya.grpc.analysisListTablesRequest
 import com.langbiantianya.grpc.analysisRequest
 import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.grpc.connectionConfig
+import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisPullCancelledException
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
-import com.langbiantianya.sundays.analysis.AnalysisTreeKind
-import com.langbiantianya.sundays.analysis.AnalysisTreeNode
 import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
-import com.langbiantianya.sundays.analysis.analysisNamespaceNodeId
+import com.langbiantianya.sundays.analysis.analysisColumnNodeId
 import com.langbiantianya.sundays.analysis.analysisTableNodeId
-import com.langbiantianya.sundays.analysis.findAnalysisNode
-import com.langbiantianya.sundays.analysis.replaceAnalysisNode
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.connection.SqlIdentifier
+import com.langbiantianya.sundays.tree.ObjectTreeColumn
+import com.langbiantianya.sundays.tree.ObjectTreeKind
+import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.findObjectTreeNode
+import com.langbiantianya.sundays.tree.replaceObjectTreeNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -211,7 +213,7 @@ class AnalysisSession(
      * 一个可写、一个恒只读，性质相反但都是「分析模式能用的东西」。
      * 把工作区塞进某个远端源底下会传达错误的关系。
      */
-    var treeRoots by mutableStateOf<List<AnalysisTreeNode>>(emptyList())
+    var treeRoots by mutableStateOf<List<ObjectTreeNode>>(emptyList())
         private set
 
     /**
@@ -284,14 +286,30 @@ class AnalysisSession(
      * **两份可能对不上的真相**（改了名字只更新一处、两处列的表不一样）。
      *
      * 所以这棵树**只显示 DuckDB 这一支**：一个根节点，没有兄弟。
+     *
+     * ## 为什么工作区是「数据库」那一种节点
+     *
+     * 分析模式与浏览模式**共用同一个树组件**（`tree/ObjectTree.kt`），
+     * 那棵树的三层是「库 → 表 → 字段」。工作区是本地 DuckDB 文件，
+     * 它装的正是「一批表」—— 与浏览模式里的数据库是**同一种位置**，
+     * 所以用同一种节点（[ObjectTreeKind.DATABASE]）。
+     *
+     * 显示的名字是**固定**的（「本地工作区」——它是应用自带的引擎，
+     * 不是用户起名的），所以走 [ObjectTreeNode.labelKey]：
+     * 名字由界面按 `StrKey` 取，会话不传字符串，也就传不错语言。
      */
-    private fun buildTreeRoots(): List<AnalysisTreeNode> {
+    private fun buildTreeRoots(): List<ObjectTreeNode> {
         val workspace =
-            AnalysisTreeNode(
+            ObjectTreeNode(
                 id = ANALYSIS_WORKSPACE_NODE_ID,
                 label = workspaceFileName(),
-                kind = AnalysisTreeKind.WORKSPACE,
-                dialectLabel = "DuckDB",
+                labelKey = StrKey.ANALYSIS_LOCAL_WORKSPACE,
+                kind = ObjectTreeKind.DATABASE,
+                badge = "DuckDB",
+                // ⚠️ **必须是「还没加载」** —— 工作区的表是**懒加载**的：
+                // 展开它的时候才去查。标成「已加载」的话，展开动作会以为
+                // 「查过了，不用再查」，于是树上永远一张表都没有。
+                loaded = false,
             )
         return listOf(workspace)
     }
@@ -310,7 +328,7 @@ class AnalysisSession(
      * @param node 被点的节点
      * @return 启动的加载任务；`null` = 没加载（收起了，或已经加载过）
      */
-    fun toggleNode(node: AnalysisTreeNode): Job? {
+    fun toggleNode(node: ObjectTreeNode): Job? {
         if (node.id in expandedNodeIds) {
             expandedNodeIds = expandedNodeIds - node.id
             return null
@@ -325,24 +343,31 @@ class AnalysisSession(
      * @param node 要展开的节点
      * @return 启动的任务；`null` = 不用查（正在查，或已经查过了）
      */
-    fun loadChildren(node: AnalysisTreeNode): Job? {
+    fun loadChildren(node: ObjectTreeNode): Job? {
         if (node.loaded) return null
         if (!loadingNodeIds.add(node.id)) return null
         treeLoading = true
         treeError = null
+        // 加载中与失败都**落在那个节点上**，不是落在整棵树的脚下 ——
+        // 共享树组件在节点脚下显示它们，用户一眼就知道是哪一个节点出了问题。
+        treeRoots = replaceObjectTreeNode(treeRoots, node.id) { it.copy(loading = true, error = null) }
         return scope.launch {
             try {
                 val children = fetchChildren(node)
                 treeRoots =
-                    replaceAnalysisNode(treeRoots, node.id) {
-                        it.copy(children = children, loaded = true)
+                    replaceObjectTreeNode(treeRoots, node.id) {
+                        it.copy(children = children, loaded = true, loading = false, error = null)
                     }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // 加载失败**不算**「这个节点是空的」—— 保持 `loaded = false`，
-                // 用户再点一次就能重试；错误原文摆在树脚下。
+                // 用户再点一次就能重试；错误原文摆在那个节点脚下。
                 treeError = e.message ?: "加载失败"
+                treeRoots =
+                    replaceObjectTreeNode(treeRoots, node.id) {
+                        it.copy(loading = false, error = e.message ?: "加载失败")
+                    }
             } finally {
                 loadingNodeIds.remove(node.id)
                 treeLoading = loadingNodeIds.isNotEmpty()
@@ -353,72 +378,20 @@ class AnalysisSession(
     /**
      * 按节点的 kind 决定「该查什么」。
      *
-     * 三种分组各查各的：
-     * - 工作区 → 它的表（DuckDB 的 `main` schema）
-     * - 远端源 → 它的命名空间（MySQL 的库 / PG 的 schema）
-     * - 命名空间 → 它的表
+     * 两层，各查各的：
+     * - 容器（工作区）→ 它的表（DuckDB 的 `main` schema）
+     * - 表 → 它的字段
+     *
+     * 字段这一层是**后加**的：分析页的树以前到表为止，用户看不到
+     * 「这张表有哪些列」，而这正是写分析 SQL 时最需要的对照信息。
+     * 现在它与浏览模式的对象树**完全同形**（库 → 表 → 字段）。
      */
-    private suspend fun fetchChildren(node: AnalysisTreeNode): List<AnalysisTreeNode> =
+    private suspend fun fetchChildren(node: ObjectTreeNode): List<ObjectTreeNode> =
         when (node.kind) {
-            AnalysisTreeKind.WORKSPACE -> listWorkspaceTables()
-            AnalysisTreeKind.SOURCE -> listNamespaces(node.sourceId ?: node.id)
-            AnalysisTreeKind.NAMESPACE -> listTables(node.sourceId, node.namespace)
-            AnalysisTreeKind.TABLE -> emptyList()
+            ObjectTreeKind.DATABASE -> listWorkspaceTables()
+            ObjectTreeKind.TABLE -> listWorkspaceColumns(node.label)
+            ObjectTreeKind.COLUMN -> emptyList()
         }
-
-    /** 远端源的命名空间。 */
-    private suspend fun listNamespaces(sourceId: String): List<AnalysisTreeNode> {
-        val config = sourceConfig(sourceId) ?: return emptyList()
-        val response =
-            engine.invoke(config) {
-                category = Category.ANALYSIS
-                action = Action.LIST_SOURCES
-                analysisRequest = analysisRequest { listSources = analysisListSourcesRequest { } }
-            }
-        if (!response.success) {
-            throw IllegalStateException(response.error.ifBlank { "列命名空间失败" })
-        }
-        return response.analysis.listSources.itemsList.map { namespace ->
-            AnalysisTreeNode(
-                id = analysisNamespaceNodeId(sourceId, namespace),
-                label = namespace,
-                kind = AnalysisTreeKind.NAMESPACE,
-                sourceId = sourceId,
-                namespace = namespace,
-            )
-        }
-    }
-
-    /** 某个命名空间下的表（远端）。 */
-    private suspend fun listTables(
-        sourceId: String?,
-        namespace: String?,
-    ): List<AnalysisTreeNode> {
-        if (sourceId == null || namespace == null) return emptyList()
-        val config = sourceConfig(sourceId) ?: return emptyList()
-        val response =
-            engine.invoke(config) {
-                category = Category.ANALYSIS
-                action = Action.LIST_TABLES
-                analysisRequest =
-                    analysisRequest {
-                        listTables = analysisListTablesRequest { this.namespace = namespace }
-                    }
-            }
-        if (!response.success) {
-            throw IllegalStateException(response.error.ifBlank { "列表失败" })
-        }
-        return response.analysis.listTables.itemsList.map { item ->
-            AnalysisTreeNode(
-                id = analysisTableNodeId(sourceId, namespace, item.name),
-                label = item.name,
-                kind = AnalysisTreeKind.TABLE,
-                sourceId = sourceId,
-                namespace = namespace,
-                table = item.name,
-            )
-        }
-    }
 
     /**
      * 工作区里的表。
@@ -426,7 +399,7 @@ class AnalysisSession(
      * 走的是**同一套** `ANALYSIS.LIST_TABLES` 路由，只是连接换成了工作区 ——
      * 不另写一条「列工作区表」的通路，免得两处的分派规则各说各话。
      */
-    private suspend fun listWorkspaceTables(): List<AnalysisTreeNode> {
+    private suspend fun listWorkspaceTables(): List<ObjectTreeNode> {
         val response =
             engine.invoke(workspaceConnection()) {
                 category = Category.ANALYSIS
@@ -440,12 +413,58 @@ class AnalysisSession(
             throw IllegalStateException(response.error.ifBlank { "列工作区表失败" })
         }
         return response.analysis.listTables.itemsList.map { item ->
-            AnalysisTreeNode(
-                id = analysisTableNodeId(ANALYSIS_WORKSPACE_NODE_ID, WORKSPACE_SCHEMA, item.name),
+            ObjectTreeNode(
+                id = analysisTableNodeId(WORKSPACE_SCHEMA, item.name),
                 label = item.name,
-                kind = AnalysisTreeKind.TABLE,
-                namespace = WORKSPACE_SCHEMA,
-                table = item.name,
+                kind = ObjectTreeKind.TABLE,
+                // 表的**字段**也是懒加载的 —— 展开这张表的时候才去查。
+                // 标成「已加载」的话，展开动作会以为「查过了」，字段就永远出不来。
+                loaded = false,
+            )
+        }
+    }
+
+    /**
+     * 一张工作区表的**字段**。
+     *
+     * 走的是 `ANALYSIS.LIST_COLUMNS` 路由 —— 与浏览模式列字段是**同一条**引擎路由，
+     * 只是连接换成了工作区。所以两棵树里的字段信息来自同一处，
+     * 不会出现「浏览模式说有三个字段、分析模式说有两个」。
+     */
+    private suspend fun listWorkspaceColumns(table: String): List<ObjectTreeNode> {
+        val response =
+            engine.invoke(workspaceConnection()) {
+                category = Category.ANALYSIS
+                action = Action.LIST_COLUMNS
+                analysisRequest =
+                    analysisRequest {
+                        listColumns =
+                            analysisListColumnsRequest {
+                                namespace = WORKSPACE_SCHEMA
+                                this.table = table
+                            }
+                    }
+            }
+        if (!response.success) {
+            throw IllegalStateException(response.error.ifBlank { "列字段失败" })
+        }
+        return response.analysis.listColumns.itemsList.map { col ->
+            ObjectTreeNode(
+                id = analysisColumnNodeId(table, col.name),
+                label = col.name,
+                kind = ObjectTreeKind.COLUMN,
+                // 字段行的「上级」是表 —— 点它时要把 `表.字段` 一起加进编辑器。
+                parentLabel = table,
+                column =
+                    ObjectTreeColumn(
+                        name = col.name,
+                        type = columnTypeText(col.type, col.size),
+                        primaryKey = col.isPrimaryKey,
+                        autoIncrement = col.autoIncrement,
+                        // proto3 的 `optional bool nullable` 有 presence 语义：
+                        // 没给就是 null，按「默认可空」处理，与引擎的 mapper 一致。
+                        nullable = if (col.hasNullable()) col.nullable else true,
+                    ),
             )
         }
     }
@@ -456,13 +475,13 @@ class AnalysisSession(
      * 刷的是**工作区节点**，不是整棵树：远端那一支没动过，重查一遍是白花钱。
      */
     private fun refreshWorkspaceChildren() {
-        val workspace = findAnalysisNode(treeRoots, ANALYSIS_WORKSPACE_NODE_ID) ?: return
+        val workspace = findObjectTreeNode(treeRoots, ANALYSIS_WORKSPACE_NODE_ID) ?: return
         scope.launch {
             try {
                 val children = listWorkspaceTables()
                 treeRoots =
-                    replaceAnalysisNode(treeRoots, workspace.id) {
-                        it.copy(children = children, loaded = true)
+                    replaceObjectTreeNode(treeRoots, workspace.id) {
+                        it.copy(children = children, loaded = true, loading = false)
                     }
             } catch (e: CancellationException) {
                 throw e
@@ -663,6 +682,31 @@ class AnalysisSession(
             }
     }
 
+    /**
+     * 把一个**字段**加进编辑器。
+     *
+     * 规则与 [appendToSql] 一样（空编辑器给一条能跑的语句，否则追加一行），
+     * 区别是字段要**带表名** —— 光有列名在多表查询里是说不清的，
+     * 而 `"表"."列"` 永远说得清。
+     *
+     * @param table 表名（未引用）
+     * @param column 列名（未引用）
+     */
+    fun appendColumnToSql(
+        table: String,
+        column: String,
+    ) {
+        val quotedTable = SqlIdentifier.quote(DialectType.DUCKDB, table)
+        val quotedColumn = SqlIdentifier.quote(DialectType.DUCKDB, column)
+        val reference = "$quotedTable.$quotedColumn"
+        sql =
+            if (sql.isBlank()) {
+                "SELECT $reference FROM $quotedTable"
+            } else {
+                sql.trimEnd() + "\n" + reference
+            }
+    }
+
     /** 取消当前这次拉取。 */
     fun cancelPull() {
         val requestId = pullRequestId
@@ -711,6 +755,20 @@ class AnalysisSession(
             }
     }
 }
+
+/**
+ * 字段的类型文字 —— `VARCHAR(64)` / `INT`。
+ *
+ * ## 为什么**不能无条件**加括号
+ *
+ * 长度是 proto 的 `int32`，未指定时是 **0** ——
+ * 无条件加括号会让 `VARCHAR` 变成 `VARCHAR(0)`，一个不存在的类型，
+ * 用户看了会以为这张表有问题。
+ */
+private fun columnTypeText(
+    type: String,
+    size: Int,
+): String = if (size > 0) "$type($size)" else type
 
 /**
  * 发一条分析查询并把响应转成界面要的结果。

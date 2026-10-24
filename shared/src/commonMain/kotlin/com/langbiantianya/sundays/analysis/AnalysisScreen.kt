@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +34,8 @@ import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
+import com.langbiantianya.sundays.tree.ObjectTree
+import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.str
@@ -74,10 +78,11 @@ import com.langbiantianya.sundays.ui.str
  * @param pullProgress 正在拉取时的进度；`null` = 没在拉
  * @param pullOutcome 最近一次拉取的**终态**；`null` = 还没拉过（或正在拉）
  * @param onCancelPull 「取消拉取」被点时回调；`null` = 不给取消入口
- * @param treeRoots 左侧数据源树的根节点（工作区 + 各远端源）
+ * @param treeRoots 左侧数据源树的根节点（工作区 + 里面已经拉进来的表）
  * @param expandedNodeIds 当前展开着的树节点 id
- * @param onToggleNode 树的某个**分组**节点被展开 / 收起时回调
+ * @param onToggleNode 树的某个节点被展开 / 收起时回调
  * @param onSelectTreeTable 树里的某张**表**被点时回调
+ * @param onSelectTreeColumn 树里的某个**字段**被点时回调
  * @param treeLoading 树里正有节点在加载；界面据此显示「加载中」
  * @param treeError 树加载失败的原因；`null` = 没有错误
  * @param sql 编辑器里的当前 SQL
@@ -92,10 +97,11 @@ fun AnalysisScreen(
     pullProgress: PullProgress? = null,
     pullOutcome: PullOutcome? = null,
     onCancelPull: (() -> Unit)? = null,
-    treeRoots: List<AnalysisTreeNode> = emptyList(),
+    treeRoots: List<ObjectTreeNode> = emptyList(),
     expandedNodeIds: Set<String> = emptySet(),
-    onToggleNode: (AnalysisTreeNode) -> Unit = {},
-    onSelectTreeTable: (AnalysisTreeNode) -> Unit = {},
+    onToggleNode: (ObjectTreeNode) -> Unit = {},
+    onSelectTreeTable: (ObjectTreeNode) -> Unit = {},
+    onSelectTreeColumn: (ObjectTreeNode) -> Unit = {},
     treeLoading: Boolean = false,
     treeError: String? = null,
     sql: String = "",
@@ -123,6 +129,7 @@ fun AnalysisScreen(
                 expandedNodeIds = expandedNodeIds,
                 onToggleNode = onToggleNode,
                 onSelectTable = onSelectTreeTable,
+                onSelectColumn = onSelectTreeColumn,
                 loading = treeLoading,
                 error = treeError,
                 modifier = Modifier.width(TREE_PANEL_WIDTH).fillMaxHeight(),
@@ -256,13 +263,21 @@ private fun AnalysisEditorPanel(
  * 左树面板 —— 头（数据源 + 注）+ 树 + 脚（一句话说明）。
  *
  * 头与脚是**固定文案**，中间那一大块才是树。
+ *
+ * ## 树用的是**与浏览模式同一个**组件
+ *
+ * `com.langbiantianya.sundays.tree.ObjectTree` —— 库 → 表 → 字段，
+ * 与浏览模式的对象树一模一样（同一个组件、同一套画法）。
+ * 分析模式以前自己画了一棵树（`SourceTree`），两边的扭子、行高、
+ * 「表能不能展开」全不一样；统一之后，用户在两个模式里看到的是同一棵树。
  */
 @Composable
 private fun AnalysisTreePanel(
-    roots: List<AnalysisTreeNode>,
+    roots: List<ObjectTreeNode>,
     expandedNodeIds: Set<String>,
-    onToggleNode: (AnalysisTreeNode) -> Unit,
-    onSelectTable: (AnalysisTreeNode) -> Unit,
+    onToggleNode: (ObjectTreeNode) -> Unit,
+    onSelectTable: (ObjectTreeNode) -> Unit,
+    onSelectColumn: (ObjectTreeNode) -> Unit,
     loading: Boolean,
     error: String?,
     modifier: Modifier = Modifier,
@@ -294,13 +309,26 @@ private fun AnalysisTreePanel(
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Box(modifier = Modifier.weight(1f)) {
-            SourceTree(
-                roots = roots,
-                expandedIds = expandedNodeIds,
-                onToggle = onToggleNode,
-                onSelectTable = onSelectTable,
-                modifier = Modifier.fillMaxSize(),
-            )
+            // 滚动容器归这里 —— 共享树组件只画内容，不自带滚动。
+            // 浏览模式把树放进 `LazyColumn` 的每一项里，容器不一样。
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                ObjectTree(
+                    roots = roots,
+                    expandedIds = expandedNodeIds,
+                    onToggle = onToggleNode,
+                    onSelectTable = onSelectTable,
+                    onSelectColumn = onSelectColumn,
+                    // 转圈是**无限动画**，会让「等界面空闲」的 UI 测试永远等不到 ——
+                    // 分析模式的加载是一瞬的事，用不着它。
+                    showLoadingSpinner = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         // 加载中 —— 单独一行放在树**下面**，而不是把扭子换成转圈：

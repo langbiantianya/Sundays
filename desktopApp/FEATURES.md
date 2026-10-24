@@ -120,12 +120,13 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | **工程** | Windows / macOS / Linux 原生安装包（`.msi` / `.dmg` / `.deb`） | `compose.desktop` |
 | | 引擎可同进程直连，也可 gRPC 跨进程 | `EngineClient` 双实现 |
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
-| **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` || | **工作区树**：只有本地 DuckDB 工作区 + 里面已经拉进来的表（**保存的连接配置不进这棵树** —— 那是连接管理器的事）；点表 → 把表名加进编辑器 | `shared/analysis/SourceTree.kt` |
+| **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
+| | **工作区树**：只有本地 DuckDB 工作区 + 里面已经拉进来的表（**保存的连接配置不进这棵树** —— 那是连接管理器的事）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
-| | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器 | `AnalysisSession` |
+| | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器；点工作区的字段 → 把「表.字段」加进编辑器 | `AnalysisSession` |
 | | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析工作台**没有返回按钮**（它是一块独立的工作区） | `ConnectionManagerScreen` / `AnalysisScreen` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）

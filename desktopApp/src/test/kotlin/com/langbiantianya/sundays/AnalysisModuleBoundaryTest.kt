@@ -13,11 +13,12 @@ import java.io.File
 import kotlin.test.assertTrue
 
 /**
- * 分析模式 UI 包的**结构边界**测试（主设计 §6.6）。
+ * `:shared` 跨平台界面包的**结构边界**测试（主设计 §6.6）。
  *
  * ## 它守的是什么
  *
- * `shared/.../analysis/` 是跨平台界面代码。它必须满足三条：
+ * `shared/.../analysis/`（分析模式）与 `shared/.../tree/`（两棵树共用的树组件）
+ * 都是跨平台界面代码。它们必须满足三条：
  *
  * 1. **不 import `java.*` / `javax.*`** —— 那些是 JVM 专有的。
  *    一旦引入，`:shared` 就不再是跨平台模块，而本仓库的 KMP 布局
@@ -39,17 +40,39 @@ import kotlin.test.assertTrue
  * 仓库里 `GenerateSandboxContractTest` 也是同一个路子。
  */
 class AnalysisModuleBoundaryTest {
-    /** `:shared` 的分析模式包 —— Gradle 跑测试时工作目录是模块根（`desktopApp/`）。 */
-    private val analysisDir = File("../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis")
+    /**
+     * 受边界约束的 `:shared` 包 —— 分析模式 UI 与**共享树组件**。
+     *
+     * ## 为什么树包也在名单里
+     *
+     * `shared/.../tree/` 是**浏览模式与分析模式共用**的树组件，
+     * 同样是跨平台界面代码 —— 它的边界与 `analysis/` 一模一样：
+     * 不碰 JVM 专有的东西、不直接依赖引擎、颜色一律走主题。
+     *
+     * 把它漏掉的话，「两棵树共用一个组件」这件事就会带来一个新的风险：
+     * 共享组件里偷偷 import 了 `java.*`，于是 `:shared` 的跨平台性
+     * 从**一个**包漏到**两个**包。
+     *
+     * Gradle 跑测试时工作目录是模块根（`desktopApp/`）。
+     */
+    private val guardedDirs =
+        listOf(
+            File("../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis"),
+            File("../shared/src/commonMain/kotlin/com/langbiantianya/sundays/tree"),
+        )
 
     private fun sources(): List<File> {
-        assertTrue(
-            analysisDir.isDirectory,
-            "找不到分析模式 UI 包：${analysisDir.absolutePath}",
-        )
-        val all = analysisDir.listFiles() ?: emptyArray()
-        val files = all.filter { it.extension == "kt" }.sortedBy { it.name }
-        assertTrue(files.isNotEmpty(), "分析模式 UI 包里没有 .kt 文件：${analysisDir.absolutePath}")
+        val files = mutableListOf<File>()
+        for (dir in guardedDirs) {
+            assertTrue(
+                dir.isDirectory,
+                "找不到受边界约束的 UI 包：${dir.absolutePath}",
+            )
+            val inDir = dir.listFiles() ?: emptyArray()
+            val kt = inDir.filter { it.extension == "kt" }.sortedBy { it.name }
+            assertTrue(kt.isNotEmpty(), "UI 包里没有 .kt 文件：${dir.absolutePath}")
+            files += kt
+        }
         return files
     }
 

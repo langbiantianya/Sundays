@@ -40,6 +40,7 @@ import com.langbiantianya.grpc.tableListItem
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.metadata.JdbcColumnMetadata
 import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -176,14 +177,28 @@ object AnalysisHandler {
 
             return@withContext connection.use { conn ->
                 val cols = listColumnsOf(conn, dialect, config.database, namespace, table)
+                // 自增标记来自 JDBC 元数据：各方言的 listColumns 都不吐这一项
+                // （MySQL / PG 走默认实现，H2 / DuckDB / SQLite 走各自覆写）。
+                //
+                // ⚠️ 为什么分析模式也要补：浏览模式与分析模式**共用同一个树组件**
+                // （`:shared` 的 `tree/ObjectTree.kt`），两边的字段行必须画得一模一样 ——
+                // 浏览模式那一侧补了，这里不补就成「同一个组件、两种信息」。
+                val jdbcColumns = JdbcColumnMetadata.load(conn, config.driver, config.database, namespace, table)
                 analysisListColumnsResponse {
                     cols.forEach { col ->
+                        val name = col["name"]?.toString() ?: ""
+                        val autoIncrement =
+                            jdbcColumns[name.lowercase()]?.autoIncrement
+                                ?: (col["autoIncrement"] as? Boolean ?: false)
                         this.items +=
                             columnDef {
-                                name = col["name"]?.toString() ?: ""
-                                type = col["type"]?.toString() ?: ""
-                                size = (col["size"] as? Number)?.toInt() ?: 0
-                                isPrimaryKey = col["isPrimaryKey"] as? Boolean ?: false
+                                this.name = name
+                                this.type = col["type"]?.toString() ?: ""
+                                this.size = (col["size"] as? Number)?.toInt() ?: 0
+                                this.isPrimaryKey = col["isPrimaryKey"] as? Boolean ?: false
+                                this.autoIncrement = autoIncrement
+                                // `nullable` 是 proto3 的 `optional`，保留 presence：
+                                // 「方言没给这个信息」与「方言说它是 null」必须分得开。
                                 val nullable = col["nullable"] as? Boolean
                                 if (nullable != null) this.nullable = nullable
                                 val defaultValue = col["defaultValue"]?.toString()

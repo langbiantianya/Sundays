@@ -10,107 +10,49 @@ package com.langbiantianya.sundays.analysis
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * 数据源树与结果表的**纯规则**测试。
+ * 分析模式的**纯规则**测试 —— 节点 id 的规则，以及结果 → 表格的换算。
  *
- * 这一层全是纯数据变换（给定输入必然给出同一个输出），
- * 所以能在任何平台上跑 —— 不需要引擎，也不需要数据库。
+ * ## 树模型本身在**共享**的包里
+ *
+ * 分析模式与浏览模式共用一个树组件（`com.langbiantianya.sundays.tree`），
+ * 模型的通用规则（谁能展开、按 id 找、按 id 替换）在那边的
+ * `ObjectTreeModelTest` 里。这里的只留**分析模式特有**的那几条：
+ * 节点 id 怎么拼、结果怎么变成表格。
  */
 class AnalysisTreeTest {
     // ──────────────── 节点 id ────────────────
 
     @Test
-    fun `namespace and table ids are distinct per owner`() {
-        // 两个源里**同名**的表必须有两个不同的 id ——
-        // 否则树上第二棵树节点会顶掉第一棵，用户点到的表与看到的不一致。
-        val a = analysisTableNodeId("c1", "shop", "orders")
-        val b = analysisTableNodeId("c2", "shop", "orders")
-        assertTrue(a != b, "不同源的同名表必须有不同的 id：$a vs $b")
+    fun `table ids differ per namespace`() {
+        // 两个命名空间里**同名**的表必须有两个不同的 id ——
+        // 否则树上第二张表节点会顶掉第一张，用户点到的表与看到的不一致。
+        val a = analysisTableNodeId("shop", "orders")
+        val b = analysisTableNodeId("warehouse", "orders")
+        assertTrue(a != b, "不同命名空间的同名表必须有不同的 id：$a vs $b")
     }
 
     @Test
-    fun `namespace and table ids differ in kind`() {
-        // 命名空间节点与表节点的 id 不能撞 ——
+    fun `table and column ids never collide`() {
         // 撞了的话「按 id 替换节点」会替换掉错的那个。
-        val namespace = analysisNamespaceNodeId("c1", "shop")
-        val table = analysisTableNodeId("c1", "shop", "orders")
-        assertTrue(namespace != table, "命名空间与表的 id 必须不同：$namespace vs $table")
+        val table = analysisTableNodeId("main", "orders")
+        val column = analysisColumnNodeId("orders", "orders")
+        assertTrue(table != column, "表节点与字段节点的 id 必须不同：$table vs $column")
     }
 
     @Test
-    fun `the workspace table id is built from the workspace owner`() {
-        assertEquals(
-            "table:workspace:main:orders",
-            analysisTableNodeId(ANALYSIS_WORKSPACE_NODE_ID, WORKSPACE_SCHEMA, "orders"),
-        )
-    }
-
-    // ──────────────── 可展开性 ────────────────
-
-    @Test
-    fun `only tables are leaves`() {
-        assertTrue(node(AnalysisTreeKind.WORKSPACE).expandable(), "工作区是分组，可展开")
-        assertTrue(node(AnalysisTreeKind.SOURCE).expandable(), "远端源是分组，可展开")
-        assertTrue(node(AnalysisTreeKind.NAMESPACE).expandable(), "命名空间是分组，可展开")
-        assertFalse(node(AnalysisTreeKind.TABLE).expandable(), "表是叶子，不可展开")
-    }
-
-    // ──────────────── 按 id 找 / 按 id 替换 ────────────────
-
-    @Test
-    fun `a nested node can be found by its id`() {
-        val tree = listOf(source("c1", listOf(namespace("c1", "shop", listOf(table("c1", "shop", "orders"))))))
-
-        val found = assertNotNull(findAnalysisNode(tree, "table:c1:shop:orders"), "深处的表必须能被找到")
-        assertEquals("orders", found.label)
+    fun `the workspace table id is built from the workspace schema`() {
+        assertEquals("table:main:orders", analysisTableNodeId(WORKSPACE_SCHEMA, "orders"))
     }
 
     @Test
-    fun `an unknown id is simply not found`() {
-        val tree = listOf(source("c1"))
-        assertNull(findAnalysisNode(tree, "nope"), "找不到不是错误，是正常状态")
-    }
-
-    @Test
-    fun `replacing a node keeps the rest of the tree intact`() {
-        val tree =
-            listOf(
-                source("c1", listOf(namespace("c1", "shop"))),
-                source("c2"),
-            )
-
-        val replaced =
-            replaceAnalysisNode(tree, "ns:c1:shop") {
-                it.copy(children = listOf(table("c1", "shop", "orders")), loaded = true)
-            }
-
-        // 换掉的那一处换了
-        val shop = assertNotNull(findAnalysisNode(replaced, "ns:c1:shop"))
-        assertEquals(1, shop.children.size)
-        assertTrue(shop.loaded, "换过的节点应当标记成已加载")
-        // 其余的**一点没动**
-        assertEquals(2, replaced.size, "根节点的数量不能变")
-        assertEquals(emptyList(), replaced[1].children, "没点名的分支不能被动过")
-        assertEquals("c2", replaced[1].id)
-    }
-
-    @Test
-    fun `replacing an unknown id leaves the tree unchanged`() {
-        val tree = listOf(source("c1"))
-        val replaced = replaceAnalysisNode(tree, "nope") { it.copy(label = "改过了") }
-        assertEquals(tree, replaced, "找不到的 id 不能凭空造出节点")
-    }
-
-    @Test
-    fun `replacing a root node works`() {
-        val tree = listOf(source("c1"), source("c2"))
-        val replaced = replaceAnalysisNode(tree, "c2") { it.copy(label = "新的名字") }
-        assertEquals("新的名字", replaced[1].label)
+    fun `the column id carries the table it belongs to`() {
+        // 不同表里都叫 `id` 的字段很常见 —— 它们要能分别展开、分别选中。
+        assertEquals("column:orders:id", analysisColumnNodeId("orders", "id"))
+        assertEquals("column:items:id", analysisColumnNodeId("items", "id"))
     }
 
     // ──────────────── 结果 → 表格 ────────────────
@@ -187,46 +129,4 @@ class AnalysisTreeTest {
         assertEquals("c1", analysisColumnKey(1))
         assertTrue(analysisColumnKey(0) != analysisColumnKey(1))
     }
-
-    // ──────────────── 造节点的小工具 ────────────────
-
-    private fun node(kind: AnalysisTreeKind) = AnalysisTreeNode(id = "x", label = "x", kind = kind)
-
-    private fun source(
-        id: String,
-        children: List<AnalysisTreeNode> = emptyList(),
-    ) = AnalysisTreeNode(
-        id = id,
-        label = id,
-        kind = AnalysisTreeKind.SOURCE,
-        children = children,
-        loaded = children.isNotEmpty(),
-    )
-
-    private fun namespace(
-        owner: String,
-        name: String,
-        children: List<AnalysisTreeNode> = emptyList(),
-    ) = AnalysisTreeNode(
-        id = analysisNamespaceNodeId(owner, name),
-        label = name,
-        kind = AnalysisTreeKind.NAMESPACE,
-        sourceId = owner,
-        namespace = name,
-        children = children,
-        loaded = children.isNotEmpty(),
-    )
-
-    private fun table(
-        owner: String,
-        namespace: String,
-        name: String,
-    ) = AnalysisTreeNode(
-        id = analysisTableNodeId(owner, namespace, name),
-        label = name,
-        kind = AnalysisTreeKind.TABLE,
-        sourceId = owner,
-        namespace = namespace,
-        table = name,
-    )
 }

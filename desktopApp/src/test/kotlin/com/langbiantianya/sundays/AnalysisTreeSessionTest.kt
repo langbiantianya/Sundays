@@ -13,10 +13,10 @@ import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
-import com.langbiantianya.sundays.analysis.AnalysisTreeKind
-import com.langbiantianya.sundays.analysis.AnalysisTreeNode
-import com.langbiantianya.sundays.analysis.findAnalysisNode
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.tree.ObjectTreeKind
+import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.findObjectTreeNode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -89,9 +89,9 @@ class AnalysisTreeSessionTest {
         dialect = DialectType.MYSQL,
     )
 
-    private fun workspaceNode(session: AnalysisSession): AnalysisTreeNode =
+    private fun workspaceNode(session: AnalysisSession): ObjectTreeNode =
         assertNotNull(
-            findAnalysisNode(session.treeRoots, ANALYSIS_WORKSPACE_NODE_ID),
+            findObjectTreeNode(session.treeRoots, ANALYSIS_WORKSPACE_NODE_ID),
             "工作区节点必须一直在树里",
         )
 
@@ -107,10 +107,10 @@ class AnalysisTreeSessionTest {
 
         assertEquals(1, session.treeRoots.size, "树里只有工作区一个根")
         assertEquals(ANALYSIS_WORKSPACE_NODE_ID, session.treeRoots[0].id)
-        assertEquals(AnalysisTreeKind.WORKSPACE, session.treeRoots[0].kind)
-        assertEquals("DuckDB", session.treeRoots[0].dialectLabel, "工作区要标出引擎")
-        assertNull(findAnalysisNode(session.treeRoots, "c1"), "保存的连接不能出现在分析树的根里")
-        assertNull(findAnalysisNode(session.treeRoots, "c2"), "保存的连接不能出现在分析树的根里")
+        assertEquals(ObjectTreeKind.DATABASE, session.treeRoots[0].kind)
+        assertEquals("DuckDB", session.treeRoots[0].badge, "工作区要标出引擎")
+        assertNull(findObjectTreeNode(session.treeRoots, "c1"), "保存的连接不能出现在分析树的根里")
+        assertNull(findObjectTreeNode(session.treeRoots, "c2"), "保存的连接不能出现在分析树的根里")
     }
 
     @Test
@@ -131,7 +131,7 @@ class AnalysisTreeSessionTest {
         val session = newSession()
         session.setSources(listOf(binding("c1")))
 
-        assertEquals("DuckDB", session.treeRoots[0].dialectLabel, "工作区要标出引擎")
+        assertEquals("DuckDB", session.treeRoots[0].badge, "工作区要标出引擎")
     }
 
     // ──────────────── 懒加载 ────────────────
@@ -156,8 +156,55 @@ class AnalysisTreeSessionTest {
             loaded.children.map { it.label },
             "工作区里刚建的表必须出现在树上",
         )
-        assertEquals(AnalysisTreeKind.TABLE, loaded.children[0].kind)
-        assertEquals("tree_probe", loaded.children[0].table)
+        assertEquals(ObjectTreeKind.TABLE, loaded.children[0].kind)
+        assertEquals("tree_probe", loaded.children[0].label)
+    }
+
+    // ──────────────── 字段层 ────────────────
+
+    @Test
+    fun `expanding a table lists its columns`() {
+        // 分析页的树以前**到表为止** —— 用户看不到「这张表有哪些列」，
+        // 而这正是写分析 SQL 时最需要的对照信息。
+        // 现在它与浏览模式的对象树**完全同形**（库 → 表 → 字段）。
+        val session = newSession()
+        session.updateSql("CREATE TABLE col_probe (id INTEGER, name VARCHAR)")
+        runBlocking { session.run()?.join() }
+        session.setSources(emptyList())
+
+        runBlocking { session.toggleNode(workspaceNode(session))?.join() }
+        val table = workspaceNode(session).children.single()
+        assertEquals(ObjectTreeKind.TABLE, table.kind)
+
+        runBlocking { session.toggleNode(table)?.join() }
+
+        val expanded = findObjectTreeNode(session.treeRoots, table.id)
+        assertNotNull(expanded, "表节点必须还在树里")
+        assertEquals(
+            listOf("id", "name"),
+            expanded.children.map { it.label },
+            "字段必须按名字列出来",
+        )
+        assertEquals(ObjectTreeKind.COLUMN, expanded.children[0].kind)
+        assertEquals("INTEGER", expanded.children[0].column?.type, "字段要带着类型")
+        assertEquals("col_probe", expanded.children[0].parentLabel, "字段要带着它属于哪张表")
+    }
+
+    @Test
+    fun `a column carries its type and its constraints`() {
+        val session = newSession()
+        session.updateSql("CREATE TABLE pk_probe (id INTEGER PRIMARY KEY, note VARCHAR)")
+        runBlocking { session.run()?.join() }
+        session.setSources(emptyList())
+
+        runBlocking { session.toggleNode(workspaceNode(session))?.join() }
+        val table = workspaceNode(session).children.single()
+        runBlocking { session.toggleNode(table)?.join() }
+
+        val id = findObjectTreeNode(session.treeRoots, table.id)?.children?.first { it.label == "id" }
+        assertNotNull(id, "主键列必须在树里")
+        assertTrue(id.column?.primaryKey == true, "主键列要标出主键")
+        assertTrue(id.column?.nullable == false, "主键列不可为空")
     }
 
     @Test

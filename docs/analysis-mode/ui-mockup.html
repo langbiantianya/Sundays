@@ -241,6 +241,15 @@ body{
 .tree-row.is-group{ font-weight:500; }
 .tree-row.is-local .name{ color:var(--tertiary); }
 .lvl0{ padding-left:6px; } .lvl1{ padding-left:20px; } .lvl2{ padding-left:34px; }
+/* 字段行（v1.9：分析页的树与浏览模式的对象树**同形**，展开到字段）——
+   名字 + 类型 + 约束标记，与浏览模式里那一层一模一样。 */
+.tree-row.is-col{ height:20px; font-size:12px; }
+.tree-row.is-col .name{ color:var(--on-surface); }
+.tree-row.is-col .type{ color:var(--on-surface-variant); flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.tree-row.is-col .badge{
+  font-size:10px; line-height:13px; padding:0 3px; border-radius:3px; flex:none;
+  background:var(--surface-variant); color:var(--on-surface-variant);
+}
 .tree-foot{
   padding:7px 10px; font-size:11px; line-height:15px; color:var(--on-surface-variant);
   background:var(--surface-variant); border-top:1px solid var(--outline-variant);
@@ -644,10 +653,15 @@ body{
           <aside class="tree">
             <div class="tree-head">工作区<span class="tree-head-note">本地 DuckDB</span></div>
             <div class="tree-list">
+              <!-- 树与浏览模式的对象树**同一个组件**：库 → 表 → 字段。
+                   展开一张表就能看到它的字段（名字 / 类型 / PK / 非空）。 -->
               <div class="tree-row is-group lvl0"><span class="tw">▾</span><span class="name">本地工作区</span><span class="tag-tertiary">DuckDB</span></div>
-              <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">orders</span></div>
-              <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">staging_orders</span></div>
-              <div class="tree-row is-local lvl1"><span class="tw"></span><span class="name">staging_items</span></div>
+              <div class="tree-row is-local lvl1"><span class="tw">▾</span><span class="name">orders</span></div>
+              <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">id</span><span class="type">INTEGER</span><span class="badge">PK</span></div>
+              <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">amount</span><span class="type">DECIMAL(10,2)</span></div>
+              <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">dt</span><span class="type">DATE</span><span class="badge">非空</span></div>
+              <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_orders</span></div>
+              <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_items</span></div>
             </div>
             <div class="tree-foot">分析工作区 · 计算引擎 DuckDB</div>
           </aside>
@@ -958,7 +972,7 @@ body{
 
           <div class="cmp-group">② 分析工作区</div>
           <div class="cmp-row"><span class="cmp-area">顶栏按钮</span><span class="cmp-comp">WinButton / WinOutlinedButton / WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
-          <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">SourceTree</span><span class="cmp-path">shared/…/analysis/SourceTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">ObjectTree</span><span class="cmp-path">shared/…/tree/ObjectTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">面板分隔条</span><span class="cmp-comp">DragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>

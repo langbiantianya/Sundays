@@ -15,37 +15,26 @@ package com.langbiantianya.sundays
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,9 +50,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -71,21 +58,20 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.connection.DialectType
-import com.langbiantianya.sundays.connection.SqlIdentifier
-import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.TABLE_STRUCTURE_DELETE_CONFIRM_BTN_TAG
 import com.langbiantianya.sundays.table.TableStructureDialog
-import com.langbiantianya.sundays.ui.ColumnBadge
+import com.langbiantianya.sundays.tree.ObjectTree
+import com.langbiantianya.sundays.tree.ObjectTreeColumn
+import com.langbiantianya.sundays.tree.ObjectTreeKind
+import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.ObjectTreeObjectGroup
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
 import com.langbiantianya.sundays.ui.WinMenuItem
-import com.langbiantianya.sundays.ui.WinProgressIndicator
 import com.langbiantianya.sundays.ui.WinTextButton
-import com.langbiantianya.sundays.ui.focusRing
 import com.langbiantianya.sundays.ui.menuShape
-import com.langbiantianya.sundays.ui.onRightClick
 import com.langbiantianya.sundays.ui.str
 import kotlin.math.roundToInt
 
@@ -208,22 +194,29 @@ class TreeContextMenuState {
         this.target = target
     }
 
+    /**
+     * 直接用 **root 坐标**弹出菜单。
+     *
+     * ## 为什么多这一条
+     *
+     * [show] 收的是「节点局部坐标 + 节点原点」，让**调用方**做换算。
+     * 而共享树组件（`com.langbiantianya.sundays.tree.ObjectTree`）自己知道
+     * 节点在 root 里的位置 —— 它已经在节点上挂了 `onGloballyPositioned`。
+     * 让它再把坐标换算一遍、只把 root 坐标交出来，菜单这边就少一次
+     * 「这里到底是局部还是全局」的判断 —— 而这正是本类最容易搞错的一处。
+     */
+    fun showAt(
+        offsetInRoot: androidx.compose.ui.geometry.Offset,
+        target: DatabaseBrowserState.TreeTarget,
+    ) {
+        this.offsetInRoot = offsetInRoot
+        this.target = target
+    }
+
     fun dismiss() {
         target = null
     }
 }
-
-/**
- * 记录本节点相对 root 的原点，供右键时把局部坐标换算成 root 坐标。
- *
- * 为什么必须是 `positionInRoot` 而不是 `positionInParent`：节点在 `LazyColumn` 里，
- * `positionInParent` 只给出「相对那一行 item」的偏移，中间隔着 LazyColumn 的滚动偏移、
- * 面板标题栏、缩进层级，逐级上溯既繁琐又容易漏一级。`positionInRoot` 一次到位，
- * **节点在树里第几行、缩进多深、在不在 LazyColumn 里都不影响**。
- */
-private fun Modifier.trackNodeCoordinates(
-    coords: MutableState<androidx.compose.ui.layout.LayoutCoordinates?>,
-): Modifier = this.onGloballyPositioned { coords.value = it }
 
 @Composable
 private fun rememberTreeContextMenuState(): TreeContextMenuState = remember { TreeContextMenuState() }
@@ -309,16 +302,36 @@ internal fun SchemaTreePanel(
                 }
 
                 else -> {
+                    // 树的数据快照 —— 节点、展开态、以及每个节点的右键目标。
+                    //
+                    // ⚠️ **每次重组都重算**：它读的是 `DatabaseBrowserState` 里的
+                    // 一堆 map（表、字段、对象、展开态），而那些 map 都是
+                    // `mutableStateMapOf` —— 读它们就等于订阅它们，
+                    // 任何一个变了都会让这里重算。缓存反而要额外的失效逻辑。
+                    val snapshot = state.objectTreeSnapshot()
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(state.databases) { db ->
-                            DatabaseNode(
-                                name = db,
-                                state = state,
-                                onOpenTable = onOpenTable,
-                                menu = treeMenu,
+                        items(snapshot.roots) { root ->
+                            // 每个数据库一**项** —— 与从前一致：
+                            // 库节点下面那一整支（表 / 字段 / 对象）在同一项里组合。
+                            ObjectTree(
+                                roots = listOf(root),
+                                expandedIds = snapshot.expandedIds,
+                                onToggle = { node -> state.toggleTreeNode(node) },
+                                onSelectTable = { node -> node.parentLabel?.let { onOpenTable(it, node.label) } },
+                                onSelectColumn = { node ->
+                                    snapshot.targets[node.id]?.let { state.copyTreeText(it, quoted = true) }
+                                },
+                                onRightClickNode = { node, offset ->
+                                    snapshot.targets[node.id]?.let { treeMenu.showAt(offset, it) }
+                                },
+                                rowTag = { node -> node.treeRowTag() },
+                                twistyTag = { node -> schemaTableObjectsTag(node.label) },
+                                // 浏览模式开着转圈：这里有真窗口的用户盯着，
+                                // 而「还在加载」是必须看得见的。
+                                showLoadingSpinner = true,
                             )
                         }
                     }
@@ -531,537 +544,218 @@ private val MENU_MIN_WIDTH = 160.dp
  */
 private val MENU_ESTIMATED_HEIGHT = 220.dp
 
+/**
+ * 树的一次快照 —— 节点、展开态、以及每个节点的右键目标。
+ *
+ * ## 为什么是「快照」而不是三个独立的 map
+ *
+ * 节点、展开态、右键目标是**同一份数据的三面**：某张表展开了，
+ * 它的节点就带着字段、它的 id 就在展开集合里、它的右键目标也就存在。
+ * 分成三份并行结构，就有了「三处可能对不上」的机会 —— 而对不上的后果
+ * 是「点右键弹出来的菜单作用在别的表上」（本类历史上真踩过：
+ * 右键第 5 行的库，菜单却弹在第 2 行那棵树上）。
+ */
+private class ObjectTreeSnapshot(
+    val roots: List<ObjectTreeNode>,
+    val expandedIds: Set<String>,
+    /** 节点 id → 右键菜单的目标。 */
+    val targets: Map<String, DatabaseBrowserState.TreeTarget>,
+)
+
+/**
+ * 把浏览状态转成共享树的节点。
+ *
+ * ## 为什么这里**只**产出数据，界面全在共享组件里
+ *
+ * 树的画法（箭头、图标、字段行的 `PK / AI / 非空` 标记）现在由
+ * `com.langbiantianya.sundays.tree.ObjectTree` 一处说了算 ——
+ * 分析模式那棵树用的是**同一个**组件。两边若各画各的，
+ * 同一个概念就有两份实现，改一处就忘了另一处。
+ *
+ * 这里负责的只有「**状态 → 节点**」这一层翻译，以及每个节点的
+ * 右键目标（那要靠 `DatabaseBrowserState.TreeTarget`，共享组件不认识它）。
+ */
 @Composable
-private fun DatabaseNode(
-    name: String,
-    state: DatabaseBrowserState,
-    onOpenTable: (schema: String, table: String) -> Unit,
-    menu: TreeContextMenuState,
-) {
-    val expanded = name in state.expandedDatabases
-    val tables = state.tablesByDatabase[name]
-    val loading = name in state.loadingTables
-    val error = state.tableLoadError[name]
-
-    // 节点在 root 里的原点 —— 右键坐标是**节点局部**的，菜单要的是**root**坐标，
-    // 两者必须靠它换算（见 TreeContextMenuState.show）。
-    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-
-    Column {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .trackNodeCoordinates(nodeCoords)
-                    .focusRing()
-                    .onRightClick { offset ->
-                        menu.show(
-                            offset,
-                            // 当场读 `positionInRoot()` 而不是读缓存的 Offset：
-                            // 展开 / 滚动之后缓存值可能已经过期，而 `LayoutCoordinates`
-                            // 是个活对象，此刻读到的就是**此刻**的位置。
-                            nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                            DatabaseBrowserState.TreeTarget(
-                                database = name,
-                                schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
-                            ),
-                        )
-                    }.clickable { state.toggleDatabase(name) }
-                    .testTag(schemaDbNodeTag(name))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                imageVector = Icons.Filled.Storage,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            if (loading) {
-                Spacer(Modifier.width(8.dp))
-                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-            }
-        }
-        if (expanded) {
-            when {
-                error != null -> {
-                    Text(
-                        text = str(StrKey.TREE_LOAD_FAILED, error),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                    )
-                }
-
-                tables == null -> {
-                    Text(
-                        text = str(StrKey.TREE_LOADING),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                    )
-                }
-
-                tables.isEmpty() -> {
-                    Text(
-                        text = str(StrKey.TREE_EMPTY),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 36.dp, bottom = 6.dp),
-                    )
-                }
-
-                else -> {
-                    tables.forEach { tbl ->
-                        val slot = "$name::$tbl"
-                        TableLeaf(
-                            tableName = tbl,
-                            database = name,
-                            schema = state.schemasByDatabase[name]?.firstOrNull().orEmpty(),
-                            menu = menu,
-                            // 字段行单击 = 复制字段引用，与右键菜单第二项同一个动作。
-                            // 与右键的判据刻意对齐：右键能复制的行，左键也能。
-                            onCopyColumn = { state.copyTreeText(it, quoted = true) },
-                            onOpen = { onOpenTable(name, tbl) },
-                            expanded = slot in state.expandedTableObjects,
-                            onToggleObjects = { state.toggleTableObjects(name, tbl) },
-                            columns = state.columnsOf(name, tbl),
-                            // 展开后、字段还没回来之前也算「加载中」——
-                            // 否则那一瞬间会渲染成「(无)」，看起来像这张表没有字段。
-                            columnsLoading =
-                                state.isTableObjectLoading(name, tbl) ||
-                                    (state.columnsOf(name, tbl) == null && slot in state.expandedTableObjects),
-                            columnsError = state.tableObjectError["$slot::${DatabaseBrowserState.TableObjectKind.COLUMNS.name}"],
-                            indexNames =
-                                state.tableObjects[slot]
-                                    ?.get(DatabaseBrowserState.TableObjectKind.INDEX)
-                                    .orEmpty(),
-                            foreignKeyNames =
-                                state.tableObjects[slot]
-                                    ?.get(DatabaseBrowserState.TableObjectKind.FOREIGN_KEY)
-                                    .orEmpty(),
-                        )
+private fun DatabaseBrowserState.objectTreeSnapshot(): ObjectTreeSnapshot {
+    val expanded = mutableSetOf<String>()
+    val targets = mutableMapOf<String, DatabaseBrowserState.TreeTarget>()
+    val roots =
+        databases.map { db ->
+            val dbId = schemaTreeDbNodeId(db)
+            val dbExpanded = db in expandedDatabases
+            if (dbExpanded) expanded += dbId
+            val schema = schemasByDatabase[db]?.firstOrNull().orEmpty()
+            targets[dbId] = DatabaseBrowserState.TreeTarget(database = db, schema = schema)
+            val childTables =
+                if (dbExpanded) {
+                    (tablesByDatabase[db] ?: emptyList()).map { table ->
+                        tableNode(db, table, schema, expanded, targets)
                     }
-                    // 库级对象（视图 / 触发器 / 过程·函数）排在表之后。
-                    // 顺序有讲究：用户 90% 的时间在找表，把表放前面、对象放后面，
-                    // 免得每展开一个库都先滚过一屏用不上的东西。
-                    //
-                    // ⚠️ 错误必须**逐类**显示，不能「任意一类出错 → 整个对象区换成一行错误」。
-                    // SQLite 没有触发器与存储过程（`SQLiteDialect` 对它们抛
-                    // UnsupportedOperationException），于是原实现下 **视图也跟着消失了** ——
-                    // 用户看到的只是一行红字「对象加载失败」，而那恰恰是唯一有内容的那一类。
-                    // 「一个 schema 失败不该让其他同类对象消失」在同一个 kind 内已经处理过，
-                    // 但跨 kind 这层漏了；**只有同时跑两个方言才照得出来**。
-                    val objBusy = state.loadingObjects.any { it.first == name }
-                    val objs = state.objectsByDatabase[name]
-                    if (objs == null && objBusy) {
-                        Text(
-                            text = str(StrKey.TREE_OBJECTS_LOADING),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 24.dp, bottom = 6.dp),
-                        )
-                    } else {
-                        Column(modifier = Modifier.padding(start = 24.dp)) {
-                            Text(
-                                text = str(StrKey.OBJECT),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            DatabaseBrowserState.DatabaseObjectKind.entries.forEach { kind ->
-                                val err = state.objectLoadError["$name::${kind.name}"]
-                                if (err != null) {
-                                    Text(
-                                        text = str(StrKey.OBJECT_LOAD_ERROR_PREFIX, str(kind.labelKey), err),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
-                                    )
-                                } else {
-                                    ObjectGroupRow(
-                                        label = str(kind.labelKey),
-                                        items = objs?.get(kind).orEmpty(),
-                                    )
-                                }
-                            }
-                        }
-                    }
+                } else {
+                    emptyList()
                 }
-            }
+            ObjectTreeNode(
+                id = dbId,
+                label = db,
+                kind = ObjectTreeKind.DATABASE,
+                loading = db in loadingTables,
+                error = tableLoadError[db],
+                children = childTables,
+                objectGroupsTitle = str(StrKey.OBJECT),
+                objectGroups = databaseObjectGroups(db),
+                // 库级对象还没回来时只显示「加载中」——
+                // 不显示的话用户会以为这个库没有视图也没有触发器。
+                objectGroupsLoading =
+                    objectsByDatabase[db] == null && loadingObjects.any { it.first == db },
+            )
         }
-    }
-}
-
-/** 对象分组下的一行：`标签: 名字1, 名字2 …`。空列表显示「(无)」。 */
-@Composable
-private fun ObjectGroupRow(
-    label: String,
-    items: List<String>,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Text(
-            text = "$label：",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = if (items.isEmpty()) str(StrKey.NONE_PAREN) else items.joinToString(", "),
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-        )
-    }
+    return ObjectTreeSnapshot(roots = roots, expandedIds = expanded, targets = targets)
 }
 
 /**
- * 树上的一个表叶子 —— 单击打开数据预览。
+ * 一张表的节点（连同它的字段与索引 / 外键）。
  *
- * ## 为什么从 `detectTapGestures(onDoubleTap)` 换成 `clickable`
- *
- * 旧写法只挂手势，**不带任何语义**：读屏用户听到的只是一个静态文本，没有「打开表」这个动作，
- * 键盘用户 Tab 过去按 Enter 也没反应 —— 等于这条路径对两类用户完全不存在。
- * 换用 `clickable` 后三者一起拿到：语义动作（`onClickLabel`）、键盘焦点与 Enter/Space 激活、
- * 鼠标单击。
- *
- * **双击不会因此失效**：一次双击会产生两次 `onClick`，第二次进 [DatabaseBrowserState.openTab]
- * 时该表已存在，按 key 命中「只激活、不新增」的分支，是幂等的。旧的手势检测器还要额外
- * 引入 `awaitPointerEventScope`，与 [reportsHover] 里同样的手写监听重复。
+ * @param db 所属库名
+ * @param table 表名
+ * @param schema 该库的 schema 名（空串 = 该方言没有独立 schema 层）
+ * @param expanded 展开态的收集器 —— 表展开了就把它的 id 放进去
+ * @param targets 右键目标的收集器
  */
 @Composable
-private fun TableLeaf(
-    tableName: String,
-    /** 所属库名 —— 限定引用名要用（`schema.table` 里的 schema 与表名两段都需要它）。 */
-    database: String = "",
-    /** 所属 schema 名；空串 = 该方言没有独立 schema 层或尚未解析（见 [SqlIdentifier.tableRef]）。 */
-    schema: String = "",
-    /** 右键菜单状态 —— 由 [SchemaTreePanel] 持有并下发（见 [TreeContextMenu]）。 */
-    menu: TreeContextMenuState? = null,
-    /**
-     * 单击某个**字段行**时的动作（收到该字段的完整目标）；`null` = 字段行不可单击。
-     *
-     * 为什么由父级给而不是 `TableLeaf` 自己调 [DatabaseBrowserState]：
-     * `TableLeaf` 不持有 `state`，动作要发剪贴板 / 推通知，那些都在 state 里。
-     * 与 [TableLeaf.onOpen] 同一套「父级给动作」的写法。
-     */
-    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
-    onOpen: () -> Unit,
-    expanded: Boolean = false,
-    onToggleObjects: (() -> Unit)? = null,
-    indexNames: List<String> = emptyList(),
-    foreignKeyNames: List<String> = emptyList(),
-    /** 字段列表；`null` = 还没加载完（与「加载完但为空」要区分开，见 [ColumnRowGroup]）。 */
-    columns: List<DatabaseBrowserState.ColumnInfo>? = null,
-    columnsLoading: Boolean = false,
-    columnsError: String? = null,
-) {
-    // 节点在 root 里的原点 —— 右键坐标换算用（见 TreeContextMenuState.show）。
-    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+private fun DatabaseBrowserState.tableNode(
+    db: String,
+    table: String,
+    schema: String,
+    expanded: MutableSet<String>,
+    targets: MutableMap<String, DatabaseBrowserState.TreeTarget>,
+): ObjectTreeNode {
+    val slot = "$db::$table"
+    val tableId = schemaTreeTableNodeId(db, table)
+    val tableExpanded = slot in expandedTableObjects
+    if (tableExpanded) expanded += tableId
+    targets[tableId] =
+        DatabaseBrowserState.TreeTarget(database = db, schema = schema, table = table)
 
-    Column {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .trackNodeCoordinates(nodeCoords)
-                    .focusRing()
-                    // 右键与左键**不冲突**，两者互不干扰：`clickable` 的 tap 检测只认主键，
-                    // 右键是次键（`isSecondaryPressed`），压根不满足 tap 条件。
-                    // 试过把 `onRightClick` 挪到 `clickable` **之后**（曾以为 `consume()`
-                    // 会串味），实测两轮 UI 测试都没红 —— 顺序在这里**无关**，
-                    // 但保留当前写法是因为它读起来就是「先识别手势、再挂动作」。
-                    .then(
-                        if (menu != null) {
-                            Modifier.onRightClick { offset ->
-                                menu.show(
-                                    offset,
-                                    nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                                    DatabaseBrowserState.TreeTarget(
-                                        database = database,
-                                        schema = schema,
-                                        table = tableName,
-                                    ),
-                                )
-                            }
-                        } else {
-                            // 预览里没有右键菜单的用法（传 null 的调用点不期待菜单出现）。
-                            // 挂一个空 Modifier 而不是硬传 —— 见 [TableLeaf.menu] 的 KDoc。
-                            Modifier
-                        },
-                    ).clickable(
-                        onClickLabel = str(StrKey.OPEN_TABLE, tableName),
-                        role = Role.Button,
-                        onClick = onOpen,
-                    ).testTag(schemaTableLeafTag(tableName))
-                    .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onToggleObjects != null) {
-                // 展开箭头：与库节点的 chevron 同一套视觉语言。
-                // 单独一个小按钮而不是让整行双击 —— 整行单击已经占用在「打开预览」上，
-                // 同一个手势不能既开预览又展开对象。
-                //
-                // ⚠️ 描述要说「字段与索引外键」而不是只有索引外键：读屏用户听到
-                // 「展开 orders 的索引与外键」，展开后冒出几十个字段却毫无预期。
-                Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
-                    contentDescription =
-                        if (expanded) {
-                            str(StrKey.COLLAPSE_TABLE_DETAIL, tableName)
-                        } else {
-                            str(StrKey.EXPAND_TABLE_DETAIL, tableName)
-                        },
-                    modifier =
-                        Modifier
-                            .size(16.dp)
-                            .testTag(schemaTableObjectsTag(tableName))
-                            .clickable { onToggleObjects() },
+    val loaded = columnsOf(db, table)
+    val columnNodes =
+        loaded.orEmpty().map { col ->
+            val colId = schemaTreeColumnNodeId(db, table, col.name)
+            targets[colId] =
+                DatabaseBrowserState.TreeTarget(
+                    database = db,
+                    schema = schema,
+                    table = table,
+                    column = col.name,
                 )
-                Spacer(Modifier.width(2.dp))
-            } else {
-                Spacer(Modifier.width(18.dp))
-            }
-            Icon(
-                imageVector = Icons.Filled.TableChart,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = tableName,
-                style = MaterialTheme.typography.bodySmall,
+            ObjectTreeNode(
+                id = colId,
+                label = col.name,
+                kind = ObjectTreeKind.COLUMN,
+                // 字段行的「上级」是表 —— 右键复制引用时要的是 `表.字段`。
+                parentLabel = table,
+                column =
+                    ObjectTreeColumn(
+                        name = col.name,
+                        type = col.typeWithSize,
+                        primaryKey = col.primaryKey,
+                        autoIncrement = col.autoIncrement,
+                        nullable = col.nullable,
+                    ),
             )
         }
-        if (expanded) {
-            // 字段 / 索引 / 外键放在**表节点下**而不是库节点下：引擎侧这几条路由要
-            // `table_name`，跟着表走才对得上；放库下就得把整库每张表的都拉一遍。
-            Column(modifier = Modifier.padding(start = 44.dp)) {
-                // 字段**排在最前**：用户展开一张表，八成是想知道它有哪些列、都是什么类型，
-                // 而不是先看索引。
-                ColumnRowGroup(
-                    label = str(StrKey.COLUMN),
-                    columns = columns,
-                    loading = columnsLoading,
-                    error = columnsError,
-                    menu = menu,
-                    onCopyColumn = onCopyColumn,
-                    target =
-                        DatabaseBrowserState.TreeTarget(
-                            database = database,
-                            schema = schema,
-                            table = tableName,
-                        ),
-                )
-                ObjectGroupRow(str(StrKey.INDEX), indexNames)
-                ObjectGroupRow(str(StrKey.FOREIGN_KEY), foreignKeyNames)
-            }
-        }
-    }
+
+    return ObjectTreeNode(
+        id = tableId,
+        label = table,
+        kind = ObjectTreeKind.TABLE,
+        // 表行的「上级」是库 —— 点它要开的是「这个库里的这张表」的预览。
+        parentLabel = db,
+        children = columnNodes,
+        // 展开后、字段还没回来之前也算「加载中」——
+        // 否则那一瞬间会渲染成「(无)」，看起来像这张表没有字段。
+        loading = isTableObjectLoading(db, table) || (loaded == null && tableExpanded),
+        error = tableObjectError["$slot::${DatabaseBrowserState.TableObjectKind.COLUMNS.name}"],
+        objectGroups =
+            listOf(
+                ObjectTreeObjectGroup(
+                    label = str(StrKey.INDEX),
+                    items = tableObjects[slot]?.get(DatabaseBrowserState.TableObjectKind.INDEX).orEmpty(),
+                ),
+                ObjectTreeObjectGroup(
+                    label = str(StrKey.FOREIGN_KEY),
+                    items = tableObjects[slot]?.get(DatabaseBrowserState.TableObjectKind.FOREIGN_KEY).orEmpty(),
+                ),
+            ),
+    )
 }
 
 /**
- * 带 loading / error / empty 三态的字段分组。
+ * 库级对象（视图 / 触发器 / 过程·函数）—— 每类一组。
  *
- * ## 为什么自己拿列表，而不是塞一个 `content` lambda
+ * ## 为什么**逐类**带自己的错误
  *
- * 第一版传的是 `content: @Composable ColumnScope.() -> Unit`，空判断靠一个
- * `var any by remember { mutableStateOf(false) }` —— 而 lambda 内部**没有**任何地方
- * 把它置 true，于是走 else 分支就必然打印一行「(无)」。
- * 真窗口上表现为：字段明明列了两行，下面还跟着一句「(无)」。
- *
- * 拿列表自己渲染就没有这个可能 —— **「有没有内容」和「渲染内容」在同一个作用域里**，
- * 不会再有中间那个观察不到的开关。
- *
- * @param columns `null` = 还没加载完（与「加载完但为空」要区分开，否则加载中的一瞬间
- *   会显示「(无)」，看起来像这张表没有字段）。
+ * SQLite 没有触发器与存储过程（`SQLiteDialect` 对它们抛
+ * `UnsupportedOperationException`），于是「任意一类出错 → 整个对象区
+ * 换成一行错误」会让**视图也跟着消失** —— 而那恰恰是唯一有内容的那一类。
  */
 @Composable
-private fun ColumnRowGroup(
-    label: String,
-    columns: List<DatabaseBrowserState.ColumnInfo>?,
-    loading: Boolean,
-    error: String?,
-    /** 字段行的右键菜单与目标（库/表信息）—— 传 null 则字段行不可右键，见 [ColumnRow]。 */
-    menu: TreeContextMenuState? = null,
-    /** 字段行单击动作；`null` = 不可单击（见 [TableLeaf.onCopyColumn]）。 */
-    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
-    target: DatabaseBrowserState.TreeTarget? = null,
-) {
-    Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "$label：",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (loading) {
-                Spacer(Modifier.width(6.dp))
-                WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(11.dp))
-            }
-        }
-        when {
-            error != null -> {
-                Text(
-                    text = error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 12.dp, top = 1.dp),
-                )
-            }
-
-            // 加载中也显示「(无)」的话，用户会以为这张表没有字段，而那只是一瞬间的假象。
-            loading -> {
-                Unit
-            }
-
-            columns.isNullOrEmpty() -> {
-                Text(
-                    text = str(StrKey.NONE_PAREN),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, top = 1.dp),
-                )
-            }
-
-            else -> {
-                Column(modifier = Modifier.padding(start = 12.dp)) {
-                    columns.forEach { col ->
-                        ColumnRow(
-                            col = col,
-                            menu = menu,
-                            onCopyColumn = onCopyColumn,
-                            target = target?.copy(column = col.name),
-                        )
-                    }
-                }
-            }
-        }
+private fun DatabaseBrowserState.databaseObjectGroups(db: String): List<ObjectTreeObjectGroup> =
+    DatabaseBrowserState.DatabaseObjectKind.entries.map { kind ->
+        ObjectTreeObjectGroup(
+            label = str(kind.labelKey),
+            items = objectsByDatabase[db]?.get(kind).orEmpty(),
+            error = objectLoadError["$db::${kind.name}"],
+        )
     }
+
+/**
+ * 树上的展开 / 收起 —— 按节点的种类分派。
+ *
+ * 容器节点展开 = 加载它的表；表节点展开 = 加载它的字段 / 索引 / 外键。
+ * 字段是叶子，没有可展开的东西。
+ */
+private fun DatabaseBrowserState.toggleTreeNode(node: ObjectTreeNode) {
+    when (node.kind) {
+        ObjectTreeKind.DATABASE -> toggleDatabase(node.label)
+        ObjectTreeKind.TABLE -> toggleTableTreeNode(node)
+        ObjectTreeKind.COLUMN -> Unit
+    }
+}
+
+/** 展开一张表 —— 加载它的字段 / 索引 / 外键。 */
+private fun DatabaseBrowserState.toggleTableTreeNode(node: ObjectTreeNode) {
+    val db = node.parentLabel
+    if (db != null) toggleTableObjects(db, node.label)
 }
 
 /**
- * 一个字段行：`列名  类型  [PK] [自增] [非空]`。
+ * 一行的测试标记 —— **沿用从前的那些**，只是按节点种类分派。
  *
- * ## 为什么标记要跟在类型后面而不是塞进类型文本
+ * ## 为什么不让共享组件自己生成
  *
- * `VARCHAR(64) PK` 读起来像是类型的一部分。而 `PK` / `AI` / `NOT NULL` 是**约束**，
- * 混进类型串里会让人以为「这是一种新类型」。分开写，扫一眼就能区分「这是什么」与
- * 「有什么限制」。
- *
- * ## 为什么字段行也必须可点击（用户报：「不知道点了哪里」）
- *
- * 库节点与表节点都挂了 `focusRing` + `clickable`，只有字段行两个都没有 ——
- * 于是鼠标划过字段区时**整片没有任何反应**：没有 hover 底色、没有按下反馈，
- * 用户既看不出自己悬停在哪一行，点下去也没有任何确认。
- * 字段行恰恰是树里**最长、最密**的一批行（一张表几十个字段），
- * 没有逐行反馈就完全靠读文字定位，扫视成本最高的地方反而反馈最少。
- *
- * 动作选「复制字段引用」，与右键菜单的第二项完全一致：
- * 字段没有「打开预览」的语义（预览是**表**级的），复制引用是它唯一能做的事；
- * 而且点了立刻有反馈（通知 + 剪贴板），用户知道自己点到了哪一行。
- *
- * `focusRing` 放在 `clickable` **之前**：焦点环靠 `padding` 让出宽度、画在容器外侧，
- * 与「选中态」的背景区分得开 —— 两者在树里长得都是一圈高亮，不分开会误判。
+ * 那些 tag（`schemaDb_` / `schemaTable_` / `schemaColumn_`）已经被一堆
+ * 测试用惯了，而它们承载的信息量并没有变 —— 改掉它们等于让所有引用点
+ * 跟着改，却换不来任何好处。
  */
-@Composable
-private fun ColumnRow(
-    col: DatabaseBrowserState.ColumnInfo,
-    /** 非 null 时这一行可右键（复制字段引用）；null = 纯展示（表格编辑器里的同名列没有右键）。 */
-    menu: TreeContextMenuState? = null,
-    /** 非 null 时这一行可单击；null = 纯展示。与 [menu] 的判据刻意一致 —— 右键能复制，
-     *  单击也该能复制同一个东西，不该出现「右键行可复制、左键行没反应」的分裂。 */
-    onCopyColumn: ((DatabaseBrowserState.TreeTarget) -> Unit)? = null,
-    target: DatabaseBrowserState.TreeTarget? = null,
-) {
-    // 同上：字段行的原点也要记，否则字段菜单会偏到面板顶部。
-    val nodeCoords = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .trackNodeCoordinates(nodeCoords)
-                .focusRing()
-                .then(
-                    if (menu != null && target != null) {
-                        Modifier.onRightClick { offset ->
-                            menu.show(
-                                offset,
-                                nodeCoords.value?.positionInRoot() ?: androidx.compose.ui.geometry.Offset.Zero,
-                                target,
-                            )
-                        }
-                    } else {
-                        Modifier
-                    },
-                ).then(
-                    if (onCopyColumn != null && target != null) {
-                        Modifier.clickable(
-                            // 语义动作名：读屏用户听到的是「复制字段 USERNAME」而不是「按钮」
-                            onClickLabel = str(StrKey.COPY_COLUMN, col.name),
-                            role = Role.Button,
-                        ) { onCopyColumn(target) }
-                    } else {
-                        Modifier
-                    },
-                )
-                // ⚠️ tag 挂在**整行**而不是列名文本上，且这与 [TableLeaf] 一致
-                // （clickable 与 testTag 都在 Row 上）：
-                //
-                // 字段行加上 `clickable` 之后**语义会被合并**（clickable 默认
-                // `mergeDescendants = true`），原先挂在列名 `Text` 上的 tag 被吸收进 Row ——
-                // 合并后的语义树里再也查不到它，而未合并的树里还在，于是测试报的是
-                // 「could not find any node … However, the unmerged tree contains '1' node
-                // that matches」，极难看出真实原因（这次真踩过）。
-                //
-                // 挂整行对测试只会更好：`rightClickOn(schemaColumnTag(...))` 右键的是**整行**，
-                // 正是 [ColumnRow] 上那个 `onRightClick` 挂在的地方；而 tag 名本身就含列名，
-                // 命中哪一行不存在歧义。
-                .testTag(schemaColumnTag(col.name))
-                .padding(top = 1.dp, bottom = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = col.name,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (col.primaryKey) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = col.typeWithSize,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        // 约束标记。空列不占位，否则没有约束的普通字段会整体左移、参差不齐
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (col.primaryKey) ColumnBadge("PK")
-            if (col.autoIncrement) ColumnBadge("AI")
-            // 只在**不可空**时标记：「可空」是绝大多数列的默认，写出来全是噪音
-            if (!col.nullable) ColumnBadge(str(StrKey.NOT_NULL))
-        }
+private fun ObjectTreeNode.treeRowTag(): String =
+    when (kind) {
+        ObjectTreeKind.DATABASE -> schemaDbNodeTag(label)
+        ObjectTreeKind.TABLE -> schemaTableLeafTag(label)
+        ObjectTreeKind.COLUMN -> schemaColumnTag(label)
     }
-}
+
+/** 容器节点的 id。 */
+private fun schemaTreeDbNodeId(db: String): String = "db:$db"
+
+/** 表节点的 id。 */
+private fun schemaTreeTableNodeId(
+    db: String,
+    table: String,
+): String = "table:$db::$table"
+
+/** 字段节点的 id。 */
+private fun schemaTreeColumnNodeId(
+    db: String,
+    table: String,
+    column: String,
+): String = "column:$db::$table::$column"

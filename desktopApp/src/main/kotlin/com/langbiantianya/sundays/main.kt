@@ -42,7 +42,6 @@ import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.i18n.LanguageScope
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
-import com.langbiantianya.sundays.analysis.AnalysisTreeNode
 import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
@@ -56,6 +55,7 @@ import com.langbiantianya.sundays.onboarding.OnboardingScreen
 import com.langbiantianya.sundays.settings.SettingsScreen
 import com.langbiantianya.sundays.settings.SystemInfo
 import com.langbiantianya.sundays.settings.SystemInfoState
+import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.AppearanceState
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
@@ -469,23 +469,25 @@ internal fun MainScreen(
         analysis.setSources(analysisBindings)
     }
 
-    // 树上点一张表 —— **远端表拉进工作区**，**工作区表加进编辑器**。
+    // 树上点一张表 —— 把表名加进编辑器。
     //
-    // 两个方向的后果完全不同，所以必须分开处理：
-    // - 远端表：它在远端，而远端**恒为只读** —— 想拿它算东西，
-    //   只能先拉进本地工作区；
-    // - 工作区表：它**已经在本地**了 —— 把名字加进编辑器，让用户直接写查询。
+    // 分析树里**只有工作区那一支**（保存的连接配置属于连接管理器），
+    // 所以树上的表**一定**在工作区里 —— 点它就是「我要查这张表」。
     //
-    // 判据是节点自带的 `sourceId`：远端表的节点带它，工作区的表不带。
-    val onTreeTableSelected: (AnalysisTreeNode) -> Unit = { node ->
-        val table = node.table
-        val sourceId = node.sourceId
-        val namespace = node.namespace
-        when {
-            table == null -> Unit
-            sourceId == null -> analysis.appendToSql(table)
-            namespace == null -> Unit
-            else -> analysis.pull(sourceId, namespace, table)
+    // 远端表的「拉进工作区」另有其事：拉取能力仍在（会话的 `pull()`），
+    // 但界面上没有触发它的入口（见主设计 v1.7 的记录）——
+    // 那个入口要么放在连接管理器里，要么等「活体联邦」的方向定下来。
+    val onTreeTableSelected: (ObjectTreeNode) -> Unit = { node ->
+        analysis.appendToSql(node.label)
+    }
+
+    // 点一个字段 —— 把「表.字段」加进编辑器。
+    //
+    // 带表名是必须的：光有列名在多表查询里说不清是哪张表的列。
+    val onTreeColumnSelected: (ObjectTreeNode) -> Unit = { node ->
+        val table = node.parentLabel
+        if (table != null) {
+            analysis.appendColumnToSql(table, node.label)
         }
     }
 
@@ -791,6 +793,7 @@ internal fun MainScreen(
                         expandedNodeIds = analysis.expandedNodeIds,
                         onToggleNode = { node -> analysis.toggleNode(node) },
                         onSelectTreeTable = { node -> onTreeTableSelected(node) },
+                        onSelectTreeColumn = { node -> onTreeColumnSelected(node) },
                         treeLoading = analysis.treeLoading,
                         treeError = analysis.treeError,
                         sql = analysis.sql,

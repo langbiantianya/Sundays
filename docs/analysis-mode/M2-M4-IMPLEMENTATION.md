@@ -11,11 +11,11 @@
 | 做什么 | 不做什么（及原因） |
 |---|---|
 | **M2** 只读地基：proto 新类别 / 新动作 / `read_only` 标记、引擎 L4 闸门、`ANALYSIS` 四个读路由、顶层导航、§3.6 两类回归测试 | **M3** Hive / Impala：卡在驱动版本取舍（R1）与目标环境发行版版本未定，设计文档要求先对着真实 HiveServer2 做 spike |
-| **M4'** 分析工作台：DuckDB 本地工作区、拉取链路、SQL 编辑 + 只读结果表、`SourceTree`、`PullStageIndicator` | **M5 / M6** 报表模型与报表设计器：等本轮的地基与工作台跑通后再做 |
+| **M4'** 分析工作台：DuckDB 本地工作区、拉取链路、SQL 编辑 + 只读结果表、`ObjectTree`、`PullStageIndicator` | **M5 / M6** 报表模型与报表设计器：等本轮的地基与工作台跑通后再做 |
 | 能力位：给 **MySQL / PostgreSQL** 补声明 `ANALYSIS_SOURCE`（见 §4.1） | **M7** AI 洞察：不在 v1 范围 |
 
 M4' 与 M4 的差别只有一处：**拉取源**从 Hive / Impala 换成现有可连的 MySQL / PostgreSQL。
-其余交付项（工作区、拉取链路、只读结果表、`SourceTree`、`PullStageIndicator`、临时文件清理）
+其余交付项（工作区、拉取链路、只读结果表、`ObjectTree`、`PullStageIndicator`、临时文件清理）
 与 M4 原文一致——M4 的验收标准本来就写着「用 `sundays_smoke` 或本地造的等价数据」。
 
 ---
@@ -243,7 +243,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `shared/.../analysis/AnalysisModels.kt` | 数据源描述（`AnalysisSourceItem`：id / 名称 / 方言标签）、行测试标记、`AnalysisColumn` / `AnalysisResult`、**树的模型与纯规则**（`AnalysisTreeKind` / `AnalysisTreeNode` / 节点 id / 按 id 替换 / 结果 → 表格的映射） | ✅ 已落地 |
 | `shared/.../analysis/AnalysisWorkspace.kt` | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗 | ✅ 已落地（第 4 片） |
 | `shared/.../analysis/AnalysisPull.kt` | **拉取的纯规则**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 | ✅ 已落地（第 5 片；**第 7 片重写**） |
-| `shared/.../analysis/SourceTree.kt` | 新组件 1/6（主设计 §6.4）：连接 → 库 → 表 的三段树 | ✅ 已落地（第 6 片） |
+| `shared/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据，不碰引擎）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换 / 谁可以展开」等纯规则 | ✅ 已落地（**第 15 片** —— 原 `analysis/SourceTree.kt` 的模型部分上移到这里） |
+| `shared/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 | ✅ 已落地（**第 15 片** —— 浏览模式的 `SchemaTree` 的**画法**搬上来，分析页改用它） |
 | `shared/.../analysis/PullProgressIndicator.kt` | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 | ✅ 已落地（第 5 片；**第 7 片重写** —— 不再有「阶段」与「临时文件」） |
 | `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（拉取状态条 + 左树 + 中编辑器与结果 + 底栏） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」；**第 9 片**去掉「数据源」下拉框；**第 10 片**加返回按钮；**第 14 片**「▶ 运行」挪进编辑器的工具条、去掉只读徽标与那条空工具条） |
 | `shared/.../navigation/StartScreen.kt` | **启动首屏**：标题 + 两张模式卡片（连接管理 / 数据分析），整块可点 | ✅ 已落地（第 11 片） |
@@ -322,9 +323,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../testutil/RemoteLikeDialect.kt` | 假方言：委托 H2 但摘掉 `EMBEDDED_MODE`、`supportsSchema = false` —— 让「远端被拒」这条边界在**不连任何数据库**的前提下可断言 | ✅ 已落地 |
 | `desktopApp/.../AnalysisCapabilityContractTest.kt` | 能力位契约：MySQL / PG 声明 `ANALYSIS_SOURCE`，H2 / DuckDB / SQLite 不声明，能力位以**枚举名**下发 | ✅ 已落地 |
 | `desktopApp/.../AnalysisModuleBoundaryTest.kt` | 主设计 §6.6 的结构测试（不 import `java.*` / `javax.*`、不 import 引擎与协议层、不出现字面量颜色）—— 落在 `desktopApp`：它读 `:shared` 的**源文件**，而 Gradle 跑测试时的工作目录是**模块根** | ✅ 已落地 |
-| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：**「▶ 运行」与「格式化」同一行**（几何判据：垂直位置重合）、**没有**只读徽标、数据源树渲染、**源只在树里选**（工具条没有「数据源」下拉框 —— 源的名字在屏幕上只出现一次）、无数据源时的空态文案、**结果表没有编辑入口**、结果表显示列与行、失败结果显示原文、运行按钮回调且运行中禁用、编辑器里有当前 SQL | ✅ 已落地（第 3 片；第 6 片补 6 例；第 9 片补 1 例；第 14 片改 1 例，共 10 例） |
-| `desktopApp/.../AnalysisSourceTreeTest.kt` | **树的界面契约**：每行有标记、工作区那一行显示**固定名**、源行带方言标签、点扭子 / 点分组行都回调「展开」、**点表回调「选中」而不是「展开」**、展开后子节点出现、表行**没有扭子**、空树不崩 | ✅ 已落地（第 6 片，8 例） |
-| `desktopApp/.../AnalysisTreeSessionTest.kt` | **会话里的树**：树里**只有工作区**（保存的连接配置不在分析树里 —— 那是连接管理器的事）、工作区永远在第一位、方言标签标出 DuckDB 引擎、展开工作区真能列出它的表、点两次收起、收起再展开**不丢已加载的子节点**、加载失败**留下原因**而不是变成「空」、**连接列表变了也不影响树**、把工作区的表名加进编辑器（空 / 非空两种） | ✅ 已落地（第 6 片，12 例；第 13 片改 4 例） |
+| `desktopApp/.../AnalysisScreenTest.kt` | 工作区界面：**「▶ 运行」与「格式化」同一行**（几何判据：垂直位置重合）、**没有**只读徽标、**树渲染到字段**（库 → 表 → 字段，与浏览模式同形）、**源只在树里选**（工具条没有「数据源」下拉框 —— 源的名字在屏幕上只出现一次）、无数据源时的空态文案、**结果表没有编辑入口**、结果表显示列与行、失败结果显示原文、运行按钮回调且运行中禁用、编辑器里有当前 SQL | ✅ 已落地（第 3 片；第 6 片补 6 例；第 9 片补 1 例；第 14 片改 1 例；**第 15 片改 1 例**，共 10 例） |
+| `desktopApp/.../ObjectTreeTest.kt` | **共享树组件的界面契约**：每行有标记、**固定名压过原名**（工作区那一行）、容器行带标签、点容器行回调「展开」、**点表回调「选中」而不是「展开」**、**点表的扭子回调「展开」且不选中**、**字段渲染出类型与 `PK` 标记**、**点字段回调「选中」并带着它属于哪张表**、展开后子节点出现、空树不崩 | ✅ 已落地（**第 15 片**，10 例；原 `AnalysisSourceTreeTest`） |
+| `desktopApp/.../AnalysisTreeSessionTest.kt` | **会话里的树**：树里**只有工作区**（保存的连接配置不在分析树里 —— 那是连接管理器的事）、工作区永远在第一位、标签标出 DuckDB 引擎、展开工作区真能列出它的表、**展开一张表能列出它的字段**（名字 / 类型 / 主键 / 可空）、点两次收起、收起再展开**不丢已加载的子节点**、加载失败**留下原因**而不是变成「空」、**连接列表变了也不影响树**、把工作区的表名加进编辑器（空 / 非空两种） | ✅ 已落地（第 6 片，12 例；第 13 片改 4 例；**第 15 片补 2 例**） |
 | `desktopApp/.../AnalysisSessionTest.kt` | **状态机**：工作区可写 / 远端源只读（两条方向相反的不变量）、原配置不被就地改写、空语句不启动、DDL 回 -1、SQL 出错收成**失败结果**而不是异常、**拉取的三条终态**（完成 / 取消 / 失败各落各的态） | ✅ 已落地（第 4 片；第 5 片补 4 例；第 9 片删 1 例，共 13 例） |
 | `desktopApp/.../AnalysisWorkspaceIntegrationTest.kt` | **工作区端到端**（真 DuckDB 文件）：能建表、重开连接表还在、目录会被自动建出来、查询能回行与列 | ✅ 已落地（第 4 片） |
 | `desktopApp/.../AnalysisPullIntegrationTest.kt` | **整条链路**端到端（前端拉取器 → 真引擎 → 联邦扫描 → 真 DuckDB 工作区）：表真的落进工作区、进度帧真的到得了调用方、失败**不留半张表**、**拉取全程不落盘**、用户取消被报成「取消」而不是「失败」 | ✅ 已落地（第 7 片重写，5 例） |
@@ -332,7 +333,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `desktopApp/.../AnalysisPullIndicatorTest.kt` | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**不再出现「临时文件」**、取消按钮回调、没有取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 | ✅ 已落地（第 7 片重写，9 例） |
 | `shared/.../commonTest/analysis/AnalysisWorkspaceTest.kt` | 工作区纯规则：staging 表名、标识符清洗（引号 / 分号不得混入）、工作区文件路径 | ✅ 已落地（第 4 片，10 例） |
 | `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯模型：进度只有一个数、结果说清落在哪张表与多少行、**终态三选一**、用户取消是**自己的异常**（不是协程取消） | ✅ 已落地（第 7 片重写，5 例） |
-| `shared/.../commonTest/analysis/AnalysisTreeTest.kt` | **树的纯规则**：同名表在不同源下 id 不同、命名空间与表的 id 不撞、只有表是叶子、按 id 找到深处的节点、**按 id 替换**只换该换的那一处、找不到就原样返回、结果列的键**按下标**（重复列名不塌）、列与行用**同一套键**、NULL 仍是 NULL | ✅ 已落地（第 6 片，15 例） |
+| `shared/.../commonTest/analysis/AnalysisTreeTest.kt` | 分析模式**特有**的树规则：同名表在不同命名空间下 id 不同、表与字段的 id 不撞、工作区表的 id 由 schema 拼出、字段的 id 带着它属于哪张表、结果列的键**按下标**（重复列名不塌）、列与行用**同一套键**、NULL 仍是 NULL | ✅ 已落地（第 6 片；**第 15 片瘦身为分析特有部分**） |
+| `shared/.../commonTest/tree/ObjectTreeModelTest.kt` | **共享树模型**的纯规则：只有字段是叶子、按 id 找到深处的节点、**按 id 替换**只换该换的那一处、找不到就原样返回、行与扭子的标记不撞 | ✅ 已落地（**第 15 片**） |
 
 ### 5.5 i18n
 
@@ -907,7 +909,7 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 - 工作区里跑一条窗口函数聚合 → 结果正确
 - 工作区里 `CREATE TABLE tmp AS SELECT …` **成功**（本地写允许）
 
-### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest` / `AnalysisSourceTreeTest`）
+### 7.5 界面（`AnalysisScreenTest` / `AnalysisPullIndicatorTest` / `ObjectTreeTest`）
 
 - 「⊘ 只读」徽标**没有关闭入口**
 - 拉取时显示「正在拉取 · 已读 N 行」；**界面上不再出现「临时文件」**（联邦直查不落盘）
@@ -944,6 +946,7 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 12 | `refactor(analysis): 分析工作台去掉工具条上的返回按钮` | `AnalysisScreen` / `AnalysisToolbar`（去掉 `onBack` 与按钮）+ 两条测试 | 分析工作台的工具条上**没有**返回按钮；其余导航路径不受影响 | ✅ **已提交** |
 | 13 | `refactor(analysis): 分析工作台的树只显示 DuckDB 工作区` | 会话的 `buildTreeRoots()`（只留工作区）+ 四条树会话测试 + UI 设计图 | 树里只有工作区一个根；连接列表怎么变都不影响树 | ✅ **已提交** |
 | 14 | `refactor(analysis): 「▶ 运行」挪到格式化那行，去掉只读徽标与那条空工具条` | `AnalysisScreen`（去掉工具条、运行按钮进编辑器的 `actions` 插槽）+ 删掉 `ReadOnlyBadge` 组件与两个 i18n 键 + UI 设计图 | 「运行」与「格式化」同一行（几何判据）；屏上没有只读徽标 | ✅ **本轮落地** |
+| 15 | `refactor(analysis): 两棵树合成一棵 —— 分析页的树与浏览模式共用组件，并展开到字段` | 新增 `:shared` 的 `tree/ObjectTree.kt` + `tree/ObjectTreeModel.kt`（浏览模式那套画法上移）；删掉 `analysis/SourceTree.kt`；`SchemaTree` 改用共享组件；会话新增**字段层**（`ANALYSIS.LIST_COLUMNS`）；引擎的分析路由补上「自增」标记 | 两边的树**同一形状**（库 → 表 → 字段）；分析页展开一张表能看到字段；浏览模式的行为**一点没变**（右键菜单 / 弹窗 / 标记都在） | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——
@@ -1013,7 +1016,7 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 > |---|---|
 > | 结果表改成**可编辑**（`onCellEdit = { }` + `cellEditable = true`） | `the result table has no editing entry` |
 > | 结果列的键从**下标**改成**列名** | `the result columns are keyed by their index not by their name` + `the columns and the rows agree on the keys` |
-> | `replaceAnalysisNode` 变成**空操作**（不替换） | `AnalysisTreeTest` 两例 + `AnalysisTreeSessionTest` 三例（展开工作区 / 收起再展开 / 刷新源后仍留着子节点） |
+> | `replaceObjectTreeNode` 变成**空操作**（不替换） | `ObjectTreeModelTest` 两例 + `AnalysisTreeSessionTest` 三例（展开工作区 / 收起再展开 / 刷新源后仍留着子节点） |
 > | 树加载失败时把 `treeError` **吞掉** | `a failing load reports the reason instead of pretending the node is empty` |
 > | `appendToSql` 在空编辑器时**不**给一条能跑的语句 | `appending a table name to an empty editor seeds a runnable statement` + `an appended table name is quoted` |
 >

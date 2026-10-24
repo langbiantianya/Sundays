@@ -88,61 +88,11 @@ data class AnalysisResult(
 // ──────────────── 数据源树 ────────────────
 
 /**
- * 分析树里一行的**种类**。
+ * 工作区根节点的 id —— 固定值，不随连接变化。
  *
- * 树的形状是固定的三层：**根 → 命名空间 → 表**。
- * 「本地工作区」也是根 —— 它是分析模式自带的计算引擎（DuckDB），
- * 和远端源在树上**同级**，只是性质相反（一个可写、一个恒只读）。
+ * 分析模式与浏览模式**共用同一个树组件**（`com.langbiantianya.sundays.tree.ObjectTree`），
+ * 节点的形状与 id 规则也共用一套 —— 这里只留下「分析模式特有的那几条规则」。
  */
-enum class AnalysisTreeKind {
-    /** 本地工作区（DuckDB 文件）。 */
-    WORKSPACE,
-
-    /** 远端数据源。 */
-    SOURCE,
-
-    /** 命名空间 —— MySQL 上是**库**，PG 上是 **schema**。 */
-    NAMESPACE,
-
-    /** 表。 */
-    TABLE,
-}
-
-/**
- * 分析树的一行。
- *
- * @param id 稳定标识 —— 展开态按它索引
- * @param label 显示名。**工作区那一行是例外**：它的名字是固定的
- *   （「本地工作区」是应用自带的引擎，不是用户起名的），
- *   由界面按 `StrKey` 取，不靠这里传。
- * @param kind 种类
- * @param dialectLabel 方言标签（只有工作区与远端源有）
- * @param children 已加载的子节点
- * @param loaded 子节点是否**已加载** —— 未加载时画「⋯」而不是空白，
- *   否则用户分不清「这里没有子节点」与「还没去查」
- * @param sourceId 所属远端源 id；`null` = 本地工作区
- * @param namespace 所属命名空间；`null` = 还没到命名空间这一层
- * @param table 表名；`null` = 不是表
- */
-data class AnalysisTreeNode(
-    val id: String,
-    val label: String,
-    val kind: AnalysisTreeKind,
-    val dialectLabel: String? = null,
-    val children: List<AnalysisTreeNode> = emptyList(),
-    val loaded: Boolean = false,
-    val sourceId: String? = null,
-    val namespace: String? = null,
-    val table: String? = null,
-)
-
-/** 树里一行的测试标记 —— `analysisTreeRow:<节点 id>`。 */
-fun analysisTreeRowTag(nodeId: String): String = "analysisTreeRow:$nodeId"
-
-/** 树里一行的**扭子**（展开 / 收起箭头）的测试标记 —— `analysisTreeTwisty:<节点 id>`。 */
-fun analysisTreeTwistyTag(nodeId: String): String = "analysisTreeTwisty:$nodeId"
-
-/** 工作区根节点的 id —— 固定值，不随连接变化。 */
 const val ANALYSIS_WORKSPACE_NODE_ID: String = "workspace"
 
 /**
@@ -163,75 +113,28 @@ const val ANALYSIS_WORKSPACE_NODE_ID: String = "workspace"
  */
 const val WORKSPACE_SCHEMA: String = "main"
 
-/** 命名空间节点的 id —— `ns:<属主>:<命名空间>`。 */
-fun analysisNamespaceNodeId(
-    owner: String,
-    namespace: String,
-): String = "ns:$owner:$namespace"
-
-/** 表节点的 id —— `table:<属主>:<命名空间>:<表名>`。 */
+/**
+ * 表节点的 id —— `table:<命名空间>:<表名>`。
+ *
+ * 带上命名空间是为了**同名表不撞**：两个 schema 里都有一张 `orders` 时，
+ * 它们必须是两个不同的节点，否则树上第二张会顶掉第一张，
+ * 用户点到的表与看到的不一致。
+ */
 fun analysisTableNodeId(
-    owner: String,
     namespace: String,
     table: String,
-): String = "table:$owner:$namespace:$table"
+): String = "table:$namespace:$table"
 
 /**
- * 这个节点**能不能展开**。
+ * 字段节点的 id —— `column:<表名>:<字段名>`。
  *
- * 只有表是叶子 —— 工作区 / 远端源 / 命名空间都是分组。
- * 判定写成一个函数而不是散在界面里，是为了**界面与测试用同一条规则**：
- * 否则界面按 kind 画扭子、测试按另一套判断，两边迟早对不上。
+ * 表名必须在里面：不同表里都叫 `id` 的字段很常见，
+ * 而它们是要分别展开、分别选中的。
  */
-fun AnalysisTreeNode.expandable(): Boolean = kind != AnalysisTreeKind.TABLE
-
-/**
- * 在树里按 id 找到某个节点。
- *
- * 找不到返回 `null`（而不是抛异常）—— 树的形状会随展开而变，
- * 「这一刻找不到」是**正常状态**（比如节点刚被换掉），不是错误。
- */
-fun findAnalysisNode(
-    roots: List<AnalysisTreeNode>,
-    id: String,
-): AnalysisTreeNode? {
-    for (node in roots) {
-        if (node.id == id) return node
-        val hit = findAnalysisNode(node.children, id)
-        if (hit != null) return hit
-    }
-    return null
-}
-
-/**
- * 把树里 id 为 [id] 的节点换成 [transform] 之后的那个。
- *
- * ## 为什么要「按 id 替换」而不是「整棵树重建」
- *
- * 展开一个节点时，我们只想换掉**那一个**节点（把它的子节点填上），
- * 其余部分必须原样保留 —— 用户的展开态、滚动位置都挂在这棵树上。
- * 整棵树重建会把「谁展开了」这件事从树上抹掉（那部分状态在界面侧的
- * `expandedIds` 里，但节点本身的 `loaded` / `children` 会一起丢）。
- *
- * ## 为什么找不到就**原样返回**
- *
- * 找不到说明这棵树已经被换掉了（比如数据源被删了）。
- * 那时**什么都不做**才是对的 —— 凭空造一个节点会让树里出现幽灵行。
- */
-fun replaceAnalysisNode(
-    roots: List<AnalysisTreeNode>,
-    id: String,
-    transform: (AnalysisTreeNode) -> AnalysisTreeNode,
-): List<AnalysisTreeNode> =
-    roots.map { node ->
-        if (node.id == id) {
-            transform(node)
-        } else if (node.children.isEmpty()) {
-            node
-        } else {
-            node.copy(children = replaceAnalysisNode(node.children, id, transform))
-        }
-    }
+fun analysisColumnNodeId(
+    table: String,
+    column: String,
+): String = "column:$table:$column"
 
 // ──────────────── 结果 → 表格 ────────────────
 

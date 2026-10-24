@@ -27,11 +27,12 @@ import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
-import com.langbiantianya.sundays.analysis.AnalysisTreeKind
-import com.langbiantianya.sundays.analysis.AnalysisTreeNode
-import com.langbiantianya.sundays.analysis.analysisTreeRowTag
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.table.TABLE_CELL_TAG_PREFIX
+import com.langbiantianya.sundays.tree.ObjectTreeColumn
+import com.langbiantianya.sundays.tree.ObjectTreeKind
+import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.objectTreeRowTag
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
@@ -85,19 +86,47 @@ class AnalysisScreenTest {
 
     private val treeRoots =
         listOf(
-            AnalysisTreeNode(
+            ObjectTreeNode(
                 id = "workspace",
                 label = "workspace.duckdb",
-                kind = AnalysisTreeKind.WORKSPACE,
-                dialectLabel = "DuckDB",
+                kind = ObjectTreeKind.DATABASE,
+                badge = "DuckDB",
+                children =
+                    listOf(
+                        ObjectTreeNode(
+                            id = "table:main:orders",
+                            label = "orders",
+                            kind = ObjectTreeKind.TABLE,
+                            children =
+                                listOf(
+                                    ObjectTreeNode(
+                                        id = "column:orders:id",
+                                        label = "id",
+                                        kind = ObjectTreeKind.COLUMN,
+                                        parentLabel = "orders",
+                                        column =
+                                            ObjectTreeColumn(
+                                                name = "id",
+                                                type = "INTEGER",
+                                                primaryKey = true,
+                                            ),
+                                    ),
+                                ),
+                        ),
+                    ),
             ),
-            AnalysisTreeNode(
+            // 一个假装的远端源 —— 只为了让「源的名字在屏幕上只出现一次」那条
+            // 判据有东西可数（真树里没有远端源，那是另一条契约）。
+            ObjectTreeNode(
                 id = "c1",
                 label = "本地 MySQL",
-                kind = AnalysisTreeKind.SOURCE,
-                dialectLabel = "MySQL",
+                kind = ObjectTreeKind.DATABASE,
+                badge = "MySQL",
             ),
         )
+
+    /** 树的展开态 —— 让那张表与它的字段都露出来。 */
+    private val expandedNodeIds = setOf("workspace", "table:main:orders")
 
     @Test
     fun `the run button sits on the same row as the format button and the badge is gone`() {
@@ -130,7 +159,7 @@ class AnalysisScreenTest {
     }
 
     @Test
-    fun `the analysis screen lists the data sources in the tree`() {
+    fun `the analysis screen renders the tree it is given down to the columns`() {
         runComposeUiTest {
             setContent {
                 SundaysTheme {
@@ -138,15 +167,18 @@ class AnalysisScreenTest {
                         AnalysisScreen(
                             sources = sources,
                             treeRoots = treeRoots,
+                            expandedNodeIds = expandedNodeIds,
                         )
                     }
                 }
             }
 
-            // 数据源的名字同时出现在工具条的下拉框里和左树的行里 ——
-            // 按标记找树里那一行，断言才说得清「是哪一行」。
-            onNodeWithTag(analysisTreeRowTag("c1")).assertIsDisplayed()
-            onNodeWithTag(analysisTreeRowTag("workspace")).assertIsDisplayed()
+            // 分析页的树与浏览模式的对象树**同形**（库 → 表 → 字段）——
+            // 字段这一层是这一轮补上的：写分析 SQL 时最需要的对照信息。
+            onNodeWithTag(objectTreeRowTag("workspace")).assertIsDisplayed()
+            onNodeWithTag(objectTreeRowTag("table:main:orders")).assertIsDisplayed()
+            onNodeWithTag(objectTreeRowTag("column:orders:id")).assertIsDisplayed()
+            onNodeWithText("INTEGER").assertIsDisplayed()
         }
     }
 
