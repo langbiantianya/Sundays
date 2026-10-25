@@ -23,12 +23,14 @@ import com.langbiantianya.grpc.analysisListTablesRequest
 import com.langbiantianya.grpc.analysisRequest
 import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.grpc.connectionConfig
+import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisPullCancelledException
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.DeleteSourceOutcome
 import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullProgress
 import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
@@ -380,6 +382,40 @@ class AnalysisSession(
     var treeError by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * 登记在册的数据源名（= 它们在工作区里占的 schema 名）。
+     *
+     * ## 为什么界面需要它
+     *
+     * 右键菜单的「删除数据源」只对**真正登记在册**的源出现 ——
+     * 工作区自己的 `main`、用户在 DuckDB 里手工建的 schema 都不是数据源：
+     * 删前者是「删掉分析模式的计算引擎」，删后者是「删掉用户自己建的东西」。
+     *
+     * 判据是**登记表**而不是「树上有没有这一行 schema」：树上那一行只说明
+     * 「工作区里有个叫这个名字的 schema」，而登记表才说明
+     * 「它是本应用登记过的数据源」。
+     */
+    var deletableSourceNames by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /**
+     * 最近一次「删除数据源」的**结果**；`null` = 还没删过。
+     *
+     * ## 为什么与 [treeError] 分开
+     *
+     * 树脚那行说的是「**加载**失败」。删除失败不是加载失败 ——
+     * 两件事塞进同一句话，用户读到的是「加载失败：删除数据源失败：xxx」，
+     * 驴唇不对马嘴。
+     *
+     * ## 为什么结果**两种都要**
+     *
+     * 失败必须看得见（用户点了，却什么都没发生）。
+     * 成功也要说一声：删除是**不可撤销**的（整根 schema 连同里面的表一起没了），
+     * 用户需要确认「刚才那一下真的生效了」，而树的变化有时会被滚动挡住。
+     */
+    var deleteSourceOutcome by mutableStateOf<DeleteSourceOutcome?>(null)
+        private set
+
     /** 正在加载的节点 id —— 用来挡住**重复**加载（连点两下扭子）。 */
     private val loadingNodeIds = mutableSetOf<String>()
 
@@ -467,6 +503,11 @@ class AnalysisSession(
      * 它是应用的内务，不是用户的数据源。
      */
     private suspend fun listSourceSchemas(): List<ObjectTreeNode> {
+        // 登记表**先**读：它决定「哪些 schema 是数据源」——
+        // 而「哪些能删」正是靠这个集合判定的（见 [deletableSourceNames]）。
+        val registered = loadRegisteredSources().associateBy { it.schemaName }
+        // ⚠️ `main` 永远排除在外：它是分析模式自带的计算引擎，不是数据源。
+        deletableSourceNames = registered.keys - WORKSPACE_SCHEMA
         val schemas =
             runWorkspaceQuery(
                 "SELECT schema_name FROM information_schema.schemata " +
@@ -474,7 +515,6 @@ class AnalysisSession(
                     "ORDER BY schema_name",
             )
         if (schemas.failed) return emptyList()
-        val registered = loadRegisteredSources().associateBy { it.schemaName }
         return schemas.rows
             .mapNotNull { it.firstOrNull() }
             .filter { it.isNotBlank() }
@@ -848,17 +888,113 @@ class AnalysisSession(
         )
     }
 
+    /**
+     * 删掉一个数据源 —— 工作区里那个 schema 与登记表里那一行。
+     *
+     * ## 为什么是**两件事**
+     *
+     * 数据源在磁盘上占**两处**：
+     *
+     * | 在哪 | 是什么 | 删掉它的后果 |
+     * |---|---|---|
+     * | 工作区 DuckDB | 一个 schema（`CREATE SCHEMA <name>`） | 里面那些拉进来的表一起没了 |
+     * | 登记表（`sundays` schema） | 一行记录（名字 / 方言 / 连接信息） | 下次启动它不再出现 |
+     *
+     * 只删一处的话：只删 schema → 登记表还留着它，重启后它又「回来」了
+     * （而表已经没了 —— 用户看到的是一个**空**的数据源）；
+     * 只删登记 → schema 还在、表也还在，但树上多了一根**没有来由**的 schema。
+     *
+     * ## 顺序为什么是「先 DROP 再 DELETE」
+     *
+     * 反过来的话，`DROP` 失败就留下一个「有 schema、没登记」的孤儿 ——
+     * 用户在树上看得见它，却**没法从菜单里删掉**（菜单只给登记在册的源）。
+     * 先 DROP 的话，最坏情况是「schema 没了、登记还在」—— 那只是下次启动时
+     * 一次没人管的清理（`listSourceSchemas` 列的是**实际存在的** schema，
+     * 登记里的残留不会在树上冒出一根）。
+     *
+     * ## 为什么删之前要**核对清单**
+     *
+     * 界面已经保证「菜单只给登记在册的源」，但界面那一层回答的是
+     * 「用户点了什么」，这一层回答的是「到底允许删什么」。
+     * 核对一次，两边对不上时**这里**说了算 —— 宁可拒绝，
+     * 也不要删掉一个不该删的 schema。
+     *
+     * @param schema 要删的数据源（= 它在工作区里占的 schema 名）
+     * @return 启动的任务；`null` = 没启动（名字是空的 / 它不是可删的数据源）
+     */
+    fun removeSource(schema: String): Job? {
+        val name = schema.trim()
+        if (name.isBlank()) return null
+        // ⚠️ 工作区**不能**删 —— 它是分析模式自带的计算引擎（主设计 M4 要求它可写）。
+        // 判据放在**动作这一层**而不是只靠界面：界面那一层是「用户点了什么」，
+        // 这一层是「到底允许删什么」。
+        if (name == WORKSPACE_SCHEMA) {
+            deleteSourceOutcome =
+                DeleteSourceOutcome.Failed(Msg.format(StrKey.ANALYSIS_DELETE_SOURCE_REFUSED, name))
+            return null
+        }
+        // 上一次的结果先清掉 —— 否则这次成功了，旧的红字还挂着，
+        // 用户会以为「还是没删掉」。
+        deleteSourceOutcome = null
+        return scope.launch {
+            try {
+                val registered = queryRegisteredSources()
+                // 读不出来 / 不在清单里 —— 两种都**拒绝**。
+                // 前者是真「清单读不出来」，后者是「它本来就不是数据源」；
+                // 两者对用户的结论是一样的（不能删），所以用同一句话。
+                if (registered == null || registered.none { it.schemaName == name }) {
+                    deleteSourceOutcome =
+                        DeleteSourceOutcome.Failed(Msg.format(StrKey.ANALYSIS_DELETE_SOURCE_REFUSED, name))
+                    return@launch
+                }
+                runWorkspaceStatement("DROP SCHEMA IF EXISTS ${quoteIdent(name)} CASCADE")
+                runWorkspaceStatement(
+                    "DELETE FROM ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} " +
+                        "WHERE name = ${escapeLiteral(name)}",
+                )
+                // 那个 schema 没了，它底下的展开态也就没有意义了 ——
+                // 留着的话，下次有**同名**的数据源加进来会被自动展开（用户没要求过）。
+                expandedNodeIds = expandedNodeIds - analysisSchemaNodeId(name)
+                // **等**树刷新完 —— 否则「删完源回头看树」可能还差半秒，
+                // 而那半秒里它还在树上（用户会以为没删掉）。
+                refreshTree().join()
+                deleteSourceOutcome = DeleteSourceOutcome.Deleted(name)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 失败要说清为什么 —— 用户刚点了「删除」，
+                // 最怕的是「点了没反应」。
+                deleteSourceOutcome =
+                    DeleteSourceOutcome.Failed(e.message ?: Msg.format(StrKey.ANALYSIS_DELETE_SOURCE_FAILED, name))
+            }
+        }
+    }
+
     /** 登记在册的数据源。 */
     suspend fun registeredSources(): List<AnalysisRegisteredSource> = loadRegisteredSources()
 
-/** 登记在册的数据源。 */
-    private suspend fun loadRegisteredSources(): List<AnalysisRegisteredSource> {
+    /** 登记在册的数据源（读不出来时是**空列表**）。 */
+    private suspend fun loadRegisteredSources(): List<AnalysisRegisteredSource> = queryRegisteredSources().orEmpty()
+
+    /**
+     * 登记表的内容 —— `null` = **读不出来**（工作区打不开 / 表还没建）。
+     *
+     * ## 为什么单独分出一个「可空」的版本
+     *
+     * 「清单是空的」与「清单读不出来」是**两件事**：
+     * 前者 = 用户一个数据源都没加；后者 = 工作区本身有问题。
+     * 合并成空列表的话，「读不出来」会被当成「没数据源」——
+     * 而「删数据源」的第一步正是**核对清单**，读不出来时它会拒绝删除。
+     * 这时若拿到的是空列表，拒绝的理由就会变成「它不在清单里」，
+     * **说错了原因**（真因是「清单读不出来」）。
+     */
+    private suspend fun queryRegisteredSources(): List<AnalysisRegisteredSource>? {
         val result =
             runWorkspaceQuery(
                 "SELECT name, kind, dialect, jdbc_url, db_name, user_name, password, path, format " +
                     "FROM ${quoteIdent(REGISTRY_SCHEMA)}.${quoteIdent(REGISTRY_TABLE)} ORDER BY created_at",
             )
-        if (result.failed) return emptyList()
+        if (result.failed) return null
         return result.rows.mapNotNull { row ->
             val name = row.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             AnalysisRegisteredSource(

@@ -806,6 +806,12 @@ internal fun MainScreen(
                         // `connection.json`（浏览模式的连接清单），
                         // 这边存的是**工作区 DuckDB 里**的登记表（分析模式自己的清单）。
                         onAddSource = { sourceDialogVisible = true },
+                        // 右键菜单「删除数据源」——
+                        // **能删的**由会话说了算（登记表里有没有它），
+                        // **怎么删**也在会话那边（工作区 DuckDB 在 desktopApp 这一侧）。
+                        deletableSourceNames = analysis.deletableSourceNames,
+                        onDeleteSource = { schema -> analysis.removeSource(schema) },
+                        deleteSourceOutcome = analysis.deleteSourceOutcome,
                         sql = analysis.sql,
                         onSqlChange = analysis::updateSql,
                         result = analysis.result,

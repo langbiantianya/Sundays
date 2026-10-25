@@ -128,8 +128,8 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **左树可折叠到侧边、宽度可调** —— 与浏览模式**同一个面板外壳**（`shared/tree/TreePaneShell.kt`）：折叠成 44dp 窄轨把宽度让给右边的编辑器与结果表；展开态拖分隔条调宽（此前是写死的 240dp） | `shared/tree/TreePaneShell.kt` |
 | | **编辑器面板高度可调** —— 与浏览模式**同一个横向分隔条**（`shared/ui/DragHandle.kt` 的 `HorizontalDragHandle`）：往下拖编辑器变高，双击复位回默认比例；**结果表有下限**（140dp），拖不下去 —— 数据看不见就等于白跑 | `shared/analysis/AnalysisScreen.kt` |
 | | **「+」添加数据源**（分析模式**专属**，不共用浏览模式的「添加连接」）：**远程数据库**（方言 / 主机 / 端口 / 库 / 用户 / 密码 → **用对应驱动预览**库与表 → **可多选可单选** → **DuckDB 官方扩展优先**，走不通退回 JDBC）与**文件 / 文件夹**（parquet / csv / Excel / jsonl → 直接用 DuckDB 的 `read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx` 建**视图**）。加完的源**直接在工作区 DuckDB 里**（登记表 `sundays.sources`），树里立刻多一根。路径可**调系统文件 / 文件夹选择器**挑（文本框仍在：网络路径与无头环境只能手输）；格式**能手选**（文件夹没有扩展名） | `AnalysisSourceDialog.kt` / `AnalysisSession` |
-| | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
-| | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
+| | **右键菜单能删掉数据源** —— 右键**数据源的那张表**就弹出菜单（菜单机制与浏览模式**共用同一份**：`shared/tree/TreeContextMenu.kt`），菜单里是「删除数据源」，**确认框**先说清后果（它带进工作区的表会一起删掉、不可撤销）。确认后工作区里那个 schema 与登记表里那一行**一起**没掉。**只有登记在册的源才给这一项** —— 用户手工建的 schema 不是数据源，工作区自己的 `main` 更不是（那是分析模式**自带的计算引擎**） | `shared/tree/TreeContextMenu.kt` / `shared/analysis/AnalysisTreeMenu.kt` / `AnalysisSession` |
+| | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` || | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器；点工作区的字段 → 把「表.字段」加进编辑器 | `AnalysisSession` |

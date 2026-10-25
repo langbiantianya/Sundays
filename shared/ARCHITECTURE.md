@@ -275,18 +275,20 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ### 6.1 数据分析模式的 UI 包（`analysis/`）
 
-[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，七个文件：
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，八个文件：
 
 | 文件 | 内容 |
 |---|---|
-| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ `AnalysisColumn` / `AnalysisResult` + 结果 → 表格的映射 + 分析模式**特有**的节点 id 规则 |
+| [`AnalysisModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) | `AnalysisSourceItem`（id / 名称 / 方言标签）+ `AnalysisColumn` / `AnalysisResult` + 结果 → 表格的映射 + 分析模式**特有**的节点 id 规则 + 「删除数据源」的终态模型（`DeleteSourceOutcome` 是 sealed：删掉了 / 没删掉） |
+| [`AnalysisTreeMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisTreeMenu.kt) | **右键菜单的判据**（纯函数 → 能进 `commonTest`）：`analysisDeleteSourceTarget(node, 可删清单)` 给出「这一下该删哪个数据源」，`null` = 不该给删除项。判据是「**登记表里有没有它**」—— 用户手工建的 schema 不是数据源，工作区自己的 `main` 更不是 |
 | [`AnalysisWorkspace.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisWorkspace.kt) | **工作区的纯规则**：工作区文件路径、`staging_<源库>_<表名>` 的拼法与标识符清洗（纯函数，不碰文件系统 → 能进 `commonTest`） |
 | [`AnalysisPull.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisPull.kt) | **拉取的纯模型**：进度（已读行数）、结果、终态模型（`PullOutcome` 是 sealed）、用户取消的专用异常 |
 | [`ObjectTreeModel.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/ObjectTreeModel.kt) | **两棵树共用的模型**（纯数据，不碰引擎 → 能进 `commonTest`）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换 / 谁可以展开」等纯规则。节点的 `namespace` 记着它所在的**容器**（schema / 库）—— 写引用时要用（`"库"."表"."列"`） |
 | [`ObjectTree.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/ObjectTree.kt) | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调。**浏览模式**（`desktopApp/SchemaTree.kt`）与**分析模式**（`analysis/AnalysisScreen.kt`）都喂它 —— 同一个概念只有一份实现 |
 | [`TreePaneShell.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreePaneShell.kt) | **两棵树共用的面板外壳**：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）。**浏览模式**与**分析模式**都套它 —— 折叠到侧边与拖拽调宽因此是同一份实现、同一套手感。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属） |
+| [`TreeContextMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreeContextMenu.kt) | **两棵树共用的右键菜单**：状态（`TreeContextMenuState<T>`，泛型载荷）、弹层（定位 / 边界钳位 / 关闭）、菜单项（「点了**先关菜单**再干活」）。此前这套机制只在 `desktopApp` 里（浏览模式专用），分析模式要么复制一份、要么没有菜单 —— 现在共用一份，两棵树的手感必然一致。用 `Popup` 而不是 `DropdownMenu` 的原因（offset 基准是「菜单**底边**」，换多少项就偏多少）是**真窗口实测**出来的，见该文件的 KDoc |
 | [`PullProgressIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullProgressIndicator.kt) | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 —— 用**静态字形**（`●`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
-| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行。编辑器面板与结果表之间是**可拖的横向分隔条**（`HorizontalDragHandle`）：编辑器高度可调，双击复位回默认比例；结果表有**下限**（140dp）—— 数据看不见就等于白跑，且窗口很矮时**编辑器的下限要让位给它** |
+| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行。编辑器面板与结果表之间是**可拖的横向分隔条**（`HorizontalDragHandle`）：编辑器高度可调，双击复位回默认比例；结果表有**下限**（140dp）—— 数据看不见就等于白跑，且窗口很矮时**编辑器的下限要让位给它**。左树带**右键菜单**（`tree/TreeContextMenu.kt`）：菜单项只有「删除数据源」一项，确认框画在**树面板之外**（折叠时面板整体从组合里移除，确认框不能跟着走） |
 
 三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
 
@@ -415,3 +417,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.30 | **树面板外壳上移** —— 新增 `tree/TreePaneShell.kt`：**两棵树的面板外壳共用一个组件**。展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（一个展开按钮 + 一枚图标，把宽度让给右边）。**宽度不由它持有**（受控组件 —— 布局宽度是窗口级偏好，应提升到「同一时刻只渲染一个实例」的那一层之外）；**指针图标由调用方给**（同 `DragHandle` 的分界）。折叠时树**整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点（滚动位置的代价见 v2.31） |
 | v2.31 | **折叠不再丢滚动位置** —— 折叠把整棵树从组合里移除，**记在树自己滚动容器里的位置就跟着没了**（展开后树回到顶部，用户得重新滚回去）。修法是**把滚动状态提到面板之外**：浏览模式放进 `DatabaseBrowserState`（**每个连接各一棵**，位置各归各 —— 放屏级会串到别的连接上），分析模式放进 `AnalysisScreen`（同一时刻只有一棵树，屏幕层已持有宽度与折叠态）。展开态（哪些库是张开的）本来就住在会话里，与滚动位置是同一类状态 |
 | v2.32 | **分隔条长出「横向」这一档** —— `DragHandle` 此前只能调**宽度**（左右两栏），SQL 编辑器的高度是写死的比例，而「写长 SQL 时要它高」与「结果只有两行时要它矮」这两种诉求打架。现在同一组件支持两种朝向：`DragHandle`（竖向，宽度）与 `HorizontalDragHandle`（横向，高度）—— **手势 / 画线 / 高亮 / 指针只有一份实现**，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。纯函数同步长出高度版（`nextPaneHeight` / `clampPaneHeight` / `canPaneHeightMove`）。**符号方向两条路径一致**：受控的永远是「分隔条**之前**那一块」的尺寸，所以往下拖编辑器变高 |
+| v2.34 | **① 树右键菜单上移** —— 新增 `tree/TreeContextMenu.kt`：浏览模式与分析模式**共用一份**右键菜单机制（状态 / 弹层 / 菜单项）。此前它只在 `desktopApp` 里，分析模式要么复制一份、要么没有菜单。菜单项各写各的（浏览模式六项、分析模式一项「删除数据源」），但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里 —— 漏了的后果是菜单杵在树上不消失、下一次右键被压在旧 Popup 底下。**② 分析模式的树能删数据源**：新增 `analysis/AnalysisTreeMenu.kt`（判据是纯函数 `analysisDeleteSourceTarget`）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`（终态是 sealed，与 `PullOutcome` 同一个做法）。菜单**只在节点属于登记在册的数据源时才弹** —— 弹一个空菜单比不弹更糟 |

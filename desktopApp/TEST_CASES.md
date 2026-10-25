@@ -94,7 +94,7 @@
 | [`TreePaneScrollTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneScrollTest.kt) | **折叠不丢滚动位置**：分析模式量**那一行的 y**（树不虚拟化，量得到画面），浏览模式量**滚动状态自己的偏移量**（树在 `LazyColumn` 里，滚出去的行不在语义树里，量不到 y）—— 两侧都是「折叠前后同一件事没变」 |
 | [`SqlEditorHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlEditorHeightTest.kt) | **SQL 编辑器高度可调（浏览与分析两侧都要成立）**：往下拖**编辑器变高**且**结果区正好让出同样的高度**（两者共享同一段空间）、往上拖编辑器变矮且高度**全部**进结果区、拖到底**结果区不跌破它的下限**（浏览 180dp / 分析 140dp —— 数据看不见就等于白跑）、高度是**窗口级偏好**（工作台被拆掉又重建后还在）。判据打在**行为**上（量高度差），不是「回调被调了」 |
 | [`PointerIconsTest`](./src/test/kotlin/com/langbiantianya/sundays/PointerIconsTest.kt) | 平台专属指针图标：「左右拉伸」箭头造得出来、就是 `java.awt.Cursor.E_RESIZE_CURSOR`（**AWT 里没有 `EW_RESIZE_CURSOR`**）、且是**稳定单例**（每次重组新建 AWT 光标会让 modifier 节点反复比对，表现为光标抖一下） |
-| [`TreeContextMenuStateTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuStateTest.kt) | 对象树右键菜单状态机：复制名称 / 复制引用名（按方言）/ 复制建表 DDL 的可见性与文案；PG 三段式与四段式、字段节点无 DDL 项、剪贴板注入 |
+| [`TreeContextMenuStateTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuStateTest.kt) | 对象树右键菜单**浏览模式特有**的那部分：复制名称 / 复制引用名（按方言）/ 复制建表 DDL 的可见性与文案；PG 三段式与四段式、字段节点无 DDL 项、剪贴板注入。⚠️ 菜单**状态机本身**的用例已随机制上移 `:shared`（见下） |
 | [`TreeContextMenuUiTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuUiTest.kt) | 右键菜单真点击：菜单项点完菜单消失 / 焦点环 / 字段行复制引用 |
 | [`CrossDatabaseQueryTest`](./src/test/kotlin/com/langbiantianya/sundays/CrossDatabaseQueryTest.kt) | 跨库浏览（真 MySQL）：非默认库独有的表能查到 / **同名表读到的是选中库的内容** / 配置指定的库仍然正常 |
 | [`PostgreSQLCrossDatabaseTest`](./src/test/kotlin/com/langbiantianya/sundays/PostgreSQLCrossDatabaseTest.kt) | PG 跨库（URL 指 A 选 B）：表列表来自 B / A 独有的表不混进来 / 同名表读到 B / A 本身仍正常 |
@@ -179,6 +179,9 @@
 | [`AnalysisPullIndicatorTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisPullIndicatorTest.kt) | **拉取进度的界面契约**：「正在拉取 · 已读 N 行」、**界面上不再出现「临时文件」**（联邦直查不落盘）、取消按钮回调、没给取消回调时不画按钮、完成 / 取消 / 失败三种终态各说各的话、进行中**不显示**上一次的终态 |
 | [`TreePaneCollapseTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneCollapseTest.kt) | **分析模式左树的面板契约**：左树**能拖宽**（此前写死 240dp）、**能折叠成侧边窄轨**（树整体从屏上消失、右边结果区**真的变宽**）、窄轨上**没有**拖宽把手、再点一下原样回来 —— 与浏览模式**同一个组件**（`TreePaneShell`） |
 | [`TreePaneScrollTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneScrollTest.kt) | **分析模式左树折叠不丢滚动位置** —— 折叠时整棵树从组合里移除，滚动状态若记在树上就跟着没；提到屏幕层后，折叠再展开树还停在原来那个位置（量**那一行的 y**，不虚拟化所以量得到画面） |
+| [`AnalysisRemoveSourceTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisRemoveSourceTest.kt) | **「删除数据源」在会话里的行为**（真 DuckDB 工作区 + 真文件源）：删得掉（工作区里那个 schema 与登记表里那一行**都**没了 —— 只删一处的话，要么重启后它又「回来」而表已经没了，要么树上多一根没有来由的 schema）、**它带进来的表一起没了**、**不误伤**工作区自己的表、**工作区自己不能被删**（`DROP SCHEMA main CASCADE` 会删掉整个工作区）、**没登记过的 schema 不能被删**（用户手工建的东西不是数据源）、成功与失败各留下一个**说得清**的结果 |
+| [`AnalysisTreeMenuTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/analysis/AnalysisTreeMenuTest.kt)（在 `:shared`） | **右键菜单的判据**（纯函数 `analysisDeleteSourceTarget`）：登记在册的源里的表给删除项且**删的是那个源**、源容器那一行也给、字段也归它所在的源；**工作区自己的表不给**、**工作区根不给**、**没登记过的 schema 不给**、清单为空时什么都不给 |
+| [`TreeContextMenuStateTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/tree/TreeContextMenuStateTest.kt)（在 `:shared`） | **两棵树共用的右键菜单状态机**：坐标换算（节点局部 → **root**，原样透传会让菜单偏整屏 —— 真窗口实测偏上 414px 且正好盖在别的节点上）、换算**不含宿主信息**、目标被替换而不是累积、`dismiss` 只清目标不清坐标、`showAt` 直接用 root 坐标 |
 
 ### 2.8 非测试支撑文件
 
@@ -309,6 +312,7 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 | **单跑通过不足以判定偶发** | 要看**第二轮全量**是否还复现。测试全量红**不等于**代码坏了，得先问「红的那一路和改动有没有关系」 |
 | **凡是要「按来源去重」的地方，「什么算同一次」只能有一个产地** | 两边算的 key 不是同一个 → 每一轮对账都把所有来源 forget 掉再当新的重推一遍，去重形同虚设 |
 | **「请求式」的滚动 API 与数据变更同时发生时是竞态** | `LazyListState.requestScrollToItem` 记下的是「下一次 remeasure 时生效、只生效一次」的请求，而 remeasure 常常**同时**要应用数据变更（行数变了）—— 那一刻位置按 **key** 维持，新行落在视野之外，请求有没有抢赢取决于先后。症状是**单跑全过、全量跑偶发挂**（负载改了时序）。改用**挂起式** `scrollToItem`（在滚动块里同步做完 remeasure）才稳 |
+| **「前置条件不成立」的断言是**假绿** —— 它测的不是那件事** | 「工作区不能出现在『可删』清单里」这条断言，配套的源叫 `orders_csv` 时**恒真**：登记表里压根没有 `main`，把实现里的「排除工作区」去掉，断言照样过 —— 变异验证里它是唯一一条 **MISSED**。改成**特意登记一个名字就叫 `main` 的数据源**（前置条件真的成立）之后，同一处变异立刻被抓。**断言要先问：它成立的那条路径，缺陷版本里会不会也成立？** |
 
 ---
 

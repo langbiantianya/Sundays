@@ -285,6 +285,8 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `shared/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据，不碰引擎）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换 / 谁可以展开」等纯规则 | ✅ 已落地（**第 15 片** —— 原 `analysis/SourceTree.kt` 的模型部分上移到这里） |
 | `shared/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 | ✅ 已落地（**第 15 片** —— 浏览模式的 `SchemaTree` 的**画法**搬上来，分析页改用它） |
 | `shared/.../tree/TreePaneShell.kt` | **两棵树共用的面板外壳**：展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮 `TreePaneToggleButton`。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） | ✅ 已落地（**第 16 片** —— 分析模式的左树此前是写死的 240dp，浏览模式是另一套手写布局；现在两侧共用同一个外壳；**第 17 片**把滚动状态也提到面板外，折叠不再丢位置） |
+| `shared/.../tree/TreeContextMenu.kt` | **两棵树共用的右键菜单**：状态（`TreeContextMenuState<T>`）、弹层（定位 / 边界钳位 / 关闭）、菜单项（「点了**先关菜单**再干活」）。此前那套机制只在 `desktopApp` 里 | ✅ 已落地（**第 18 片** —— 从 `desktopApp` 上移，分析模式与浏览模式共用同一份） |
+| `shared/.../analysis/AnalysisTreeMenu.kt` | **右键菜单的判据**（纯函数 `analysisDeleteSourceTarget`）：这一下该删哪个数据源，`null` = 不该给删除项 | ✅ 已落地（**第 18 片**） |
 | `shared/.../analysis/PullProgressIndicator.kt` | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 | ✅ 已落地（第 5 片；**第 7 片重写** —— 不再有「阶段」与「临时文件」） |
 | `shared/.../analysis/AnalysisScreen.kt` | 分析工作区主屏（拉取状态条 + 左树 + 中编辑器与结果 + 底栏）；**编辑器面板高度可拖**（`HorizontalDragHandle`，双击复位；结果表有 140dp 下限） | ✅ 已落地（**第 6 片补齐了主区**：编辑器面板 + 只读结果表 + 状态栏 + 「▶ 运行」；**第 9 片**去掉「数据源」下拉框；**第 10 片**加返回按钮；**第 14 片**「▶ 运行」挪进编辑器的工具条、去掉只读徽标与那条空工具条；**第 18 片**编辑器与结果表之间那条缝变成可拖的） |
 | `shared/.../navigation/StartScreen.kt` | **启动首屏**：标题 + 两张模式卡片（连接管理 / 数据分析），整块可点 | ✅ 已落地（第 11 片） |
@@ -434,6 +436,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `shared/.../commonTest/analysis/AnalysisPullTest.kt` | 拉取纯模型：进度只有一个数、结果说清落在哪张表与多少行、**终态三选一**、用户取消是**自己的异常**（不是协程取消） | ✅ 已落地（第 7 片重写，5 例） |
 | `shared/.../commonTest/analysis/AnalysisTreeTest.kt` | 分析模式**特有**的树规则：同名表在不同命名空间下 id 不同、表与字段的 id 不撞、工作区表的 id 由 schema 拼出、字段的 id 带着它属于哪张表、结果列的键**按下标**（重复列名不塌）、列与行用**同一套键**、NULL 仍是 NULL | ✅ 已落地（第 6 片；**第 15 片瘦身为分析特有部分**） |
 | `shared/.../commonTest/tree/ObjectTreeModelTest.kt` | **共享树模型**的纯规则：只有字段是叶子、按 id 找到深处的节点、**按 id 替换**只换该换的那一处、找不到就原样返回、行与扭子的标记不撞 | ✅ 已落地（**第 15 片**） |
+| `shared/.../commonTest/tree/TreeContextMenuStateTest.kt` | **共用右键菜单的状态机**：坐标换算（节点局部 → **root**，原样透传会让菜单偏整屏）、换算**不含宿主信息**、目标被替换而不是累积、`dismiss` 只清目标不清坐标 | ✅ 已落地（**第 18 片**） |
+| `shared/.../commonTest/analysis/AnalysisTreeMenuTest.kt` | **右键菜单判据**的纯规则：登记在册的源给删除项且删对名字；工作区自己的表 / 工作区根 / 没登记过的 schema / 空清单**都不给** | ✅ 已落地（**第 18 片**） |
+| `desktopApp/.../AnalysisRemoveSourceTest.kt` | **「删除数据源」在会话里的行为**（真 DuckDB + 真文件源）：schema 与登记**两处**都删掉、带进来的表一起没、不误伤工作区的表、工作区自己不能被删、没登记过的 schema 不能被删、成功与失败各留下一个结果 | ✅ 已落地（**第 18 片**，7 例；**变异验证 9 处全被抓住**） |
 
 ### 5.5 i18n
 
@@ -1065,6 +1070,7 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 15 | `refactor(analysis): 两棵树合成一棵 —— 分析页的树与浏览模式共用组件，并展开到字段` | 新增 `:shared` 的 `tree/ObjectTree.kt` + `tree/ObjectTreeModel.kt`（浏览模式那套画法上移）；删掉 `analysis/SourceTree.kt`；`SchemaTree` 改用共享组件；会话新增**字段层**（`ANALYSIS.LIST_COLUMNS`）；引擎的分析路由补上「自增」标记 | 两边的树**同一形状**（库 → 表 → 字段）；分析页展开一张表能看到字段；浏览模式的行为**一点没变**（右键菜单 / 弹窗 / 标记都在） | ✅ **已提交** |
 | 16 | `feat(analysis): 分析模式能自己加数据源 —— 树头上一个「+」，加完直接进 DuckDB` | 协议（`AnalysisPullRequest` 加 `target_schema` / `access_mode`）+ 会话的**数据源登记表**（工作区 DuckDB 里的 `sundays.sources`）+ **「添加数据源」对话框**（驱动预览 + 勾选表 / 文件路径）+ 树按 **schema** 组织 | 加一个 CSV → 工作区里有它、树上看得见、换个会话还在；远程源走**扩展优先、JDBC 兜底** | ✅ **已提交** |
 | 17 | `fix(analysis): 「添加数据源」对话框跟着全局主题走，文件改用系统选择器` | 对话框从 Material3 `AlertDialog` 换成仓库的 Win 控件自拼（`WinSurface` / `WinButton` / `WinTextField` / `WinDivider`）；路径框旁加「浏览」→ `NativePathPicker.pickPath`（系统文件 / 文件夹选择器）；格式改成**能手选**（文件夹没有扩展名）；i18n 加一个键 | 对话框在复古档里也是 Win 风格；路径不必手抄；文件夹的格式能选 | ✅ **本轮落地** |
+| 18 | `feat(analysis): 分析模式的树能删掉数据源 —— 右键表 → 菜单 → 确认 → 删除` | 新增 `:shared` 的 `tree/TreeContextMenu.kt`（**两棵树共用的右键菜单机制**，从 `desktopApp` 上移）+ `analysis/AnalysisTreeMenu.kt`（判据是纯函数）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`；会话新增 `removeSource()`（`DROP SCHEMA … CASCADE` + 删登记 + 刷树）与 `deletableSourceNames`；i18n 加 7 个键 × 六语言；UI 设计图补上菜单 | 右键**表**能弹菜单、菜单里能删数据源；删得掉（schema 与登记**两处**都没）；**工作区自己不能被删**；**没登记过的 schema 不能被删**；**变异验证 9 处全被抓住**（其中一处原本是**假绿** —— 前置条件不成立，改成「特意登记一个叫 `main` 的源」之后才抓住） | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——

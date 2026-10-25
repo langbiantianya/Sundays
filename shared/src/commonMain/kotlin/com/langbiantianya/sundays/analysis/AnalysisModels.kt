@@ -88,6 +88,30 @@ data class AnalysisResult(
 // ──────────────── 数据源树 ────────────────
 
 /**
+ * 「删除数据源」的**结果** —— 成功与失败两种，互斥。
+ *
+ * ## 为什么不是一个可空的字符串
+ *
+ * 「删掉了」与「没删掉」要用**不同的颜色**呈现（常态 / 红），
+ * 而颜色不是字符串的一部分 —— 所以这里带一个**种类**，
+ * 由界面决定怎么画，界面自己不必去猜「这句话是成功还是失败」。
+ *
+ * 这与拉取的 [PullOutcome] 是同一个做法：**终态是一个穷举**，
+ * 界面照着渲染即可，不必自己推断。
+ */
+sealed interface DeleteSourceOutcome {
+    /** 删掉了 —— [schema] 是被删掉的数据源名。 */
+    data class Deleted(
+        val schema: String,
+    ) : DeleteSourceOutcome
+
+    /** 没删掉 —— [reason] 是原因（要看得见，不能只说「失败了」）。 */
+    data class Failed(
+        val reason: String,
+    ) : DeleteSourceOutcome
+}
+
+/**
  * 工作区根节点的 id —— 固定值，不随连接变化。
  *
  * 分析模式与浏览模式**共用同一个树组件**（`com.langbiantianya.sundays.tree.ObjectTree`），

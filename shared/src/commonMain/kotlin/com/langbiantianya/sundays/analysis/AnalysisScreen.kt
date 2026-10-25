@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -50,12 +53,17 @@ import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
+import com.langbiantianya.sundays.tree.TreeContextMenu
+import com.langbiantianya.sundays.tree.TreeContextMenuItem
+import com.langbiantianya.sundays.tree.TreeContextMenuState
 import com.langbiantianya.sundays.tree.TreePaneShell
 import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.HorizontalDragHandle
+import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinIconButton
+import com.langbiantianya.sundays.ui.WinTextButton
 import com.langbiantianya.sundays.ui.str
 
 /**
@@ -105,6 +113,14 @@ import com.langbiantianya.sundays.ui.str
  * @param treeError 树加载失败的原因；`null` = 没有错误
  * @param onAddSource 「添加数据源」被点时回调 —— 加的东西**直接进工作区 DuckDB**
  *   （它自己的清单，不跟连接管理器共用）
+ * @param deletableSourceNames 登记在册的数据源名（= 它们在工作区里占的 schema 名）。
+ *   只有列在这里的才给「删除数据源」这一项 —— 工作区自己的 `main`
+ *   与用户手工建的 schema 都不在其中（判据见 [analysisDeleteSourceTarget]）
+ * @param onDeleteSource 「删除数据源」被**确认**时回调，参数是那个 schema 名。
+ *   真正动手的是 desktopApp（`DROP SCHEMA … CASCADE` + 从登记表里删掉那一行）——
+ *   `:shared` 看不见工作区，也不该知道「数据源」在磁盘上是什么
+ * @param deleteSourceOutcome 最近一次「删除数据源」的**结果**；
+ *   `null` = 还没删过。画在树面板的脚上（成功是常态色、失败是红色）
  * @param sql 编辑器里的当前 SQL
  * @param onSqlChange 编辑器内容变化时回调
  * @param result 最近一次查询的结果；`null` = 还没跑过
@@ -134,6 +150,9 @@ fun AnalysisScreen(
     treeLoading: Boolean = false,
     treeError: String? = null,
     onAddSource: () -> Unit = {},
+    deletableSourceNames: Set<String> = emptySet(),
+    onDeleteSource: (String) -> Unit = {},
+    deleteSourceOutcome: DeleteSourceOutcome? = null,
     sql: String = "",
     onSqlChange: (String) -> Unit = {},
     result: AnalysisResult? = null,
@@ -173,6 +192,14 @@ fun AnalysisScreen(
     // 屏幕层这一层已经持有宽度与折叠态，滚动位置与它们是同一类东西。
     val treeScrollState = rememberScrollState()
 
+    // 「删除数据源」的**待确认对象** —— 右键菜单点下去只**记下**它，
+    // 真正删之前要用户确认（删掉的是一整个 schema 里的表，不可恢复）。
+    //
+    // 为什么状态住在**屏幕层**而不是树面板里：树面板在**折叠时整体从组合里移除**
+    // （`TreePaneShell` 的窄轨只有 44dp，塞不下树）—— 确认框要是跟着面板走，
+    // 用户折叠一下树，正在确认的删除就**无声消失**了（而删除本身还没发生）。
+    var pendingDeleteSource by remember { mutableStateOf<String?>(null) }
+
     Column(modifier = modifier.fillMaxSize()) {
         // 拉取状态条 —— 在树与主区**上面**横贯一条。
         // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
@@ -209,6 +236,10 @@ fun AnalysisScreen(
                         onSelectTable = onSelectTreeTable,
                         onSelectColumn = onSelectTreeColumn,
                         onAddSource = onAddSource,
+                        // 右键菜单：**只有**属于登记在册数据源的节点才给删除项。
+                        deletableSourceNames = deletableSourceNames,
+                        onRequestDeleteSource = { pendingDeleteSource = it },
+                        deleteSourceOutcome = deleteSourceOutcome,
                         onCollapse = { treePaneCollapsed = !treePaneCollapsed },
                         loading = treeLoading,
                         error = treeError,
@@ -288,6 +319,42 @@ fun AnalysisScreen(
                 }
             }
         }
+
+        // 「删除数据源」的确认框 —— 画在**树面板之外**（见上面那条注释）。
+        //
+        // 为什么要有确认：删掉的是**整个 schema**（连同里面所有拉进来的表），
+        // 而 DuckDB 里没有撤销。误触一次的代价是用户重新拉一遍数据 ——
+        // 远端表可能几十上百兆。
+        pendingDeleteSource?.let { schema ->
+            AlertDialog(
+                onDismissRequest = { pendingDeleteSource = null },
+                // 标题是**问句**、正文是**后果** —— 与浏览模式「删除表」那个框同构。
+                title = { Text(str(StrKey.ANALYSIS_DELETE_SOURCE_CONFIRM, schema)) },
+                text = { Text(str(StrKey.ANALYSIS_DELETE_SOURCE_CONFIRM_HINT)) },
+                confirmButton = {
+                    WinButton(
+                        onClick = {
+                            // 先关掉确认框再动手：删除是**异步**的
+                            // （要发引擎往返），确认框杵在那里会挡住用户的下一次操作。
+                            pendingDeleteSource = null
+                            onDeleteSource(schema)
+                        },
+                        shape = SundaysPalette.buttonShape,
+                        modifier = Modifier.testTag(ANALYSIS_DELETE_SOURCE_CONFIRM_TAG),
+                    ) {
+                        Text(str(StrKey.ANALYSIS_DELETE_SOURCE_CONFIRM_BTN), maxLines = 1, softWrap = false)
+                    }
+                },
+                dismissButton = {
+                    WinTextButton(
+                        onClick = { pendingDeleteSource = null },
+                        shape = SundaysPalette.buttonShape,
+                    ) {
+                        Text(str(StrKey.CANCEL), maxLines = 1, softWrap = false)
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -299,6 +366,12 @@ const val ANALYSIS_RUN_BUTTON_TAG: String = "analysisRunButton"
 
 /** 「添加数据源」按钮的测试标记。 */
 const val ANALYSIS_ADD_SOURCE_BUTTON_TAG: String = "analysisAddSourceButton"
+
+/** 分析树右键菜单里「删除数据源」那一项的测试标记。 */
+const val ANALYSIS_MENU_DELETE_SOURCE_TAG: String = "analysisMenuDeleteSource"
+
+/** 「删除数据源」确认框里那个「删除」按钮的测试标记。 */
+const val ANALYSIS_DELETE_SOURCE_CONFIRM_TAG: String = "analysisDeleteSourceConfirm"
 
 /** 左树的默认宽度 —— 双击分隔条即复位到这个值。 */
 val ANALYSIS_TREE_PANEL_DEFAULT_WIDTH: Dp = 240.dp
@@ -493,12 +566,21 @@ private fun AnalysisTreePanel(
     onSelectTable: (ObjectTreeNode) -> Unit,
     onSelectColumn: (ObjectTreeNode) -> Unit,
     onAddSource: () -> Unit,
+    deletableSourceNames: Set<String>,
+    onRequestDeleteSource: (String) -> Unit,
+    deleteSourceOutcome: DeleteSourceOutcome?,
     onCollapse: () -> Unit,
     loading: Boolean,
     error: String?,
     scrollState: ScrollState,
     modifier: Modifier = Modifier,
 ) {
+    // 右键菜单的状态 —— 与浏览模式**同一份机制**（`:shared` 的 `TreeContextMenuState`）。
+    //
+    // 目标类型是**数据源的 schema 名**：分析模式的树只有「删除数据源」这一个动作，
+    // 没有浏览模式那六项，所以不必把整个节点传出去。
+    val treeMenu = remember { TreeContextMenuState<String>() }
+
     Column(
         modifier =
             modifier
@@ -552,7 +634,14 @@ private fun AnalysisTreePanel(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        Box(modifier = Modifier.weight(1f)) {
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    // Popup 的 parent 就是这个 Box，而 `Popup.offset` 相对 parent ——
+                    // 所以菜单要把 root 坐标换算成面板内坐标，就靠这里上报的 origin。
+                    .onGloballyPositioned { treeMenu.updateHostOrigin(it.positionInRoot()) },
+        ) {
             // 滚动容器归这里 —— 共享树组件只画内容，不自带滚动。
             // 浏览模式把树放进 `LazyColumn` 的每一项里，容器不一样。
             //
@@ -571,11 +660,37 @@ private fun AnalysisTreePanel(
                     onToggle = onToggleNode,
                     onSelectTable = onSelectTable,
                     onSelectColumn = onSelectColumn,
+                    // 右键 —— 判据只有一条：**这个节点属于一个登记在册的数据源**。
+                    //
+                    // 不属于就**不弹菜单**：弹一个空菜单比不弹更糟 ——
+                    // 用户会以为程序卡住了。工作区自己的表（`main`）就属于这一类。
+                    onRightClickNode = { node, offset ->
+                        analysisDeleteSourceTarget(node, deletableSourceNames)?.let { schema ->
+                            treeMenu.showAt(offset, schema)
+                        }
+                    },
                     // 转圈是**无限动画**，会让「等界面空闲」的 UI 测试永远等不到 ——
                     // 分析模式的加载是一瞬的事，用不着它。
                     showLoadingSpinner = false,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            // 右键菜单的**弹层** —— 与浏览模式**同一个组件**
+            // （`:shared` 的 `TreeContextMenu`），所以两侧的定位与手感必然一致。
+            //
+            // 菜单项**只有一条**：删除数据源。分析模式的树没有别的动作 ——
+            // 复制引用是**点**字段就干的事（`onSelectColumn`），不需要菜单。
+            TreeContextMenu(menu = treeMenu) { schema ->
+                TreeContextMenuItem(
+                    treeMenu,
+                    ANALYSIS_MENU_DELETE_SOURCE_TAG,
+                    // 菜单项要写清**删的是哪一个** —— 树上可能有好几个数据源，
+                    // 光写「删除数据源」用户得自己猜是哪一张表背后的那个。
+                    str(StrKey.ANALYSIS_DELETE_SOURCE, schema),
+                ) {
+                    onRequestDeleteSource(schema)
+                }
             }
         }
 
@@ -587,6 +702,42 @@ private fun AnalysisTreePanel(
                 text = str(StrKey.ANALYSIS_TREE_LOADING),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+            )
+        }
+
+        // 「删除数据源」的**结果** —— 单独一行，放在树**下面**、树脚**上面**。
+        //
+        // 为什么成功也要说一声：删除是**不可撤销**的（整根 schema 连同里面的表
+        // 一起没了），用户需要确认「刚才那一下真的生效了」。
+        // 失败则是**必须**看得见的 —— 用户点了，却什么都没发生。
+        //
+        // 为什么与树脚那行「加载失败」**分开**：那是加载失败，这是操作失败 ——
+        // 混成一句「加载失败：删除数据源失败：xxx」就没法读了。
+        val outcomeText: Pair<String, Boolean>? =
+            when (val outcome = deleteSourceOutcome) {
+                null -> {
+                    null
+                }
+
+                is DeleteSourceOutcome.Deleted -> {
+                    str(StrKey.ANALYSIS_SOURCE_DELETED, outcome.schema) to false
+                }
+
+                is DeleteSourceOutcome.Failed -> {
+                    str(StrKey.ANALYSIS_DELETE_SOURCE_FAILED, outcome.reason) to true
+                }
+            }
+        if (outcomeText != null) {
+            Text(
+                text = outcomeText.first,
+                style = MaterialTheme.typography.labelSmall,
+                color =
+                    if (outcomeText.second) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
             )
         }

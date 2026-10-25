@@ -1,6 +1,35 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.14** · 2026-10-25
+> **状态**：设计冻结待评审 · **v1.15** · 2026-10-25
+>
+> **v1.15 相对 v1.14 的修改**（**分析模式的树能删掉数据源了**）：
+>
+> 1. **分析模式此前只能「加」数据源** —— 加错了、或者那个源已经不需要了，
+>    用户只能自己去 DuckDB 里手动 `DROP SCHEMA`（而他多半不知道
+>    数据源在工作区里占着一个 schema）。
+>    现在**右键数据源的那张表**就弹出菜单，菜单里是「删除数据源」。
+> 2. **菜单机制与浏览模式共用同一份** —— `:shared` 的
+>    `tree/TreeContextMenu.kt`（状态 / 弹层 / 菜单项）。
+>    此前那套机制只在 `desktopApp` 里（浏览模式专用），
+>    于是分析模式要么复制一份（同一个概念两份实现，改一处忘另一处）、
+>    要么就只能没有右键菜单。
+>    **§6.4 那条「右键菜单留在 `desktopApp`，分析模式不传它就是了」的结论作废。**
+> 3. **判据是「登记表里有没有它」** —— 不是「树上有没有这一行 schema」：
+>    用户在 DuckDB 里手工建的 schema 不是数据源，工作区自己的 `main` 更不是
+>    （那是分析模式**自带的计算引擎**，删它等于删掉整个工作区）。
+>    判据落在纯函数 `analysisDeleteSourceTarget` 上
+>    （`analysis/AnalysisTreeMenu.kt`）：界面按它决定「要不要弹菜单」，
+>    测试按它断言「这一下不该有删除项」。
+>    **菜单只在有得删时才弹** —— 弹一个空菜单比不弹更糟。
+> 4. **删除要动两处** —— 工作区里那个 schema（`DROP SCHEMA … CASCADE`）
+>    与登记表里那一行（`DELETE`）。只删一处的话，要么重启后它又「回来」
+>    而表已经没了，要么树上多一根没有来由的 schema。
+>    顺序是「先 DROP 再 DELETE」。
+> 5. **删除不可撤销，所以先问一句** —— 确认框与浏览模式「删除表」那个框同构：
+>    标题是**问句**、正文是**后果**（它带进工作区的表会一起删掉、不可撤销）。
+>    确认框画在**树面板之外**（折叠时面板整体从组合里移除，确认框不能跟着走）。
+> 6. **§9.1 画面 ② 与 §9.3 组件对照表同步**；浏览模式那一侧同步落到
+>    `desktopApp` 的 ARCHITECTURE / FEATURES / TEST_CASES。
 >
 > **v1.14 相对 v1.13 的修改**（**SQL 编辑器的高度可以拖了**）：
 >
@@ -1136,7 +1165,7 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 | `EmptyHint` | `shared/.../ui/EmptyHint.kt` | 所有空态 | 已是「标题 + 说明 + 可选居中」的通用形态 |
 | `FocusRing` / `uiBevel` / `winShape` / `controlShape` / `selectionColorsFor` | `shared/.../ui/UiChrome.kt` | 焦点环 / 立体边 / 圆角 / 选中色 | 经典档与现代档的差异全在这一个文件里 |
 | `WinButton` / `WinOutlinedButton` / `WinTextButton` / `WinTextField` / `WinIconButton` / `WinSwitch` / `WinMenuItem` / `WinSurface` / `WinProgressIndicator` / `WinDivider` | `shared/.../ui/WinControls.kt` | 全部按钮 / 输入框 / 开关 / 菜单项 / 进度条 | 现有控件集已覆盖分析模式的绝大多数控件，**唯独缺下拉**（§6.3.4） |
-| `ContextMenuState` / `onRightClick` | `shared/.../ui/ContextMenuState.kt` / `RightClick.kt` | 右键菜单 | 泛型 `ContextMenuState<T>`；表格与编辑器各有一个类型别名 |
+| `ContextMenuState` / `onRightClick` | `shared/.../ui/ContextMenuState.kt` / `RightClick.kt` | 右键菜单 | 泛型 `ContextMenuState<T>`；表格与编辑器各有一个类型别名。⚠️ **树**的右键菜单**不用它** —— 用的是 `tree/TreeContextMenu.kt`（那套的 `offset` 语义是「相对 root 的坐标」，与这里的「相对 DataTable 的偏移」不是一回事，见该文件 KDoc） |
 | `ColumnBadge` | `shared/.../ui/ColumnBadge.kt` | 数据源类型小徽标 | `surfaceVariant` 底的小徽标，正好是「类型标签」的视觉 |
 | `DragHandle` / `HorizontalDragHandle` | `shared/.../ui/DragHandle.kt` | 面板宽度拖拽 / **编辑器高度拖拽** | 同一个组件的两种朝向：手势 / 画线 / 高亮 / 指针只有一份实现，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。已支持 `hoverIcon`（指针图标由平台侧注入，桌面端 `PointerIcons.kt`；竖向用**左右拉伸**箭头，横向用**上下拉伸**箭头 —— 画反方向就是在骗用户） |
 | `DangerousSql` / `DangerousSqlConfirmDialog` | `shared/.../sql/DangerousSql.kt` / `DangerousSqlConfirmDialog.kt` | SQL 执行前的只读校验 | `isReadOnlyQuery` 已能剥注释、识别 SELECT / WITH / 多语句写操作 |
@@ -1369,6 +1398,17 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 > **右键菜单**留在 `desktopApp`，分析模式不传它就是了。
 > 这也正是本项目**既定的做法**（「平台无关的纯 UI 上移到 `:shared`」，
 > 见上面 `main.kt` 的 KDoc 引文）。
+>
+> ⚠️ **v1.15 把这条结论改了一半** —— 「不传它就是了」已经不成立：
+> 分析模式现在**有**右键菜单了（删除数据源），而菜单的**机制**
+> （状态 / 弹层 / 定位 / 关闭）跟着上移到 `:shared` 的
+> `tree/TreeContextMenu.kt`，与浏览模式**共用同一份**。
+>
+> 改的理由与当初把树上移**同源**：菜单的「怎么弹、弹在哪、点了怎么关」
+> 是**同一个概念**，留一份在 `desktopApp` 就等于分析模式要么复制一份、
+> 要么没有菜单。上移之后**菜单项**仍各写各的
+> （浏览模式六项、分析模式一项「删除数据源」）——
+> 该共用的共用，该各自的各自。
 
 **留下的问题**（→ Q9）：要不要顺手把 `BrowserToolBar` / `BrowserChrome` 上移？
 本设计的立场是**不夹带** —— 那是浏览模式的内部重构，与数据分析模式无关，
@@ -1686,7 +1726,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
 | ② 分析工作区 | 左树面板的**外壳**（可拖宽的分隔条 + **折叠到侧边的 44dp 窄轨** + 折叠 / 展开按钮） | `TreePaneShell` / `TreePaneToggleButton`（**与浏览模式同一个组件**） | ★ 新增（§6.4-2，**两棵树共用**） |
 | ② 分析工作区 | 底部状态条 | `WinProgressIndicator` / `WinTextField`（只读展示） | —— |
-| ② 分析工作区 | 右键菜单 | `ContextMenuState` + `onRightClick` | —— |
+| ② 分析工作区 | 右键菜单（**删除数据源**） | `TreeContextMenu` / `TreeContextMenuItem`（**与浏览模式同一个组件**）+ 判据 `analysisDeleteSourceTarget` | ★ v1.15：菜单**机制**上移 `:shared`（此前只在 `desktopApp` 里）；菜单项只有「删除数据源」一项 |
 | ③ 报表设计器 | 左侧区块列表 | `ReportBlockList` | ★ 新增（§6.4-2） |
 | ③ 报表设计器 | 中间列规格 | `ReportColumnSpecRow` + `WinDropdown` | ★ 新增（§6.4-3、§6.3.4） |
 | ③ 报表设计器 | 右侧 Excel 预览 | `DataTable`（只读）+ `WinSurface` | —— |
@@ -1740,6 +1780,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换」等纯规则 |
 | `shared/src/commonMain/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 |
 | `shared/src/commonMain/.../tree/TreePaneShell.kt` | **两棵树共用的面板外壳**（**新增组件 2/6**）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`TreePaneToggleButton`）。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） |
+| `shared/src/commonMain/.../tree/TreeContextMenu.kt` | **两棵树共用的右键菜单**（v1.15）：状态（`TreeContextMenuState<T>`，泛型载荷）、弹层（定位 / 边界钳位 / 关闭）、菜单项（「点了**先关菜单**再干活」）。此前那套机制只在 `desktopApp` 里 —— 分析模式要么复制一份、要么没有菜单。**菜单项各写各的**：浏览模式六项、分析模式一项「删除数据源」 |
+| `shared/src/commonMain/.../analysis/AnalysisTreeMenu.kt` | **右键菜单的判据**（v1.15，纯函数 → 能进 `commonTest`）：`analysisDeleteSourceTarget(node, 可删清单)` 给出「这一下该删哪个数据源」，`null` = 不该给删除项。判据是「**登记表里有没有它**」—— 用户手工建的 schema 不是数据源，工作区自己的 `main` 更不是 |
 | `shared/src/commonMain/.../ui/DragHandle.kt` | **可拖拽分隔条**（**不是新增组件** —— 是既有组件的**第二种朝向**）：`DragHandle`（竖向，调宽度）与 `HorizontalDragHandle`（横向，调高度）是**同一份实现**。分析模式的编辑器高度用它调；指针图标**由调用方给**（桌面端传**上下拉伸**箭头） |
 | `desktopApp/src/main/.../AnalysisSourceDialog.kt` | **「添加数据源」对话框** —— 分析模式**专属**（不共用浏览模式的「添加连接」）：远程数据库（方言 / 主机 / 端口 / 库 / 用户 / 密码 + **驱动预览**库与表 + **勾选**）与文件 / 文件夹（路径 + 格式） |
 | `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 3/6**） |

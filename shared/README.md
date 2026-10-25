@@ -1,6 +1,6 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。97 个源文件（`commonMain` 69 / `commonTest` 25 /
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。115 个源文件（`commonMain` 81 / `commonTest` 31 /
 `jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 

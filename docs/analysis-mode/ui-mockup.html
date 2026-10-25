@@ -224,6 +224,7 @@ body{
 .tree{
   width:250px; flex:none; display:flex; flex-direction:column;
   border-right:1px solid var(--outline-variant); background:var(--surface);
+  position:relative; /* 右键菜单是**浮层**，要相对树面板定位 */
 }
 /* 树头上的「+」—— 添加数据源（分析模式**专属**，不共用浏览模式的「添加连接」） */
 .tree-add{
@@ -268,6 +269,9 @@ body{
 .tree-row .tw{ width:13px; flex:none; text-align:center; font-size:11px; color:var(--on-surface-variant); }
 .tree-row.is-group{ font-weight:500; }
 .tree-row.is-local .name{ color:var(--tertiary); }
+/* v1.15：被右键的那一行 —— 菜单贴在它下面，
+   高亮它是为了说清「这个菜单作用在这一行上」。 */
+.tree-row.is-hot{ background:var(--surface-variant); }
 .lvl0{ padding-left:6px; } .lvl1{ padding-left:20px; } .lvl2{ padding-left:34px; }
 /* 字段行（v1.9：分析页的树与浏览模式的对象树**同形**，展开到字段）——
    名字 + 类型 + 约束标记，与浏览模式里那一层一模一样。 */
@@ -281,6 +285,25 @@ body{
 .tree-foot{
   padding:7px 10px; font-size:11px; line-height:15px; color:var(--on-surface-variant);
   background:var(--surface-variant); border-top:1px solid var(--outline-variant);
+}
+/* v1.15：**右键菜单** —— 与浏览模式**同一个组件**
+   （`:shared` 的 `tree/TreeContextMenu.kt`）。
+   分析模式这一侧只有**一项**：删除数据源。
+   菜单只在「这个节点属于一个登记在册的数据源」时才弹 ——
+   弹一个空菜单比不弹更糟。 */
+.ctx-menu{
+  position:absolute; z-index:20; min-width:150px; padding:4px 0;
+  /* 贴在被右键那一行的下方（与真窗口里的 `Popup` 同一个观感） */
+  left:56px; top:184px;
+  background:var(--surface); border:1px solid var(--outline-variant); border-radius:var(--r-md);
+  box-shadow:0 6px 18px rgba(0,0,0,.28);
+}
+.ctx-item{
+  padding:6px 12px; font-size:12px; line-height:16px; color:var(--on-surface); white-space:nowrap;
+}
+.ctx-item.is-danger{ color:var(--error); }
+.ctx-hint{
+  position:absolute; z-index:21; font-size:10px; line-height:14px; color:var(--on-surface-variant);
 }
 .work-main{ flex:1 1 auto; display:flex; flex-direction:column; gap:0; padding:8px; min-width:0; }
 .panel{
@@ -712,8 +735,18 @@ body{
               <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">amount</span><span class="type">DECIMAL(10,2)</span></div>
               <div class="tree-row is-col lvl2"><span class="tw"></span><span class="name">dt</span><span class="type">DATE</span><span class="badge">非空</span></div>
               <div class="tree-row is-group lvl0"><span class="tw">▸</span><span class="name">订单文件</span><span class="tag-tertiary">CSV</span></div>
-              <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_orders</span></div>
+              <!-- v1.15：右键**表** → 菜单（与浏览模式**同一个组件**）。
+                   被右键的那一行高亮 —— 菜单就贴在它下面，
+                   免得用户盯着菜单不知道它作用在哪张表上。 -->
+              <div class="tree-row is-local lvl1 is-hot"><span class="tw">▸</span><span class="name">staging_orders</span></div>
               <div class="tree-row is-local lvl1"><span class="tw">▸</span><span class="name">staging_items</span></div>
+            </div>
+            <!-- 右键菜单（`:shared` 的 `tree/TreeContextMenu.kt`）。
+                 分析模式这一侧只有**一项**；菜单**只在**被右键的节点属于
+                 一个**登记在册**的数据源时才弹（工作区自己的表没有这一项，
+                 所以那儿根本不弹菜单 —— 弹一个空菜单比不弹更糟）。 -->
+            <div class="ctx-menu">
+              <div class="ctx-item is-danger">删除数据源「订单文件」</div>
             </div>
             <div class="tree-foot">分析工作区 · 计算引擎 DuckDB</div>
           </aside>
@@ -1039,7 +1072,7 @@ body{
           <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">面板分隔条</span><span class="cmp-comp">DragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">编辑器高度分隔条（横向）</span><span class="cmp-comp">HorizontalDragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
-          <div class="cmp-row"><span class="cmp-area">右键菜单</span><span class="cmp-comp">ContextMenuState / onRightClick</span><span class="cmp-path">shared/…/ui/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">右键菜单</span><span class="cmp-comp">TreeContextMenu / TreeContextMenuItem</span><span class="cmp-path">shared/…/tree/TreeContextMenu.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">拉取进度</span><span class="cmp-comp">PullProgressIndicator</span><span class="cmp-path">shared/…/analysis/PullProgressIndicator.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
 
           <div class="cmp-group">③ 报表设计器</div>

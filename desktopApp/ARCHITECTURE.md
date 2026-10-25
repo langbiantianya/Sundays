@@ -54,7 +54,7 @@ desktopApp （本模块）
 
    │     ├── BrowserToolBar.kt         工具栏 / sheet 标签 / 连接状态
 
-   │     ├── SchemaTree.kt             对象树 + 右键菜单 + 表结构弹窗宿主（弹窗本体在 :shared）
+   │     ├── SchemaTree.kt             对象树 + 右键菜单的菜单项 + 表结构弹窗宿主（弹窗本体在 :shared）
 
    │     ├── TablePreview.kt           表格预览区 + 新增行弹窗
 
@@ -128,7 +128,7 @@ desktopApp （本模块）
 
 | [`DialectFormRegistryFactory.kt`](./src/main/kotlin/com/langbiantianya/sundays/DialectFormRegistryFactory.kt) | 引擎的方言列表 → 前端要的**两半**（连接表单注册表 + 能力位集合）；一次 `SYSTEM.LIST_DRIVERS`、一次换算（`DialectCatalog`） |
 
-| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径、**拉取进度与终态**、**数据源树与展开态**。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
+| [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | **分析模式的状态机** —— 与 `ConnectionSession` / `DatabaseBrowserState` **并列**（不继承、不耦合）：远端源的连接配置、当前选中源、当前 SQL 与结果、运行态、工作区文件路径、**拉取进度与终态**、**数据源树与展开态**、**登记在册的数据源名**与**删除数据源的终态**。**两条会话的只读方向相反**且各只有一个执行点：远端源恒只读（`sourceConfig`）、工作区可写（`workspaceConnection`） |
 
 | [`AnalysisSourceConnector.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSourceConnector.kt) | UI 层的 `ConnectionConfig` → 引擎的 `grpc.ConnectionConfig`（与浏览模式的 `engineConnFor` 同口径）；**不**在这里设 `read_only` —— 那是会话的唯一执行点，两处都设就又有了两个可能不一致的产地 |
 
@@ -158,7 +158,7 @@ desktopApp （本模块）
 
 | [`BrowserToolBar.kt`](./src/main/kotlin/com/langbiantianya/sundays/BrowserToolBar.kt) | 激活 sheet 的内容编排（`ActiveSheetContent`）与连接失败横幅 —— 依赖 `DatabaseBrowserState`，留在本模块 |
 
-| [`SchemaTree.kt`](./src/main/kotlin/com/langbiantianya/sundays/SchemaTree.kt) | 对象树渲染、右键菜单，以及由右键菜单进入的表结构弹窗宿主 |
+| [`SchemaTree.kt`](./src/main/kotlin/com/langbiantianya/sundays/SchemaTree.kt) | 对象树渲染、**右键菜单的菜单项**（复制名称 / 复制引用 / 复制建表 DDL / 编辑表结构 / 删除表 / 新增表），以及由右键菜单进入的表结构弹窗宿主。菜单的**机制**（状态 / 弹层 / 定位 / 关闭）**已上移 `:shared`** 的 `tree/TreeContextMenu.kt` —— 分析模式那棵树用的是同一份 |
 
 | [`TableStructure*.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/table/TableStructureDialog.kt) | **已上移 `:shared`**（草稿模型 / 校验与差分 / 类型候选 / 编辑弹窗）；本模块只剩 `SchemaTree.kt` 里的弹窗宿主与状态机里的 DDL 提交 |
 
@@ -488,6 +488,13 @@ desktopApp （本模块）
 | 拉取要**显式传源 id** | 树上点的是**某一张具体的表**，它属于哪个源是树自己知道的；用「当前选中的源」会拉错库的同名表 —— 而那**不会报错**（只要恰好有那张表），只是数据悄悄换了来源 | 同上 |
 | 分析工作台**没有「数据源」下拉框** | 它是**纯装饰**：拉取走的是树上那张表（表节点自带 `sourceId`），从不下拉框里取源 —— 那个 id 全程只有它自己在读。而它带来的是**两份可能对不上的真相**：下拉框里选了 A 源、树上点了 B 源的表，界面上「当前源是 A」而拉下去的却是 B 源的同名表。源只有一处能选：**左树** | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
 | 结果表的只读判据是**结构的** | 「点一下单元格看有没有冒出输入框」是**假绿**：实测把结果表改成可编辑后，点单元格照样不冒输入框（编辑手势挂在单元格的 `Box` 上，`Text` 自己不收指针事件）。改用「可编辑的单元格才有的标记」才有判别力 | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
+| 数据源的**增与删**是**一件事的两处** | 一个数据源在工作区里占**一个 schema**，同时在登记表（`sundays` schema）里占**一行**。只删一处的话：只删 schema → 重启后它又「回来」而表已经没了（用户看到的是一个**空**的数据源）；只删登记 → schema 还在、表也还在，但树上多一根**没有来由**的 schema。删除要**两处一起动** | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 删除的顺序是「**先 DROP 再 DELETE**」 | 反过来的话，`DROP` 失败就留下一个「有 schema、没登记」的**孤儿** —— 用户在树上看得见它，却**没法从菜单里删掉**（菜单只给登记在册的源）。先 DROP 的话，最坏情况是「schema 没了、登记还在」—— 那只是下次启动时一次没人管的清理（树列的是**实际存在的** schema，登记里的残留不会在树上冒出一根） | 同上 |
+| 「能不能删」的判据是**登记表**，不是「树上有没有这一行」 | 树上那一行只说明「工作区里有个叫这个名字的 schema」；登记表才说明「它是本应用登记过的数据源」。用户在 DuckDB 里手工建的 schema 不是数据源，工作区自己的 `main` 更不是 —— 删它等于删掉分析模式**自带的计算引擎**。判据落在 `:shared` 的纯函数 `analysisDeleteSourceTarget` 上：界面按它决定「要不要弹菜单」，测试按它断言「这一下不该有删除项」 | [`AnalysisTreeMenu.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisTreeMenu.kt) + [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 动作那一层要**再核一次**清单 | 界面那一层回答的是「用户点了什么」，动作那一层回答的是「到底允许删什么」。两边对不上时**动作那一层说了算** —— 宁可拒绝，也不要 `DROP` 掉一个不该删的 schema | 同上 |
+| 删除**不可撤销**，所以先问一句 | 删掉的是整个 schema（连同里面所有拉进来的表），DuckDB 里没有撤销，而远端表可能几十上百兆。确认框与浏览模式「删除表」那个框同构：标题是**问句**、正文是**后果** | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
+| 删除的结果是一个 **sealed** | 「删掉了」与「没删掉」要用**不同的颜色**呈现，而颜色不是字符串的一部分 —— 所以带一个**种类**（`DeleteSourceOutcome.Deleted` / `.Failed`），界面照着渲染即可，不必自己推断。与 `PullOutcome` 是同一个做法 | [`AnalysisModels.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) |
+| 菜单机制**与浏览模式共用一份** | `TreeContextMenuState` / `TreeContextMenu` / `TreeContextMenuItem` 现在住在 `:shared` 的 `tree/TreeContextMenu.kt`。此前那套机制只在 `desktopApp` 里 —— 分析模式要么复制一份（同一个概念两份实现，改一处忘另一处），要么根本没有右键菜单。菜单项各写各的，但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里（漏了的后果：菜单杵在树上不消失，下一次右键被压在旧 Popup 底下，看起来像「右键没反应了」） | [`TreeContextMenu.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreeContextMenu.kt) |
 
 
 ---
