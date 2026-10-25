@@ -814,6 +814,9 @@ internal fun MainScreen(
                         // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
                         // （`:shared` 只决定「什么时候用」）。
                         treePaneHoverIcon = ewResizePointerIcon(),
+                        // 编辑器 / 结果表之间那条缝是**横向**的，
+                        // 所以指针必须是**上下拉伸**箭头 —— 画成 ↔ 就是在说反。
+                        editorPaneHoverIcon = nsResizePointerIcon(),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

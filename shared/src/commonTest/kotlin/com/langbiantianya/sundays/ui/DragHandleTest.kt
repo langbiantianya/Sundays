@@ -193,4 +193,101 @@ class DragHandleTest {
             message = "上下限相同时宽度动不了，指针不该再是左右拉伸",
         )
     }
+
+    // ───────────────────────── 高度版（横向分隔条）─────────────────────────
+    //
+    // 横向分隔条与竖向分隔条共用同一份算术（`nextPaneSize`），
+    // 但**符号方向**必须单独钉住：受控的是分隔条**上面**那一块，
+    // 所以往下拖（正增量）它变高 —— 写反了就是「往下拖反而变矮」，
+    // 而这种缺陷在手感上只表现为「有点黏」，没人会报 bug。
+
+    @Test
+    fun dragging_down_tallens_the_pane() {
+        assertEquals(
+            400.dp,
+            nextPaneHeight(current = 320.dp, dragDeltaPx = 80f, density = d1, minHeight = min, maxHeight = max),
+            message = "向下拖应当按拖动距离等量加高",
+        )
+    }
+
+    @Test
+    fun dragging_up_shortens_the_pane() {
+        assertEquals(
+            240.dp,
+            nextPaneHeight(current = 320.dp, dragDeltaPx = -80f, density = d1, minHeight = min, maxHeight = max),
+            message = "向上拖应当等量变矮（正负号写反会让拖拽朝反方向响应）",
+        )
+    }
+
+    @Test
+    fun height_pixel_delta_is_converted_by_density_not_taken_as_dp() {
+        // 与宽度版同一条道理，但**要单独测**：两条路径共用 `nextPaneSize`，
+        // 而共用恰恰意味着「写错一次，两边一起错」。
+        assertEquals(
+            360.dp,
+            nextPaneHeight(current = 320.dp, dragDeltaPx = 80f, density = d2, minHeight = min, maxHeight = max),
+            message = "高度版的拖拽增量也必须先经 density 换算成 dp",
+        )
+    }
+
+    @Test
+    fun height_stays_at_least_the_minimum() {
+        assertEquals(
+            min,
+            nextPaneHeight(current = 200.dp, dragDeltaPx = -9999f, density = d1, minHeight = min, maxHeight = max),
+            message = "一路往上拖应停在下限，而不是被拖成 0 高",
+        )
+    }
+
+    @Test
+    fun height_stays_at_most_the_maximum() {
+        assertEquals(
+            max,
+            nextPaneHeight(current = 500.dp, dragDeltaPx = 9999f, density = d1, minHeight = min, maxHeight = max),
+            message = "一路往下拖应停在上限，否则结果区会被挤成一条缝",
+        )
+    }
+
+    @Test
+    fun height_clamp_keeps_values_inside_the_range_untouched() {
+        assertEquals(
+            320.dp,
+            clampPaneHeight(320.dp, min, max),
+            message = "区间内的高度不应被钳位改动",
+        )
+    }
+
+    @Test
+    fun height_clamp_pulls_back_an_oversized_value() {
+        assertEquals(max, clampPaneHeight(9999.dp, min, max))
+        assertEquals(min, clampPaneHeight((-5).dp, min, max))
+    }
+
+    @Test
+    fun an_inverted_range_does_not_throw() {
+        // 窗口极窄时，`max` 是按容器算出来的 —— 它会小于写死的 `min`。
+        // `coerceIn` 遇到 min > max 会直接抛 IllegalArgumentException，
+        // 而「窗口太窄」不该让整个应用崩掉。
+        assertEquals(
+            240.dp,
+            clampPaneHeight(value = 300.dp, minHeight = 240.dp, maxHeight = 200.dp),
+            message = "上下限反着时也要能钳住 —— 摆正后应当落在 [200, 240] 里",
+        )
+    }
+
+    @Test
+    fun a_height_inside_the_range_can_move_in_at_least_one_direction() {
+        assertTrue(
+            canPaneHeightMove(height = 320.dp, minHeight = min, maxHeight = max),
+            message = "区间内的高度至少还能往一边走，指针就该是上下拉伸",
+        )
+    }
+
+    @Test
+    fun a_height_pinned_at_both_ends_cannot_move() {
+        assertFalse(
+            canPaneHeightMove(height = 180.dp, minHeight = 180.dp, maxHeight = 180.dp),
+            message = "上下限相同时高度动不了，指针不该再是上下拉伸",
+        )
+    }
 }

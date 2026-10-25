@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.31（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.32（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -32,7 +32,7 @@
 | **SQL 文本工具** | 危险写操作识别与只读判定、WHERE 字面量转义与 CAST 类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
 | **浏览器的标签条与工作台切换** | sheet 标签条 / 工作台切换按钮 / 空态引导（只认窄数据形状 `SheetSummary`） | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
 | **通知中心** | 跨界面收集错误：状态容器 + 面板 + 铃铛入口 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
-| **通用 UI 工具** | `ContextMenuState<T>` + `Modifier.onRightClick` + `DragHandle` + `FocusRing` + `EmptyHint` + `ColumnBadge` + `TabRenameDialog` + 复古控件包装 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
+| **通用 UI 工具** | `ContextMenuState<T>` + `Modifier.onRightClick` + `DragHandle` / `HorizontalDragHandle` + `FocusRing` + `EmptyHint` + `ColumnBadge` + `TabRenameDialog` + 复古控件包装 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 
 ### 1.2 KMP Source Set 布局
 
@@ -264,7 +264,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `DangerousSqlConfirmDialog` | 危险语句二次确认框 | 导出预览与 SQL 执行共用同一个弹窗；识别与转义都是纯字符串遍历，因此能留在 `commonMain` | [`sql/DangerousSqlConfirmDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSqlConfirmDialog.kt) |
 | `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenuState.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenuState.kt) |
 | `Modifier.onRightClick` | 右键检测 | 只在主指针通道消费；不复用 Foundation 的 `internal onRightClickDown`（跨模块不可见） | [`ui/RightClick.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/RightClick.kt) |
-| `DragHandle` | 可拖拽分隔条 | 受控组件（宽度归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位**；悬停指针图标**由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」） | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
+| `DragHandle` / `HorizontalDragHandle` | 可拖拽分隔条（**竖向调宽度 / 横向调高度**） | **同一个组件的两种朝向** —— 手势、画线、高亮、指针只有一份实现，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。受控组件（尺寸归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位**；悬停指针图标**由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」）；钳位**先把上下限摆正**再夹 —— 容器极窄时上限会小于下限，`coerceIn` 遇到这种会直接抛异常 | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
 | `FocusRing` | 可见焦点环 | 给「自带焦点能力、默认不画焦点指示」的容器补一圈焦点环 | [`ui/FocusRing.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/FocusRing.kt) |
 | `LocalStrings` / `LanguagePicker` | 界面语言入口 | 文案表在 `:i18n`，本模块只提供 Composable 侧入口；语言名恒显母语名 | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt)、[`ui/LanguagePicker.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LanguagePicker.kt) |
 | `WinControls` / `WinDivider` / `winShape` / `uiBevel` | 复古控件外观包装层 | 现代档透传 M3；形状解析只在经典档改形状 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) |
@@ -286,7 +286,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | [`ObjectTree.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/ObjectTree.kt) | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调。**浏览模式**（`desktopApp/SchemaTree.kt`）与**分析模式**（`analysis/AnalysisScreen.kt`）都喂它 —— 同一个概念只有一份实现 |
 | [`TreePaneShell.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreePaneShell.kt) | **两棵树共用的面板外壳**：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）。**浏览模式**与**分析模式**都套它 —— 折叠到侧边与拖拽调宽因此是同一份实现、同一套手感。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属） |
 | [`PullProgressIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullProgressIndicator.kt) | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 —— 用**静态字形**（`●`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
-| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行 |
+| [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行。编辑器面板与结果表之间是**可拖的横向分隔条**（`HorizontalDragHandle`）：编辑器高度可调，双击复位回默认比例；结果表有**下限**（140dp）—— 数据看不见就等于白跑，且窗口很矮时**编辑器的下限要让位给它** |
 
 三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
 
@@ -351,7 +351,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `TableModelsTest` / `CellEditTest` | 列 / 行 / 分页 / 主题模型；单元格编辑只报不执行 |
 | `JdbcUrlTest` / `SqlIdentifierQuoteTest` | 字段 ↔ URL 折算与回解析；引号风格与 5 个真实方言逐一比对 |
 | `SundaysPaletteTest` / `UiTokensTest` | 文字对比度达 WCAG AA；逐主题 × 明暗断言经典档全开、现代档全关 |
-| `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算；**「还能不能拖」的判据**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄、上下限相等才不可拖） |
+| `ThemeModeTest` / `CompactModeTest` / `DragHandleTest` | 三档循环与互逆；密度缩放数学与字体补偿；拖拽算术必须经 density 换算；**「还能不能拖」的判据**（`canPaneWidthMove` / `canPaneHeightMove`：顶到下限仍可变宽、顶到上限仍可变窄、上下限相等才不可拖）；**上下限反着时不能抛异常**（容器极窄 → 上限小于下限） |
 | `SettingsStorageTest` / `ConnectionStorageTest` | 逐档往返、原子写、损坏降级 + 自愈、**v1 → v2 → v3 迁移**、自定义 URL 连接的往返仍是自定义 URL |
 | `ConnectionStoragePermissionsTest` | POSIX 权限位（0600）。**Windows 上是 `assumeTrue` skip 而非断言失败** —— 那里访问控制走 ACL，断言失败等于要求 Windows 做不到的事 |
 | `DangerousSqlTest` / `SqlLiteralsTest` | 危险写操作识别与**逐句**只读判定；WHERE 字面量转义 / CAST 目标类型逐方言 |
@@ -414,3 +414,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.28 | **① 分隔条悬停要有「左右拉伸」指针** —— 此前 `DragHandle` 只管拖拽不管指针，鼠标停上去永远是默认箭头，拖拽功能「存在但没人发现」。新增 `hoverIcon: PointerIcon?` 参数：**图标由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」），因为 Compose 公共 API 只有默认 / 十字 / 文本 / 手型四种指针，左右拉伸箭头是平台专属资源 —— 与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker`）。**② 只在「真的拖得动」时才显示箭头**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄，只有上下限相等才是真动不了）—— 顶死还摆「可拖」箭头是在骗用户，而且这种「图标在骗人」的缺陷比「图标没有」更难查 |
 | v2.30 | **树面板外壳上移** —— 新增 `tree/TreePaneShell.kt`：**两棵树的面板外壳共用一个组件**。展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（一个展开按钮 + 一枚图标，把宽度让给右边）。**宽度不由它持有**（受控组件 —— 布局宽度是窗口级偏好，应提升到「同一时刻只渲染一个实例」的那一层之外）；**指针图标由调用方给**（同 `DragHandle` 的分界）。折叠时树**整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点（滚动位置的代价见 v2.31） |
 | v2.31 | **折叠不再丢滚动位置** —— 折叠把整棵树从组合里移除，**记在树自己滚动容器里的位置就跟着没了**（展开后树回到顶部，用户得重新滚回去）。修法是**把滚动状态提到面板之外**：浏览模式放进 `DatabaseBrowserState`（**每个连接各一棵**，位置各归各 —— 放屏级会串到别的连接上），分析模式放进 `AnalysisScreen`（同一时刻只有一棵树，屏幕层已持有宽度与折叠态）。展开态（哪些库是张开的）本来就住在会话里，与滚动位置是同一类状态 |
+| v2.32 | **分隔条长出「横向」这一档** —— `DragHandle` 此前只能调**宽度**（左右两栏），SQL 编辑器的高度是写死的比例，而「写长 SQL 时要它高」与「结果只有两行时要它矮」这两种诉求打架。现在同一组件支持两种朝向：`DragHandle`（竖向，宽度）与 `HorizontalDragHandle`（横向，高度）—— **手势 / 画线 / 高亮 / 指针只有一份实现**，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。纯函数同步长出高度版（`nextPaneHeight` / `clampPaneHeight` / `canPaneHeightMove`）。**符号方向两条路径一致**：受控的永远是「分隔条**之前**那一块」的尺寸，所以往下拖编辑器变高 |

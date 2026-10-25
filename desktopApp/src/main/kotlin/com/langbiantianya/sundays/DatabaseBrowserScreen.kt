@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.langbiantianya.client.EngineClient
 import com.langbiantianya.grpc.Action
@@ -225,6 +226,17 @@ fun DatabaseBrowserScreen(
     // 折叠的收益是**把宽度让给右边** —— 表格宽一点、SQL 长一点都少横向滚动。
     var schemaPanelCollapsed by remember { mutableStateOf(false) }
 
+    // SQL 编辑器的高度 —— 与树面板宽度**同一层**、同一套理由：
+    //
+    // 它也是**布局偏好**，不是「某个连接的数据」的一部分。写在
+    // `ActiveSheetContent` 里的话，切 sheet 时组合被拆掉重建，高度就复位了 ——
+    // 「在 A 连接把编辑器拉高，切到 B 连接又缩回去」。
+    //
+    // `null` = **还没拖过**，用默认比例（跟着窗口高度走）。
+    // 拖过之后是**绝对高度**：窗口缩小时会被工作台重新钳一遍（装不下就往下拉），
+    // 但不会因为「窗口变大了」就自己长回去 —— 用户拖出来的样子是用户的事。
+    var sqlEditorHeight by remember { mutableStateOf<Dp?>(null) }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
@@ -259,6 +271,8 @@ fun DatabaseBrowserScreen(
                     onSchemaPanelWidthChange = { schemaPanelWidth = it },
                     schemaPanelCollapsed = schemaPanelCollapsed,
                     onSchemaPanelCollapsedChange = { schemaPanelCollapsed = it },
+                    sqlEditorHeight = sqlEditorHeight,
+                    onSqlEditorHeightChange = { sqlEditorHeight = it },
                     modifier = Modifier.weight(1f),
                 )
             }

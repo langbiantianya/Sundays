@@ -66,6 +66,9 @@ internal const val TABLE_CLEAR_BTN_TAG = "tableClearBtn"
  * @param onSchemaPanelWidthChange 拖拽分隔条时的实时回调
  * @param schemaPanelCollapsed 左树面板是不是折叠成了贴边的窄轨
  * @param onSchemaPanelCollapsedChange 折叠 / 展开时的回调
+ * @param sqlEditorHeight SQL 编辑器的高度 —— **窗口级偏好**，同样由 [DatabaseBrowserScreen] 持有；
+ *   `null` = 还没拖过，用默认比例
+ * @param onSqlEditorHeightChange 拖动编辑器与结果区之间那条缝时的实时回调
  */
 @Composable
 internal fun ActiveSheetContent(
@@ -76,6 +79,8 @@ internal fun ActiveSheetContent(
     onSchemaPanelWidthChange: (Dp) -> Unit,
     schemaPanelCollapsed: Boolean,
     onSchemaPanelCollapsedChange: (Boolean) -> Unit,
+    sqlEditorHeight: Dp?,
+    onSqlEditorHeightChange: (Dp) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 注入当前连接（连接变化时清空派生状态），随后在已连接时自动加载数据库列表。
@@ -169,6 +174,10 @@ internal fun ActiveSheetContent(
                             connected = sheet.status.state == ConnectionState.CONNECTED,
                             schema = sheet.browser.currentSchema(),
                             dialect = sheet.browser.sqlDialectProfile(),
+                            // 编辑器高度是**窗口级偏好** —— 与左树宽度同一层，
+                            // 切 sheet 不复位（见 [DatabaseBrowserScreen]）。
+                            editorHeight = sqlEditorHeight,
+                            onEditorHeightChange = onSqlEditorHeightChange,
                             modifier =
                                 Modifier
                                     .weight(1f)

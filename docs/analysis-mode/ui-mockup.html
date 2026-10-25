@@ -282,7 +282,7 @@ body{
   padding:7px 10px; font-size:11px; line-height:15px; color:var(--on-surface-variant);
   background:var(--surface-variant); border-top:1px solid var(--outline-variant);
 }
-.work-main{ flex:1 1 auto; display:flex; flex-direction:column; gap:8px; padding:8px; min-width:0; }
+.work-main{ flex:1 1 auto; display:flex; flex-direction:column; gap:0; padding:8px; min-width:0; }
 .panel{
   display:flex; flex-direction:column; min-height:0;
   border:1px solid var(--outline-variant); border-radius:var(--r-md); background:var(--surface); overflow:hidden;
@@ -295,6 +295,18 @@ body{
 .panel-head .sub{ margin-left:auto; font-size:11px; line-height:14px; font-weight:400; color:var(--on-surface-variant); }
 .panel-editor{ flex:1 1 auto; }
 .panel-result{ flex:0 0 auto; }
+/* v1.14：编辑器与结果表之间那条**可拖**的缝 —— `:shared` 的 `HorizontalDragHandle`。
+   它与竖向那条（树的宽度）是**同一个组件的两种朝向**：命中区 8dp、画线 1dp。
+   悬停时换**上下拉伸**指针 —— 画成左右拉伸就是在说反方向，
+   用户照着指针试，试不动就以为坏了。 */
+.h-divider{
+  flex:none; height:8px; display:flex; align-items:center; cursor:ns-resize;
+}
+.h-divider::before{
+  content:""; width:100%; height:1px; background:var(--outline-variant);
+  transition:background .12s ease;
+}
+.h-divider:hover::before{ background:var(--primary); }
 .editor{
   flex:1 1 auto; padding:8px 10px; overflow:auto;
   background:var(--background); color:var(--on-surface);
@@ -324,7 +336,7 @@ body{
 .bar-label{ display:inline-block; margin-left:8px; font-size:12px; color:var(--on-surface-variant); vertical-align:middle; }
 .fill-41{ width:41.2%; } .fill-24{ width:24.1%; } .fill-15{ width:15.5%; } .fill-10{ width:9.8%; }
 .status-bar{
-  display:flex; align-items:center; gap:14px; height:26px; padding:0 10px;
+  display:flex; align-items:center; gap:14px; height:26px; padding:0 10px; margin-top:8px;
   border-top:1px solid var(--outline-variant); background:var(--surface);
   font-size:11px; line-height:14px; color:var(--on-surface-variant);
 }
@@ -721,6 +733,13 @@ body{
 <span class="caret"></span></div>
             </div>
 
+            <!-- v1.14：编辑器与结果表之间那条缝**可以拖** ——
+                 往下拖编辑器变高，双击复位回默认比例（0.42 : 1）。
+                 结果表有 140dp 下限，拖不下去 —— 数据看不见就等于白跑。
+                 实现是 `:shared` 的 `HorizontalDragHandle`，与竖向那条
+                 （左树的宽度）是同一个组件的两种朝向。 -->
+            <div class="h-divider" title="拖动调整编辑器高度（双击复位）"></div>
+
             <div class="panel panel-result">
               <div class="panel-head">结果 (12 行)<span class="sub">耗时 1.2 s</span></div>
               <table class="grid">
@@ -1019,6 +1038,7 @@ body{
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">面板分隔条</span><span class="cmp-comp">DragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">编辑器高度分隔条（横向）</span><span class="cmp-comp">HorizontalDragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">右键菜单</span><span class="cmp-comp">ContextMenuState / onRightClick</span><span class="cmp-path">shared/…/ui/</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">拉取进度</span><span class="cmp-comp">PullProgressIndicator</span><span class="cmp-path">shared/…/analysis/PullProgressIndicator.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
 

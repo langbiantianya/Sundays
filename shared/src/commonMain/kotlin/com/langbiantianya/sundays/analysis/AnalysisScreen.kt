@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +53,7 @@ import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
 import com.langbiantianya.sundays.tree.TreePaneShell
 import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
+import com.langbiantianya.sundays.ui.HorizontalDragHandle
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.str
@@ -114,6 +116,9 @@ import com.langbiantianya.sundays.ui.str
  *   （AWT 里只有 `E_RESIZE_CURSOR` / `W_RESIZE_CURSOR`），公共 Compose API 造不出来。
  *   `:shared` 只管「什么时候用」，平台侧管「长什么样」——
  *   与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker` / `DragHandle` 的 `hoverIcon`）。
+ * @param editorPaneHoverIcon 编辑器 / 结果表之间那条分隔条悬停时的指针图标。
+ *   桌面端应传**上下拉伸**箭头（`Cursor.NS_RESIZE_CURSOR`）——
+ *   与左树那条传**左右拉伸**箭头，方向必须跟着分隔条自身的朝向走。
  */
 @Composable
 fun AnalysisScreen(
@@ -135,6 +140,7 @@ fun AnalysisScreen(
     running: Boolean = false,
     onRun: () -> Unit = {},
     treePaneHoverIcon: PointerIcon? = null,
+    editorPaneHoverIcon: PointerIcon? = null,
     modifier: Modifier = Modifier,
 ) {
     // 左树的**宽度**与**折叠态** —— 与浏览模式的树面板同一套理由：
@@ -146,6 +152,15 @@ fun AnalysisScreen(
     // 那是它把状态放在 `DatabaseBrowserScreen` 的原因）。
     var treePaneWidth by remember { mutableStateOf(ANALYSIS_TREE_PANEL_DEFAULT_WIDTH) }
     var treePaneCollapsed by remember { mutableStateOf(false) }
+
+    // 编辑器面板的**高度** —— 与左树的宽度、折叠态**同类**：布局偏好，住在屏幕层。
+    //
+    // 为什么不能写死成比例：写一段长 SQL 时编辑器太矮，
+    // 跑出来的结果只有两行时结果表又占了七成屏 —— 两种诉求互相打架，
+    // 而比例是编译期定死的，用户没有任何办法调。
+    //
+    // `null` = **还没拖过**，用默认比例（跟着窗口高度走）。
+    var editorHeight by remember { mutableStateOf<Dp?>(null) }
 
     // 左树的**滚动位置** —— 提到面板**外面**持有。
     //
@@ -208,20 +223,67 @@ fun AnalysisScreen(
                             .fillMaxHeight()
                             .background(MaterialTheme.colorScheme.surface),
                 ) {
-                    AnalysisEditorPanel(
-                        sql = sql,
-                        onSqlChange = onSqlChange,
-                        running = running,
-                        onRun = onRun,
-                        modifier = Modifier.weight(EDITOR_PANEL_WEIGHT),
-                    )
-                    AnalysisResultPanel(
-                        result = result,
-                        // 一个远端源都没有时，空态要说的是「去建连接」而不是「去跑一条 SQL」——
-                        // 没有源就拉不到任何表，跑出来的结果只能是工作区里原有的东西。
-                        noSources = sources.isEmpty(),
-                        modifier = Modifier.weight(RESULT_PANEL_WEIGHT),
-                    )
+                    // 编辑器与结果表之间那条缝**可拖**。
+                    //
+                    // 为什么要多套一层 [BoxWithConstraints]：默认高度是**按比例**算出来的
+                    // （随窗口高度走），而拖出来的是**绝对高度** —— 两种算法都需要知道
+                    // 「编辑器 + 结果表」这一段有多高，所以必须先把状态栏让出去、
+                    // 再量剩下的那块。
+                    BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                        // 编辑器最多能有多高：要让出分隔条的命中区与结果表的下限。
+                        val maxEditorHeight =
+                            (maxHeight - ANALYSIS_EDITOR_HANDLE_HEIGHT - MIN_ANALYSIS_RESULT_HEIGHT)
+                                .coerceAtLeast(0.dp)
+                        // 编辑器的下限**要让位给结果表的下限** —— 两者冲突时（窗口很矮）
+                        // **结果表优先**：它是分析模式的产出，看不见就等于白跑；
+                        // 而编辑器内部能滚，矮一点只是少显示几行。
+                        val minEditorHeight = MIN_ANALYSIS_EDITOR_HEIGHT.coerceAtMost(maxEditorHeight)
+                        // 没拖过时的初始高度 —— 沿用原来的权重比（0.42 : 1）。
+                        val defaultEditorHeight =
+                            ((maxHeight - ANALYSIS_EDITOR_HANDLE_HEIGHT) * EDITOR_PANEL_DEFAULT_RATIO)
+                                .coerceIn(minEditorHeight, maxEditorHeight)
+                        // 实际生效的高度：拖过的用拖出来的，没拖过的用默认值；
+                        // 两者都过一遍钳位 —— 窗口缩窄后上限会变小，
+                        // 拖出来的绝对高度可能已经装不下了，布局必须服从当前窗口。
+                        val editorHeightNow =
+                            (editorHeight ?: defaultEditorHeight)
+                                .coerceIn(minEditorHeight, maxEditorHeight)
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            AnalysisEditorPanel(
+                                sql = sql,
+                                onSqlChange = onSqlChange,
+                                running = running,
+                                onRun = onRun,
+                                modifier =
+                                    Modifier
+                                        .height(editorHeightNow)
+                                        .testTag(ANALYSIS_EDITOR_PANEL_TAG),
+                            )
+                            HorizontalDragHandle(
+                                height = editorHeightNow,
+                                onHeightChange = { editorHeight = it },
+                                defaultHeight = defaultEditorHeight,
+                                minHeight = MIN_ANALYSIS_EDITOR_HEIGHT,
+                                maxHeight = maxEditorHeight,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                highlightColor = MaterialTheme.colorScheme.primary,
+                                hitHeight = ANALYSIS_EDITOR_HANDLE_HEIGHT,
+                                modifier = Modifier.testTag(ANALYSIS_EDITOR_DRAG_HANDLE_TAG),
+                                // 悬停时换「上下拉伸」指针：分隔条在鼠标下必须看起来可拖
+                                hoverIcon = editorPaneHoverIcon,
+                            )
+                            AnalysisResultPanel(
+                                result = result,
+                                // 一个远端源都没有时，空态要说的是「去建连接」而不是「去跑一条 SQL」——
+                                // 没有源就拉不到任何表，跑出来的结果只能是工作区里原有的东西。
+                                noSources = sources.isEmpty(),
+                                modifier =
+                                    Modifier
+                                        .weight(1f)
+                                        .testTag(ANALYSIS_RESULT_PANEL_TAG),
+                            )
+                        }
+                    }
                     AnalysisStatusBar(result = result)
                 }
             }
@@ -258,11 +320,70 @@ const val ANALYSIS_TREE_DRAG_HANDLE_TAG: String = "analysisTreeDragHandle"
  */
 const val ANALYSIS_TREE_LIST_TAG: String = "analysisTreeList"
 
-/** 编辑器面板占主区的高度比例 —— 剩下的给结果表。 */
+/** 编辑器面板的 UI 测试 tag —— 拖拽测试要量「编辑器现在多高」。 */
+const val ANALYSIS_EDITOR_PANEL_TAG: String = "analysisEditorPanel"
+
+/** 编辑器与结果表之间那条分隔条的 UI 测试 tag —— 拖拽要有个明确的落点。 */
+const val ANALYSIS_EDITOR_DRAG_HANDLE_TAG: String = "analysisEditorDragHandle"
+
+/**
+ * 结果**面板**（面板头 + 表）的 UI 测试 tag。
+ *
+ * 为什么与 [ANALYSIS_RESULT_TABLE_TAG] 分成两个：前者量的是**结果区这一块**，
+ * 后者量的是结果区里**放表格的那一块**（不含面板头）。
+ * 「结果区有没有被拖到低于它的下限」问的是前者。
+ */
+const val ANALYSIS_RESULT_PANEL_TAG: String = "analysisResultPanel"
+
+/**
+ * 编辑器面板与结果面板的**原始权重比** —— 0.42 : 1。
+ *
+ * 权重不再直接用于布局（现在是「编辑器固定高度 + 结果表占剩余」），
+ * 但这两个数字仍是**默认比例**的来源 —— 见 [EDITOR_PANEL_DEFAULT_RATIO]。
+ */
 private const val EDITOR_PANEL_WEIGHT = 0.42f
 
-/** 结果面板占主区的高度比例。 */
+/** 结果面板的原始权重。 */
 private const val RESULT_PANEL_WEIGHT = 1f
+
+/**
+ * 编辑器在「编辑器 + 结果表」这一段里占的比例 —— 由权重比换算而来。
+ *
+ * 为什么不直接写死 0.3：权重是**相对**的（0.42 : 1 说的是「编辑器 : 结果表」），
+ * 换算成「编辑器占总数的几分之几」才是布局真正要的数字。
+ * 两处各写一个数字，改一处忘了另一处，比例就会悄悄漂掉。
+ */
+private const val EDITOR_PANEL_DEFAULT_RATIO = EDITOR_PANEL_WEIGHT / (EDITOR_PANEL_WEIGHT + RESULT_PANEL_WEIGHT)
+
+/**
+ * 分析模式编辑器的**最小高度** —— 再矮就只剩面板头与工具栏，看不见几行 SQL。
+ *
+ * 120dp = 面板头（约 26dp）+ 工具栏（约 40dp）+ 两行代码。
+ */
+private val MIN_ANALYSIS_EDITOR_HEIGHT = 120.dp
+
+/**
+ * 分析模式结果表的**最小高度** —— 表头 + 几行数据 + 分页栏。
+ *
+ * 与编辑器抢高度时**优先保结果表**：结果只有几行时结果表也用不满，
+ * 但「一行都看不见」是彻底的失败，而「编辑器矮一点」它内部能滚。
+ *
+ * 它同时是**拖拽的硬边界** —— 编辑器最多长到「总高 - 这个下限」，拖不下去。
+ * 公开出来是因为它是一条**契约**（测试要断言「结果表没被拖到低于它」），
+ * 而 :desktopApp 的测试看不到 :shared 的 `internal`。
+ */
+val ANALYSIS_RESULT_PANEL_MIN_HEIGHT: Dp = 140.dp
+
+/** 分析模式结果表的最小高度（内部名，布局算式里用）。 */
+private val MIN_ANALYSIS_RESULT_HEIGHT: Dp = ANALYSIS_RESULT_PANEL_MIN_HEIGHT
+
+/**
+ * 编辑器与结果表之间那条分隔条的**命中区高度** —— 画线仍只有 1dp。
+ *
+ * 与布局算式绑定（总高 = 编辑器 + 这条 + 结果表），
+ * 所以写成一个常量而不是就地写 8.dp：两处各写一个数字，迟早对不上。
+ */
+private val ANALYSIS_EDITOR_HANDLE_HEIGHT = 8.dp
 
 /**
  * 拉取状态条 —— 进度指示器与终态行。

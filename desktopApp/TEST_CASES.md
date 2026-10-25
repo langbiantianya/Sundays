@@ -92,6 +92,7 @@
 | [`SchemaPanelWidthTest`](./src/test/kotlin/com/langbiantianya/sundays/SchemaPanelWidthTest.kt) | 树面板宽度：拖拽 / 双击复位 / 钳在 `[180dp, 容器宽 × 62%]` |
 | [`TreePaneCollapseTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneCollapseTest.kt) | **树面板的折叠到侧边与宽度可调（浏览与分析两侧都要成立）**：分析模式**能拖宽**（此前写死 240dp）、折叠后**树整体不在屏上**且右边**真的宽出空间**、窄轨**没有分隔条**（44dp 没有「可调宽」可言）、再点一下原样回来、浏览模式折叠**不丢**拖好的宽度 |
 | [`TreePaneScrollTest`](./src/test/kotlin/com/langbiantianya/sundays/TreePaneScrollTest.kt) | **折叠不丢滚动位置**：分析模式量**那一行的 y**（树不虚拟化，量得到画面），浏览模式量**滚动状态自己的偏移量**（树在 `LazyColumn` 里，滚出去的行不在语义树里，量不到 y）—— 两侧都是「折叠前后同一件事没变」 |
+| [`SqlEditorHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlEditorHeightTest.kt) | **SQL 编辑器高度可调（浏览与分析两侧都要成立）**：往下拖**编辑器变高**且**结果区正好让出同样的高度**（两者共享同一段空间）、往上拖编辑器变矮且高度**全部**进结果区、拖到底**结果区不跌破它的下限**（浏览 180dp / 分析 140dp —— 数据看不见就等于白跑）、高度是**窗口级偏好**（工作台被拆掉又重建后还在）。判据打在**行为**上（量高度差），不是「回调被调了」 |
 | [`PointerIconsTest`](./src/test/kotlin/com/langbiantianya/sundays/PointerIconsTest.kt) | 平台专属指针图标：「左右拉伸」箭头造得出来、就是 `java.awt.Cursor.E_RESIZE_CURSOR`（**AWT 里没有 `EW_RESIZE_CURSOR`**）、且是**稳定单例**（每次重组新建 AWT 光标会让 modifier 节点反复比对，表现为光标抖一下） |
 | [`TreeContextMenuStateTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuStateTest.kt) | 对象树右键菜单状态机：复制名称 / 复制引用名（按方言）/ 复制建表 DDL 的可见性与文案；PG 三段式与四段式、字段节点无 DDL 项、剪贴板注入 |
 | [`TreeContextMenuUiTest`](./src/test/kotlin/com/langbiantianya/sundays/TreeContextMenuUiTest.kt) | 右键菜单真点击：菜单项点完菜单消失 / 焦点环 / 字段行复制引用 |

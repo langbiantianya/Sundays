@@ -57,6 +57,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.langbiantianya.grpc.request
 import com.langbiantianya.i18n.Msg
@@ -69,6 +70,7 @@ import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.sql.DangerousSqlConfirmDialog
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.ui.EmptyHint
+import com.langbiantianya.sundays.ui.HorizontalDragHandle
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.TabRenameDialog
 import com.langbiantianya.sundays.ui.WinButton
@@ -118,11 +120,51 @@ internal const val SQL_READONLY_CHIP_TAG = "sqlReadonlyChip"
  * 屏幕上却一行都没有 —— 用户看到的是「查出来了但没结果」，而拉高窗口数据就出来了。
  *
  * 宁可编辑器小一点（它内部能滚），也不能让结果区看不见数据。
+ *
+ * 这个下限同时是**拖拽的硬边界** —— 编辑器最多长到「总高 - 这个下限」，
+ * 拖不下去。测试要断言「结果区没被拖到低于它」，所以它是 `internal` 而不是 `private`。
  */
-private val MIN_SQL_RESULT_HEIGHT = 180.dp
+internal val MIN_SQL_RESULT_HEIGHT = 180.dp
 
 /**
- * SQL 工作台 —— 顶部信息条 + SQL sheet 标签条 + 编辑器（60%） + 结果面板（40%）。
+ * SQL 编辑器的**最小高度** —— 再矮就只剩一条工具栏，代码区看不见几行。
+ *
+ * 96dp = 工具栏（约 40dp）+ 两行代码。低于这个高度，编辑器就只是「一条装饰」。
+ *
+ * 它与 [MIN_SQL_RESULT_HEIGHT] 是一对**互相让步**的下限：
+ * 两者之和超过可用高度时（窗口极矮），谁都不可能满意，
+ * 那时优先保住**结果区** —— 数据看不见就等于白查（见 [MIN_SQL_RESULT_HEIGHT]）。
+ */
+private val MIN_SQL_EDITOR_HEIGHT = 96.dp
+
+/**
+ * 结果区默认占「编辑器 + 结果区」总高度的比例 —— 其余归编辑器。
+ *
+ * 沿用 40% / 60% 这个老比例：它是**没拖过**时的初始布局，
+ * 而拖过之后由用户说了算（见 [HorizontalDragHandle]）。
+ */
+private const val SQL_RESULT_DEFAULT_RATIO = 0.4f
+
+/**
+ * 编辑器与结果区之间那条分隔条的**命中区高度** —— 画线仍只有 1dp。
+ *
+ * 为什么写成一个常量而不是就地写 8.dp：布局算式里要**扣掉**它
+ * （总高 = 编辑器 + 这条 + 结果区），而画出来的那条线只有 1dp ——
+ * 两处各写一个数字，迟早会对不上，对不上的表现是「底部多出一条缝」或「内容被顶出去」。
+ */
+private val SQL_EDITOR_HANDLE_HEIGHT = 8.dp
+
+/** SQL 编辑器面板的 UI 测试 tag —— 拖拽测试要量「编辑器现在多高」。 */
+internal const val SQL_EDITOR_PANE_TAG = "sqlEditorPane"
+
+/** 编辑器与结果区之间那条分隔条的 UI 测试 tag —— 拖拽要有个明确的落点。 */
+internal const val SQL_EDITOR_DRAG_HANDLE_TAG = "sqlEditorDragHandle"
+
+/** SQL 结果区的 UI 测试 tag —— 拖拽测试要量「结果区被挤成多高了」。 */
+internal const val SQL_RESULT_AREA_TAG = "sqlResultArea"
+
+/**
+ * SQL 工作台 —— 顶部信息条 + SQL sheet 标签条 + 编辑器（默认 60%） + 结果面板（默认 40%）。
  *
  * 与 [GenerateWorkbenchPane] 同构：**多 sheet**，每个 sheet 的 [CodeEditorState] 与执行结果都由
  * 状态机持有（[DatabaseBrowserState.sqlSheets]），因此切到表预览 / 切到别的 sheet 再切回来时，
@@ -141,14 +183,26 @@ private val MIN_SQL_RESULT_HEIGHT = 180.dp
  * - `affectedRows != null`（非 SELECT）→ 「已影响 N 行」
  * - 有 `rows` → [DataTable]
  * - 否则 → 「执行 SQL 后在此查看结果」占位
+ *
+ * ## 编辑器的高度**可拖**
+ *
+ * 比例是编译期定死的，而两种诉求是**互相打架**的：
+ * 写一段长 SQL 时编辑器太矮，跑出来的结果只有两行时结果区又占了七成屏。
+ * 所以编辑器与结果区之间那条缝是 [HorizontalDragHandle] —— 往下拖编辑器变高，
+ * 双击复位回默认比例。
+ *
+ * @param editorHeight 编辑器的高度 —— **窗口级偏好**，由 [DatabaseBrowserScreen] 持有；
+ *   `null` = 还没拖过，用默认比例（跟着窗口高度走）
+ * @param onEditorHeightChange 拖动分隔条时的实时回调
  */
-
 @Composable
 internal fun SqlWorkbenchPane(
     state: DatabaseBrowserState,
     connected: Boolean,
     schema: String,
     dialect: SqlDialectProfile,
+    editorHeight: Dp? = null,
+    onEditorHeightChange: (Dp) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 补全候选：库 / 表 / 字段，全部来自已有状态（见 [DatabaseBrowserState.sqlSchemaCompletions]）。
@@ -355,16 +409,46 @@ internal fun SqlWorkbenchPane(
         // 现在结果区至少 [MIN_SQL_RESULT_HEIGHT]（够放下表头 + 一行数据 + 分页栏），
         // 多出来的高度归编辑器 —— 编辑器内部能滚，结果区不能：数据看不见就是白跑。
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val resultHeight = (maxHeight * 0.4f).coerceAtLeast(MIN_SQL_RESULT_HEIGHT)
+            // 四个高度先算清楚，**顺序不能反**：
+            //
+            // 1. `maxEditorHeight` —— 编辑器最多能有多高：上面要让出分隔条的
+            //    命中区与结果区的下限，剩下的是编辑器的。
+            // 2. `minEditorHeight` —— 编辑器的下限**要让位给结果区的下限**。
+            //    两者冲突时（窗口很矮）**结果区优先**：数据看不见就等于白查，
+            //    而编辑器内部能滚，它矮一点只是少显示几行。
+            //    少了这一步，小窗口下编辑器那 96dp 的下限会把结果区压到 134dp ——
+            //    破了「结果区至少 180dp」这条既有契约
+            //    （钉它的是 `SqlResultMinHeightTest`）。
+            // 3. `defaultEditorHeight` —— **没拖过**时的初始高度（老比例 40/60），
+            //    它随窗口高度走。
+            // 4. `editorHeightNow` —— 实际生效的高度：拖过的用拖出来的值，
+            //    没拖过的用默认值；两者都要过一遍钳位。
+            //
+            // 为什么每次都重新钳：窗口缩窄后上限会变小，
+            // 而用户拖出来的那个绝对高度可能已经装不下了 —— 布局必须服从当前窗口。
+            val maxEditorHeight =
+                (maxHeight - SQL_EDITOR_HANDLE_HEIGHT - MIN_SQL_RESULT_HEIGHT)
+                    .coerceAtLeast(0.dp)
+            val minEditorHeight = MIN_SQL_EDITOR_HEIGHT.coerceAtMost(maxEditorHeight)
+            val defaultEditorHeight =
+                (
+                    maxHeight -
+                        SQL_EDITOR_HANDLE_HEIGHT -
+                        (maxHeight * SQL_RESULT_DEFAULT_RATIO).coerceAtLeast(MIN_SQL_RESULT_HEIGHT)
+                ).coerceIn(minEditorHeight, maxEditorHeight)
+            val editorHeightNow =
+                (editorHeight ?: defaultEditorHeight)
+                    .coerceIn(minEditorHeight, maxEditorHeight)
             Column(modifier = Modifier.fillMaxSize()) {
                 if (sheet == null) {
                     EmptyHint(
                         title = str(StrKey.NO_EDITABLE_SQL_SHEET),
                         description = str(StrKey.NO_EDITABLE_SQL_SHEET_HINT),
-                        // 用 weight 而非 fillMaxSize —— 与下方 weighted 子项共存时不会互相挤掉
+                        // 高度与「有 sheet」时一致 —— 换句话说，
+                        // 「没有可编辑的 sheet」不该顺带把布局改了
                         modifier =
                             Modifier
-                                .weight(1f)
+                                .height(editorHeightNow)
                                 .fillMaxWidth(),
                     )
                 } else {
@@ -522,16 +606,34 @@ internal fun SqlWorkbenchPane(
                         modifier =
                             Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .height(editorHeightNow)
+                                .testTag(SQL_EDITOR_PANE_TAG),
                     )
                 }
-                WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // 编辑器与结果区之间那条**可拖**的缝 ——
+                // 比例写死在代码里，而「写长 SQL」与「结果只有两行」这两种诉求
+                // 没法同时满足，所以这条缝交给用户拖；双击复位回默认比例。
+                HorizontalDragHandle(
+                    height = editorHeightNow,
+                    onHeightChange = onEditorHeightChange,
+                    defaultHeight = defaultEditorHeight,
+                    minHeight = MIN_SQL_EDITOR_HEIGHT,
+                    maxHeight = maxEditorHeight,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    highlightColor = MaterialTheme.colorScheme.primary,
+                    hitHeight = SQL_EDITOR_HANDLE_HEIGHT,
+                    modifier = Modifier.testTag(SQL_EDITOR_DRAG_HANDLE_TAG),
+                    // 悬停时换「上下拉伸」指针：分隔条在鼠标下必须看起来可拖，
+                    // 否则拖拽功能「存在但没人发现」。
+                    hoverIcon = nsResizePointerIcon(),
+                )
                 SqlResultArea(
                     sheet = sheet,
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .height(resultHeight),
+                            .weight(1f)
+                            .testTag(SQL_RESULT_AREA_TAG),
                 )
             }
         }

@@ -102,6 +102,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **只读模式**（发出去之前就拦，引擎那边什么都没发生） | `rejectIfReadOnly` |
 | | **危险写操作确认**（`DROP` / 全表 `UPDATE` 等） | `DangerousSql` |
 | | **停止执行**（`SYSTEM.CANCEL` → `Statement.cancel()`） | `cancelSql` |
+| | **编辑器高度可拖拽** —— 编辑器与结果区之间那条缝能拖（双击复位），悬停显示**上下拉伸指针**；比例写死在代码里时，「写长 SQL 要它高」与「结果只有两行要它矮」这两种诉求没法同时满足。**结果区的 180dp 下限同时是拖拽的硬边界** —— 数据不会被拖没；高度是**窗口级偏好**，关掉 sheet 再开还在 | `shared/ui/DragHandle.kt`（`HorizontalDragHandle`）/ `SqlWorkbench.kt` |
 | | 结果集**封顶 5000 行** + 显式截断提示 | `SQL_RESULT_MAX_ROWS` |
 | | 非 SELECT 显示「已影响 N 行」 | `affectedRows` |
 | **数据流转** | **导出**对话框（CSV / JSON / Excel / Markdown / Parquet） | `exportQuery` |
@@ -124,6 +125,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
 | | **工作区树**：**根 = 工作区的各个 schema**（`main` 是工作区自己的表，每个**数据源**一个）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
 | | **左树可折叠到侧边、宽度可调** —— 与浏览模式**同一个面板外壳**（`shared/tree/TreePaneShell.kt`）：折叠成 44dp 窄轨把宽度让给右边的编辑器与结果表；展开态拖分隔条调宽（此前是写死的 240dp） | `shared/tree/TreePaneShell.kt` |
+| | **编辑器面板高度可调** —— 与浏览模式**同一个横向分隔条**（`shared/ui/DragHandle.kt` 的 `HorizontalDragHandle`）：往下拖编辑器变高，双击复位回默认比例；**结果表有下限**（140dp），拖不下去 —— 数据看不见就等于白跑 | `shared/analysis/AnalysisScreen.kt` |
 | | **「+」添加数据源**（分析模式**专属**，不共用浏览模式的「添加连接」）：**远程数据库**（方言 / 主机 / 端口 / 库 / 用户 / 密码 → **用对应驱动预览**库与表 → **可多选可单选** → **DuckDB 官方扩展优先**，走不通退回 JDBC）与**文件 / 文件夹**（parquet / csv / Excel / jsonl → 直接用 DuckDB 的 `read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx` 建**视图**）。加完的源**直接在工作区 DuckDB 里**（登记表 `sundays.sources`），树里立刻多一根。路径可**调系统文件 / 文件夹选择器**挑（文本框仍在：网络路径与无头环境只能手输）；格式**能手选**（文件夹没有扩展名） | `AnalysisSourceDialog.kt` / `AnalysisSession` |
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` |
 | | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |

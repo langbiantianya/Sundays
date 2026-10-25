@@ -1,6 +1,27 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.13** · 2026-10-25
+> **状态**：设计冻结待评审 · **v1.14** · 2026-10-25
+>
+> **v1.14 相对 v1.13 的修改**（**SQL 编辑器的高度可以拖了**）：
+>
+> 1. **编辑器面板的高度此前是写死的比例** —— `0.42 : 1`（编辑器 : 结果表），
+>    编译期定死。而两种诉求是**互相打架**的：写一段长 SQL 时编辑器太矮
+>    （一屏只看得到几行），跑出来的结果只有两行时结果表又占掉七成屏。
+>    比例写死在代码里，用户**没有任何办法调**。
+> 2. **编辑器与结果表之间那条缝变成可拖的** —— 往下拖编辑器变高，
+>    往上拖结果表变宽，双击复位回默认比例。实现上是 `:shared` 的
+>    **横向分隔条**（`HorizontalDragHandle`），与浏览模式**同一个组件**
+>    （竖向的 `DragHandle` 与它是同一份实现，手势 / 画线 / 指针只有一份）——
+>    两个模式之间同一个概念只有一份实现。
+> 3. **结果表有下限**（140dp）—— **它同时是拖拽的硬边界**：
+>    编辑器最多长到「总高 − 140dp」。结果表是分析模式的**产出**，
+>    把它拖没了，用户看到的就是「跑完了但什么都没有」。
+>    窗口很矮时，**编辑器的下限要让位给它** —— 编辑器矮一点只是少显示几行，
+>    结果表矮一点就一行数据都看不见了。
+> 4. **高度是屏幕层状态** —— 与左树的宽度、折叠态同类（布局偏好，不是会话数据）；
+>    分析模式同一时刻只有一个实例，屏幕层已经持有那两项。
+> 5. **§9.1 画面 ② 与 §9.3 组件对照表同步**；浏览模式那一侧同步落到
+>    `desktopApp` 的 ARCHITECTURE / FEATURES / TEST_CASES。
 >
 > **v1.13 相对 v1.12 的修改**（**折叠不再丢滚动位置**）：
 >
@@ -1117,7 +1138,7 @@ fun buildJdbcUrl(host: String, port: Int, database: String): String   // 原样�
 | `WinButton` / `WinOutlinedButton` / `WinTextButton` / `WinTextField` / `WinIconButton` / `WinSwitch` / `WinMenuItem` / `WinSurface` / `WinProgressIndicator` / `WinDivider` | `shared/.../ui/WinControls.kt` | 全部按钮 / 输入框 / 开关 / 菜单项 / 进度条 | 现有控件集已覆盖分析模式的绝大多数控件，**唯独缺下拉**（§6.3.4） |
 | `ContextMenuState` / `onRightClick` | `shared/.../ui/ContextMenuState.kt` / `RightClick.kt` | 右键菜单 | 泛型 `ContextMenuState<T>`；表格与编辑器各有一个类型别名 |
 | `ColumnBadge` | `shared/.../ui/ColumnBadge.kt` | 数据源类型小徽标 | `surfaceVariant` 底的小徽标，正好是「类型标签」的视觉 |
-| `DragHandle` | `shared/.../ui/DragHandle.kt` | 面板宽度拖拽 | 已支持 `hoverIcon`（指针图标由平台侧注入，桌面端 `PointerIcons.kt`） |
+| `DragHandle` / `HorizontalDragHandle` | `shared/.../ui/DragHandle.kt` | 面板宽度拖拽 / **编辑器高度拖拽** | 同一个组件的两种朝向：手势 / 画线 / 高亮 / 指针只有一份实现，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。已支持 `hoverIcon`（指针图标由平台侧注入，桌面端 `PointerIcons.kt`；竖向用**左右拉伸**箭头，横向用**上下拉伸**箭头 —— 画反方向就是在骗用户） |
 | `DangerousSql` / `DangerousSqlConfirmDialog` | `shared/.../sql/DangerousSql.kt` / `DangerousSqlConfirmDialog.kt` | SQL 执行前的只读校验 | `isReadOnlyQuery` 已能剥注释、识别 SELECT / WITH / 多语句写操作 |
 | `SundaysTheme` / `ThemePalette` / `SundaysPalette` | `shared/.../ui/` | 主题 | 5 套配色 × 明暗 × 紧凑档，分析模式**一行新样式都不写** |
 | `str` / `LocalStrings` / `ProvideStrings` | `shared/.../ui/LocalStrings.kt` | 国际化 | 新增文案键走 `i18n` 的 6 语言表，UI 里不写死中文 |
@@ -1364,6 +1385,11 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | 5 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
 | 6 | `WinDropdown` | **加进** `shared/.../ui/WinControls.kt` | 见 §6.3.4 —— 它是**扩充**现有控件集，不是独立体系 |
 
+> ⚠️ **v1.14：编辑器高度可调**用到的 `HorizontalDragHandle` **不算新增组件** ——
+> 它是既有 `DragHandle` 的**第二种朝向**（同一份实现，手势 / 画线 / 指针只有一份），
+> 与第 6 项 `WinDropdown` 同性质：**扩充**现有控件集，不是独立体系。
+> 所以这张表的**数量不变**。
+>
 > ⚠️ **v1.9：第 1 个组件从「分析模式自建」变成「两棵树共用」。**
 >
 > 共享之后，三件事跟着变了：
@@ -1656,6 +1682,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ② 分析工作区 | 左侧**工作区树**（`ObjectTree` —— **与浏览模式的对象树同一个组件**：库 → 表 → 字段；内部用 `EmptyHint` / `ColumnBadge` / `focusRing` / `onRightClick` / `winShape`） | ★ 新增（§6.4-1，**两棵树共用**） |
 | ② 分析工作区 | 树头上 **「+ 添加数据源」**（分析模式**专属**——不共用浏览模式的「添加连接」） | `WinIconButton` + `Icons.Filled.Add` | —— |
 | ② 分析工作区 | 中间 SQL 编辑器 | `CodeEditorWithToolbar` / `CodeEditorState` / `SqlFormatter` | —— |
+| ② 分析工作区 | 编辑器与结果表之间的**可拖分隔条**（调编辑器的高度，双击复位；**与浏览模式同一个组件**） | `HorizontalDragHandle`（`:shared` 的 `ui/DragHandle.kt`，与竖向的 `DragHandle` 同一份实现） | ——（v1.14 新增可用性，组件不是新增） |
 | ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
 | ② 分析工作区 | 左树面板的**外壳**（可拖宽的分隔条 + **折叠到侧边的 44dp 窄轨** + 折叠 / 展开按钮） | `TreePaneShell` / `TreePaneToggleButton`（**与浏览模式同一个组件**） | ★ 新增（§6.4-2，**两棵树共用**） |
 | ② 分析工作区 | 底部状态条 | `WinProgressIndicator` / `WinTextField`（只读展示） | —— |
@@ -1687,7 +1714,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 |---|---|
 | **⓪ 启动选择（首屏）** | 顶栏只有**品牌 + ⚙ 设置**；中间是「选择要进入的模式」+ 两张模式卡片（**连接管理** / **数据分析**），各带一句话说明。选完一路走下去 |
 | **① 分析模式说明** | 讲清本模式的边界与「复用什么」。 |
-| **② 分析工作区** | 左：**树**（**根 = 工作区的各个 schema**：`main` 是工作区自己的表，每个**数据源**一个 —— 树与浏览模式的对象树**同形**：库 → 表 → 字段；展开一张表能看到它的字段）。树的**头上**有一个 **「+」** —— 打开分析模式专属的「添加数据源」对话框（远程数据库 / 文件）。中：SQL 编辑器（**工具条上「格式化」旁边就是「▶ 运行」**）+ 结果表（带占比条形）。分析屏上**没有**独立工具条，也没有只读徽标。 |
+| **② 分析工作区** | 左：**树**（**根 = 工作区的各个 schema**：`main` 是工作区自己的表，每个**数据源**一个 —— 树与浏览模式的对象树**同形**：库 → 表 → 字段；展开一张表能看到它的字段）。树的**头上**有一个 **「+」** —— 打开分析模式专属的「添加数据源」对话框（远程数据库 / 文件）。中：SQL 编辑器（**工具条上「格式化」旁边就是「▶ 运行」**）+ 结果表（带占比条形）；**两者之间那条缝可拖**（编辑器高度可调，双击复位 —— 结果表有 140dp 下限，拖不下去）。分析屏上**没有**独立工具条，也没有只读徽标。 |
 | **③ 报表设计器** | 左：区块列表（可增删排序）。中：区块配置（列规格 / 类型 / 数字格式 / 样式）。右：Excel 观感预览（标题 + 元信息 + 表头 + 斑马纹）。 |
 | **④ 连接管理器（复用 + 通用化后）** | **同一个**连接管理器：列表按「可浏览 / 可分析」分组、只读方言带 ⓘ 徽标；右侧是选中连接的详情（含「只读方言」说明与「在数据分析中打开」）。 |
 | **⑤ 新增连接向导（复用 + 通用化后）** | **同一个**添加连接弹窗，但表单由**方言自描述**渲染：认证方式下拉（账密 / Kerberos）、方言特有字段、「高级属性」折叠区、以及**自定义 JDBC URL** 逃生舱。 |
@@ -1713,6 +1740,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换」等纯规则 |
 | `shared/src/commonMain/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 |
 | `shared/src/commonMain/.../tree/TreePaneShell.kt` | **两棵树共用的面板外壳**（**新增组件 2/6**）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`TreePaneToggleButton`）。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） |
+| `shared/src/commonMain/.../ui/DragHandle.kt` | **可拖拽分隔条**（**不是新增组件** —— 是既有组件的**第二种朝向**）：`DragHandle`（竖向，调宽度）与 `HorizontalDragHandle`（横向，调高度）是**同一份实现**。分析模式的编辑器高度用它调；指针图标**由调用方给**（桌面端传**上下拉伸**箭头） |
 | `desktopApp/src/main/.../AnalysisSourceDialog.kt` | **「添加数据源」对话框** —— 分析模式**专属**（不共用浏览模式的「添加连接」）：远程数据库（方言 / 主机 / 端口 / 库 / 用户 / 密码 + **驱动预览**库与表 + **勾选**）与文件 / 文件夹（路径 + 格式） |
 | `shared/src/commonMain/.../analysis/ReportBlockList.kt` | 报表区块列表（**新增组件 3/6**） |
 | `shared/src/commonMain/.../analysis/ReportColumnSpecRow.kt` | 列规格行（**新增组件 4/6**） |

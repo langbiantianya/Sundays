@@ -31,7 +31,7 @@
 | `SundaysTheme` / `ThemePalette` / `ThemeMode` / `AppearanceState` / `SundaysPalette` | 三轴外观（配色 / 明暗 / 尺度）与视觉规范单例 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 | `UiThemeTokens` / `LocalUiTokens` / `UiChrome.kt` 派生函数 | 界面外观的**唯一真相来源**（斜面 / 填充 / 选中态 / 分割线…） | [`ui/UiChrome.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/UiChrome.kt) |
 | `CodeEditorTheme` / `DataTableTheme` / `SyntaxHighlighter` | 编辑器与表格的主题档位 —— 换主题只需提供自己的实例，不必改组件 | [`editor/ui/CodeEditorTheme.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/editor/ui/CodeEditorTheme.kt) 等 |
-| `WinControls` / `FocusRing` / `DragHandle` / `ContextMenuState<T>` / `Modifier.onRightClick` | 通用 UI 工具：复古控件包装、可见焦点环、可拖拽分隔条、右键菜单 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) 等 |
+| `WinControls` / `FocusRing` / `DragHandle` / `HorizontalDragHandle` / `ContextMenuState<T>` / `Modifier.onRightClick` | 通用 UI 工具：复古控件包装、可见焦点环、**可拖拽分隔条**（竖向调宽度 / 横向调高度）、右键菜单 | [`ui/WinControls.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/WinControls.kt) 等 |
 | `str(...)` / `plural(...)` / `ProvideStrings` / `LanguagePicker` | 界面语言入口（文案表在 `:i18n`，本模块只提供 Composable 侧） | [`ui/LocalStrings.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/LocalStrings.kt) |
 | `SettingsEntryButton` / `ThemeModeToggleButton` / `SystemInfoRefresh` | 设置页入口按钮、日夜切换按钮、系统信息自动刷新间隔（默认关闭） | [`ui/ThemeModeToggle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ThemeModeToggle.kt) 等 |
 | `DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog` | SQL 危险写操作识别与**逐句**只读判定、WHERE 字面量转义与 CAST 目标类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |

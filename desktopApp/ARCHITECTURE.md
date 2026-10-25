@@ -166,7 +166,7 @@ desktopApp （本模块）
 
 | [`ExportDialogs.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportDialogs.kt) | 危险语句确认框、导出配置弹窗、导出进度弹窗、结果预览表，及其纯函数（语句切分 / 文件名生成 / proto 值展开） |
 
-| [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名 |
+| [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
 | [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、结果集铺表 |
 
@@ -279,6 +279,8 @@ desktopApp （本模块）
 | 多语句导出 = N 个任务且**串行** | 面板存在的意义是回答「哪一条失败」；并发会把库压垮，而并发度不可控 | 同上 |
 
 | SQL 结果区有**最小高度** | 结果区原先按 `maxHeight * 0.4f` 分高度且**没有下限** ⇒ 小窗口下数据区被压成 0 高，而标题照写着「查询结果 · 2 行」——**查了白查**。编辑器内部能滚、结果区不能，所以空间从编辑器借：结果区保底 180dp，编辑器拿剩下的 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `MIN_SQL_RESULT_HEIGHT` |
+| **编辑器的高度是拖出来的，不是比例算出来的** | 60/40 的比例是**编译期**定死的，而「写长 SQL 时编辑器要够高」与「结果只有两行时编辑器该矮」这两种诉求打架，用户没有任何办法调。现在编辑器与结果区之间那条缝是 `HorizontalDragHandle`（`:shared` 的横向分隔条）：往下拖编辑器变高，双击复位回默认比例。**结果区的 180dp 下限同时是拖拽的硬边界** —— 编辑器最多长到「总高 − 180dp」，数据不会被拖没；且窗口很矮时**编辑器的下限要让位给结果区的下限**（编辑器矮一点只是少显示几行，结果区矮一点就看不见数据了） | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `SQL_EDITOR_DRAG_HANDLE_TAG` / `MIN_SQL_RESULT_HEIGHT` |
+| 编辑器高度是**窗口级偏好** | 写在 `ActiveSheetContent` 里的话，那棵组合一旦被拆掉重建（关掉最后一个 sheet 再重开）高度就复位了 —— 「在 A 连接把编辑器拉高，关掉再打开又缩回去」。所以它与**树面板宽度**同一层：持有在 `DatabaseBrowserScreen` | [`DatabaseBrowserScreen.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserScreen.kt) 的 `sqlEditorHeight` |
 
 
 
@@ -501,6 +503,7 @@ desktopApp （本模块）
 | 库列表 / 展开状态 / 表缓存 | `DatabaseBrowserState`（per-sheet） | 保持 | 清空 |
 
 | **树面板宽度** | `DatabaseBrowserScreen`（**屏级**） | 保持 | 保持（窗口级偏好，不落盘） |
+| **SQL 编辑器高度** | `DatabaseBrowserScreen`（**屏级**，与树面板宽度同一层） | 保持 | 保持（窗口级偏好，不落盘） |
 
 | **后台任务列表** | `DatabaseBrowserState`（per-sheet） | 保持 | 随 sheet 生命周期 |
 
