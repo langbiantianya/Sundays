@@ -128,8 +128,8 @@
 | [`GuiFeatureWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/GuiFeatureWalkthroughTest.kt) | GUI 真点击走查：浏览 / SQL 执行 / 多语句 / 危险确认 / 导出对话框 |
 | [`SqlResultMinHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlResultMinHeightTest.kt) | **SQL 结果区不得被压成 0 高**：320dp 高的窗口里结果表数据区 `boundsInRoot.height > 0` —— 标题写着「查询结果 · 2 行」而数据区**零高度**，等于查了白查 |
 | [`GenerateLogTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateLogTest.kt) | **造数实时日志（状态层与纯函数）** —— 用**真引擎**（H2 + 真 Lua 沙箱 + 真流式通道）验：每条 INSERT 一行且带表名 / 脚本内行号 / 列值（与库里那一行**对得上**）、日志里的列值与**实际写进库的**一致、重新执行与切连接都会清空、失败也留一行且带原因原文、有界（保留 + 丢掉的行数 = 追加的行数，一行都不凭空消失）、追加序号每次都递增。**为什么必须用真引擎**：「引擎每条 INSERT 回一帧」是协议契约，假的帧只能验「映射函数写对了」，验不了「引擎真的这么发」 |
-| [`GenerateLogUiTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateLogUiTest.kt) | **造数实时日志（界面层）** —— 日志面板常驻、空态有提示、真实造数的每一行都出现在面板里、**自动滚到最新一行**（LazyColumn 只组合看得见的项：最后一行可见 = 滚动确实发生了）、日志溢出时标题栏**明写丢了多少行**。断言打在**列值文本**上（不受语言影响），而不是中文文案 |
-| [`GenerateEditorHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateEditorHeightTest.kt) | **造数工作台的编辑器高度可拖** —— 与浏览 / 分析两侧共用同一个横向分隔条：往下拖编辑器**真的变高**且**跟手**（不是松手才跳）、高度**守恒**（编辑器多出来的那块正好从输出面板来）、拖到底也**挤不没输出面板**（260dp 下限是硬边界）、窗口很矮时**编辑器的下限要让位给输出面板的下限**、高度是**窗口级偏好**（工作台被拆掉又重建后还在）。另有一条判据钉住「**日志与结果在同一个面板里**」（共同的祖先面板）—— 此前它们是两个各自独立的 `Surface`，只断言「两个都存在」的话拆回去也照样通过 |
+| [`GenerateLogUiTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateLogUiTest.kt) | **造数实时日志（界面层）** —— 日志面板常驻、空态有提示、真实造数的每一行都出现在面板里、**自动滚到最新一行**（LazyColumn 只组合看得见的项：最后一行可见 = 滚动确实发生了）、日志溢出时标题栏**明写丢了多少行**（并钉住它在**标题栏里**，而不是混在日志流里等人翻）、跑完之后**完成摘要出现在底部状态行**。断言打在**列值文本**上（不受语言影响），而不是中文文案 |
+| [`GenerateEditorHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateEditorHeightTest.kt) | **造数工作台的编辑器高度可拖** —— 与浏览 / 分析两侧共用同一个横向分隔条：往下拖编辑器**真的变高**且**跟手**（不是松手才跳）、高度**守恒**（编辑器多出来的那块正好从输出面板来）、拖到底也**挤不没输出面板**（260dp 下限是硬边界）、窗口很矮时**编辑器的下限要让位给输出面板的下限**、高度是**窗口级偏好**（工作台被拆掉又重建后还在）。另有两条判据钉住「**统计结果只占一行**」（状态行 ≤ 48dp，且远小于日志区 —— 为两三行内容留一整块地，是把最稀缺的地方浪费掉）与「**日志与状态行在同一个面板里**」（共同的祖先面板）—— 此前它们是两个各自独立的 `Surface`，只断言「两个都存在」的话拆回去也照样通过 |
 
 ### 2.5 导出
 

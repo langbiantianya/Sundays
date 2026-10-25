@@ -6,7 +6,7 @@
  * Copyright (c) 2026 langbiantianya <langbiantianya@outlook.com>
  */
 
-// **造数工作台** —— 生成 Lua 造数脚本、执行、把返回的结果集铺成表格。
+// **造数工作台** —— 生成 Lua 造数脚本、执行、把每条写入实时铺成日志。
 
 package com.langbiantianya.sundays
 
@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,27 +42,24 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.editor.GenerateHelpers
 import com.langbiantianya.sundays.editor.ui.CodeEditorState
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
-import com.langbiantianya.sundays.table.DataTable
-import com.langbiantianya.sundays.table.TableColumn
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.HorizontalDragHandle
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
-import com.langbiantianya.sundays.ui.WinProgressIndicator
 import com.langbiantianya.sundays.ui.plural
 import com.langbiantianya.sundays.ui.str
 
 // ============================================================================
-// 造数工作台 —— Lua 脚本编辑 + 造数结果
+// 造数工作台 —— Lua 脚本编辑 + 实时日志 + 状态行
 // ============================================================================
 
 /** 造数工作台的 Lua 版本候选 —— 对应引擎 `DataGenerateRequest.lua_version`。 */
@@ -96,8 +92,13 @@ internal const val GENERATE_LOG_LIST_TAG = "generateLogList"
  */
 internal const val GENERATE_OUTPUT_PANEL_TAG = "generateOutputPanel"
 
-/** 造数结果区的 UI 测试 tag —— 拖拽测试要量「结果区被挤成多高了」。 */
-internal const val GENERATE_RESULT_AREA_TAG = "generateResultArea"
+/**
+ * **造数状态行**的 UI 测试 tag —— 输出面板**底部**那一行文本。
+ *
+ * 它替掉了此前的「结果区」：那块原本是一张「每个脚本一行」的统计表，
+ * 而它实际只有两三行内容，却占掉了 30% 的高度。
+ */
+internal const val GENERATE_STATUS_LINE_TAG = "generateStatusLine"
 
 /**
  * **输出面板标题栏**的 UI 测试 tag —— 面板级摘要（「已插入 N 行」）待在这儿。
@@ -155,22 +156,25 @@ internal val MIN_GENERATE_OUTPUT_HEIGHT = 260.dp
 private const val GENERATE_OUTPUT_DEFAULT_RATIO = 0.55f
 
 /**
- * 输出面板里**结果区**的固定高度 —— 表头 + 数据行 + 分页栏。
+ * 输出面板底部**状态行**的高度 —— 恰好一行文字。
  *
- * ## 为什么是固定高度而不是「按内容自适应」
+ * ## 为什么不再给「统计结果」一块地方
  *
- * 结果表是「每个脚本一行」：脚本通常只有一两个，两行足够看。
- * 但如果按内容自适应，**整个面板的高度会在「跑完了」那一刻突变** ——
- * 用户刚拖好的编辑器高度看着好好的，结果区一出现就把日志挤扁了。
+ * 此前那块是一张「每个脚本一行」的统计表（脚本 / 目标表 / 插入行数）。
+ * 它实际只有两三行内容，却占掉了 30% 的高度 —— 而真正需要地方的是日志
+ * （1000 行历史）。**为两三行内容留一整块地，是把最稀缺的地方浪费掉**。
+ *
+ * 现在只留一行文本：造数中报「已插入 N 行」，跑完报「共 N 行 · 处理 M 个脚本」，
+ * 出错报原因。分脚本的明细在**日志里**逐行写着（每行都有目标表名与行号），
+ * 真要按表汇总，看日志比看一张两三行的表更快。
+ *
+ * ## 为什么是**固定**高度
+ *
+ * 按内容自适应的话，这一行会在「跑完了」那一刻出现或消失 ——
+ * 面板高度突变，用户刚拖好的编辑器高度看着好好的，日志区却被挤了一下。
  * 固定高度换来「布局不动」。
- *
- * ## 为什么不再给它 30%
- *
- * 老布局给它 30%（900dp 窗口下约 270dp），而它实际只有两三行 ——
- * 那块空间原本是日志的。日志要的是**地方**（1000 行历史），
- * 结果表要的是**一眼能看到**。
  */
-private val GENERATE_RESULT_AREA_HEIGHT = 150.dp
+private val GENERATE_STATUS_LINE_HEIGHT = 30.dp
 
 /**
  * 造数工作台 —— 上半脚本标签条 + Lua 版本 + 编辑器，下半**造数输出面板**。
@@ -392,90 +396,93 @@ internal fun GenerateWorkbenchPane(
 }
 
 /**
- * 造数**结果区** —— 输出面板的**结论**那一半。
+ * **造数状态行** —— 输出面板底部那一行文本。
  *
- * 三态：进行中（一条转圈）/ 错误 / 结果表（每个脚本一行）；没跑过时是空态。
+ * ## 它说什么
  *
- * ## 为什么它只有固定高度
+ * - 造数中 → 「造数中… 已插入 N 行」
+ * - 跑完 → 「造数完成 · 共 N 行 · 处理 M 个脚本」
+ * - 出错 → 失败原因（红色）
+ * - 还没跑过 → 什么都不说（那一行是空的）
  *
- * 见 [GENERATE_RESULT_AREA_HEIGHT]：结果表两三行就够，而按内容自适应会让
- * 整个面板在「跑完了」那一刻**突变高度** —— 用户刚拖好的编辑器高度看着好好的，
- * 结果区一出现就把日志挤扁了。固定高度换来「布局不动」。
+ * ## 为什么不是一张统计表
  *
- * ## 为什么「已插入 N 行」不在这里
+ * 此前的「结果区」是一张「每个脚本一行」的表（脚本 / 目标表 / 插入行数）。
+ * 它只有两三行内容，却占掉 30% 的高度 —— 那是**日志**（1000 行历史）的地方。
+ * 为两三行内容留一整块地，是把最稀缺的地方浪费掉。
  *
- * 它说的是**整个面板**的状态，不是结果表的 —— 所以它放在输出面板的标题栏上，
- * 放在这里就成了同一句话出现两次（标题栏一次、这里一次）。
+ * 分脚本的明细并没有丢：**日志里逐行写着**目标表名与该脚本内的行号，
+ * 真要按表汇总，看日志比看一张两三行的表更快。
  */
 @Composable
-private fun GenerateResultArea(
+private fun GenerateStatusLine(
     state: DatabaseBrowserState,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        modifier = modifier,
-    ) {
+    val error = state.generateError
+    val text: String? =
         when {
-            state.generateRunning -> {
-                // 只留一个转圈 —— 「造数中… 已插入 N 行」已经写在**输出面板的标题栏**上了，
-                // 这里再说一遍就是同一句话出现两次。
-                //
-                // 而这一格此时**本来就没有结论**：结果表要等跑完才有行可列。
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    WinProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                }
+            error != null -> {
+                str(StrKey.GENERATE_FAILED_REASON, error)
             }
 
-            state.generateError != null -> {
-                EmptyHint(
-                    title = str(StrKey.GENERATE_FAILED),
-                    description = state.generateError,
-                    centerContent = false,
-                    modifier = Modifier.fillMaxSize(),
+            state.generateRunning -> {
+                plural(
+                    PluralStrKey.GENERATING_INSERTED,
+                    state.generateTotalInserted.toInt(),
+                    state.generateTotalInserted,
                 )
             }
 
             state.hasGenerateResult -> {
-                // 摘要（「共插入 N 行 · M 个脚本」）已经提到**输出面板的标题栏**上 ——
-                // 它说的是**整个面板**，放在这儿就成了同一句话出现两次。
-                DataTable(
-                    columns = GENERATE_RESULT_COLUMNS,
-                    rows = state.generateResultRows(),
-                    modifier = Modifier.fillMaxSize(),
-                    pageSize = state.generateResultPageSize,
-                    onPageSizeChange = { state.generateResultPageSize = it },
-                    currentPage = state.generateResultPage,
-                    onPageChange = { state.generateResultPage = it },
-                    selectedRowId = state.generateResultSelectedRowId,
-                    onSelectedRowChange = { state.generateResultSelectedRowId = it?.id },
-                    fillParentHeight = false,
+                plural(
+                    PluralStrKey.GENERATE_COMPLETE_SUMMARY,
+                    state.generateTotalInserted.toInt(),
+                    state.generateTotalInserted,
+                    state.generateTablesProcessed,
                 )
             }
 
             else -> {
-                EmptyHint(
-                    title = str(StrKey.NO_GENERATE_EXECUTED),
-                    description = str(StrKey.NO_GENERATE_EXECUTED_HINT),
-                    modifier = Modifier.fillMaxSize(),
-                )
+                null
             }
+        }
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(GENERATE_STATUS_LINE_HEIGHT)
+                .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (text != null) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color =
+                    if (error != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                // **一行**放不下时省略号截断 —— 完整原因在**日志里**
+                // （失败也会留一行，带引擎原文）。
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 /**
- * **造数输出面板** —— 日志（过程）与结果表（结论）**合并**成的一块。
+ * **造数输出面板** —— 日志（过程）与结论**合并**成的一块。
  *
  * ## 为什么合并
  *
  * 此前下半部分是两个各自独立的 `Surface`：日志面板一块、结果面板一块，
  * 各带一个标题栏、各占一块固定比例（25% / 30%）。而它们的**关系**是
- * 同一件事的两面：日志是「正在造什么」的**过程**，结果表是「造完了什么」的
- * **结论**（每个脚本一行）。
+ * 同一件事的两面：日志是「正在造什么」的**过程**，结果是「造完了什么」的
+ * **结论**。
  *
  * 拆成两个面板的代价很具体：
  *
@@ -483,9 +490,8 @@ private fun GenerateResultArea(
  * - **结论分到了 30% 的高度**，而它实际只有两三行；真正需要地方的
  *   日志（1000 行历史）只拿到 25%。
  *
- * 合成一块之后：标题栏只有一行（顺带把「已插入 N 行」这个**面板级**的摘要
- * 收了进来 —— 它说的是整个面板，不该只属于其中一块），日志吃掉全部剩余空间，
- * 结果表拿到一个固定的小高度。
+ * 合成一块之后：标题栏只有一行，日志吃掉全部剩余空间，结论收在底部
+ * **一行**文本里（见 [GenerateStatusLine]）。
  *
  * ## 日志的数据从哪来
  *
@@ -536,37 +542,6 @@ private fun GenerateOutputArea(
                     )
                     Spacer(Modifier.width(12.dp))
                 }
-                // 面板级的摘要 —— 进行中报「已插入 N 行」，跑完报「共插入 N 行 · M 个脚本」。
-                //
-                // 为什么放在标题栏而不是结果区里：它说的是**整个面板**的状态
-                // （这一轮造数造到哪儿了），不是结果表的 —— 放在结果区里
-                // 就会变成「同一句话，一处在标题栏一处在结果区」。
-                //
-                // 两个分支互斥：进行中与「已完成」不可能同时成立。
-                val summary: String? =
-                    if (state.generateRunning) {
-                        plural(
-                            PluralStrKey.GENERATING_INSERTED,
-                            state.generateTotalInserted.toInt(),
-                            state.generateTotalInserted,
-                        )
-                    } else if (state.hasGenerateResult) {
-                        plural(
-                            PluralStrKey.GENERATE_COMPLETE_SUMMARY,
-                            state.generateTotalInserted.toInt(),
-                            state.generateTotalInserted,
-                            state.generateTablesProcessed,
-                        )
-                    } else {
-                        null
-                    }
-                if (summary != null) {
-                    Text(
-                        text = summary,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
             // 日志区 —— 吃掉**全部剩余**空间（面板整体高度由编辑器那条缝决定）。
@@ -588,14 +563,16 @@ private fun GenerateOutputArea(
                 }
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            // 结果区 —— 结论那一半，固定高度（见 [GENERATE_RESULT_AREA_HEIGHT]）。
-            GenerateResultArea(
+            // 状态行 —— 底部**一行**文本（见 [GenerateStatusLine]）。
+            //
+            // 此前这里是一张「每个脚本一行」的统计表：两三行内容占掉 30% 的高度，
+            // 而那块地方本该给日志。现在只留一行字。
+            GenerateStatusLine(
                 state = state,
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .height(GENERATE_RESULT_AREA_HEIGHT)
-                        .testTag(GENERATE_RESULT_AREA_TAG),
+                        .testTag(GENERATE_STATUS_LINE_TAG),
             )
         }
     }
@@ -690,11 +667,3 @@ private fun GenerateLogRow(entry: GenerateLogEntry) {
                 .padding(horizontal = 16.dp, vertical = 2.dp),
     )
 }
-
-/** 造数结果表列定义（脚本 / 目标表 / 插入行数）。 */
-private val GENERATE_RESULT_COLUMNS =
-    listOf(
-        TableColumn(key = "script", header = Msg.text(StrKey.SCRIPT)),
-        TableColumn(key = "table", header = Msg.text(StrKey.TARGET_TABLE)),
-        TableColumn(key = "inserted", header = Msg.text(StrKey.INSERTED_ROWS)),
-    )

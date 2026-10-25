@@ -771,7 +771,7 @@ class DatabaseBrowserUiTest {
         }
 
     /**
-     * 造数工作台端到端 —— 工具栏进入 → 编辑器输入 Lua → 执行 → 结果统计，
+     * 造数工作台端到端 —— 工具栏进入 → 编辑器输入 Lua → 执行 → 结论与日志，
      * 且**切到表预览再切回来后脚本与结果原样回显**（与 SQL 工作台同一契约）。
      *
      * 断言锚点是引擎真实效果：目标表 `gen_target` 里确实多出 3 行。
@@ -822,8 +822,13 @@ class DatabaseBrowserUiTest {
             waitUntil(timeoutMillis = 10_000) {
                 onAllNodesWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).fetchSemanticsNodes().isNotEmpty()
             }
-            // 结果表出现目标表列 —— 编辑器文本里也含同名串，故要求整串相等，只命中单元格
-            onNodeWithText("gen_target", substring = false).assertIsDisplayed()
+            onNodeWithText(zh(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3, 1)).assertIsDisplayed()
+            // 目标表名出现在**日志**里 —— 结论那块地此前是一张统计表，
+            // 现在收成了底部一行文本；逐行的表名 / 行号 / 实际数据在日志里。
+            //
+            // 判据打在「gen_target 第 1 行」这一段上：编辑器文本里虽然也有
+            // `gen_target`，但它**不含**「第 1 行」—— 所以这段只会命中日志行。
+            onNodeWithText("gen_target 第 1 行", substring = true).assertIsDisplayed()
 
             // 引擎真的把行写进了库
             val rows =

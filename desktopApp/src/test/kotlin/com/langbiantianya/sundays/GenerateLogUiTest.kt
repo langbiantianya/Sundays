@@ -228,7 +228,7 @@ class GenerateLogUiTest {
     ): String = StringsRegistry.of(AppLanguage.ZH_HANS).plural(key, count, *args)
 
     @Test
-    fun `the finished summary shows up in the panel header`() =
+    fun `the finished summary shows up in the status line`() =
         runComposeUiTest {
             val state = newBrowser()
             setWorkbench(state)
@@ -240,13 +240,12 @@ class GenerateLogUiTest {
             state.executeGenerate()
             waitUntil(timeoutMillis = 10_000) { !state.generateRunning }
 
-            // 摘要（「造数完成 · 共 3 行 · 处理 1 个脚本」）说的是**整个面板**的状态，
-            // 不是结果表这一块的 —— 所以它得在**标题栏**上。
+            // 摘要（「造数完成 · 共 3 行 · 处理 1 个脚本」）说的是**这一轮造数的结论**。
             //
-            // 判据钉的是「它在标题栏里」而不只是「它存在」：
-            // 掉回结果区里的话，这句话照样存在，只是没人第一眼能看到。
+            // 判据钉的是「它在底部那一行」而不只是「它存在」：
+            // 掉回别处的话，这句话照样存在，只是没人第一眼能看到。
             val summary = zhPlural(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3L, 1)
-            onNodeWithText(summary).assert(hasAnyAncestor(hasTestTag(GENERATE_OUTPUT_HEADER_TAG)))
+            onNodeWithText(summary).assert(hasAnyAncestor(hasTestTag(GENERATE_STATUS_LINE_TAG)))
         }
 
     @Test
@@ -259,6 +258,9 @@ class GenerateLogUiTest {
             setWorkbench(state)
 
             assertTrue(state.generateLogDropped > 0, "前置条件：确实丢行了")
-            onNodeWithText(zh(StrKey.GENERATE_LOG_DROPPED, state.generateLogDropped)).assertExists()
+            // 钉住它**在标题栏里** —— 丢行这件事必须一眼看到，
+            // 而不是混在日志流里等人翻。
+            onNodeWithText(zh(StrKey.GENERATE_LOG_DROPPED, state.generateLogDropped))
+                .assert(hasAnyAncestor(hasTestTag(GENERATE_OUTPUT_HEADER_TAG)))
         }
 }

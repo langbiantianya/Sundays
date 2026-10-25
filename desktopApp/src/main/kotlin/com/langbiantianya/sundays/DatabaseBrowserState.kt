@@ -3242,11 +3242,6 @@ class DatabaseBrowserState(
 
     var generateError: String? by mutableStateOf(null)
 
-    /** 结果区视图状态（与 SQL 工作台同构：分页 / 选中行归状态机，切 pane 保持）。 */
-    var generateResultPage: Int by mutableStateOf(1)
-    var generateResultPageSize: PageSize by mutableStateOf(PageSize.DEFAULT)
-    var generateResultSelectedRowId: Any? by mutableStateOf(null)
-
     /** 造数代次 —— 同 [SqlSheet.generation]：切连接 / 重新执行后使 in-flight 进度帧失效。 */
     private var generateGeneration: Int = 0
 
@@ -3365,20 +3360,6 @@ class DatabaseBrowserState(
     /** 是否已有可展示的造数结果（至少一个脚本插过行）。 */
     val hasGenerateResult: Boolean get() = generateScripts.any { it.inserted > 0 }
 
-    /** 造数结果表数据 —— 每个脚本一行。 */
-    fun generateResultRows(): List<TableRow> =
-        generateScripts.mapIndexed { index, script ->
-            TableRow(
-                id = index.toLong(),
-                cells =
-                    mapOf(
-                        "script" to "${index + 1}. ${script.title}",
-                        "table" to script.lastTable.ifBlank { "—" },
-                        "inserted" to script.inserted.toString(),
-                    ),
-            )
-        }
-
     /**
      * 执行造数 —— 走 `Category.DATA` / `Action.GENERATE` 流式通道：
      * 每条 INSERT 回一帧 `gen_progress_frame`（含 `script_index` / `inserted` / `table`），
@@ -3404,8 +3385,6 @@ class DatabaseBrowserState(
         generateRunning = true
         generateError = null
         generateTablesProcessed = 0
-        generateResultPage = 1
-        generateResultSelectedRowId = null
         generateScripts.forEach {
             it.inserted = 0
             it.lastTable = ""
@@ -3534,8 +3513,6 @@ class DatabaseBrowserState(
         selectedGenerateIndex = 0
         generateTablesProcessed = 0
         generateError = null
-        generateResultPage = 1
-        generateResultSelectedRowId = null
         // 日志也是上一连接的东西 —— 跟着脚本一起复位。
         clearGenerateLog()
     }

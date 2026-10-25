@@ -71,8 +71,11 @@ import kotlin.test.assertTrue
  * 2. **挤不没输出面板**：输出面板有**下限**（[MIN_GENERATE_OUTPUT_HEIGHT]）——
  *    日志看不见就等于没有日志，拖拽**不能**把它破坏掉。
  * 3. **是窗口级偏好**：工作台被拆掉又重建之后，高度还在（与左树宽度、SQL 编辑器高度同一层）。
- * 4. **日志与结果在同一个面板里**：这是这次「合并」本身要立的契约 ——
+ * 4. **日志与状态行在同一个面板里**：这是这次「合并」本身要立的契约 ——
  *    此前它们是**两个**各自独立的 `Surface`，各自带标题栏、各占一块比例。
+ *    而「统计结果」那块地此前是一张两三行的表，现在收成底部**一行**文本。
+ * 5. **状态行只占一行**：为两三行内容留一整块地，是把最稀缺的地方浪费掉 ——
+ *    那块地方本该给日志（1000 行历史）。
  */
 @OptIn(ExperimentalTestApi::class)
 class GenerateEditorHeightTest {
@@ -272,9 +275,34 @@ class GenerateEditorHeightTest {
         }
 
     @Test
-    fun `the log and the result table live in the same output panel`() =
+    fun `the status line takes one row, not a whole block`() =
         runComposeUiTest {
-            // 这就是「合并」本身要立的契约：日志与结果表**在同一个面板里**。
+            // 「统计结果占的高度太大了，只要底下一行文本能显示的了就行」——
+            // 这条判据就把那句话钉成契约：结论那一块**只占一行**，
+            // 剩下的地方全归日志。
+            //
+            // 此前那里是一张「每个脚本一行」的表（两三行内容），
+            // 却占掉了 30% 的高度 —— 为两三行内容留一整块地，
+            // 是把最稀缺的地方浪费掉。
+            setGenerateWorkbench(1000.dp)
+
+            val statusHeight = heightOf(GENERATE_STATUS_LINE_TAG)
+            val logHeight = heightOf(GENERATE_LOG_PANEL_TAG)
+
+            assertTrue(
+                statusHeight <= 48.dp,
+                "状态行只该占一行文字，实际 $statusHeight",
+            )
+            assertTrue(
+                statusHeight * 4 < logHeight,
+                "日志区应当远大于状态行：status=$statusHeight log=$logHeight",
+            )
+        }
+
+    @Test
+    fun `the log and the status line live in the same output panel`() =
+        runComposeUiTest {
+            // 这就是「合并」本身要立的契约：日志与状态行**在同一个面板里**。
             //
             // 此前它们是两个各自独立的 `Surface`，各自带一个标题栏、各占一块比例。
             // 判据打在「共同的祖先面板」上 —— 只断言「两个都存在」的话，
@@ -283,7 +311,7 @@ class GenerateEditorHeightTest {
 
             onNodeWithTag(GENERATE_LOG_PANEL_TAG)
                 .assert(hasAnyAncestor(hasTestTag(GENERATE_OUTPUT_PANEL_TAG)))
-            onNodeWithTag(GENERATE_RESULT_AREA_TAG)
+            onNodeWithTag(GENERATE_STATUS_LINE_TAG)
                 .assert(hasAnyAncestor(hasTestTag(GENERATE_OUTPUT_PANEL_TAG)))
         }
 

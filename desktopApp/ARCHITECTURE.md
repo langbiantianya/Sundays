@@ -168,7 +168,7 @@ desktopApp （本模块）
 
 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
-| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、**造数输出面板**（**实时日志** + 结果表合成一块）、结果集铺表；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
+| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、**造数输出面板**（**实时日志** + 底部一行**状态行**，合成一块）、结果集铺表；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
 | [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) | 造数日志的**数据模型与纯函数** —— 日志条目（脚本下标 / 表 / 行号 / 列值 / 失败原因）、列值的显示文本（按列名排序、NULL、超长截断）、「一帧进度 → 一行日志」的映射。上界常量（保留行数 / 成批丢的批量）也在这里 |
 
@@ -291,7 +291,8 @@ desktopApp （本模块）
 | 滚动用**挂起式** `scrollToItem`，不用 `requestScrollToItem` | `requestScrollToItem` 记下一个「下一次 remeasure 时生效、且只生效一次」的请求 —— 而 remeasure 常常**同时**要应用数据变更（行数变了），那一刻位置是按 **key** 维持的（列表是索引键），新行就落在视野之外；请求有没有抢赢取决于它与那次 remeasure 的先后 —— **竞态**。`scrollToItem` 在滚动块里**同步**做完一次 remeasure：位置一定落在最后一行，且与其它滚动互斥 | 同上 |
 | **失败也进日志**，行号**跳号也不抹平** | 前者：一份不显示失败的日志是不完整的 —— 用户在日志里看到「插到第 37 行」然后就没了，与「日志里明写失败原因」差着一整个排查过程（脚本为空 / 引擎报错 / 异常兜底三条路径都留痕）。后者：引擎的帧通道满了会**丢最旧**的帧，行号会从 7 直接跳到 9 —— 行号是**引擎回传的真值**，抹平成连续的行号等于伪造一份不存在的日志 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `generateFailureEntry` · [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) |
 | 造数日志属于**这一轮** | 重新执行 / 切连接都要清空 —— 否则两轮的行混在一起，看不出哪一行是哪一轮插的 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `clearGenerateLog` |
-| 造数工作台的**编辑器高度可拖**，日志与结果**合成一块** | 此前是**写死的比例**（编辑器 45% / 日志 25% / 结果 30%）：写一段几百行的 Lua 循环时编辑器太矮，而只想看一眼刚造的那批数据时输出区又占了七成屏。现在编辑器与输出面板之间那条缝是 `HorizontalDragHandle`（与浏览 / 分析两侧**同一份实现**），双击复位回默认比例；**输出面板的 260dp 下限是拖拽的硬边界** —— 日志看不见就等于没有日志，窗口很矮时**编辑器的下限要让位给它**。而下半部分从**两个面板合成一个**：日志与结果表本是同一件事的两面（过程 / 结论），此前却是两行标题栏、两条分隔线，且只有两三行的结论表分到了 30% 的高度 —— 真正需要地方的日志只拿到 25% | [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) 的 `GENERATE_EDITOR_DRAG_HANDLE_TAG` / `MIN_GENERATE_OUTPUT_HEIGHT` |
+| 造数工作台的**编辑器高度可拖**，日志与结果**合成一块** | 此前是**写死的比例**（编辑器 45% / 日志 25% / 结果 30%）：写一段几百行的 Lua 循环时编辑器太矮，而只想看一眼刚造的那批数据时输出区又占了七成屏。现在编辑器与输出面板之间那条缝是 `HorizontalDragHandle`（与浏览 / 分析两侧**同一份实现**），双击复位回默认比例；**输出面板的 260dp 下限是拖拽的硬边界** —— 日志看不见就等于没有日志，窗口很矮时**编辑器的下限要让位给它**。而下半部分从**两个面板合成一个**：日志与结果表本是同一件事的两面（过程 / 结论），此前却是两行标题栏、两条分隔线，且只有两三行的结论表分到了 30% 的高度 —— 真正需要地方的日志只拿到 25% |
+| 统计结果**只占一行**，不为两三行内容留一整块地 | 合成输出面板之后，那块「统计结果」（每个脚本一行：脚本 / 目标表 / 插入行数）仍是 150dp 的一块地，而它实际只有两三行内容 —— **为两三行内容留一整块地，是把最稀缺的地方浪费掉**：那块地本该给日志（1000 行历史）。现在收成底部**一行**文本（造数中 / 跑完 / 出错三种）。**分脚本的明细并没有丢** —— 日志里**逐行写着**目标表名与该脚本内的行号，真要按表汇总，看日志比看一张两三行的表更快 | [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) 的 `GenerateStatusLine` / `GENERATE_STATUS_LINE_HEIGHT` | [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) 的 `GENERATE_EDITOR_DRAG_HANDLE_TAG` / `MIN_GENERATE_OUTPUT_HEIGHT` |
 
 
 

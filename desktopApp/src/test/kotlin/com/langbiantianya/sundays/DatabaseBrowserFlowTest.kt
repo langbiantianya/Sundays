@@ -798,17 +798,12 @@ class DatabaseBrowserFlowTest {
     }
 
     @Test
-    fun `renameGenerateScript renames the script and its result row label`() {
+    fun `renameGenerateScript renames the script`() {
         val state = newBrowser()
         assertEquals("脚本 1", state.currentGenerateScript()!!.title)
 
         state.renameGenerateScript(0, " 订单造数 ")
         assertEquals("订单造数", state.currentGenerateScript()!!.title)
-        assertEquals(
-            "1. 订单造数",
-            state.generateResultRows().single().cells["script"],
-            "造数结果表的脚本列应跟随重命名",
-        )
 
         state.renameGenerateScript(0, "")
         assertEquals("订单造数", state.currentGenerateScript()!!.title, "空名应保持原名")
