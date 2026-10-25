@@ -69,6 +69,9 @@ internal const val TABLE_CLEAR_BTN_TAG = "tableClearBtn"
  * @param sqlEditorHeight SQL 编辑器的高度 —— **窗口级偏好**，同样由 [DatabaseBrowserScreen] 持有；
  *   `null` = 还没拖过，用默认比例
  * @param onSqlEditorHeightChange 拖动编辑器与结果区之间那条缝时的实时回调
+ * @param generateEditorHeight 造数编辑器的高度 —— **窗口级偏好**，同样由 [DatabaseBrowserScreen] 持有；
+ *   `null` = 还没拖过，用默认比例
+ * @param onGenerateEditorHeightChange 拖动造数编辑器与输出面板之间那条缝时的实时回调
  */
 @Composable
 internal fun ActiveSheetContent(
@@ -81,6 +84,8 @@ internal fun ActiveSheetContent(
     onSchemaPanelCollapsedChange: (Boolean) -> Unit,
     sqlEditorHeight: Dp?,
     onSqlEditorHeightChange: (Dp) -> Unit,
+    generateEditorHeight: Dp?,
+    onGenerateEditorHeightChange: (Dp) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 注入当前连接（连接变化时清空派生状态），随后在已连接时自动加载数据库列表。
@@ -190,6 +195,12 @@ internal fun ActiveSheetContent(
                             state = sheet.browser,
                             connected = sheet.status.state == ConnectionState.CONNECTED,
                             schema = sheet.browser.currentSchema(),
+                            // 造数编辑器的高度同样是**窗口级偏好** —— 与 SQL 编辑器
+                            // 同一层、同一套理由，但**各存各的**：
+                            // 两个面板的内容与默认比例都不同（SQL 60/40、造数 45/55），
+                            // 共用一个值会让「在 SQL 里拉高编辑器」顺带改掉造数工作台的布局。
+                            editorHeight = generateEditorHeight,
+                            onEditorHeightChange = onGenerateEditorHeightChange,
                             modifier =
                                 Modifier
                                     .weight(1f)

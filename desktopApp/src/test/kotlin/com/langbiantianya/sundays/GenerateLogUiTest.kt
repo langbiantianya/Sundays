@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,7 +27,9 @@ import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.LanguageScope
 import com.langbiantianya.i18n.Msg
+import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.i18n.StringsRegistry
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.pool.PoolManager
 import com.langbiantianya.sundays.browser.BrowserPane
@@ -209,6 +214,40 @@ class GenerateLogUiTest {
             rowNumber = rowNumber.toLong(),
             values = mapOf("id" to rowNumber.toDouble(), "total" to rowNumber.toDouble()),
         )
+
+    /**
+     * 复数文案 —— 直接读文案表，不走 `CompositionLocal`。
+     *
+     * `plural()` 是 `@Composable` 的，而断言要在**组合之外**算期望值；
+     * 所以这里绕开界面层，直接问文案表要那一条。
+     */
+    private fun zhPlural(
+        key: PluralStrKey,
+        count: Int,
+        vararg args: Any?,
+    ): String = StringsRegistry.of(AppLanguage.ZH_HANS).plural(key, count, *args)
+
+    @Test
+    fun `the finished summary shows up in the panel header`() =
+        runComposeUiTest {
+            val state = newBrowser()
+            setWorkbench(state)
+
+            state.selectPane(BrowserPane.GENERATE)
+            state.currentGenerateScript()!!.editor.setText(
+                "for i = 1, 3 do insert('orders', {id = 100 + i, total = i * 10}) end",
+            )
+            state.executeGenerate()
+            waitUntil(timeoutMillis = 10_000) { !state.generateRunning }
+
+            // 摘要（「造数完成 · 共 3 行 · 处理 1 个脚本」）说的是**整个面板**的状态，
+            // 不是结果表这一块的 —— 所以它得在**标题栏**上。
+            //
+            // 判据钉的是「它在标题栏里」而不只是「它存在」：
+            // 掉回结果区里的话，这句话照样存在，只是没人第一眼能看到。
+            val summary = zhPlural(PluralStrKey.GENERATE_COMPLETE_SUMMARY, 3, 3L, 1)
+            onNodeWithText(summary).assert(hasAnyAncestor(hasTestTag(GENERATE_OUTPUT_HEADER_TAG)))
+        }
 
     @Test
     fun `the dropped row notice shows up when the log overflows`() =

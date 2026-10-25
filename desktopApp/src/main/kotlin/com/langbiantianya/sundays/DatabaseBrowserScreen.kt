@@ -237,6 +237,16 @@ fun DatabaseBrowserScreen(
     // 但不会因为「窗口变大了」就自己长回去 —— 用户拖出来的样子是用户的事。
     var sqlEditorHeight by remember { mutableStateOf<Dp?>(null) }
 
+    // 造数编辑器的高度 —— 与 SQL 编辑器**同一层、同一套理由**（布局偏好，
+    // 不是「某个连接的数据」的一部分），但**各存各的**：
+    //
+    // 两个面板的内容与默认比例都不同（SQL 60/40、造数 45/55），
+    // 共用一个值的话，「在 SQL 里把编辑器拉高」会顺带改掉造数工作台的布局 ——
+    // 而用户多半根本没意识到自己换了个面板。
+    //
+    // `null` = **还没拖过**，用默认比例（跟着窗口高度走）。
+    var generateEditorHeight by remember { mutableStateOf<Dp?>(null) }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 没有 sheet 时不渲染标签条：Material3 的 ScrollableTabRow 不接受 0 个 tab
@@ -273,6 +283,8 @@ fun DatabaseBrowserScreen(
                     onSchemaPanelCollapsedChange = { schemaPanelCollapsed = it },
                     sqlEditorHeight = sqlEditorHeight,
                     onSqlEditorHeightChange = { sqlEditorHeight = it },
+                    generateEditorHeight = generateEditorHeight,
+                    onGenerateEditorHeightChange = { generateEditorHeight = it },
                     modifier = Modifier.weight(1f),
                 )
             }

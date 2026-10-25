@@ -168,7 +168,7 @@ desktopApp （本模块）
 
 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
-| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、**实时日志面板**（每条 INSERT 一行）、结果集铺表 |
+| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、**造数输出面板**（**实时日志** + 结果表合成一块）、结果集铺表；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
 | [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) | 造数日志的**数据模型与纯函数** —— 日志条目（脚本下标 / 表 / 行号 / 列值 / 失败原因）、列值的显示文本（按列名排序、NULL、超长截断）、「一帧进度 → 一行日志」的映射。上界常量（保留行数 / 成批丢的批量）也在这里 |
 
@@ -291,6 +291,7 @@ desktopApp （本模块）
 | 滚动用**挂起式** `scrollToItem`，不用 `requestScrollToItem` | `requestScrollToItem` 记下一个「下一次 remeasure 时生效、且只生效一次」的请求 —— 而 remeasure 常常**同时**要应用数据变更（行数变了），那一刻位置是按 **key** 维持的（列表是索引键），新行就落在视野之外；请求有没有抢赢取决于它与那次 remeasure 的先后 —— **竞态**。`scrollToItem` 在滚动块里**同步**做完一次 remeasure：位置一定落在最后一行，且与其它滚动互斥 | 同上 |
 | **失败也进日志**，行号**跳号也不抹平** | 前者：一份不显示失败的日志是不完整的 —— 用户在日志里看到「插到第 37 行」然后就没了，与「日志里明写失败原因」差着一整个排查过程（脚本为空 / 引擎报错 / 异常兜底三条路径都留痕）。后者：引擎的帧通道满了会**丢最旧**的帧，行号会从 7 直接跳到 9 —— 行号是**引擎回传的真值**，抹平成连续的行号等于伪造一份不存在的日志 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `generateFailureEntry` · [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) |
 | 造数日志属于**这一轮** | 重新执行 / 切连接都要清空 —— 否则两轮的行混在一起，看不出哪一行是哪一轮插的 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `clearGenerateLog` |
+| 造数工作台的**编辑器高度可拖**，日志与结果**合成一块** | 此前是**写死的比例**（编辑器 45% / 日志 25% / 结果 30%）：写一段几百行的 Lua 循环时编辑器太矮，而只想看一眼刚造的那批数据时输出区又占了七成屏。现在编辑器与输出面板之间那条缝是 `HorizontalDragHandle`（与浏览 / 分析两侧**同一份实现**），双击复位回默认比例；**输出面板的 260dp 下限是拖拽的硬边界** —— 日志看不见就等于没有日志，窗口很矮时**编辑器的下限要让位给它**。而下半部分从**两个面板合成一个**：日志与结果表本是同一件事的两面（过程 / 结论），此前却是两行标题栏、两条分隔线，且只有两三行的结论表分到了 30% 的高度 —— 真正需要地方的日志只拿到 25% | [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) 的 `GENERATE_EDITOR_DRAG_HANDLE_TAG` / `MIN_GENERATE_OUTPUT_HEIGHT` |
 
 
 
@@ -522,6 +523,7 @@ desktopApp （本模块）
 
 | **树面板宽度** | `DatabaseBrowserScreen`（**屏级**） | 保持 | 保持（窗口级偏好，不落盘） |
 | **SQL 编辑器高度** | `DatabaseBrowserScreen`（**屏级**，与树面板宽度同一层） | 保持 | 保持（窗口级偏好，不落盘） |
+| **造数编辑器高度** | `DatabaseBrowserScreen`（**屏级**，与 SQL 编辑器高度同一层但**各存各的** —— 两个面板的默认比例不同，共用一个值会让「在 SQL 里拉高编辑器」顺带改掉造数工作台） | 保持 | 保持（窗口级偏好，不落盘） |
 
 | **后台任务列表** | `DatabaseBrowserState`（per-sheet） | 保持 | 随 sheet 生命周期 |
 
