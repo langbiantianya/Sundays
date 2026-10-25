@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
@@ -234,12 +233,14 @@ internal fun SchemaTreePanel(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // **必须显式持有** —— LazyColumn 不传 state 时内部用的是 `rememberLazyListState()`，
-    // 而这个 remember 的宿主是**调用点的组合作用域**：右栏 pane 切换（表预览 ⇄ SQL ⇄ 造数）
-    // 会把整棵子树移出再移回组合，remember 随之销毁、滚动位置回到顶部。
-    // 结果就是「看一眼 SQL 回来，树又滚回顶部，得重新展开找到刚才那张表」——
-    // 与本屏「每 sheet 状态互相独立、跨视图不丢失」的既有契约直接冲突。
-    val listState = rememberLazyListState()
+    // 滚动状态**由外面持有**（[DatabaseBrowserState.treeScrollState]）——
+    // 面板折叠时整棵树会从组合里移除，记在面板里的状态会跟着没，
+    // 展开后树就回到顶部了。
+    //
+    // 放在会话里还有第二层好处：切右栏 pane（表预览 ⇄ SQL ⇄ 造数）时
+    // 组合会重排，本屏「每 sheet 状态互相独立、跨视图不丢失」的契约要求
+    // 滚动位置也不丢。
+    val listState = state.treeScrollState
 
     // 右键菜单状态提到 LazyColumn **外面**：菜单是**屏级**的一个浮层，
     // 若把 `visible` 记在某个 item 的组合里，滚动时被回收的 item 会把菜单一起带走

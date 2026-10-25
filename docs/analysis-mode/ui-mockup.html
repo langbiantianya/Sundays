@@ -679,7 +679,9 @@ body{
         <div class="work-body">
           <!-- v1.12：左树可**折叠到侧边** —— 收成贴到屏幕左边的 44dp 窄轨，
                把宽度让给右边的编辑器与结果表。树的内容**整体不在屏上**
-               （44dp 塞不下树，画一截残影既没法看也没法点）。 -->
+               （44dp 塞不下树，画一截残影既没法看也没法点）。
+               v1.13 起：折叠**不丢滚动位置** —— 滚动状态提到面板之外，
+               展开后树还停在原来那个位置。 -->
           <aside class="tree-rail" id="tree-rail" hidden>
             <button class="tree-expand" type="button" title="展开左树" aria-label="展开左树">›</button>
             <span class="rail-icon" title="工作区">🗄</span>

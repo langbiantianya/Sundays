@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.30（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.31（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -412,4 +412,5 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.26 | **① 表结构编辑整套上移**：`table/` 下新增 `TableStructureDraft` / `TableStructureDiff` / `TableStructureTypes` / `TableStructureDialog`，由 `desktopApp` 迁入 —— 判据见 §1.3；协议无 `ALTER` 所以外键改动只能删了重建。**② SQL 文本工具上移**：新增 `sql/` 包（`DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog`），连同 `EmptyHint` / `ColumnBadge` / `TabRenameDialog` 一并迁入；`shared/build.gradle.kts` 显式声明 `libs.kotlinx.coroutines.core`（此前靠 Compose runtime 传递依赖） |
 | v2.27 | **① `TableStructureDialog` 保存失败时必须显示错误** —— 早先把 `state.error` 记成 `remember(state.draft)` 的快照，而保存失败时 `state.draft` 并不变，remember 的 key 也就没变，快照永远停在初始值；再叠加一层 `if (state.loading) state.error else draft.validate()` 的门控，失败原因被彻底吞掉。改为每次重组都从 `state.error` 读，弹窗里那行红字才真的会出现。**② 读回表结构时「长度」要按类型过滤**（`ColumnTypeCatalog.lengthFor`）—— 引擎给的 `size` 对数值列是**十进制位数**（`BIGINT` 是 19）而不是长度，照搬进长度框就成了「BIGINT 长度 19」 |
 | v2.28 | **① 分隔条悬停要有「左右拉伸」指针** —— 此前 `DragHandle` 只管拖拽不管指针，鼠标停上去永远是默认箭头，拖拽功能「存在但没人发现」。新增 `hoverIcon: PointerIcon?` 参数：**图标由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」），因为 Compose 公共 API 只有默认 / 十字 / 文本 / 手型四种指针，左右拉伸箭头是平台专属资源 —— 与仓库既有的分界一致（`ClipboardWriter` / `NativePathPicker`）。**② 只在「真的拖得动」时才显示箭头**（`canPaneWidthMove`：顶到下限仍可变宽、顶到上限仍可变窄，只有上下限相等才是真动不了）—— 顶死还摆「可拖」箭头是在骗用户，而且这种「图标在骗人」的缺陷比「图标没有」更难查 |
-| v2.30 | **树面板外壳上移** —— 新增 `tree/TreePaneShell.kt`：**两棵树的面板外壳共用一个组件**。展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（一个展开按钮 + 一枚图标，把宽度让给右边）。**宽度不由它持有**（受控组件 —— 布局宽度是窗口级偏好，应提升到「同一时刻只渲染一个实例」的那一层之外）；**指针图标由调用方给**（同 `DragHandle` 的分界）。折叠时树**整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点；代价是滚动位置回顶部（**展开态不丢**，它在会话状态里） |
+| v2.30 | **树面板外壳上移** —— 新增 `tree/TreePaneShell.kt`：**两棵树的面板外壳共用一个组件**。展开态 = 面板 + 可拖宽的分隔条（复用 `DragHandle`），折叠态 = 贴到屏幕左边的 **44dp 窄轨**（一个展开按钮 + 一枚图标，把宽度让给右边）。**宽度不由它持有**（受控组件 —— 布局宽度是窗口级偏好，应提升到「同一时刻只渲染一个实例」的那一层之外）；**指针图标由调用方给**（同 `DragHandle` 的分界）。折叠时树**整体从组合里移除** —— 44dp 塞不下树，画一截残影既没法看也没法点（滚动位置的代价见 v2.31） |
+| v2.31 | **折叠不再丢滚动位置** —— 折叠把整棵树从组合里移除，**记在树自己滚动容器里的位置就跟着没了**（展开后树回到顶部，用户得重新滚回去）。修法是**把滚动状态提到面板之外**：浏览模式放进 `DatabaseBrowserState`（**每个连接各一棵**，位置各归各 —— 放屏级会串到别的连接上），分析模式放进 `AnalysisScreen`（同一时刻只有一棵树，屏幕层已持有宽度与折叠态）。展开态（哪些库是张开的）本来就住在会话里，与滚动位置是同一类状态 |

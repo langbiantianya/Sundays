@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.analysis
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -146,6 +147,17 @@ fun AnalysisScreen(
     var treePaneWidth by remember { mutableStateOf(ANALYSIS_TREE_PANEL_DEFAULT_WIDTH) }
     var treePaneCollapsed by remember { mutableStateOf(false) }
 
+    // 左树的**滚动位置** —— 提到面板**外面**持有。
+    //
+    // 为什么：折叠时整棵树会从组合里移除（44dp 的窄轨塞不下树），
+    // 滚动状态若记在面板里就跟着一起没了 —— 展开后树回到顶部，
+    // 用户得重新滚回去找刚才那张表。
+    //
+    // 为什么住在**屏幕层**而不是会话里：它是**这棵树**的滚动位置，
+    // 而分析模式同一时刻只有一棵树（不像浏览模式有多个连接各有一棵）；
+    // 屏幕层这一层已经持有宽度与折叠态，滚动位置与它们是同一类东西。
+    val treeScrollState = rememberScrollState()
+
     Column(modifier = modifier.fillMaxSize()) {
         // 拉取状态条 —— 在树与主区**上面**横贯一条。
         // 放在这里是因为拉取是**跨树与主区**的动作：它从左边树上发起，
@@ -185,6 +197,7 @@ fun AnalysisScreen(
                         onCollapse = { treePaneCollapsed = !treePaneCollapsed },
                         loading = treeLoading,
                         error = treeError,
+                        scrollState = treeScrollState,
                         modifier = paneModifier.testTag(ANALYSIS_TREE_PANEL_TAG),
                     )
                 }
@@ -236,6 +249,14 @@ const val ANALYSIS_TREE_PANEL_TAG: String = "analysisTreePanel"
 
 /** 左树分隔条的 UI 测试 tag —— 拖拽测试需要一个明确的落点，不能靠坐标猜。 */
 const val ANALYSIS_TREE_DRAG_HANDLE_TAG: String = "analysisTreeDragHandle"
+
+/**
+ * 左树**列表容器**的 UI 测试 tag —— 滚动手势要有一个明确的落点。
+ *
+ * 为什么不用 `hasScrollAction()` 找：分析屏上还有别的能滚的东西
+ * （编辑器里的长 SQL 会自己滚），按能力找会撞上好几个节点。
+ */
+const val ANALYSIS_TREE_LIST_TAG: String = "analysisTreeList"
 
 /** 编辑器面板占主区的高度比例 —— 剩下的给结果表。 */
 private const val EDITOR_PANEL_WEIGHT = 0.42f
@@ -354,6 +375,7 @@ private fun AnalysisTreePanel(
     onCollapse: () -> Unit,
     loading: Boolean,
     error: String?,
+    scrollState: ScrollState,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -412,11 +434,15 @@ private fun AnalysisTreePanel(
         Box(modifier = Modifier.weight(1f)) {
             // 滚动容器归这里 —— 共享树组件只画内容，不自带滚动。
             // 浏览模式把树放进 `LazyColumn` 的每一项里，容器不一样。
+            //
+            // 滚动状态由**外面**持有（`AnalysisScreen` 那一层）——
+            // 折叠时整棵树会从组合里移除，记在这里的状态会跟着没。
             Column(
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(scrollState)
+                        .testTag(ANALYSIS_TREE_LIST_TAG),
             ) {
                 ObjectTree(
                     roots = roots,

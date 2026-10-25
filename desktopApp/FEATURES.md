@@ -86,7 +86,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
 | | 树面板宽度**可拖拽**（双击复位，范围钳位），悬停显示**左右拉伸指针** | `shared/ui/DragHandle.kt` |
-| | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度 | `shared/tree/TreePaneShell.kt` |
+| | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度，**也不丢**滚动位置 | `shared/tree/TreePaneShell.kt` |
 | | **对象树右键菜单**：复制名称 / 复制引用名（按方言限定）/ 复制建表 DDL | `SqlIdentifier` + `TABLE.GET_DDL` |
 | **SQL 工作台** | 多 sheet，各自独立文本 / 光标 / 滚动 / 结果 | `SqlSheet` |
 | | 语法高亮，**随连接方言切换词表** | `SqlDialectProfile` → `CodeEditor` |

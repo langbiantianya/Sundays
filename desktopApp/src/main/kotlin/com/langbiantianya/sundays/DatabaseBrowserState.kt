@@ -10,10 +10,17 @@
 // 同一份状态机可以脱离界面直接驱动（见 DatabaseBrowserFlowTest），所以这里**不能**出现任何
 // Composable 函数或 Modifier。`TablePreviewTab` 放在这里而不是 TablePreview.kt，
 // 是因为它本质是状态而不是界面。
+//
+// ⚠️ 唯一的例外是 `treeScrollState`（左树的滚动位置）—— 它**不是**渲染，
+// 是一个状态容器；之所以住在这里，是因为它必须**活过面板本身**
+// （面板折叠时整棵树会从组合里移除，记在面板里的位置就跟着没了）。
+// 住在会话里还有个好处：每个连接各有一棵树，滚动位置各归各，
+// 换连接不会把上一个连接的滚动位置带过来。
 
 package com.langbiantianya.sundays
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -559,6 +566,26 @@ class DatabaseBrowserState(
 
     /** 已展开的数据库节点 */
     val expandedDatabases: SnapshotStateSet<String> = mutableStateSetOf()
+
+    /**
+     * 左树的**滚动位置** —— 提到面板**外面**持有。
+     *
+     * ## 为什么不在面板里 `rememberLazyListState()`
+     *
+     * 面板折叠时整棵树会从组合里移除（44dp 的窄轨塞不下树），
+     * 记在面板里的状态跟着一起没了 —— 展开后树回到顶部，
+     * 用户得重新滚回去找刚才那张表。
+     * 提到会话里，容器拆了状态还在，展开后树还停在原来那个位置。
+     *
+     * ## 为什么住在**会话**里而不是屏级
+     *
+     * 滚动位置是**这棵树**的位置：换个连接就是另一棵树，位置没有意义
+     *（屏级的会串到别的连接上去 —— 切到 B 连接时树停在 A 滚到的位置）。
+     * 它与「哪些库是张开的」是同一类状态 —— 都属于**这棵树**。
+     *
+     * 它跟着会话一起死：sheet 关了，这棵树也没了，位置自然不必留。
+     */
+    val treeScrollState: LazyListState = LazyListState()
 
     /** database → table list(来自 TABLE.LIST) */
     private val _tablesByDatabase = mutableStateMapOf<String, List<String>>()
