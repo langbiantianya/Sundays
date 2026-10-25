@@ -3250,6 +3250,79 @@ class DatabaseBrowserState(
     /** 造数代次 —— 同 [SqlSheet.generation]：切连接 / 重新执行后使 in-flight 进度帧失效。 */
     private var generateGeneration: Int = 0
 
+    /**
+     * 造数日志 —— 引擎每回传一帧 `gen_progress_frame` 就追加一行。
+     *
+     * 数据源是引擎**已经在发**的流（每条 INSERT 一帧），引擎侧无需改动；
+     * 前端此前只拿它更新计数器，那些信息其实已经够拼出一份实时日志了。
+     *
+     * 有界（[GENERATE_LOG_MAX_LINES] 行）—— 十万行造数不能把界面撑爆；
+     * 丢掉的行数记在 [generateLogDropped] 里**显式告知**，不静默截断。
+     */
+    val generateLog: SnapshotStateList<GenerateLogEntry> = mutableStateListOf()
+
+    /** 因超出 [GENERATE_LOG_MAX_LINES] 而被丢掉的行数 —— 显式告知，不静默截断。 */
+    var generateLogDropped: Int by mutableStateOf(0)
+
+    /**
+     * 日志的**追加序号** —— 每次追加 +1。
+     *
+     * ## 为什么自动滚动要盯它，而不是盯条数
+     *
+     * 条数在丢行时**不是单调的**：一次成批丢行会让它从 `MAX + BATCH` 掉回 `MAX`
+     * （见 [GENERATE_LOG_DROP_BATCH]）。于是「条数变了」既可能是「又来了一行」，
+     * 也可能是「旧的被丢了」—— 两种情况指向的滚动目标不一样。
+     *
+     * 序号每次追加**只 +1**，所以「又来了一行」只有**一个**信号、
+     * **一个**目标：最新那一行。
+     */
+    var generateLogSeq: Int by mutableStateOf(0)
+
+    /**
+     * 追加一行造数日志。
+     *
+     * 满了就**成批**丢最旧的（见 [GENERATE_LOG_DROP_BATCH] 的理由）。
+     *
+     * 可见性是 `internal` 而不是 `private`：测试要能**走同一条路**灌日志，
+     * 才能验证「有界缓冲 + 丢行计数 + 序号递增」这三条契约 ——
+     * 而用真引擎灌一千多行既慢又不确定（引擎自己也会丢帧，见 [GENERATE_LOG_MAX_LINES]）。
+     */
+    internal fun appendGenerateLog(entry: GenerateLogEntry) {
+        generateLog.add(entry)
+        generateLogSeq++
+        if (generateLog.size > GENERATE_LOG_MAX_LINES + GENERATE_LOG_DROP_BATCH) {
+            val drop = generateLog.size - GENERATE_LOG_MAX_LINES
+            generateLog.removeRange(0, drop)
+            generateLogDropped += drop
+        }
+    }
+
+    /** 清空造数日志 —— 新一轮造数开始时调用（日志属于**这一轮**）。 */
+    private fun clearGenerateLog() {
+        generateLog.clear()
+        generateLogDropped = 0
+        generateLogSeq++
+    }
+
+    /**
+     * 造数失败时写进日志的那一行 —— 失败原因原文进 [GenerateLogEntry.error]。
+     *
+     * `scriptIndex = 0` 表示「不属于任何脚本」—— 失败可能发生在引擎接到请求之前
+     * （比如脚本为空），那时还没有具体的脚本上下文。
+     *
+     * 原因取不到时退回通用文案：日志里写一行空理由，
+     * 等于把「失败了但不知道为什么」这件事又说了一遍。
+     */
+    private fun generateFailureEntry(message: String?): GenerateLogEntry =
+        GenerateLogEntry(
+            scriptIndex = 0,
+            totalScripts = 0,
+            table = "",
+            rowNumber = 0,
+            values = emptyMap(),
+            error = message?.takeIf { it.isNotBlank() } ?: Msg.text(StrKey.GENERATE_FAILED),
+        )
+
     /** 当前选中的脚本（越界时为 null —— 例如用户删掉了最后一个脚本）。 */
     fun currentGenerateScript(): GenerateScript? = generateScripts.getOrNull(selectedGenerateIndex)
 
@@ -3316,9 +3389,14 @@ class DatabaseBrowserState(
      */
     fun executeGenerate() {
         currentConnection ?: return
+        // 日志属于**这一轮**造数 —— 一开始就清空，
+        // 否则两轮的行会混在一起，看不出哪一行是哪一轮插的。
+        clearGenerateLog()
         val scripts = generateScripts.filter { it.editor.text.isNotBlank() }
         if (scripts.isEmpty()) {
             generateError = Msg.text(StrKey.GENERATE_SCRIPT_EMPTY)
+            // 失败也进日志 —— 一份不显示失败的日志是不完整的。
+            appendGenerateLog(generateFailureEntry(generateError))
             return
         }
         generateGeneration++
@@ -3364,6 +3442,7 @@ class DatabaseBrowserState(
             val flow = result.getOrNull()
             if (flow == null) {
                 generateError = result.exceptionOrNull()?.message ?: Msg.text(StrKey.GENERATE_FAILED)
+                appendGenerateLog(generateFailureEntry(generateError))
                 generateRunning = false
                 return@launch
             }
@@ -3377,6 +3456,10 @@ class DatabaseBrowserState(
                     }
                     if (!resp.success) {
                         generateError = resp.error.ifBlank { Msg.text(StrKey.GENERATE_FAILED) }
+                        // 失败也进日志 —— 一份不显示失败的日志是不完整的：
+                        // 用户在日志里看到「插到第 37 行」然后就没了，
+                        // 与「日志里明写失败原因」差着一整个排查过程。
+                        appendGenerateLog(generateFailureEntry(generateError))
                     } else if (resp.hasGenProgressFrame()) {
                         val frame = resp.genProgressFrame
                         // 引擎的 `script_index` 是 **1-based**（GenerateHandler 发帧时 +1），
@@ -3385,6 +3468,8 @@ class DatabaseBrowserState(
                             script.inserted = frame.inserted
                             if (frame.table.isNotBlank()) script.lastTable = frame.table
                         }
+                        // 追加一行日志 —— 引擎每条 INSERT 回传一帧，这里就是「实时日志」的数据源。
+                        appendGenerateLog(generateLogEntryOf(frame, ::cellValueToAny))
                     } else if (resp.hasGenerateTerminal()) {
                         generateTablesProcessed = resp.generateTerminal.tablesProcessed
                     }
@@ -3394,6 +3479,7 @@ class DatabaseBrowserState(
                 // 否则上一次造数请求的异常会抹掉新请求的「执行中」，用户就会再点一次，两次造数叠着跑。
                 if (gen == generateGeneration) {
                     generateError = e.message ?: e.javaClass.simpleName
+                    appendGenerateLog(generateFailureEntry(generateError))
                     generateRunning = false
                 }
                 return@launch
@@ -3450,6 +3536,8 @@ class DatabaseBrowserState(
         generateError = null
         generateResultPage = 1
         generateResultSelectedRowId = null
+        // 日志也是上一连接的东西 —— 跟着脚本一起复位。
+        clearGenerateLog()
     }
 
     /**

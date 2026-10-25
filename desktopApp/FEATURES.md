@@ -111,6 +111,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 补全：关键字 + **引擎注入的 13 个沙箱宿主函数**（带签名） | `extraCompletions` |
 | | Lua 版本切换 | `LUA_VERSIONS` |
 | | 执行 + 流式进度回填（已插入行数 / 最后写入表） | `DATA.GENERATE` |
+| | **实时日志** —— **每条 INSERT 一行**（目标表 · 该脚本内的行号 · 这一行的实际数据），自动滚到最新一行；**失败也进日志**；日志有界（1000 行）且丢掉的行数**明写在标题栏**（静默截断等于伪造一份完整日志）。数据源是引擎**已经在发**的进度帧，**引擎侧零改动** | `GenerateLog.kt` / `generateLog` |
 | **错误与状态** | 连接失败原因**常驻横幅** + 一键重试 | `ConnectionFailureBanner` |
 | | 引擎报错顶对齐 + 可纵向滚动（关键信息在末尾 `Caused by`） | `EmptyHint` |
 | | 底部状态栏：JVM 堆占用 + 点击展开详情面板 | `EngineMemoryStatusBar` |
@@ -249,7 +250,7 @@ Navicat 9。sundays 目前 **5** 个。引擎侧是插件化 SPI（`DialectLoade
 | **文件型数据源** | `database` 填 `.csv` / `.jsonl` / `.parquet` / `.xlsx` 路径即可当数据源。DuckDB 直接开前三种，视图名是去扩展名的文件名；`.xlsx` 由 POI 预转换，表名取自 sheet 名、首行表头用作列名。⚠️ 预转换只发生在 `dialect.buildJdbcUrl(...)` 内，预先算好 `jdbcUrl` 的调用方会绕过它 | [`ExcelToDuckDbCache.kt`](../dialect-duckdb/src/main/kotlin/com/langbiantianya/dialect/ExcelToDuckDbCache.kt) |
 | **数据库浏览** | 库表树懒加载（展开才拉表）；分页在引擎侧，`DataTable` 必须传 `serverSidePaging = true`；窄窗口下底栏自动降级，翻页按钮绝不被挤没 | [`SchemaTree.kt`](./src/main/kotlin/com/langbiantianya/sundays/SchemaTree.kt) · [`TablePreview.kt`](./src/main/kotlin/com/langbiantianya/sundays/TablePreview.kt) |
 | **表结构管理** | 右键表节点可编辑结构、右键库节点可新增表；主键 / 可空 / 自增 / 默认值 / 外键（含 `ON DELETE` / `ON UPDATE`）逐字段编辑，类型下拉**跟着方言走**。新增与编辑复用同一弹窗，批量 DDL 走事务会话、失败自动回滚并报引擎原文 | [`TableStructureDialog.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/table/TableStructureDialog.kt) · [`TableStructureDiff.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/table/TableStructureDiff.kt) |
-| **造数工作台（差异化）** | 走 **Lua 脚本 + 引擎内沙箱**而非表单式生成 —— 表单表达不了「外键顺序」「幂等重跑」「按业务规则派生字段」。沙箱注入 13 个宿主函数，补全带签名列出且**只在这个工作台出现** | [`generateGenerateHandler`](../engine/src/main/kotlin/com/langbiantianya/handlers/GenerateHandler.kt) |
+| **造数工作台（差异化）** | 走 **Lua 脚本 + 引擎内沙箱**而非表单式生成 —— 表单表达不了「外键顺序」「幂等重跑」「按业务规则派生字段」。沙箱注入 13 个宿主函数，补全带签名列出且**只在这个工作台出现**。**实时日志逐行显示写进去的数据**（引擎每条 INSERT 回传的那一帧直接铺成一行），出错时能定位到**具体哪一行** | [`generateGenerateHandler`](../engine/src/main/kotlin/com/langbiantianya/handlers/GenerateHandler.kt) · [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) |
 | **SQL 工作台** | 多 sheet 优先于多标签；补全 schema 感知但**零额外往返**（库 ← 连接时的 `SCHEMA.LIST`，表 ← 展开树时的 `TABLE.LIST`，字段 ← 已打开过预览的表）；长查询可「停止」走 `SYSTEM.CANCEL` | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) · [`CodeEditor`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/editor/ui/CodeEditor.kt) |
 
 > **为什么补全的字段只覆盖「访问过的表」**：全库全表意味着每张表一次

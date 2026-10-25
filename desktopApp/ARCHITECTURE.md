@@ -168,7 +168,9 @@ desktopApp （本模块）
 
 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
-| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、结果集铺表 |
+| [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) | 造数工作台：生成 Lua 脚本、执行、**实时日志面板**（每条 INSERT 一行）、结果集铺表 |
+
+| [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) | 造数日志的**数据模型与纯函数** —— 日志条目（脚本下标 / 表 / 行号 / 列值 / 失败原因）、列值的显示文本（按列名排序、NULL、超长截断）、「一帧进度 → 一行日志」的映射。上界常量（保留行数 / 成批丢的批量）也在这里 |
 
 
 
@@ -281,6 +283,14 @@ desktopApp （本模块）
 | SQL 结果区有**最小高度** | 结果区原先按 `maxHeight * 0.4f` 分高度且**没有下限** ⇒ 小窗口下数据区被压成 0 高，而标题照写着「查询结果 · 2 行」——**查了白查**。编辑器内部能滚、结果区不能，所以空间从编辑器借：结果区保底 180dp，编辑器拿剩下的 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `MIN_SQL_RESULT_HEIGHT` |
 | **编辑器的高度是拖出来的，不是比例算出来的** | 60/40 的比例是**编译期**定死的，而「写长 SQL 时编辑器要够高」与「结果只有两行时编辑器该矮」这两种诉求打架，用户没有任何办法调。现在编辑器与结果区之间那条缝是 `HorizontalDragHandle`（`:shared` 的横向分隔条）：往下拖编辑器变高，双击复位回默认比例。**结果区的 180dp 下限同时是拖拽的硬边界** —— 编辑器最多长到「总高 − 180dp」，数据不会被拖没；且窗口很矮时**编辑器的下限要让位给结果区的下限**（编辑器矮一点只是少显示几行，结果区矮一点就看不见数据了） | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `SQL_EDITOR_DRAG_HANDLE_TAG` / `MIN_SQL_RESULT_HEIGHT` |
 | 编辑器高度是**窗口级偏好** | 写在 `ActiveSheetContent` 里的话，那棵组合一旦被拆掉重建（关掉最后一个 sheet 再重开）高度就复位了 —— 「在 A 连接把编辑器拉高，关掉再打开又缩回去」。所以它与**树面板宽度**同一层：持有在 `DatabaseBrowserScreen` | [`DatabaseBrowserScreen.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserScreen.kt) 的 `sqlEditorHeight` |
+| 造数日志的数据源是**引擎已经在发的进度帧** | `DATA.GENERATE` 的流里每条 INSERT 回一帧 `gen_progress_frame`（表名 / 该脚本内的行号 / 这一行的实际数据）—— 前端此前只拿它更新计数器，那些信息其实早就够拼出一份日志。**引擎一行代码都不用改**；协议里没有独立的日志消息，Lua 沙箱里也没有 `log()` 辅助函数 | [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) 的 `generateLogEntryOf` · [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `executeGenerate` |
+| **每条 INSERT 一行**，不是每张表一行 | 「每张表一行」只剩一个总数，造数出错时（某个脚本写了别的表、或者数据类型不对）**看不出是哪一行出的问题**；而造数这种「批量写脏数据」的场景最需要的就是逐行看得见**写进去的是什么** | 同上 |
+| 日志**有界**，且丢掉的行数**说出来** | 十万行造数不能把界面撑爆；但**静默截断的日志等于伪造了一份完整的日志** —— 用户以为看到了全部 5000 行，其实只看到了最后 1000 行。所以丢掉的行数记在 `generateLogDropped` 里，界面在标题栏明写 | [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) 的 `GENERATE_LOG_MAX_LINES` / `GENERATE_LOG_DROP_BATCH` |
+| 丢行要**成批**丢 | 丢掉的是**最前面**的行，而 `SnapshotStateList.removeAt(0)` 是 O(n) 的数组搬移（十万行 = 5×10⁹ 次）；更要命的是删第 0 行会让**后面每一行都换位置**，可见的每一行都要重组一次。成批丢（每 128 行一次）把这笔开销摊薄到 1/128 | 同上 |
+| 自动滚动盯**序号**，条数只是**下标**的来源 | 序号每次追加**只 +1** —— 「又来了一行」只有**一个**信号；而条数在丢行时**不是单调的**（一次成批丢行会让它从 1129 掉回 1000），拿它当触发信号就得同时处理「涨了要滚」与「跌了别滚回去」两种情况。条数仍然要读 —— 它就是**滚到第几行**，但**在组合期只读一次**：列表的 item 数与要滚的下标必须是同一个数。两者都进 effect 的 key：**序号是触发信号，条数保证下标不越界** | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `generateLogSeq` · [`GenerateWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateWorkbench.kt) 的 `GenerateLogList` |
+| 滚动用**挂起式** `scrollToItem`，不用 `requestScrollToItem` | `requestScrollToItem` 记下一个「下一次 remeasure 时生效、且只生效一次」的请求 —— 而 remeasure 常常**同时**要应用数据变更（行数变了），那一刻位置是按 **key** 维持的（列表是索引键），新行就落在视野之外；请求有没有抢赢取决于它与那次 remeasure 的先后 —— **竞态**。`scrollToItem` 在滚动块里**同步**做完一次 remeasure：位置一定落在最后一行，且与其它滚动互斥 | 同上 |
+| **失败也进日志**，行号**跳号也不抹平** | 前者：一份不显示失败的日志是不完整的 —— 用户在日志里看到「插到第 37 行」然后就没了，与「日志里明写失败原因」差着一整个排查过程（脚本为空 / 引擎报错 / 异常兜底三条路径都留痕）。后者：引擎的帧通道满了会**丢最旧**的帧，行号会从 7 直接跳到 9 —— 行号是**引擎回传的真值**，抹平成连续的行号等于伪造一份不存在的日志 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `generateFailureEntry` · [`GenerateLog.kt`](./src/main/kotlin/com/langbiantianya/sundays/GenerateLog.kt) |
+| 造数日志属于**这一轮** | 重新执行 / 切连接都要清空 —— 否则两轮的行混在一起，看不出哪一行是哪一轮插的 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `clearGenerateLog` |
 
 
 
@@ -497,6 +507,7 @@ desktopApp （本模块）
 | SQL 编辑器方言档位 | `currentConnection.dialect` → `sqlDialectProfile()` | 保持 | 换档位 |
 
 | 造数脚本与统计、运行态、结果区视图 | `generateScripts[i]` / `generate*` | 保持 | 复位为单个默认模板 |
+| **造数实时日志**（行 / 丢行数 / 追加序号） | `DatabaseBrowserState.generateLog` / `generateLogDropped` / `generateLogSeq` | 保持 | 清空（属于上一连接） |
 
 | 表预览标签页（列 / 行 / 分页 / 代次） | `DatabaseBrowserState.tabs[i]` | 保持 | 清空 |
 

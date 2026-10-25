@@ -371,6 +371,31 @@ enum class StrKey {
     GENERATE_SCRIPT_EMPTY,
     NO_DATA_INSERTED,
 
+    // ──────────────── 造数实时日志 ────────────────
+
+    /** 日志面板的标题。 */
+    GENERATE_LOG_TITLE,
+
+    /** 日志为空时的标题。 */
+    GENERATE_LOG_EMPTY_TITLE,
+
+    /** 日志为空时的说明 —— 告诉用户「跑一次造数就会出现」。 */
+    GENERATE_LOG_EMPTY_HINT,
+
+    /**
+     * 一条正常日志行的文本。
+     *
+     * 占位符：`{0}` 脚本下标（1 起）· `{1}` 脚本总数 · `{2}` 目标表 ·
+     * `{3}` 该脚本内的行号 · `{4}` 这一行的列值文本。
+     */
+    GENERATE_LOG_LINE,
+
+    /** 失败行的文本 —— `{0}` 是引擎给的失败原因原文。 */
+    GENERATE_LOG_ERROR,
+
+    /** 日志超出上限、丢掉了最早的那些行 —— `{0}` 丢掉多少行。 */
+    GENERATE_LOG_DROPPED,
+
     // ──────────────── 通知中心 ────────────────
     NOTIFICATION_CENTER,
     NOTIFICATIONS_TITLE,

@@ -127,6 +127,8 @@
 | [`editor/CodeEditorThemeFollowTest`](./src/test/kotlin/com/langbiantianya/sundays/editor/CodeEditorThemeFollowTest.kt) | 编辑器高亮随主题 / 连接方言切换词表 |
 | [`GuiFeatureWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/GuiFeatureWalkthroughTest.kt) | GUI 真点击走查：浏览 / SQL 执行 / 多语句 / 危险确认 / 导出对话框 |
 | [`SqlResultMinHeightTest`](./src/test/kotlin/com/langbiantianya/sundays/SqlResultMinHeightTest.kt) | **SQL 结果区不得被压成 0 高**：320dp 高的窗口里结果表数据区 `boundsInRoot.height > 0` —— 标题写着「查询结果 · 2 行」而数据区**零高度**，等于查了白查 |
+| [`GenerateLogTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateLogTest.kt) | **造数实时日志（状态层与纯函数）** —— 用**真引擎**（H2 + 真 Lua 沙箱 + 真流式通道）验：每条 INSERT 一行且带表名 / 脚本内行号 / 列值（与库里那一行**对得上**）、日志里的列值与**实际写进库的**一致、重新执行与切连接都会清空、失败也留一行且带原因原文、有界（保留 + 丢掉的行数 = 追加的行数，一行都不凭空消失）、追加序号每次都递增。**为什么必须用真引擎**：「引擎每条 INSERT 回一帧」是协议契约，假的帧只能验「映射函数写对了」，验不了「引擎真的这么发」 |
+| [`GenerateLogUiTest`](./src/test/kotlin/com/langbiantianya/sundays/GenerateLogUiTest.kt) | **造数实时日志（界面层）** —— 日志面板常驻、空态有提示、真实造数的每一行都出现在面板里、**自动滚到最新一行**（LazyColumn 只组合看得见的项：最后一行可见 = 滚动确实发生了）、日志溢出时标题栏**明写丢了多少行**。断言打在**列值文本**上（不受语言影响），而不是中文文案 |
 
 ### 2.5 导出
 
@@ -306,6 +308,7 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 | **变异没变红时，先怀疑「被变异的东西根本不在这条路径上」** | 但测试没变红**不等于**可以不查 —— 查完才知道是 KDoc 写错了，不是实现错了 |
 | **单跑通过不足以判定偶发** | 要看**第二轮全量**是否还复现。测试全量红**不等于**代码坏了，得先问「红的那一路和改动有没有关系」 |
 | **凡是要「按来源去重」的地方，「什么算同一次」只能有一个产地** | 两边算的 key 不是同一个 → 每一轮对账都把所有来源 forget 掉再当新的重推一遍，去重形同虚设 |
+| **「请求式」的滚动 API 与数据变更同时发生时是竞态** | `LazyListState.requestScrollToItem` 记下的是「下一次 remeasure 时生效、只生效一次」的请求，而 remeasure 常常**同时**要应用数据变更（行数变了）—— 那一刻位置按 **key** 维持，新行落在视野之外，请求有没有抢赢取决于先后。症状是**单跑全过、全量跑偶发挂**（负载改了时序）。改用**挂起式** `scrollToItem`（在滚动块里同步做完 remeasure）才稳 |
 
 ---
 
