@@ -136,6 +136,10 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器；点工作区的字段 → 把「表.字段」加进编辑器 | `AnalysisSession` |
 | | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析工作台**没有返回按钮**（它是一块独立的工作区） | `ConnectionManagerScreen` / `AnalysisScreen` |
+| | **报表设计视图**（分析模式的第二个视图，与工作台**共用同一份工作区**）：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。左边是**报表列表**、右边是**部件画布**；加部件时打开**编辑页**（类型 / 标题 / SQL + **样例数据**）—— 样例数据是那条 SQL **真跑出来**的结果（原始行 + 图表预览并排），「约定」只有看得见数据才能被遵守 | `shared/analysis/report/` / `AnalysisSession` |
+| | **数据形状的约定写死在代码里**：第一列 = 类别，第二列 = 数值；说不清形状就**说清是哪一种**（缺列 / 只有一列 / 值不是数字 / 有负值 / 没数据），**绝不静默截断** —— 少一根柱子，用户不会知道少了什么。负值一律不画（饼图算不出角度，条形图画成正值长度是**误导**） | `shared/analysis/report/ReportModels.kt` |
+| | 图表**手绘**（`Canvas` + `drawArc` / `drawRoundRect`），不用第三方图表库 —— `:shared` 的 `commonMain` 不能引 Android-only 依赖 | `shared/analysis/report/ReportChart.kt` |
+| | 报表**暂不落盘**（住在会话里，**退出即失**）—— 但「部件 = 一条 SQL」这个形状**从此不许改**，用户搭好的报表会集体作废 | `AnalysisSession` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 

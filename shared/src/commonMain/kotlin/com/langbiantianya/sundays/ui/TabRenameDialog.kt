@@ -87,12 +87,20 @@ import kotlin.math.roundToInt
  * **为什么是弹窗而不是标签内联编辑**：`Tab` 的文本槽位于 `SecondaryScrollableTabRow` 的
  * SubcomposeLayout 内，把可编辑控件（尤其是自己抢焦点的 `BasicTextField`）塞进去会与该布局
  * 的测量 / 焦点链路互相触发。弹窗把编辑面与标签条彻底解耦。
+ *
+ * @param initialTitle 输入框里的初始值
+ * @param onConfirm 点「确定」或按回车 —— 参数是输入框里的新名字
+ * @param onDismiss 点「取消」或按 Esc
+ * @param title 弹窗标题；`null` = 用通用的「重命名标签」。
+ *   传别的标题是因为这个弹窗**不只**服务于标签条 —— 报表重命名也是同一件事，
+ *   只是标题该叫「重命名报表」。
  */
 @Composable
 fun TabRenameDialog(
     initialTitle: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    title: String? = null,
 ) {
     var value by remember { mutableStateOf(initialTitle) }
     Dialog(onDismissRequest = onDismiss) {
@@ -108,7 +116,7 @@ fun TabRenameDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = str(StrKey.RENAME_TAB),
+                    text = title ?: str(StrKey.RENAME_TAB),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 WinTextField(

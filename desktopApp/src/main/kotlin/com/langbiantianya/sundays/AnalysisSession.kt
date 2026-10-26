@@ -27,6 +27,7 @@ import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
+import com.langbiantianya.sundays.analysis.AnalysisMode
 import com.langbiantianya.sundays.analysis.AnalysisPullCancelledException
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
@@ -37,6 +38,8 @@ import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.analysisColumnNodeId
 import com.langbiantianya.sundays.analysis.analysisSchemaNodeId
 import com.langbiantianya.sundays.analysis.analysisTableNodeId
+import com.langbiantianya.sundays.analysis.report.AnalysisReport
+import com.langbiantianya.sundays.analysis.report.ReportWidget
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
@@ -415,6 +418,66 @@ class AnalysisSession(
      */
     var deleteSourceOutcome by mutableStateOf<DeleteSourceOutcome?>(null)
         private set
+
+    // ──────────────── 报表设计 ────────────────
+
+    /**
+     * 分析模式当前显示**哪个视图**（工作台 / 报表设计）。
+     *
+     * ## 为什么住在会话里而不是屏幕层
+     *
+     * 切到别的顶层页再切回来，用户希望自己**还在报表设计里**。
+     * 而屏幕层的 `remember` 活不过这次切页（顶层页切换会重建整棵组合）。
+     * 这与 [sql] / [result] 是同一类东西 —— 跨页存活的分析模式状态。
+     */
+    var analysisMode by mutableStateOf(AnalysisMode.WORKBENCH)
+        private set
+
+    /**
+     * 全部报表。
+     *
+     * ## 为什么报表**不落盘**
+     *
+     * 落盘要么另开一个文件（要多一套读写与迁移），要么在工作区 DuckDB 里建表
+     * （要让引擎知道「这张表不是用户的数据」）。这一轮先把报表的**形状**做对，
+     * 让它**活在会话里**（退出即失）。
+     *
+     * 但有一件事不能等：部件的形状（**一条 SQL + 一种图表类型**）从此**不许改** ——
+     * 用户已经搭好的报表会因为形状变化而集体作废。
+     */
+    var reports by mutableStateOf<List<AnalysisReport>>(emptyList())
+        private set
+
+    /** 当前选中的报表 id；`null` = 还没选。 */
+    var selectedReportId by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 部件 id → 该部件的数据。
+     *
+     * 只存**跑过**的部件 —— 没跑过的部件在界面上是「还没有数据」，
+     * 而不是一张空表（空表会被误读成「查出来就是空的」）。
+     */
+    var widgetResults by mutableStateOf<Map<String, AnalysisResult>>(emptyMap())
+        private set
+
+    /** 编辑页里那条 SQL 的**样例数据**；`null` = 还没预览。 */
+    var previewResult by mutableStateOf<AnalysisResult?>(null)
+        private set
+
+    /** 正在取样例数据 —— 界面据此禁用「预览」按钮。 */
+    var previewRunning by mutableStateOf(false)
+        private set
+
+    /** 正在重新取整张报表的数据 —— 界面据此禁用「刷新」按钮。 */
+    var refreshRunning by mutableStateOf(false)
+        private set
+
+    /** 报表 id 的计数器 —— 让每张报表有一个**唯一且稳定**的 id。 */
+    private val reportCounter = AtomicLong(0)
+
+    /** 部件 id 的计数器 —— 同上。 */
+    private val widgetCounter = AtomicLong(0)
 
     /** 正在加载的节点 id —— 用来挡住**重复**加载（连点两下扭子）。 */
     private val loadingNodeIds = mutableSetOf<String>()
@@ -1151,6 +1214,192 @@ class AnalysisSession(
                 result = runOnWorkspace(statement)
             } finally {
                 running = false
+            }
+        }
+    }
+
+    // ──────────────── 报表设计 ────────────────
+
+    /**
+     * 切到**哪个视图**（工作台 / 报表设计）。
+     *
+     * ## 为什么不叫 `setAnalysisMode`
+     *
+     * 属性 `analysisMode` 的私有 setter 在 JVM 上就叫 `setAnalysisMode` ——
+     * 同名方法会与它**签名冲突**（platform declaration clash），编译直接过不去。
+     *
+     * @param mode 目标视图
+     */
+    fun selectMode(mode: AnalysisMode) {
+        analysisMode = mode
+    }
+
+    /**
+     * 选中某张报表。
+     *
+     * @param id 报表 id
+     */
+    fun selectReport(id: String) {
+        // 认不出来的 id 直接忽略 —— 界面可能拿着**刚被删掉**的报表 id 回调过来。
+        if (reports.none { it.id == id }) return
+        selectedReportId = id
+    }
+
+    /**
+     * 新建一张报表，并选中它。
+     *
+     * ## 为什么新报表的**名字是空的**
+     *
+     * 名字里的「报表 1」那个「1」是**要翻译的词** —— 而这一层（会话）不是 Composable，
+     * 取不到当前语言。所以这里只留**空名字**，由界面按它在列表里的位置显示「报表 N」。
+     */
+    fun createReport() {
+        val id = "report-${reportCounter.incrementAndGet()}"
+        reports = reports + AnalysisReport(id = id, name = "", widgets = emptyList())
+        selectedReportId = id
+    }
+
+    /**
+     * 重命名报表。
+     *
+     * @param id 报表 id
+     * @param name 新名字
+     */
+    fun renameReport(
+        id: String,
+        name: String,
+    ) {
+        reports = reports.map { report -> if (report.id == id) report.copy(name = name.trim()) else report }
+    }
+
+    /**
+     * 删除报表 —— 连同它的部件与它们已经取到的数据。
+     *
+     * 删掉报表却不删它的部件数据，会留下一堆**永远没人引用**的查询结果
+     * （地图越攒越大，而界面上再也看不到它们）。
+     *
+     * @param id 报表 id
+     */
+    fun deleteReport(id: String) {
+        val removed = reports.firstOrNull { it.id == id } ?: return
+        reports = reports.filterNot { it.id == id }
+        widgetResults = widgetResults - removed.widgets.map { it.id }.toSet()
+        // 删掉的正好是当前选中的那张 —— 顺手选中剩下的第一张，
+        // 不然画布会突然空掉，用户得自己再点一次。
+        if (selectedReportId == id) {
+            selectedReportId = reports.firstOrNull()?.id
+        }
+    }
+
+    /**
+     * 保存部件。
+     *
+     * @param reportId 属于哪张报表
+     * @param widget 部件（**新建时它的 id 是空的** —— 见 `newReportWidgetDraft`）
+     * @param isNew 是新增还是改已有的
+     */
+    fun saveWidget(
+        reportId: String,
+        widget: ReportWidget,
+        isNew: Boolean,
+    ) {
+        val saved =
+            if (isNew) {
+                widget.copy(id = "widget-${widgetCounter.incrementAndGet()}")
+            } else {
+                widget
+            }
+        reports =
+            reports.map { report ->
+                if (report.id != reportId) {
+                    report
+                } else if (isNew) {
+                    report.copy(widgets = report.widgets + saved)
+                } else {
+                    report.copy(widgets = report.widgets.map { if (it.id == saved.id) saved else it })
+                }
+            }
+    }
+
+    /**
+     * 删除部件 —— 连同它已经取到的数据。
+     *
+     * @param reportId 属于哪张报表
+     * @param widgetId 部件 id
+     */
+    fun deleteWidget(
+        reportId: String,
+        widgetId: String,
+    ) {
+        reports =
+            reports.map { report ->
+                if (report.id != reportId) {
+                    report
+                } else {
+                    report.copy(widgets = report.widgets.filterNot { it.id == widgetId })
+                }
+            }
+        widgetResults = widgetResults - widgetId
+    }
+
+    /**
+     * 取一条 SQL 的**样例数据**。
+     *
+     * ## 为什么跑在工作区上
+     *
+     * 部件的 SQL 与工作台的 SQL 是**同一个世界**里的查询 ——
+     * 工作台里能查到的表，部件里也能查。反过来就不成立了：
+     * 部件的 SQL 要是跑在远端上，用户刚拉下来的数据就用不上。
+     *
+     * @param sql 要跑的语句
+     * @return 启动的任务；`null` = 没跑（SQL 为空，或上一次还在跑）
+     */
+    fun previewSql(sql: String): Job? {
+        if (previewRunning) return null
+        val statement = sql.trim()
+        if (statement.isEmpty()) return null
+        return scope.launch {
+            previewRunning = true
+            try {
+                previewResult = runOnWorkspace(statement)
+            } finally {
+                previewRunning = false
+            }
+        }
+    }
+
+    /**
+     * 重新取一张报表里**所有**部件的数据。
+     *
+     * ## 为什么**串行**跑而不是并发
+     *
+     * 工作区是**一个** DuckDB 文件 —— 并发查询会互相抢锁，
+     * 而且后完成的会把先完成的盖掉，用户看到的是**错配**的结果
+     * （A 部件的位置上显示着 B 部件的数据）。串行慢一点，但每个部件
+     * 拿到的都是**自己**那份。
+     *
+     * @param report 要刷新的报表
+     * @return 启动的任务；`null` = 没跑（已经在刷了）
+     */
+    fun refreshReport(report: AnalysisReport): Job? {
+        if (refreshRunning) return null
+        // 只刷新**会话里确实有**的那张报表 —— 认不出来就直接不刷。
+        // 否则会把**没人引用**的数据塞进会话：界面上根本没有这张报表，
+        // 数据却占着位置，而且再也删不掉（删报表时按 id 找，找不到）。
+        val target = reports.firstOrNull { it.id == report.id } ?: return null
+        return scope.launch {
+            refreshRunning = true
+            try {
+                target.widgets.forEach { widget ->
+                    val statement = widget.sql.trim()
+                    if (statement.isEmpty()) return@forEach
+                    val result = runOnWorkspace(statement)
+                    // 每跑完一个就放出去 —— 界面能一块一块地亮起来，
+                    // 而不是等最后一个跑完才一起出现。
+                    widgetResults = widgetResults + (widget.id to result)
+                }
+            } finally {
+                refreshRunning = false
             }
         }
     }

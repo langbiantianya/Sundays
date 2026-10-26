@@ -498,6 +498,15 @@ desktopApp （本模块）
 | 删除的结果是一个 **sealed** | 「删掉了」与「没删掉」要用**不同的颜色**呈现，而颜色不是字符串的一部分 —— 所以带一个**种类**（`DeleteSourceOutcome.Deleted` / `.Failed`），界面照着渲染即可，不必自己推断。与 `PullOutcome` 是同一个做法 | [`AnalysisModels.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModels.kt) |
 | 菜单机制**与浏览模式共用一份** | `TreeContextMenuState` / `TreeContextMenu` / `TreeContextMenuItem` 现在住在 `:shared` 的 `tree/TreeContextMenu.kt`。此前那套机制只在 `desktopApp` 里 —— 分析模式要么复制一份（同一个概念两份实现，改一处忘另一处），要么根本没有右键菜单。菜单项各写各的，但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里（漏了的后果：菜单杵在树上不消失，下一次右键被压在旧 Popup 底下，看起来像「右键没反应了」） | [`TreeContextMenu.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreeContextMenu.kt) |
 
+| 分析模式是**两个视图**，不是两个顶层页 | 工作台与报表设计共用**同一份工作区**（同一批拉进来的表、同一套 SQL 语义）。做成两个顶层页的话，「拉好的数据」与「做好的报表」就被分到了两个互不相干的地方 —— 而它们本来就是一件事的两个面。切换条在 `:shared` 的 `analysis/AnalysisModeBar.kt` | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`AnalysisModeBar.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModeBar.kt) |
+| 报表状态住在**会话**里，不落盘 | 报表 = 若干**部件**，每个部件 = **一条 SQL + 一种图表类型**。落盘要么另开一个文件（要多一套读写与迁移），要么在工作区 DuckDB 里建表（要让引擎知道「这张表不是用户的数据」）—— 这一轮先把**形状**做对，让它住在会话里（**退出即失**）。但「部件 = 一条 SQL」这个形状**从此不许改**：用户搭好的报表会因为形状变化而集体作废 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 部件的 **id 是保存时才有的** | 新建中的部件 id 是**空串**（`newReportWidgetDraft()`）：id 是「存下来之后」才有的身份 —— 它可能下一刻就被用户「取消」了。先发一个 id 出去等于承诺了一个它永远不会用到的身份，而这些 id 会一直留在会话的计数里，让后面的部件都带着一个空洞的序号 | 同上 |
+| 删部件 / 删报表要**连它的数据一起删** | 删掉却不删，会留下一堆**永远没人引用**的查询结果 —— 地图越攒越大，而界面上再也看不到它们（而且按 id 找不回来，再也删不掉） | 同上 |
+| 刷新一张报表**串行**跑它的部件 | 工作区是**一个** DuckDB 文件 —— 并发查询会互相抢锁，而且后完成的会把先完成的盖掉，用户看到的是**错配**的结果（A 部件的位置上显示着 B 部件的数据）。串行慢一点，但每个部件拿到的都是**自己**那份 | 同上（`refreshReport`） |
+| 刷新**只认会话里有的**那张报表 | 认不出来就直接不刷 —— 否则会把**没人引用**的数据塞进会话：界面上根本没有这张报表，数据却占着位置 | 同上 |
+| 部件的 SQL 与工作台的 SQL 是**同一个世界** | 部件的 SQL 跑在**工作区**上：工作台里能查到的表，部件里也能查。反过来不成立 —— 部件的 SQL 要是跑在远端上，用户刚拉下来的数据就用不上 | 同上（`previewSql`） |
+| 样例数据是**真跑出来**的 | 部件的形状约定是「第一列类别、第二列数值」，而**约定只有看得见数据才能被遵守**。「预览」不是拿假数据糊弄界面，它真的在工作区上跑那条 SQL | 同上 |
+
 
 ---
 
@@ -529,6 +538,9 @@ desktopApp （本模块）
 | **后台任务列表** | `DatabaseBrowserState`（per-sheet） | 保持 | 随 sheet 生命周期 |
 
 | **通知中心** | `MainScreen`（**屏级**） | 保持 | 保持 |
+
+| **报表与部件**（报表清单 / 选中项 / 部件数据 / 样例数据） | `AnalysisSession` | 保持 | 不适用（分析模式与连接无关） |
+| **分析模式的视图**（工作台 / 报表设计） | `AnalysisSession` | 保持 | 不适用 |
 
 | **长生命周期 `CoroutineScope`** | `MainScreen` | 保持 | 保持 |
 

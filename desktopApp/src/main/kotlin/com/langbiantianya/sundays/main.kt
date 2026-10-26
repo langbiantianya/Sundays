@@ -11,6 +11,7 @@ package com.langbiantianya.sundays
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -40,8 +41,11 @@ import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.i18n.LanguageScope
+import com.langbiantianya.sundays.analysis.AnalysisMode
+import com.langbiantianya.sundays.analysis.AnalysisModeBar
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.report.ReportDesignerScreen
 import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
@@ -785,46 +789,79 @@ internal fun MainScreen(
                 }
 
                 AppDestination.ANALYSIS -> {
-                    AnalysisScreen(
-                        sources = analysisSources,
-                        // 拉取状态由**会话**持有：它跨页面切换存活，
-                        // 拉一半切去别的页再回来，进度条还在动。
-                        pullProgress = analysis.pullProgress,
-                        pullOutcome = analysis.pullOutcome,
-                        onCancelPull = analysis::cancelPull,
-                        // 树与展开态同样由会话持有 —— 切去别的顶层页再回来，
-                        // 用户展开到一半的树还摊在那儿。
-                        treeRoots = analysis.treeRoots,
-                        expandedNodeIds = analysis.expandedNodeIds,
-                        onToggleNode = { node -> analysis.toggleNode(node) },
-                        onSelectTreeTable = { node -> onTreeTableSelected(node) },
-                        onSelectTreeColumn = { node -> onTreeColumnSelected(node) },
-                        treeLoading = analysis.treeLoading,
-                        treeError = analysis.treeError,
-                        // 「+」→ 打开分析模式**专属**的「添加数据源」对话框。
-                        // 它**不共用**浏览模式的「添加连接」：那边存的是
-                        // `connection.json`（浏览模式的连接清单），
-                        // 这边存的是**工作区 DuckDB 里**的登记表（分析模式自己的清单）。
-                        onAddSource = { sourceDialogVisible = true },
-                        // 右键菜单「删除数据源」——
-                        // **能删的**由会话说了算（登记表里有没有它），
-                        // **怎么删**也在会话那边（工作区 DuckDB 在 desktopApp 这一侧）。
-                        deletableSourceNames = analysis.deletableSourceNames,
-                        onDeleteSource = { schema -> analysis.removeSource(schema) },
-                        deleteSourceOutcome = analysis.deleteSourceOutcome,
-                        sql = analysis.sql,
-                        onSqlChange = analysis::updateSql,
-                        result = analysis.result,
-                        running = analysis.running,
-                        onRun = { analysis.run() },
-                        // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
-                        // （`:shared` 只决定「什么时候用」）。
-                        treePaneHoverIcon = ewResizePointerIcon(),
-                        // 编辑器 / 结果表之间那条缝是**横向**的，
-                        // 所以指针必须是**上下拉伸**箭头 —— 画成 ↔ 就是在说反。
-                        editorPaneHoverIcon = nsResizePointerIcon(),
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    // 分析模式有两个**视图**：工作台（写 SQL）与报表设计（拼报表）。
+                    // 它们共用同一份工作区与同一个会话，所以是同一个顶层页里的两屏，
+                    // 而不是两个顶层页 —— 切过去再切回来，SQL 与报表都还在。
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnalysisModeBar(
+                            mode = analysis.analysisMode,
+                            onModeChange = analysis::selectMode,
+                        )
+                        when (analysis.analysisMode) {
+                            AnalysisMode.WORKBENCH -> {
+                                AnalysisScreen(
+                                    sources = analysisSources,
+                                    // 拉取状态由**会话**持有：它跨页面切换存活，
+                                    // 拉一半切去别的页再回来，进度条还在动。
+                                    pullProgress = analysis.pullProgress,
+                                    pullOutcome = analysis.pullOutcome,
+                                    onCancelPull = analysis::cancelPull,
+                                    // 树与展开态同样由会话持有 —— 切去别的顶层页再回来，
+                                    // 用户展开到一半的树还摊在那儿。
+                                    treeRoots = analysis.treeRoots,
+                                    expandedNodeIds = analysis.expandedNodeIds,
+                                    onToggleNode = { node -> analysis.toggleNode(node) },
+                                    onSelectTreeTable = { node -> onTreeTableSelected(node) },
+                                    onSelectTreeColumn = { node -> onTreeColumnSelected(node) },
+                                    treeLoading = analysis.treeLoading,
+                                    treeError = analysis.treeError,
+                                    // 「+」→ 打开分析模式**专属**的「添加数据源」对话框。
+                                    // 它**不共用**浏览模式的「添加连接」：那边存的是
+                                    // `connection.json`（浏览模式的连接清单），
+                                    // 这边存的是**工作区 DuckDB 里**的登记表（分析模式自己的清单）。
+                                    onAddSource = { sourceDialogVisible = true },
+                                    // 右键菜单「删除数据源」——
+                                    // **能删的**由会话说了算（登记表里有没有它），
+                                    // **怎么删**也在会话那边（工作区 DuckDB 在 desktopApp 这一侧）。
+                                    deletableSourceNames = analysis.deletableSourceNames,
+                                    onDeleteSource = { schema -> analysis.removeSource(schema) },
+                                    deleteSourceOutcome = analysis.deleteSourceOutcome,
+                                    sql = analysis.sql,
+                                    onSqlChange = analysis::updateSql,
+                                    result = analysis.result,
+                                    running = analysis.running,
+                                    onRun = { analysis.run() },
+                                    // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
+                                    // （`:shared` 只决定「什么时候用」）。
+                                    treePaneHoverIcon = ewResizePointerIcon(),
+                                    // 编辑器 / 结果表之间那条缝是**横向**的，
+                                    // 所以指针必须是**上下拉伸**箭头 —— 画成 ↔ 就是在说反。
+                                    editorPaneHoverIcon = nsResizePointerIcon(),
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                )
+                            }
+
+                            AnalysisMode.REPORT -> {
+                                ReportDesignerScreen(
+                                    reports = analysis.reports,
+                                    selectedReportId = analysis.selectedReportId,
+                                    widgetResults = analysis.widgetResults,
+                                    previewResult = analysis.previewResult,
+                                    previewRunning = analysis.previewRunning,
+                                    refreshRunning = analysis.refreshRunning,
+                                    onSelectReport = analysis::selectReport,
+                                    onCreateReport = analysis::createReport,
+                                    onRenameReport = analysis::renameReport,
+                                    onDeleteReport = analysis::deleteReport,
+                                    onSaveWidget = analysis::saveWidget,
+                                    onDeleteWidget = analysis::deleteWidget,
+                                    onPreviewSql = { analysis.previewSql(it) },
+                                    onRefreshReport = { analysis.refreshReport(it) },
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 # `shared/` — KMP 共享 UI 组件架构
 
-> **版本**：v2.32（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
+> **版本**：v2.37（与根 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 同版本）
 >
 > **模块定位**：与 `:engine` 解耦的纯 UI 组件库，通过 KMP `commonMain` 单一 source set 承载所有业务组件，`jvm` 平台特定逻辑最小化。
 >
@@ -262,6 +262,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | `DangerousSql` | 危险写操作识别 + 只读判定 | **逐句**判定（`SELECT 1; DROP TABLE t` 必须拒），注释里的关键字不算语义；别序偏容易报（多点一次确认）而不漏报（没弹框就执行了 DROP） | [`sql/DangerousSql.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSql.kt) |
 | `SqlLiterals` | WHERE 字面量转义与 CAST 目标类型 | 它是**安全边界而不是格式校验**：`DataListRequest.where` 收的是**裸 SQL 片段**、没有占位符，表内搜索词直接拼进去就是注入面；CAST 目标类型逐方言差异大（MySQL 只能 `CHAR`） | [`sql/SqlLiterals.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/SqlLiterals.kt) |
 | `DangerousSqlConfirmDialog` | 危险语句二次确认框 | 导出预览与 SQL 执行共用同一个弹窗；识别与转义都是纯字符串遍历，因此能留在 `commonMain` | [`sql/DangerousSqlConfirmDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/DangerousSqlConfirmDialog.kt) |
+| `ConfirmDialog` | 通用「确认 / 取消」框 | 「删掉之前先问一句」到处都有（删报表、删部件、删数据源、删连接……），各写各的就会出现**同一句话的不同说法**与**按钮顺序不一致** —— 而那没有任何信息量。更专门的 `DangerousSqlConfirmDialog` **不并进来**：它要逐条列出危险语句、用错误色的「仍然执行」按钮，那是另一种形状 | [`ui/ConfirmDialog.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ConfirmDialog.kt) |
 | `ContextMenuState<T>` | 通用右键菜单状态 | 位置透明、payload 类型由调用方定、`@Stable`；editor / table 各自用类型别名封装 | [`ui/ContextMenuState.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/ContextMenuState.kt) |
 | `Modifier.onRightClick` | 右键检测 | 只在主指针通道消费；不复用 Foundation 的 `internal onRightClickDown`（跨模块不可见） | [`ui/RightClick.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/RightClick.kt) |
 | `DragHandle` / `HorizontalDragHandle` | 可拖拽分隔条（**竖向调宽度 / 横向调高度**） | **同一个组件的两种朝向** —— 手势、画线、高亮、指针只有一份实现，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。受控组件（尺寸归调用方）；命中区 8dp / 画线 1dp；拖拽与双击复位**共用同一钳位**；悬停指针图标**由调用方给**（`:shared` 只管「什么时候用」，平台侧管「长什么样」）；钳位**先把上下限摆正**再夹 —— 容器极窄时上限会小于下限，`coerceIn` 遇到这种会直接抛异常。**三个使用方**：浏览模式与分析模式的 SQL 编辑器、造数工作台的 Lua 编辑器 | [`ui/DragHandle.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
@@ -275,7 +276,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 
 ### 6.1 数据分析模式的 UI 包（`analysis/`）
 
-[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，八个文件：
+[`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) 是**数据分析模式**的界面层，由下列文件组成：
 
 | 文件 | 内容 |
 |---|---|
@@ -289,6 +290,12 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | [`TreeContextMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreeContextMenu.kt) | **两棵树共用的右键菜单**：状态（`TreeContextMenuState<T>`，泛型载荷）、弹层（定位 / 边界钳位 / 关闭）、菜单项（「点了**先关菜单**再干活」）。此前这套机制只在 `desktopApp` 里（浏览模式专用），分析模式要么复制一份、要么没有菜单 —— 现在共用一份，两棵树的手感必然一致。用 `Popup` 而不是 `DropdownMenu` 的原因（offset 基准是「菜单**底边**」，换多少项就偏多少）是**真窗口实测**出来的，见该文件的 KDoc |
 | [`PullProgressIndicator.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/PullProgressIndicator.kt) | 拉取进度指示器（「正在拉取 · 已读 N 行」+ 取消按钮）+ 终态行 —— 用**静态字形**（`●`）而不是转圈：转圈是无限动画，界面截不到静止态，UI 测试里还会让「等空闲」永远等不到 |
 | [`AnalysisScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) | 分析工作台主屏（拉取状态条 + 左树 + 右侧**编辑器面板 / 只读结果表 / 状态栏**）——「▶ 运行」在**编辑器的工具条**上，与「格式化」同一行。编辑器面板与结果表之间是**可拖的横向分隔条**（`HorizontalDragHandle`）：编辑器高度可调，双击复位回默认比例；结果表有**下限**（140dp）—— 数据看不见就等于白跑，且窗口很矮时**编辑器的下限要让位给它**。左树带**右键菜单**（`tree/TreeContextMenu.kt`）：菜单项只有「删除数据源」一项，确认框画在**树面板之外**（折叠时面板整体从组合里移除，确认框不能跟着走） |
+| [`AnalysisModeBar.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModeBar.kt) | 分析模式的**两个视图**的切换条（工作台 / 报表设计）。用**标签**而不是下拉框：两个视图是平级的、且会来回切，标签一次点击就到位，还自带「我现在在哪儿」的指示。视图状态住在**会话**里 —— 切到别的顶层页再切回来，用户希望自己还在报表设计里，而屏幕层的 `remember` 活不过这次切页 |
+| [`report/ReportModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportModels.kt) | 报表的**纯数据**：`ReportWidget`（一条 SQL + 一种图表类型）/ `AnalysisReport` / `ChartSlice` / `ChartProblem`（画不出来的**五种**原因）/ `ChartData`（能画 / 不能画）。核心是纯函数 `chartDataOf(result)` —— **数据形状的约定**（第一列 = 类别、第二列 = 数值）就写在这里；说不清形状就说清是哪一种（缺列 / 只有一列 / 值不是数字 / 有负值 / 没数据），**绝不静默截断**。另有 `newReportWidgetDraft()`（新部件**没有 id** —— id 是存下来之后才有的身份）与 `isPreviewStale()`（样例数据是不是旧 SQL 跑出来的） |
+| [`report/ReportChart.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportChart.kt) | **手绘**的饼图与条形图（`Canvas` + `drawArc` / `drawRoundRect`）—— 不用第三方图表库：`:shared` 的 `commonMain` 不能引 Android-only 依赖，而这两个图形加起来不到一百行。`ReportChartPreview()` 是**唯一**的画图入口（画布上的卡片与编辑页的预览共用它），画不出来时给出**具体**原因。饼图扇区之间留 1.5° 缝（相邻颜色相近时边界会糊）；条形图**竖排**（标签在上、柱子在下 —— 类别名比数值长得多） |
+| [`report/ReportLabels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportLabels.kt) | 「**种类 → 文案键**」的**唯一**映射：`chartProblemText()`（五种画不出来的原因）与 `reportWidgetTypeText()`（三种图表类型）。散开写就会出现「这里说缺列、那里说列不够」—— 同一个意思只能有**一句话** |
+| [`report/ReportDesignerScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) | 报表设计页面：**左边报表列表 + 右边画布**（报表是多张的、部件是报表的 —— 层级不同，位置也不同）。部件排成**纵向列表**而不是网格（网格要固定宽高，而部件的形状由 SQL 决定）。画布用 `LazyColumn` 而不是「Column + verticalScroll」—— 后者给子节点**无限高**约束，而卡片里装着 `DataTable`（自己的 `LazyColumn`）与图表区（自己的滚动）：滚动套滚动，Compose 直接抛异常。删除（报表 / 部件）都要**先确认** |
+| [`report/ReportWidgetEditor.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportWidgetEditor.kt) | 部件编辑页：**覆盖**设计页面（不是弹窗 —— 它要同时摆 SQL 编辑器与样例数据，挤在小窗口里两边都不够用）。左边写 SQL，右边看**样例数据**（原始行）与**图表预览**（结论）—— 两者并排，用户一眼就能确认「形状对不对」，而那正是部件这件事的全部难点。草稿住在**这一层**（会话只该存已经存下来的报表），点「取消」天然什么都不用做 |
 
 三条边界，**都有测试钉住**（`desktopApp` 的 `AnalysisModuleBoundaryTest`）：
 
@@ -419,3 +426,4 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.32 | **分隔条长出「横向」这一档** —— `DragHandle` 此前只能调**宽度**（左右两栏），SQL 编辑器的高度是写死的比例，而「写长 SQL 时要它高」与「结果只有两行时要它矮」这两种诉求打架。现在同一组件支持两种朝向：`DragHandle`（竖向，宽度）与 `HorizontalDragHandle`（横向，高度）—— **手势 / 画线 / 高亮 / 指针只有一份实现**，朝向只决定「拖哪个轴 / 命中区是宽是高 / 画竖线还是横线」。纯函数同步长出高度版（`nextPaneHeight` / `clampPaneHeight` / `canPaneHeightMove`）。**符号方向两条路径一致**：受控的永远是「分隔条**之前**那一块」的尺寸，所以往下拖编辑器变高 |
 | v2.35 | **横向分隔条多了第三个使用方** —— 造数工作台的 Lua 编辑器此前也是**写死的比例**（编辑器 45% / 输出 55%），现在接上了同一条 `HorizontalDragHandle`。**同一个概念（上下两块之间那条能拖的缝）不能各做各的** —— 浏览 / 分析的 SQL 编辑器与造数工作台的 Lua 编辑器是三处，三处共用一份实现，手感必然一致 |
 | v2.34 | **① 树右键菜单上移** —— 新增 `tree/TreeContextMenu.kt`：浏览模式与分析模式**共用一份**右键菜单机制（状态 / 弹层 / 菜单项）。此前它只在 `desktopApp` 里，分析模式要么复制一份、要么没有菜单。菜单项各写各的（浏览模式六项、分析模式一项「删除数据源」），但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里 —— 漏了的后果是菜单杵在树上不消失、下一次右键被压在旧 Popup 底下。**② 分析模式的树能删数据源**：新增 `analysis/AnalysisTreeMenu.kt`（判据是纯函数 `analysisDeleteSourceTarget`）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`（终态是 sealed，与 `PullOutcome` 同一个做法）。菜单**只在节点属于登记在册的数据源时才弹** —— 弹一个空菜单比不弹更糟 |
+| v2.37 | **① 新增 `analysis/report/` 包（报表设计）** —— 一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。五个文件：`ReportModels.kt`（纯数据 + `chartDataOf` 的数据形状判据）、`ReportChart.kt`（**手绘**图表：`drawArc` + `drawRoundRect`，不用第三方库）、`ReportLabels.kt`（「种类 → 文案键」的**唯一**映射）、`ReportDesignerScreen.kt`（报表列表 + 部件画布）、`ReportWidgetEditor.kt`（部件编辑页：类型 / 标题 / SQL + **样例数据**）。**判据不静默截断**：值不是数字 / 有负值 / 缺列，一律**整张图都不画**并说清是哪一种。**② 新增 `analysis/AnalysisModeBar.kt`** —— 分析模式两个视图（工作台 / 报表设计）的切换条（两个平级视图，不是两个顶层页）。**③ 新增 `ui/ConfirmDialog.kt`** —— 通用「确认 / 取消」框（删报表 / 删部件共用一份）。**④ `ui/TabRenameDialog.kt` 加 `title` 参数** —— 报表重命名复用它，不再另做一个弹窗 |
