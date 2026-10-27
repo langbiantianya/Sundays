@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.analysis.report
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.HorizontalDivider
@@ -41,11 +43,14 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.analysisTableColumns
 import com.langbiantianya.sundays.analysis.analysisTableRows
+import com.langbiantianya.sundays.analysis.appendAnalysisColumnRef
+import com.langbiantianya.sundays.analysis.appendAnalysisTableRef
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.editor.ui.rememberCodeEditorState
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
+import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.WinTextButton
 import com.langbiantianya.sundays.ui.WinTextField
@@ -66,6 +71,15 @@ import com.langbiantianya.sundays.ui.str
  * 而约定只有看得见数据才能被遵守。用户写完 SQL 若只能「保存后到画布上看」，
  * 那就要先建好整张报表才知道自己写错了 —— 试错成本被放大到不可接受。
  * 所以这一页把样例数据摆在 SQL 旁边：**改一句，看一眼**。
+ *
+ * ## 为什么左边还要摆一棵**数据树**
+ *
+ * 写出一条符合「类别 + 数值」约定的 SQL，前提是知道**有哪些表、哪些字段**。
+ * 没有树的话，用户只能切回工作台把名字**记下来**，再切回来凭记忆敲 ——
+ * 敲错了要等**跑 SQL** 时才报错。
+ *
+ * 所以这一页左边摆一棵树（[ReportDataTreePane]），点表或字段，
+ * 引用直接进编辑器 —— 不用记、不用抄、不用核对。
  */
 
 /** 部件编辑页里各处的 UI 测试 tag。 */
@@ -99,6 +113,9 @@ object ReportWidgetEditorTags {
 
     /** 类型单选组 —— 表格。 */
     const val TYPE_TABLE = "reportWidgetTypeTable"
+
+    /** 编辑页里那棵**数据树**的面板。 */
+    const val DATA_TREE = "reportWidgetEditorDataTree"
 }
 
 /**
@@ -114,6 +131,12 @@ object ReportWidgetEditorTags {
  * @param isNew 是新建还是改已有的
  * @param previewResult 最近一次预览的结果；`null` = 还没预览
  * @param previewRunning 正在取样例数据
+ * @param treeRoots 左侧数据树的根节点（工作区 + 已经拉进来的数据源）
+ * @param expandedNodeIds 当前展开着的树节点 id
+ * @param onToggleNode 树的某个节点被展开 / 收起时回调
+ * @param onAddSource 「添加数据源」被点时回调
+ * @param treeScrollState 树的滚动状态 —— 由**外面**持有，
+ *   这样「打开编辑页 → 关掉」之后，树还停在用户刚才滚动到的位置
  * @param onPreview 取样例数据 —— 参数是**当前草稿里的 SQL**
  * @param onSave 保存 —— 参数是最终的部件
  * @param onDismiss 关闭这一页（不保存）
@@ -125,6 +148,11 @@ fun ReportWidgetEditor(
     isNew: Boolean,
     previewResult: AnalysisResult? = null,
     previewRunning: Boolean = false,
+    treeRoots: List<ObjectTreeNode> = emptyList(),
+    expandedNodeIds: Set<String> = emptySet(),
+    onToggleNode: (ObjectTreeNode) -> Unit = {},
+    onAddSource: () -> Unit = {},
+    treeScrollState: ScrollState = rememberScrollState(),
     onPreview: (String) -> Unit = {},
     onSave: (ReportWidget) -> Unit = {},
     onDismiss: () -> Unit = {},
@@ -210,7 +238,7 @@ fun ReportWidgetEditor(
         }
         HorizontalDivider()
 
-        // ── 主体：左边写 SQL，右边看样例数据 ──
+        // ── 主体：左边数据树、中间写 SQL、右边看样例数据 ──
         Row(
             modifier =
                 Modifier
@@ -218,6 +246,33 @@ fun ReportWidgetEditor(
                     .weight(1f)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
+            // 左边那棵**数据树** —— 点表或字段，引用直接进编辑器。
+            //
+            // 为什么树在这里而不是在画布上：写 SQL 的**地方**只有这一处。
+            // 树摆在画布上时，用户看得见表名却插不进手边正在写的那条语句 ——
+            // 还是要记下来再敲一遍。摆在编辑器旁边才是「看着选、点一下就有」。
+            ReportDataTreePane(
+                roots = treeRoots,
+                expandedNodeIds = expandedNodeIds,
+                onToggleNode = onToggleNode,
+                onSelectTable = { node ->
+                    sql = appendAnalysisTableRef(sql, node.label, node.namespace)
+                },
+                onSelectColumn = { node ->
+                    // 字段的父节点就是它那张表 —— 引用要**带表名**：
+                    // 光有列名在多表查询里说不清是哪张表的列。
+                    val table = node.parentLabel
+                    if (table != null) {
+                        sql = appendAnalysisColumnRef(sql, table, node.label, node.namespace)
+                    }
+                },
+                onAddSource = onAddSource,
+                hint = str(StrKey.REPORT_DATA_TREE_EDITOR_HINT),
+                paneTag = ReportWidgetEditorTags.DATA_TREE,
+                scrollState = treeScrollState,
+                modifier = Modifier.width(REPORT_DATA_TREE_WIDTH).fillMaxHeight(),
+            )
+            Spacer(Modifier.width(12.dp))
             CodeEditorWithToolbar(
                 text = sql,
                 onTextChange = { sql = it },

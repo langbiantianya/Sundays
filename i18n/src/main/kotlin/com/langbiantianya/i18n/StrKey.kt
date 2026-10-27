@@ -851,6 +851,15 @@ enum class StrKey {
     REPORT_PREVIEW_STALE,
     CHART_PROBLEM_NO_DATA,
 
+    // ──────────────── 报表设计用的数据树 ────────────────
+    // 报表设计页与部件编辑页共用同一棵树：看得见有哪些表、哪些字段，
+    // 点一下就能把引用用到 SQL 里 —— 不用记、不用抄。
+    REPORT_DATA_TREE_TITLE,
+    REPORT_DATA_TREE_EMPTY,
+    REPORT_DATA_TREE_EMPTY_HINT,
+    REPORT_DATA_TREE_CANVAS_HINT,
+    REPORT_DATA_TREE_EDITOR_HINT,
+
     ENGINE_ANALYSIS_LOCAL_ONLY,
 
     // ──────────────── 树面板（浏览与分析共用） ────────────────

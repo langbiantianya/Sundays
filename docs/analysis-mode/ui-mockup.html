@@ -587,6 +587,24 @@ body{
 .rd-item.is-on{ background:var(--primary-container); color:var(--on-primary-container); }
 .rd-item .name{ flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rd-canvas{ flex:1 1 auto; padding:8px 12px 12px; overflow:auto; min-width:0; }
+/* 数据树（v2.38）—— 与分析工作台**同一棵**树。
+   报表设计页与部件编辑页各摆一棵：同一份节点与展开态，只是**上下文**不同，
+   于是「点它会发生什么」也不同（画布上是「开一个新部件」，编辑页里是「插引用」）。 */
+.rd-tree{ width:200px; flex:none; border-right:1px solid var(--outline-variant); background:var(--surface); display:flex; flex-direction:column; }
+.rd-tree-head{ display:flex; align-items:center; gap:6px; padding:8px 10px; font-size:12px; line-height:15px; font-weight:600; color:var(--on-surface); border-bottom:1px solid var(--outline-variant); }
+.rd-tree-head .spacer{ flex:1 1 auto; }
+.rd-tree-list{ flex:1 1 auto; overflow:auto; padding:4px 0; }
+.rd-tree-row{ display:flex; align-items:center; gap:6px; font-size:12px; line-height:17px; color:var(--on-surface); }
+.rd-tree-row .tw{ width:12px; flex:none; color:var(--on-surface-variant); }
+.rd-tree-row .ic{ width:14px; flex:none; color:var(--secondary); }
+.rd-tree-row .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rd-tree-row .ty{ margin-left:auto; font-size:10px; line-height:13px; color:var(--on-surface-variant); }
+.rd-tree-row .badge-sm{ margin-left:auto; font-size:10px; line-height:13px; color:var(--on-surface-variant); border:1px solid var(--outline-variant); border-radius:3px; padding:0 4px; }
+.rd-tree-row.lv0{ padding:2px 10px; font-weight:500; }
+.rd-tree-row.lv1{ padding:1px 10px 1px 20px; }
+.rd-tree-row.lv2{ padding:0 10px 0 40px; color:var(--on-surface-variant); }
+.rd-tree-row.is-hot{ background:var(--primary-container); color:var(--on-primary-container); }
+.rd-tree-foot{ border-top:1px solid var(--outline-variant); background:var(--surface-variant); padding:5px 10px; font-size:11px; line-height:15px; color:var(--on-surface-variant); }
 .rd-canvas-head{ display:flex; align-items:center; gap:8px; padding:2px 4px 8px; }
 .rd-canvas-head .t-title-small{ font-size:13px; line-height:18px; font-weight:600; color:var(--on-surface); }
 .w-card{ border:1px solid var(--outline-variant); border-radius:var(--r-sm); padding:10px 12px 12px; margin-bottom:10px; background:var(--surface); }
@@ -616,6 +634,10 @@ body{
 .ed-radio .dot{ width:11px; height:11px; border-radius:50%; border:1px solid var(--outline); display:inline-block; }
 .ed-radio.is-on .dot{ border-color:var(--primary); background:radial-gradient(circle, var(--primary) 0 4px, transparent 4px); }
 .ed-main{ flex:1 1 auto; display:flex; gap:12px; min-height:0; }
+/* 编辑页里的数据树 —— 与画布上那棵**同一棵**（同一份节点与展开态），
+   但脚上那句话不同：这里点表是「把引用插进正在写的那条 SQL」。 */
+.ed-tree{ width:200px; flex:none; display:flex; flex-direction:column; min-width:0; border:1px solid var(--outline-variant); border-radius:var(--r-sm); overflow:hidden; }
+.ed-tree .rd-tree-list{ padding:4px 0; }
 .ed-sql{ flex:1 1 auto; display:flex; flex-direction:column; min-width:0; }
 .ed-sql .editor{ flex:1 1 auto; }
 .ed-sample{ flex:1 1 auto; display:flex; flex-direction:column; min-width:0; }
@@ -939,7 +961,7 @@ body{
     </div>
   </section>
 
-  <!-- ===================== 画面 3′：报表设计（图表型，v2.37 已落地） ===================== -->
+  <!-- ===================== 画面 3′：报表设计（图表型，v2.37 已落地 / v2.38 补上数据树） ===================== -->
   <section class="screen" data-screen="charts">
     <div class="window" style="position:relative;">
       <header class="appbar">
@@ -978,6 +1000,26 @@ body{
                 <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
               </div>
             </div>
+          </aside>
+
+          <!-- 中：数据树（v2.38）—— 与分析工作台**同一棵**树。
+               点表 = **开一个新部件**（画布上还没有正在写的 SQL，引用插给谁？）；
+               点字段 = 开一个新部件并把字段引用填好。 -->
+          <aside class="rd-tree">
+            <div class="rd-tree-head">
+              <span>数据</span>
+              <span class="spacer"></span>
+              <button class="icon-btn" type="button" title="添加数据源" aria-label="添加数据源">＋</button>
+            </div>
+            <div class="rd-tree-list">
+              <div class="rd-tree-row lv0"><span class="tw">▾</span><span class="ic">🗄</span><span class="nm">本地工作区</span><span class="badge-sm">DuckDB</span></div>
+              <div class="rd-tree-row lv1"><span class="tw">▾</span><span class="ic">▤</span><span class="nm">staging_shop_orders</span></div>
+              <div class="rd-tree-row lv2"><span class="nm">id</span><span class="ty">INTEGER</span></div>
+              <div class="rd-tree-row lv2 is-hot"><span class="nm">amount</span><span class="ty">INTEGER</span></div>
+              <div class="rd-tree-row lv2"><span class="nm">region</span><span class="ty">VARCHAR</span></div>
+              <div class="rd-tree-row lv1"><span class="tw">▸</span><span class="ic">▤</span><span class="nm">staging_crm_leads</span></div>
+            </div>
+            <div class="rd-tree-foot">点表或字段，开一个新部件</div>
           </aside>
 
           <!-- 右：部件画布 —— 一块块往下排，每块 = 一条 SQL + 一种图表类型 -->
@@ -1091,6 +1133,26 @@ body{
         </div>
 
         <div class="ed-main">
+          <!-- 编辑页里的数据树 —— 与画布上那棵**同一棵**，
+               但脚上那句话不同：这里点表是「把引用插进正在写的那条 SQL」。
+               写 SQL 的地方只有这一处 —— 树摆在旁边，用户看着选、点一下就有。 -->
+          <aside class="ed-tree">
+            <div class="rd-tree-head">
+              <span>数据</span>
+              <span class="spacer"></span>
+              <button class="icon-btn" type="button" title="添加数据源" aria-label="添加数据源">＋</button>
+            </div>
+            <div class="rd-tree-list">
+              <div class="rd-tree-row lv0"><span class="tw">▾</span><span class="ic">🗄</span><span class="nm">本地工作区</span><span class="badge-sm">DuckDB</span></div>
+              <div class="rd-tree-row lv1"><span class="tw">▾</span><span class="ic">▤</span><span class="nm">staging_shop_orders</span></div>
+              <div class="rd-tree-row lv2"><span class="nm">id</span><span class="ty">INTEGER</span></div>
+              <div class="rd-tree-row lv2 is-hot"><span class="nm">amount</span><span class="ty">INTEGER</span></div>
+              <div class="rd-tree-row lv2"><span class="nm">region</span><span class="ty">VARCHAR</span></div>
+              <div class="rd-tree-row lv1"><span class="tw">▸</span><span class="ic">▤</span><span class="nm">staging_crm_leads</span></div>
+            </div>
+            <div class="rd-tree-foot">点表或字段，把引用加进 SQL</div>
+          </aside>
+
           <div class="ed-sql">
             <div class="panel-head">SQL<span class="sub">在工作区（DuckDB）上跑</span></div>
             <div class="editor">

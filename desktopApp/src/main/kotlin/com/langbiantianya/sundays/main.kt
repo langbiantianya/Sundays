@@ -849,6 +849,14 @@ internal fun MainScreen(
                                     previewResult = analysis.previewResult,
                                     previewRunning = analysis.previewRunning,
                                     refreshRunning = analysis.refreshRunning,
+                                    // 树与展开态**与工作台共用同一份** ——
+                                    // 那是同一棵工作区树，不该有两份状态。
+                                    treeRoots = analysis.treeRoots,
+                                    expandedNodeIds = analysis.expandedNodeIds,
+                                    onToggleNode = { node -> analysis.toggleNode(node) },
+                                    // 「+」→ 与工作台的树面板头**同一个**对话框
+                                    // （分析模式专属的「添加数据源」）。
+                                    onAddSource = { sourceDialogVisible = true },
                                     onSelectReport = analysis::selectReport,
                                     onCreateReport = analysis::createReport,
                                     onRenameReport = analysis::renameReport,

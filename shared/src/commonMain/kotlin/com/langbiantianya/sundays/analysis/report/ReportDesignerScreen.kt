@@ -8,6 +8,7 @@
 
 package com.langbiantianya.sundays.analysis.report
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -48,8 +50,11 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.analysisTableColumns
 import com.langbiantianya.sundays.analysis.analysisTableRows
+import com.langbiantianya.sundays.analysis.appendAnalysisColumnRef
+import com.langbiantianya.sundays.analysis.appendAnalysisTableRef
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
+import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.ConfirmDialog
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.TabRenameDialog
@@ -61,11 +66,21 @@ import com.langbiantianya.sundays.ui.str
  * **报表设计页面** —— 一张报表由若干**部件**组成，每个部件就是
  * 「一条 SQL + 一种图表类型」。
  *
- * ## 布局为什么是「左边报表列表 + 右边画布」
+ * ## 布局为什么是「左边报表列表 + 数据树 + 右边画布」
  *
  * 报表是**多张**的（销售报表、库存报表……），而部件是**报表的**内容 ——
  * 两者的层级不同，位置也就不同：列表在左（一列窄条），
  * 当前报表的部件在右（占满剩余空间）。
+ *
+ * ## 为什么中间还要插一棵**数据树**
+ *
+ * 部件的形状约定是「第一列类别、第二列数值」，
+ * 而写出一条符合这个约定的 SQL，前提是知道**有哪些表、哪些字段**。
+ * 没有树的话，用户只能切回工作台把名字**记下来**，再切回来凭记忆敲 ——
+ * 敲错了要等**跑 SQL** 时才报错。
+ *
+ * 所以树摆在报表设计这一页里：点一张表，就**开一个新部件**并把引用填好，
+ * 用户接着改聚合、改标题就行 —— 不用记、不用抄。
  *
  * ## 部件为什么排成**纵向列表**而不是网格
  *
@@ -100,6 +115,9 @@ object ReportDesignerTags {
     /** 报表画布上的「刷新」按钮。 */
     const val REFRESH_BUTTON = "reportRefreshBtn"
 
+    /** 画布上那棵**数据树**的面板。 */
+    const val DATA_TREE = "reportDesignerDataTree"
+
     /** 报表设计页面本体。 */
     const val DESIGNER = "reportDesigner"
 }
@@ -117,6 +135,10 @@ object ReportDesignerTags {
  * @param widgetResults 部件 id → 该部件的数据（跑过一次才有）
  * @param previewResult 编辑页里那条 SQL 的**样例数据**；`null` = 还没预览
  * @param previewRunning 正在取样例数据
+ * @param treeRoots 数据树的根节点（工作区 + 已经拉进来的数据源）
+ * @param expandedNodeIds 当前展开着的树节点 id
+ * @param onToggleNode 树的某个节点被展开 / 收起时回调
+ * @param onAddSource 「添加数据源」被点时回调
  * @param onSelectReport 选中某张报表
  * @param onCreateReport 新建一张报表
  * @param onRenameReport 重命名报表
@@ -136,6 +158,10 @@ fun ReportDesignerScreen(
     previewResult: AnalysisResult? = null,
     previewRunning: Boolean = false,
     refreshRunning: Boolean = false,
+    treeRoots: List<ObjectTreeNode> = emptyList(),
+    expandedNodeIds: Set<String> = emptySet(),
+    onToggleNode: (ObjectTreeNode) -> Unit = {},
+    onAddSource: () -> Unit = {},
     onSelectReport: (String) -> Unit = {},
     onCreateReport: () -> Unit = {},
     onRenameReport: (String, String) -> Unit = { _, _ -> },
@@ -159,6 +185,14 @@ fun ReportDesignerScreen(
     var deletingReportId by remember { mutableStateOf<String?>(null) }
     var deletingWidget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
+    // 树的**滚动位置** —— 提到面板**外面**持有。
+    //
+    // 为什么：画布上的树与部件编辑页里的树是**同一棵树**（同一份数据、同一份展开态），
+    // 而编辑页是**盖在**画布上的覆盖层。开编辑页时画布那棵树会从组合里移除，
+    // 滚动状态若记在面板里就跟着一起没了 —— 用户展开到一半的树，
+    // 每开一次编辑页就要重新滚回去找。
+    val treeScrollState = rememberScrollState()
+
     val selected = reports.firstOrNull { it.id == selectedReportId }
     val selectedIndex = reports.indexOfFirst { it.id == selectedReportId }
 
@@ -172,6 +206,45 @@ fun ReportDesignerScreen(
                 onRename = { renamingReportId = it },
                 onDelete = { deletingReportId = it },
                 modifier = Modifier.width(220.dp).fillMaxHeight(),
+            )
+            // 中间那棵**数据树** —— 点一张表就开一个新部件。
+            //
+            // 为什么这里是「开新部件」而不是「把引用插进某处」：
+            // 画布上**还没有正在写的 SQL**，引用插给谁？
+            // 所以这里最自然的动作是「拿这张表起一个部件」——
+            // 而起手的那条 SQL 由部件编辑页接手，用户在那里继续改。
+            ReportDataTreePane(
+                roots = treeRoots,
+                expandedNodeIds = expandedNodeIds,
+                onToggleNode = onToggleNode,
+                onSelectTable = { node ->
+                    // 部件总得有个家 —— 一张报表都没有时先建一张。
+                    //
+                    // 为什么不是「提示用户先建报表」：那样这一下点击就**白点了**。
+                    // 用户在报表设计里点了一张表，他要的就是「把它放进报表」，
+                    // 报表还不存在只是因为还没建 —— 顺手建一张正是他要的结果。
+                    if (selected == null) onCreateReport()
+                    editingWidget =
+                        newReportWidgetDraft(
+                            sql = appendAnalysisTableRef("", node.label, node.namespace),
+                        )
+                    editingIsNew = true
+                },
+                onSelectColumn = { node ->
+                    // 字段的父节点就是它那张表 —— 引用要**带表名**。
+                    val table = node.parentLabel ?: return@ReportDataTreePane
+                    if (selected == null) onCreateReport()
+                    editingWidget =
+                        newReportWidgetDraft(
+                            sql = appendAnalysisColumnRef("", table, node.label, node.namespace),
+                        )
+                    editingIsNew = true
+                },
+                onAddSource = onAddSource,
+                hint = str(StrKey.REPORT_DATA_TREE_CANVAS_HINT),
+                paneTag = ReportDesignerTags.DATA_TREE,
+                scrollState = treeScrollState,
+                modifier = Modifier.width(REPORT_DATA_TREE_WIDTH).fillMaxHeight(),
             )
             ReportCanvas(
                 report = selected,
@@ -204,6 +277,14 @@ fun ReportDesignerScreen(
                 isNew = editingIsNew,
                 previewResult = previewResult,
                 previewRunning = previewRunning,
+                // 编辑页里的树 —— 与画布上那棵**同一棵**（同一份数据与展开态），
+                // 滚动位置也共用 —— 于是「打开编辑页 → 关掉」这一轮里，
+                // 用户刚才展开到哪、滚到哪，都在原处。
+                treeRoots = treeRoots,
+                expandedNodeIds = expandedNodeIds,
+                onToggleNode = onToggleNode,
+                onAddSource = onAddSource,
+                treeScrollState = treeScrollState,
                 onPreview = onPreviewSql,
                 onSave = { saved ->
                     selected?.let { onSaveWidget(it.id, saved, editingIsNew) }

@@ -140,6 +140,8 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **数据形状的约定写死在代码里**：第一列 = 类别，第二列 = 数值；说不清形状就**说清是哪一种**（缺列 / 只有一列 / 值不是数字 / 有负值 / 没数据），**绝不静默截断** —— 少一根柱子，用户不会知道少了什么。负值一律不画（饼图算不出角度，条形图画成正值长度是**误导**） | `shared/analysis/report/ReportModels.kt` |
 | | 图表**手绘**（`Canvas` + `drawArc` / `drawRoundRect`），不用第三方图表库 —— `:shared` 的 `commonMain` 不能引 Android-only 依赖 | `shared/analysis/report/ReportChart.kt` |
 | | 报表**暂不落盘**（住在会话里，**退出即失**）—— 但「部件 = 一条 SQL」这个形状**从此不许改**，用户搭好的报表会集体作废 | `AnalysisSession` |
+| | **报表设计里也有数据树** —— 报表设计页是「报表列表 + **数据树** + 部件画布」，部件编辑页是「**数据树** / SQL / 样例数据」；两处**共用同一棵**工作区树（同一份节点与展开态，与分析工作台也是同一份）。**点表**在画布上是「**开一个新部件**」（SQL 预填 `SELECT * FROM "表"`），在编辑页里是「**把引用插进正在写的那条 SQL**」（`"表"."字段"`）。没有树的话，用户只能切回工作台把表名字**记下来**再凭记忆敲，**敲错了要等跑 SQL 时才报错** | `shared/analysis/report/ReportDataTreePane.kt` / `shared/analysis/AnalysisSqlRef.kt` |
+| | 引用拼接的规则**只有一份**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 里的表**不带** schema 前缀）—— 分析工作台与报表设计都调它 | `shared/analysis/AnalysisSqlRef.kt` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）
 

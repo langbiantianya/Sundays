@@ -506,6 +506,10 @@ desktopApp （本模块）
 | 刷新**只认会话里有的**那张报表 | 认不出来就直接不刷 —— 否则会把**没人引用**的数据塞进会话：界面上根本没有这张报表，数据却占着位置 | 同上 |
 | 部件的 SQL 与工作台的 SQL 是**同一个世界** | 部件的 SQL 跑在**工作区**上：工作台里能查到的表，部件里也能查。反过来不成立 —— 部件的 SQL 要是跑在远端上，用户刚拉下来的数据就用不上 | 同上（`previewSql`） |
 | 样例数据是**真跑出来**的 | 部件的形状约定是「第一列类别、第二列数值」，而**约定只有看得见数据才能被遵守**。「预览」不是拿假数据糊弄界面，它真的在工作区上跑那条 SQL | 同上 |
+| 报表设计里也有**数据树**，且与工作台**共用同一棵** | 部件的形状约定是「第一列类别、第二列数值」，而写出一条符合这个约定的 SQL，前提是知道**有哪些表、哪些字段**。没有树的话，用户只能切回工作台把名字**记下来**再凭记忆敲，**敲错了要等跑 SQL 时才报错**。树的状态（节点 / 展开态）住在会话里、**与工作台同一份** —— 那是同一棵工作区树，不该有两份状态（树上展开到一半，切去工作台再回来还是展开的） | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`ReportDataTreePane.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDataTreePane.kt) |
+| 「点树上的一张表」在两处的后果**不同** | 画布上**还没有正在写的 SQL**，引用插给谁？所以那里的点表是「**开一个新部件**」，起手的 SQL 由部件编辑页接手；编辑页里点表则是「**把引用插进正在写的那条 SQL**」。同一个组件、同一份数据，只是**上下文**不同 | 同上 |
+| 引用拼接的规则**住在 `:shared`** | 「树上的一个对象」到「SQL 里的一段引用」这条规则有两个调用方：分析工作台（会话的 `appendToSql` / `appendColumnToSql`）与报表设计（部件编辑页）。规则只写一份在 `AnalysisSqlRef.kt`（纯函数），两边都调它 —— 两份实现的话，改一处忘了另一处必然发生，而**两边各自的测试都是绿的** | [`AnalysisSqlRef.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) + [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| **还没有报表时点树会先建一张** | 部件总得有个家。而「提示用户先建报表」等于让那一下点击**白点**（用户点了，什么也没发生）—— 仓库原则是「宁可少给，不给一个点了必然失败的东西」。用户在报表设计里点了一张表，他要的就是「把它放进报表」；报表还不存在只是因为还没建 | [`ReportDesignerScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) |
 
 
 ---
@@ -541,6 +545,7 @@ desktopApp （本模块）
 
 | **报表与部件**（报表清单 / 选中项 / 部件数据 / 样例数据） | `AnalysisSession` | 保持 | 不适用（分析模式与连接无关） |
 | **分析模式的视图**（工作台 / 报表设计） | `AnalysisSession` | 保持 | 不适用 |
+| **报表数据树**（节点 / 展开态） | `AnalysisSession`（**与工作台共用同一份**） | 保持 | 不适用 |
 
 | **长生命周期 `CoroutineScope`** | `MainScreen` | 保持 | 保持 |
 

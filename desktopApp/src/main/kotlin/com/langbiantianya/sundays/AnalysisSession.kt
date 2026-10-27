@@ -38,12 +38,13 @@ import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.analysisColumnNodeId
 import com.langbiantianya.sundays.analysis.analysisSchemaNodeId
 import com.langbiantianya.sundays.analysis.analysisTableNodeId
+import com.langbiantianya.sundays.analysis.appendAnalysisColumnRef
+import com.langbiantianya.sundays.analysis.appendAnalysisTableRef
 import com.langbiantianya.sundays.analysis.report.AnalysisReport
 import com.langbiantianya.sundays.analysis.report.ReportWidget
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
-import com.langbiantianya.sundays.connection.SqlIdentifier
 import com.langbiantianya.sundays.tree.ObjectTreeColumn
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
@@ -1495,12 +1496,12 @@ class AnalysisSession(
     /**
      * 把一张表加进编辑器 —— **带它所在的 schema**。
      *
-     * ## 为什么 schema 不能省
+     * ## 规则住在 `:shared`
      *
-     * 「添加数据源」把每个源的表放进**自己的 schema** ——
-     * 于是同一张表名可以在两个源里各有一份（`shop.orders` 与 `crm.orders`）。
-     * 不带 schema 的引用落在 `main` 里，于是查的可能是**另一个**表 ——
-     * 而且**不报错**（`main` 里恰好有同名表的话），只是数据悄悄换了来源。
+     * 具体怎么拼、拼在哪儿，全部由 [appendAnalysisTableRef] 决定 ——
+     * 报表设计的部件编辑页也要做**一模一样**的事（点树上的表 → 引用进 SQL），
+     * 而那边住在跨平台模块里、拿不到会话。规则只写一份，两边都调它 ——
+     * 否则「同一个概念有两份实现，改一处忘了另一处」必然发生。
      *
      * ## 规则只有一条，例外只有一个
      *
@@ -1523,13 +1524,7 @@ class AnalysisSession(
         name: String,
         namespace: String? = null,
     ) {
-        val quoted = qualify(name, namespace)
-        sql =
-            if (sql.isBlank()) {
-                "SELECT * FROM $quoted"
-            } else {
-                sql.trimEnd() + "\n" + quoted
-            }
+        sql = appendAnalysisTableRef(sql, name, namespace)
     }
 
     /**
@@ -1548,35 +1543,7 @@ class AnalysisSession(
         column: String,
         namespace: String? = null,
     ) {
-        val quotedTable = SqlIdentifier.quote(DialectType.DUCKDB, table)
-        val quotedColumn = SqlIdentifier.quote(DialectType.DUCKDB, column)
-        val tableRef = qualify(table, namespace)
-        val reference = "$tableRef.$quotedColumn"
-        sql =
-            if (sql.isBlank()) {
-                "SELECT $reference FROM $tableRef"
-            } else {
-                sql.trimEnd() + "\n" + reference
-            }
-    }
-
-    /**
-     * 表的**限定引用** —— `"schema"."表"`，而 `main` 里的表就只写 `"表"`。
-     *
-     * ## 为什么 `main` 不带前缀
-     *
-     * 工作区自己的表都在 `main` 里 —— 而那是最常见的情况。
-     * 每次都写成 `"main"."orders"` 的话，用户复制到别处（另一条 SQL、
-     * 另一个工具）就多了一截前缀，而那截前缀**大多数时候是多余的**。
-     */
-    private fun qualify(
-        name: String,
-        namespace: String?,
-    ): String {
-        val quotedName = SqlIdentifier.quote(DialectType.DUCKDB, name)
-        if (namespace.isNullOrBlank() || namespace == WORKSPACE_SCHEMA) return quotedName
-        val quotedNamespace = SqlIdentifier.quote(DialectType.DUCKDB, namespace)
-        return "$quotedNamespace.$quotedName"
+        sql = appendAnalysisColumnRef(sql, table, column, namespace)
     }
 
     /** 取消当前这次拉取。 */

@@ -15,7 +15,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,6 +30,7 @@ import com.langbiantianya.sundays.analysis.AnalysisMode
 import com.langbiantianya.sundays.analysis.AnalysisModeBar
 import com.langbiantianya.sundays.analysis.AnalysisModeTags
 import com.langbiantianya.sundays.analysis.AnalysisResult
+import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.report.AnalysisReport
 import com.langbiantianya.sundays.analysis.report.ReportDesignerScreen
 import com.langbiantianya.sundays.analysis.report.ReportDesignerTags
@@ -35,6 +38,10 @@ import com.langbiantianya.sundays.analysis.report.ReportWidget
 import com.langbiantianya.sundays.analysis.report.ReportWidgetEditorTags
 import com.langbiantianya.sundays.analysis.report.ReportWidgetType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
+import com.langbiantianya.sundays.tree.ObjectTreeColumn
+import com.langbiantianya.sundays.tree.ObjectTreeKind
+import com.langbiantianya.sundays.tree.ObjectTreeNode
+import com.langbiantianya.sundays.tree.objectTreeRowTag
 import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -75,6 +82,47 @@ class ReportDesignerUiTest {
             columns = listOf(AnalysisColumn("region", "VARCHAR"), AnalysisColumn("amount", "INTEGER")),
             rows = listOf(listOf("华东", "128"), listOf("华北", "64")),
         )
+
+    /**
+     * 报表设计页上那棵**数据树** —— 工作区 → orders → amount。
+     *
+     * ## 为什么字段节点要带 [ObjectTreeColumn]
+     *
+     * 共享树组件画字段行时**先看** `node.column` —— 没有它就整行不画。
+     * 只给 `label` 的话，字段在树上根本不会出现，点它的测试就成了空谈。
+     */
+    private val treeRoots =
+        listOf(
+            ObjectTreeNode(
+                id = "schema:main",
+                label = "本地工作区",
+                kind = ObjectTreeKind.DATABASE,
+                badge = "DuckDB",
+                children =
+                    listOf(
+                        ObjectTreeNode(
+                            id = "table:main:orders",
+                            label = "orders",
+                            kind = ObjectTreeKind.TABLE,
+                            namespace = WORKSPACE_SCHEMA,
+                            children =
+                                listOf(
+                                    ObjectTreeNode(
+                                        id = "column:main:orders:amount",
+                                        label = "amount",
+                                        kind = ObjectTreeKind.COLUMN,
+                                        parentLabel = "orders",
+                                        namespace = WORKSPACE_SCHEMA,
+                                        column = ObjectTreeColumn(name = "amount", type = "INTEGER"),
+                                    ),
+                                ),
+                        ),
+                    ),
+            ),
+        )
+
+    /** 树里展开着的节点 —— 工作区与 orders 都要展开，字段才露得出来。 */
+    private val expandedTreeIds = setOf("schema:main", "table:main:orders")
 
     @Test
     fun `the report list shows the reports it is given`() =
@@ -379,7 +427,154 @@ class ReportDesignerUiTest {
             assertEquals(AnalysisMode.REPORT, mode)
         }
 
+    // ──────────────── 数据树 ────────────────
+
+    @Test
+    fun `the report design shows the data tree`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            // 树是**看得见的** —— 用户得能看见有哪些表与字段，
+            // 否则「方便用户选择」这件事根本无从谈起。
+            onNodeWithTag(ReportDesignerTags.DATA_TREE).assertIsDisplayed()
+            // 而且树里**真有内容** —— 只摆一个空壳面板不算「显示了树」。
+            treeRow("table:main:orders", ReportDesignerTags.DATA_TREE).assertIsDisplayed()
+        }
+
+    @Test
+    fun `clicking a table in the tree starts a new part filled with that table`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            treeRow("table:main:orders", ReportDesignerTags.DATA_TREE).performClick()
+            waitForIdle()
+
+            // 点表 = 开一个新部件，而那条部件的 SQL 已经把表填好了 ——
+            // 用户不用记住表名再敲一遍。
+            onNodeWithTag(ReportWidgetEditorTags.EDITOR).assertIsDisplayed()
+            sqlEditor().assertTextContains("SELECT * FROM \"orders\"")
+        }
+
+    @Test
+    fun `clicking a column in the editor tree puts the reference into the sql`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_EDIT_PREFIX + widget.id).performClick()
+            waitForIdle()
+
+            // 编辑页里那棵树是**另一棵**（画布上那棵被编辑页盖住了，但它还在组合里），
+            // 所以必须圈定到编辑页这一棵再点 ——
+            // 不圈定的话，同一个 tag 会找到两行，断言反而失败。
+            treeRow("column:main:orders:amount", ReportWidgetEditorTags.DATA_TREE).performClick()
+            waitForIdle()
+
+            // 字段的引用**必须带表名** —— 光有列名在多表查询里说不清是哪张表的列。
+            //
+            // 用 `substring = true`：引用是**追加**到已有 SQL 后面的，
+            // 整条语句不等于那一句引用。
+            sqlEditor().assertTextContains("\"orders\".\"amount\"", substring = true)
+        }
+
+    @Test
+    fun `a tree click with no report yet makes one first`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            val created = mutableListOf<Unit>()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = emptyList(),
+                            selectedReportId = null,
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            onCreateReport = { created += Unit },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            treeRow("table:main:orders", ReportDesignerTags.DATA_TREE).performClick()
+            waitForIdle()
+
+            // 部件总得有个家 —— 一张报表都没有时先建一张。
+            // 不这么做的话，这一下点击就**白点了**：用户点了，什么也没发生。
+            assertEquals(1, created.size, "还没有报表时点树应当先建一张报表")
+            onNodeWithTag(ReportWidgetEditorTags.EDITOR).assertIsDisplayed()
+        }
+
     // ──────────────── 圈定范围的取节点 ────────────────
+
+    /**
+     * 某一棵**树**里的某一行。
+     *
+     * @param nodeId 节点 id
+     * @param paneTag 那棵树的**面板** tag —— 报表设计页上同时存在两棵树
+     *   （画布上那棵与编辑页里那棵），不圈定的话会找到两行
+     */
+    private fun ComposeUiTest.treeRow(
+        nodeId: String,
+        paneTag: String,
+    ) = onNode(
+        hasTestTag(objectTreeRowTag(nodeId)) and hasAnyAncestor(hasTestTag(paneTag)),
+        useUnmergedTree = true,
+    )
+
+    /**
+     * 部件编辑页里的 **SQL 编辑器**。
+     *
+     * 编辑器把 SQL 放在**可写文本**里（BasicTextField）—— 断言落在那儿，
+     * 才真的验到「SQL 进了编辑器」。
+     *
+     * 为什么要圈定到编辑器那一块：编辑页上还有一个标题输入框，
+     * 它同样是可写文本 —— 不圈定就会找到两个节点。
+     */
+    private fun ComposeUiTest.sqlEditor() =
+        onNode(
+            hasSetTextAction() and hasAnyAncestor(hasTestTag(ReportWidgetEditorTags.SQL_EDITOR)),
+            useUnmergedTree = true,
+        )
 
     /**
      * 报表**列表里**的那个文本节点。

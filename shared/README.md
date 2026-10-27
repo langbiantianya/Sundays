@@ -1,6 +1,6 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。123 个源文件（`commonMain` 88 / `commonTest` 32 /
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。126 个源文件（`commonMain` 90 / `commonTest` 33 /
 `jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 
@@ -37,7 +37,9 @@
 | `DangerousSql` / `SqlLiterals` / `DangerousSqlConfirmDialog` | SQL 危险写操作识别与**逐句**只读判定、WHERE 字面量转义与 CAST 目标类型、危险语句确认框 | [`sql/`](./src/commonMain/kotlin/com/langbiantianya/sundays/sql/) |
 | `EmptyHint` / `ColumnBadge` / `TabRenameDialog` / `ConfirmDialog` | 空态提示、字段类型徽标、标签重命名弹窗（标题可定制）、通用「确认 / 取消」框 | [`ui/`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/) |
 | `AnalysisScreen` / `AnalysisModeBar` | 数据分析模式的界面层：工作台（工作区树 + 编辑器 + 只读结果表）与**两个视图的切换条**（工作台 / 报表设计） | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
-| `ReportDesignerScreen` / `ReportWidgetEditor` / `PieChart` / `BarChart` | **报表设计**：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**。设计页面（报表列表 + 部件画布）、部件编辑页（类型 / 标题 / SQL + **样例数据**）、**手绘**的饼图与条形图（不用第三方库） | [`analysis/report/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/) |
+| `ReportDesignerScreen` / `ReportWidgetEditor` / `PieChart` / `BarChart` | **报表设计**：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**。设计页面（报表列表 + **数据树** + 部件画布）、部件编辑页（**数据树** / 类型 / 标题 / SQL + **样例数据**）、**手绘**的饼图与条形图（不用第三方库） | [`analysis/report/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/) |
+| `ReportDataTreePane` | 报表设计用的**数据树**窄条（工作区 → 表 → 字段），复用共享树组件 `ObjectTree` —— 报表设计页与部件编辑页**各一棵、同一份数据** | [`analysis/report/ReportDataTreePane.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDataTreePane.kt) |
+| `analysisTableRef` / `analysisColumnRef` / `appendAnalysisTableRef` / `appendAnalysisColumnRef` | 「树上的一个对象」到「SQL 里的一段引用」的**纯规则**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 不带前缀）—— 分析工作台与报表设计**共用这一份** | [`analysis/AnalysisSqlRef.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) |
 | `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 浏览器的**标签条 / 工作台切换 / 空态引导** —— 纯展示，只认窄数据形状 | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
 | `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 通知中心（状态 + 面板 + 铃铛入口）—— 跨界面收集错误 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
 | `ObjectTree` / `ObjectTreeModel` / `TreePaneShell` / `TreePaneToggleButton` | **两棵数据库树共用的组件与外壳**：库 → 表 → 字段的渲染与纯模型；面板外壳（**折叠到侧边的 44dp 窄轨** + **可拖拽调宽**的分隔条）与折叠 / 展开按钮 | [`tree/`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/) |
