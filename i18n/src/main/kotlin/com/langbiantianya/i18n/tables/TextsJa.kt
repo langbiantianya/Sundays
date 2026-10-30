@@ -680,6 +680,8 @@ internal val textsJa: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "上の + を押してデータソースを追加し、テーブルをワークスペースに取り込みます",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "テーブルまたは列を押すと新しい部品になります",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "テーブルまたは列を押すと参照を SQL に挿入します",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "レポートリストを折りたたむ",
+        StrKey.REPORT_LIST_PANE_EXPAND to "レポートリストを展開する",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析クエリはローカルワークスペースに対してのみ実行でき、リモートデータソースに直接実行することはできません",
         StrKey.TREE_PANE_COLLAPSE to "ツリーパネルを折りたたむ",
         StrKey.TREE_PANE_EXPAND to "ツリーパネルを展開する",

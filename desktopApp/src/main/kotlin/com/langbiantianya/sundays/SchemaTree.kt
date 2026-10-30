@@ -59,8 +59,8 @@ import com.langbiantianya.sundays.tree.ObjectTreeObjectGroup
 import com.langbiantianya.sundays.tree.TreeContextMenu
 import com.langbiantianya.sundays.tree.TreeContextMenuItem
 import com.langbiantianya.sundays.tree.TreeContextMenuState
-import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
+import com.langbiantianya.sundays.ui.SidePaneToggleButton
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
@@ -177,10 +177,10 @@ internal fun SchemaTreePanel(
                     fontWeight = FontWeight.SemiBold,
                 )
                 // 「收起左树」—— 与分析模式的树面板头**同一个按钮**
-                // （`TreePaneToggleButton`）：两侧的手感必须一致，
+                // （`SidePaneToggleButton`）：两侧的手感必须一致，
                 // 不能出现「这边能收、那边不能收」。
                 Spacer(Modifier.weight(1f))
-                TreePaneToggleButton(collapsed = false, onClick = onCollapse)
+                SidePaneToggleButton(collapsed = false, onClick = onCollapse)
             }
             WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
 

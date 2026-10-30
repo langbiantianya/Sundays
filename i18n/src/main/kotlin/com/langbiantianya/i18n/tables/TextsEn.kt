@@ -680,6 +680,8 @@ internal val textsEn: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "Click the + above to add a data source and pull tables into the workspace",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "Click a table or column to start a new part",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "Click a table or column to insert its reference into the SQL",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "Collapse report list",
+        StrKey.REPORT_LIST_PANE_EXPAND to "Expand report list",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Analysis queries can only run against the local workspace, not directly against a remote data source",
         StrKey.TREE_PANE_COLLAPSE to "Collapse tree panel",
         StrKey.TREE_PANE_EXPAND to "Expand tree panel",

@@ -10,20 +10,27 @@ package com.langbiantianya.sundays
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.unit.width
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.AnalysisColumn
 import com.langbiantianya.sundays.analysis.AnalysisMode
@@ -42,6 +49,7 @@ import com.langbiantianya.sundays.tree.ObjectTreeColumn
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.tree.objectTreeRowTag
+import com.langbiantianya.sundays.ui.SIDE_PANE_COLLAPSED_WIDTH
 import com.langbiantianya.sundays.ui.SundaysTheme
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -544,6 +552,269 @@ class ReportDesignerUiTest {
             onNodeWithTag(ReportWidgetEditorTags.EDITOR).assertIsDisplayed()
         }
 
+    // ──────────────── 布局与折叠 ────────────────
+
+    @Test
+    fun `the data tree sits on the left and the report list on the far right`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            val treeLeft = leftOf(ReportDesignerTags.DATA_TREE)
+            val canvasLeft = leftOf(ReportDesignerTags.REPORT_CANVAS)
+            val listLeft = leftOf(ReportDesignerTags.REPORT_LIST)
+
+            // 输入在左（树）、主产物在中（画布）、另一类产物在右（报表列表）。
+            assertTrue(
+                treeLeft < canvasLeft,
+                "数据树应当在画布左边：tree=$treeLeft canvas=$canvasLeft",
+            )
+            assertTrue(
+                canvasLeft < listLeft,
+                "报表列表应当在画布右边：canvas=$canvasLeft list=$listLeft",
+            )
+            // 报表列表贴在**窗口最右** —— 右边不该再留一条空白。
+            assertEquals(
+                rightOf(ReportDesignerTags.DESIGNER),
+                rightOf(ReportDesignerTags.REPORT_LIST),
+                1f,
+                "报表列表应当贴着窗口的右边缘",
+            )
+        }
+
+    @Test
+    fun `the data tree folds away into a rail on the left`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            val canvasBefore = widthOf(ReportDesignerTags.REPORT_CANVAS)
+            val treeBefore = widthOf(ReportDesignerTags.DATA_TREE)
+
+            onNodeWithTag(ReportDesignerTags.DATA_TREE_TOGGLE).performClick()
+            waitForIdle()
+
+            // 树**整个**从屏上消失 —— 44dp 塞不下树，画一截残影既没法看也没法点。
+            onAllNodesWithTag(ReportDesignerTags.DATA_TREE).assertCountEquals(0)
+            // 窄轨就是**那个固定宽度**。
+            assertEquals(
+                SIDE_PANE_COLLAPSED_WIDTH.value,
+                widthOf(ReportDesignerTags.DATA_TREE_RAIL),
+                1f,
+                "窄轨应当就是那个固定宽度",
+            )
+            // 窄轨必须**比刚才的面板窄** —— 折叠的意义就是把宽度**让出来**。
+            //
+            // 为什么要单独钉这一条：只比「窄轨 == 那个常量」的话，
+            // 常量本身被改大时两边一起变，断言照样成立 ——
+            // 而那时候折叠就**什么也没让出**（用户白点了一次）。
+            assertTrue(
+                widthOf(ReportDesignerTags.DATA_TREE_RAIL) < treeBefore,
+                "窄轨应当比面板窄（rail=${widthOf(ReportDesignerTags.DATA_TREE_RAIL)} panel=$treeBefore）",
+            )
+            // 窄轨贴在**窗口最左**（树那一侧）。
+            assertEquals(
+                leftOf(ReportDesignerTags.DESIGNER),
+                leftOf(ReportDesignerTags.DATA_TREE_RAIL),
+                1f,
+                "窄轨应当贴在窗口的左边缘",
+            )
+            // 折叠的**意义**是把宽度让给主区 —— 这一条才是「折叠有没有用」的判据。
+            assertTrue(
+                widthOf(ReportDesignerTags.REPORT_CANVAS) > canvasBefore,
+                "折叠后画布应当变宽：before=$canvasBefore after=${widthOf(ReportDesignerTags.REPORT_CANVAS)}",
+            )
+            // 另一侧**不受影响** —— 两块面板各收各的。
+            onNodeWithTag(ReportDesignerTags.REPORT_LIST).assertIsDisplayed()
+
+            // 再点一下回来。
+            onNodeWithTag(ReportDesignerTags.DATA_TREE_TOGGLE).performClick()
+            waitForIdle()
+            onAllNodesWithTag(ReportDesignerTags.DATA_TREE_RAIL).assertCountEquals(0)
+            onNodeWithTag(ReportDesignerTags.DATA_TREE).assertIsDisplayed()
+        }
+
+    @Test
+    fun `the report list folds away into a rail on the far right`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            val canvasBefore = widthOf(ReportDesignerTags.REPORT_CANVAS)
+            val listBefore = widthOf(ReportDesignerTags.REPORT_LIST)
+
+            onNodeWithTag(ReportDesignerTags.REPORT_LIST_TOGGLE).performClick()
+            waitForIdle()
+
+            onAllNodesWithTag(ReportDesignerTags.REPORT_LIST).assertCountEquals(0)
+            // 窄轨就是**那个固定宽度**。
+            assertEquals(
+                SIDE_PANE_COLLAPSED_WIDTH.value,
+                widthOf(ReportDesignerTags.REPORT_LIST_RAIL),
+                1f,
+                "窄轨应当就是那个固定宽度",
+            )
+            // 窄轨必须**比刚才的面板窄** —— 折叠的意义就是把宽度**让出来**。
+            assertTrue(
+                widthOf(ReportDesignerTags.REPORT_LIST_RAIL) < listBefore,
+                "窄轨应当比面板窄（rail=${widthOf(ReportDesignerTags.REPORT_LIST_RAIL)} panel=$listBefore）",
+            )
+            // 窄轨贴在**窗口最右**（报表列表那一侧）。
+            assertEquals(
+                rightOf(ReportDesignerTags.DESIGNER),
+                rightOf(ReportDesignerTags.REPORT_LIST_RAIL),
+                1f,
+                "窄轨应当贴在窗口的右边缘",
+            )
+            assertTrue(
+                widthOf(ReportDesignerTags.REPORT_CANVAS) > canvasBefore,
+                "折叠后画布应当变宽：before=$canvasBefore after=${widthOf(ReportDesignerTags.REPORT_CANVAS)}",
+            )
+            // 左侧的数据树**不受影响** —— 两块面板各收各的。
+            onNodeWithTag(ReportDesignerTags.DATA_TREE).assertIsDisplayed()
+
+            // 再点一下回来。
+            onNodeWithTag(ReportDesignerTags.REPORT_LIST_TOGGLE).performClick()
+            waitForIdle()
+            onAllNodesWithTag(ReportDesignerTags.REPORT_LIST_RAIL).assertCountEquals(0)
+            onNodeWithTag(ReportDesignerTags.REPORT_LIST).assertIsDisplayed()
+        }
+
+    @Test
+    fun `folding both sides hands the whole width to the canvas`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.DATA_TREE_TOGGLE).performClick()
+            waitForIdle()
+            onNodeWithTag(ReportDesignerTags.REPORT_LIST_TOGGLE).performClick()
+            waitForIdle()
+
+            // 两侧都收起来之后，画布应当占满**除两条窄轨以外**的全部宽度。
+            // 留着空白的话，说明有一侧压根没被收走 —— 那正是这条断言要抓的。
+            assertEquals(
+                widthOf(ReportDesignerTags.DESIGNER),
+                widthOf(ReportDesignerTags.REPORT_CANVAS) + 2 * SIDE_PANE_COLLAPSED_WIDTH.value,
+                1f,
+                "两侧都收起来后，画布应当占满除两条窄轨以外的全部宽度",
+            )
+        }
+
+    @Test
+    fun `the two panels have their own fold descriptions`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            // 屏幕上有**两块**能折叠的面板 —— 无障碍文案必须**各说各的**。
+            // 共用一句的话，读屏念「折叠树面板」，用户照着提示去点，
+            // 收起来的却是**另一块** —— 提示反而在误导人。
+            onNode(
+                hasContentDescription(zh(StrKey.TREE_PANE_COLLAPSE)) and
+                    hasAnyAncestor(hasTestTag(ReportDesignerTags.DATA_TREE_TOGGLE)),
+                useUnmergedTree = true,
+            ).assertExists()
+            onNode(
+                hasContentDescription(zh(StrKey.REPORT_LIST_PANE_COLLAPSE)) and
+                    hasAnyAncestor(hasTestTag(ReportDesignerTags.REPORT_LIST_TOGGLE)),
+                useUnmergedTree = true,
+            ).assertExists()
+        }
+
+    @Test
+    fun `the report list panel gets wider when it is dragged towards the left`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            val before = widthOf(ReportDesignerTags.REPORT_LIST)
+            // 报表列表贴在**窗口最右** —— 所以往**左**拖才变宽（与左边的树**镜像**）。
+            //
+            // 拖反了的后果不是「难看」，是**反直觉**：往左拖，面板却**变窄**了。
+            // 而分隔条又是「看起来能拖」的样子 —— 用户多半会以为坏了。
+            dragHandle(ReportDesignerTags.REPORT_LIST_DRAG_HANDLE, (-40f))
+            waitForIdle()
+
+            val after = widthOf(ReportDesignerTags.REPORT_LIST)
+            assertTrue(
+                after > before,
+                "右侧面板往左拖应当变宽：before=$before after=$after",
+            )
+        }
+
     // ──────────────── 圈定范围的取节点 ────────────────
 
     /**
@@ -595,4 +866,39 @@ class ReportDesignerUiTest {
             hasText(text) and hasAnyAncestor(hasTestTag(ReportWidgetEditorTags.SAMPLE_TABLE)),
             useUnmergedTree = true,
         )
+
+    // ──────────────── 布局的度量 ────────────────
+
+    /**
+     * 某个 tag 的节点的**左边界**（dp）。
+     *
+     * 用 `getUnclippedBoundsInRoot` 而不是「可见区域」——
+     * 折叠后窄轨贴着窗口边，可见区域会被裁掉一截，量出来的就不是布局的真实位置了。
+     */
+    private fun ComposeUiTest.leftOf(tag: String): Float = onNodeWithTag(tag).getUnclippedBoundsInRoot().left.value
+
+    /** 某个 tag 的节点的**右边界**（dp）。 */
+    private fun ComposeUiTest.rightOf(tag: String): Float = onNodeWithTag(tag).getUnclippedBoundsInRoot().right.value
+
+    /** 某个 tag 的节点的**宽度**（dp）。 */
+    private fun ComposeUiTest.widthOf(tag: String): Float = onNodeWithTag(tag).getUnclippedBoundsInRoot().width.value
+
+    /**
+     * 在分隔条上按下、水平移动 [by] dp、松开。
+     *
+     * 用触摸作用域而不是鼠标作用域：`MouseInjectionScope` 只暴露 `click` / `moveTo` 这类
+     * 成品动作，没有 `down` / `up`，而 `detectDragGestures` 需要一次完整的按下-移动-抬起。
+     *
+     * @param by 移动的像素数（**负数 = 往左**）
+     */
+    private fun ComposeUiTest.dragHandle(
+        tag: String,
+        by: Float,
+    ) {
+        onNodeWithTag(tag).performTouchInput {
+            down(center)
+            moveBy(Offset(by, 0f))
+            up()
+        }
+    }
 }

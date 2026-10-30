@@ -38,11 +38,11 @@ import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
-import com.langbiantianya.sundays.tree.TREE_PANE_COLLAPSED_WIDTH
-import com.langbiantianya.sundays.tree.TREE_PANE_RAIL_TAG
-import com.langbiantianya.sundays.tree.TREE_PANE_TOGGLE_TAG
 import com.langbiantianya.sundays.tree.objectTreeRowTag
 import com.langbiantianya.sundays.ui.ProvideStrings
+import com.langbiantianya.sundays.ui.SIDE_PANE_COLLAPSED_WIDTH
+import com.langbiantianya.sundays.ui.SIDE_PANE_RAIL_TAG
+import com.langbiantianya.sundays.ui.SIDE_PANE_TOGGLE_TAG
 import com.langbiantianya.sundays.ui.SundaysTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +58,7 @@ import kotlin.test.assertTrue
  *
  * ## 为什么两侧写在一个文件里
  *
- * 这两件事的实现是**同一个组件**（`com.langbiantianya.sundays.tree.TreePaneShell`），
+ * 这两件事的实现是**同一个组件**（`com.langbiantianya.sundays.ui.SidePaneShell`），
  * 两边的差异只在「谁持有状态」与「面板长什么样」。把两条契约写在同一个文件里，
  * 才能一眼看出「两边的手感一致」这件事是被测过的，而不是碰巧。
  *
@@ -186,17 +186,17 @@ class TreePaneCollapseTest {
 
             val resultBefore = widthOf(ANALYSIS_RESULT_TABLE_TAG)
             assertTrue(
-                onAllNodesWithTag(TREE_PANE_RAIL_TAG).fetchSemanticsNodes().isEmpty(),
+                onAllNodesWithTag(SIDE_PANE_RAIL_TAG).fetchSemanticsNodes().isEmpty(),
                 "前置条件：一开始不该有窄轨",
             )
 
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             // 窄轨在，面板与树都不在了。
             assertEquals(
                 1,
-                onAllNodesWithTag(TREE_PANE_RAIL_TAG).fetchSemanticsNodes().size,
+                onAllNodesWithTag(SIDE_PANE_RAIL_TAG).fetchSemanticsNodes().size,
                 "折叠后应当只剩一条窄轨",
             )
             onAllNodesWithTag(ANALYSIS_TREE_PANEL_TAG).assertCountEquals(0)
@@ -210,10 +210,10 @@ class TreePaneCollapseTest {
             )
 
             // 再点一下回来。
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
-            onAllNodesWithTag(TREE_PANE_RAIL_TAG).assertCountEquals(0)
+            onAllNodesWithTag(SIDE_PANE_RAIL_TAG).assertCountEquals(0)
             assertEquals(
                 1,
                 onAllNodesWithTag(ANALYSIS_TREE_PANEL_TAG).fetchSemanticsNodes().size,
@@ -233,12 +233,12 @@ class TreePaneCollapseTest {
             // 留个把手在那儿就是「看起来能拖，拖了纹丝不动」。
             setAnalysisScreen()
 
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             assertEquals(
-                TREE_PANE_COLLAPSED_WIDTH,
-                widthOf(TREE_PANE_RAIL_TAG),
+                SIDE_PANE_COLLAPSED_WIDTH,
+                widthOf(SIDE_PANE_RAIL_TAG),
                 "窄轨应当就是那个固定宽度",
             )
             onAllNodesWithTag(ANALYSIS_TREE_DRAG_HANDLE_TAG).assertCountEquals(0)
@@ -292,29 +292,29 @@ class TreePaneCollapseTest {
             setBrowserScreen(conn)
 
             val before = widthOf(SCHEMA_PANEL_TAG)
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             assertEquals(
                 1,
-                onAllNodesWithTag(TREE_PANE_RAIL_TAG).fetchSemanticsNodes().size,
+                onAllNodesWithTag(SIDE_PANE_RAIL_TAG).fetchSemanticsNodes().size,
                 "折叠后应当只剩一条窄轨",
             )
             onAllNodesWithTag(SCHEMA_PANEL_TAG).assertCountEquals(0)
             assertEquals(
-                TREE_PANE_COLLAPSED_WIDTH,
-                widthOf(TREE_PANE_RAIL_TAG),
+                SIDE_PANE_COLLAPSED_WIDTH,
+                widthOf(SIDE_PANE_RAIL_TAG),
                 "窄轨应当就是那个固定宽度",
             )
             assertTrue(
-                before > TREE_PANE_COLLAPSED_WIDTH,
+                before > SIDE_PANE_COLLAPSED_WIDTH,
                 "前置条件：展开态的面板应当比窄轨宽（before=$before）",
             )
 
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
-            onAllNodesWithTag(TREE_PANE_RAIL_TAG).assertCountEquals(0)
+            onAllNodesWithTag(SIDE_PANE_RAIL_TAG).assertCountEquals(0)
             assertEquals(
                 1,
                 onAllNodesWithTag(SCHEMA_PANEL_TAG).fetchSemanticsNodes().size,
@@ -343,9 +343,9 @@ class TreePaneCollapseTest {
                 "前置条件：先拖宽（default=${SCHEMA_PANEL_DEFAULT_WIDTH} dragged=$dragged）",
             )
 
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             assertEquals(

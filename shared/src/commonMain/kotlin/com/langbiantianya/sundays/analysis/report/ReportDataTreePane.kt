@@ -12,9 +12,11 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,6 +37,8 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.ui.EmptyHint
+import com.langbiantianya.sundays.ui.PaneEdge
+import com.langbiantianya.sundays.ui.SidePaneToggleButton
 import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.str
 
@@ -81,26 +85,42 @@ object ReportDataTreeTags {
 
     /** 「添加数据源」按钮。 */
     const val ADD_SOURCE = "reportDataTreeAddSource"
+
+    /**
+     * 「折叠 / 展开」按钮。
+     *
+     * **每棵树各给各的**：报表设计页上同时存在两棵树（画布上那棵与部件编辑页里那棵），
+     * 共用一个 tag 的话「按 tag 找这个按钮」会找到两个。
+     */
+    const val TOGGLE = "reportDataTreeToggle"
 }
 
 /**
- * 数据树窄条的**宽度** —— 200dp。
+ * 数据树窄条的**默认**宽度 —— 200dp。
  *
  * ## 为什么是固定值，而不是「跟窗口按比例」
  *
  * 树里显示的是**名字**（表名、字段名），而名字的长度不随窗口按比例地变 ——
  * 按比例给，窗口一小就把名字截掉一半，而截掉一半的表名是**认不出来的**。
  *
- * ## 为什么不给它一个下限 / 上限
+ * ## 为什么是「默认」宽度而不是「唯一」宽度
  *
- * 分析工作台那棵树是可以拖宽窄的（`TreePaneShell`），因为它旁边是**结果表** ——
- * 两者抢宽度，用户自己知道该让给谁。
- * 报表设计这一页的树旁边是**窄条**（报表列表）与**画布**，
- * 而画布里的部件卡片是**定宽**的（固定 300dp 高、宽度随窗口）——
- * 树抢走的那点宽度，画布里的表格就得横向多滚一截。
- * 所以这里给一个固定值：布局是设计决定的，不交给用户调。
+ * 报表设计页的这一棵树住在**可拖宽的侧边面板**里（`SidePaneShell`）——
+ * 用户拖出来的宽度比默认值宽是**他要的**，不该被布局按回去。
+ * 而部件编辑页里的那一棵是**固定**的（它是专注写 SQL 的一屏，树只是辅助）——
+ * 同一份「默认值」在两处的角色不同，所以这里叫「默认宽度」而不是「宽度」。
  */
-val REPORT_DATA_TREE_WIDTH: Dp = 200.dp
+val REPORT_DATA_TREE_DEFAULT_WIDTH: Dp = 200.dp
+
+/**
+ * 数据树窄条的**宽度下限** —— 150dp。
+ *
+ * ## 为什么不给它一个「不小于多少」的保护
+ *
+ * 名字（表名、字段名）认不出来就没法用 —— 150dp 是「能看清大部分表名」的下限。
+ * 再窄的话用户宁可把它折叠掉（那就走 44dp 的窄轨），也不愿意半开着看一个认不出的名字。
+ */
+val REPORT_DATA_TREE_MIN_WIDTH: Dp = 150.dp
 
 /**
  * 报表设计用的**数据树** —— 一条窄窄的树。
@@ -126,6 +146,12 @@ val REPORT_DATA_TREE_WIDTH: Dp = 200.dp
  * @param scrollState 滚动状态。
  *   **由外面持有**，是为了在「打开部件编辑页 → 关掉」这一轮里，
  *   树还是停在用户刚才滚动到的位置 —— 而不是每次都弹回顶部
+ * @param onToggleCollapsed 「折叠 / 展开这一块」的回调。
+ *   **`null` = 不给折叠按钮** —— 部件编辑页里的那棵树就不折叠：
+ *   那是专注写 SQL 的一屏，树是辅助输入，折叠它只会让 SQL 编辑器少一截
+ * @param toggleTag 折叠 / 展开按钮的 UI 测试 tag。
+ *   **每棵树各给各的**：同屏上可能有两棵树，共用一个 tag 会找到两个
+ * @param edge 这一块贴在窗口的**哪一边** —— 决定折叠按钮的箭头朝哪
  * @param modifier 布局修饰
  */
 @Composable
@@ -139,6 +165,9 @@ fun ReportDataTreePane(
     hint: String,
     paneTag: String = ReportDataTreeTags.PANE,
     scrollState: ScrollState = rememberScrollState(),
+    onToggleCollapsed: (() -> Unit)? = null,
+    toggleTag: String = ReportDataTreeTags.TOGGLE,
+    edge: PaneEdge = PaneEdge.LEFT,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -170,6 +199,20 @@ fun ReportDataTreePane(
                         imageVector = Icons.Filled.Add,
                         contentDescription = str(StrKey.ANALYSIS_ADD_SOURCE),
                         tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                // 「收起数据树」—— 与浏览模式、分析工作台的树面板头**同一个按钮**
+                // （`SidePaneToggleButton`）：同一件事只能有一份实现，
+                // 否则「一边能收一边不能收」迟早发生。
+                //
+                // 只有**这一处**要折叠时才画它（`onToggleCollapsed` 为 `null` = 不折叠）。
+                onToggleCollapsed?.let { onToggle ->
+                    Spacer(modifier = Modifier.width(2.dp))
+                    SidePaneToggleButton(
+                        collapsed = false,
+                        onClick = onToggle,
+                        edge = edge,
+                        tag = toggleTag,
                     )
                 }
             }

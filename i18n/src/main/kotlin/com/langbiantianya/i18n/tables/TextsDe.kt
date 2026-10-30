@@ -680,6 +680,8 @@ internal val textsDe: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "Oben auf + klicken, um eine Datenquelle hinzuzufügen und Tabellen in den Arbeitsbereich zu laden",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "Auf eine Tabelle oder Spalte klicken, um ein neues Teil anzulegen",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "Auf eine Tabelle oder Spalte klicken, um den Verweis ins SQL einzufügen",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "Berichtsliste einklappen",
+        StrKey.REPORT_LIST_PANE_EXPAND to "Berichtsliste ausklappen",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Analyseabfragen können nur gegen den lokalen Arbeitsbereich laufen, nicht direkt gegen eine externe Datenquelle",
         StrKey.TREE_PANE_COLLAPSE to "Baumbereich einklappen",
         StrKey.TREE_PANE_EXPAND to "Baumbereich ausklappen",

@@ -52,14 +52,14 @@ import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
-import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
 import com.langbiantianya.sundays.tree.TreeContextMenu
 import com.langbiantianya.sundays.tree.TreeContextMenuItem
 import com.langbiantianya.sundays.tree.TreeContextMenuState
-import com.langbiantianya.sundays.tree.TreePaneShell
-import com.langbiantianya.sundays.tree.TreePaneToggleButton
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.HorizontalDragHandle
+import com.langbiantianya.sundays.ui.SIDE_PANE_MAX_WIDTH_RATIO
+import com.langbiantianya.sundays.ui.SidePaneShell
+import com.langbiantianya.sundays.ui.SidePaneToggleButton
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinIconButton
@@ -196,7 +196,7 @@ fun AnalysisScreen(
     // 真正删之前要用户确认（删掉的是一整个 schema 里的表，不可恢复）。
     //
     // 为什么状态住在**屏幕层**而不是树面板里：树面板在**折叠时整体从组合里移除**
-    // （`TreePaneShell` 的窄轨只有 44dp，塞不下树）—— 确认框要是跟着面板走，
+    // （`SidePaneShell` 的窄轨只有 44dp，塞不下树）—— 确认框要是跟着面板走，
     // 用户折叠一下树，正在确认的删除就**无声消失**了（而删除本身还没发生）。
     var pendingDeleteSource by remember { mutableStateOf<String?>(null) }
 
@@ -215,9 +215,9 @@ fun AnalysisScreen(
         // 宽度上限按容器比例给（与浏览模式同一个常量）—— 窗口窄时若还允许拉到固定 dp，
         // 右侧的编辑器与结果表会被挤到没法用。
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val maxPaneWidth = maxWidth * TREE_PANE_MAX_WIDTH_RATIO
+            val maxPaneWidth = maxWidth * SIDE_PANE_MAX_WIDTH_RATIO
             Row(modifier = Modifier.fillMaxSize()) {
-                TreePaneShell(
+                SidePaneShell(
                     collapsed = treePaneCollapsed,
                     onToggleCollapsed = { treePaneCollapsed = !treePaneCollapsed },
                     width = treePaneWidth,
@@ -555,7 +555,7 @@ private fun AnalysisEditorPanel(
  *
  * ## 面板外壳也是**与浏览模式同一个**
  *
- * [TreePaneShell] —— 折叠到侧边（窄轨）与拖拽调宽。
+ * [SidePaneShell] —— 折叠到侧边（窄轨）与拖拽调宽。
  * 两侧的树面板因此有一模一样的手感，不会出现「浏览模式能拖、分析模式不能拖」。
  */
 @Composable
@@ -627,9 +627,9 @@ private fun AnalysisTreePanel(
                     )
                 }
                 // 「收起左树」—— 与浏览模式的树面板头**同一个按钮**
-                // （`TreePaneToggleButton`）：两侧的手感必须一致。
+                // （`SidePaneToggleButton`）：两侧的手感必须一致。
                 Spacer(modifier = Modifier.width(2.dp))
-                TreePaneToggleButton(collapsed = false, onClick = onCollapse)
+                SidePaneToggleButton(collapsed = false, onClick = onCollapse)
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

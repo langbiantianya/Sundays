@@ -680,6 +680,8 @@ internal val textsZhHant: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "點上面的 + 新增資料來源，把資料表拉進工作區",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "點資料表或欄位，開一個新部件",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "點資料表或欄位，把參照加進 SQL",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "收合報表列表",
+        StrKey.REPORT_LIST_PANE_EXPAND to "展開報表列表",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析查詢只能跑在本機工作區上，不能直接對遠端資料來源執行",
         StrKey.TREE_PANE_COLLAPSE to "收合樹面板",
         StrKey.TREE_PANE_EXPAND to "展開樹面板",

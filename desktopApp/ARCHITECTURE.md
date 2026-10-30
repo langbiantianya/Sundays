@@ -314,7 +314,7 @@ desktopApp （本模块）
 
 | 宽度上限按**比例**（容器宽 × 62%） | 窗口窄时若还允许拉到 600dp，右侧工作台会被挤到没法用 | 同上 |
 
-| 树面板外壳**上移到 `:shared`**（`TreePaneShell`） | 浏览模式与分析模式是**同一个概念**（左侧的数据库树），此前却是两套实现：浏览模式能拖宽、分析模式写死 240dp。合成一个组件后，「折叠到侧边」「拖拽调宽」在两个模式里是同一份代码、同一套手感 | [`shared/…/tree/TreePaneShell.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreePaneShell.kt) |
+| 树面板外壳**上移到 `:shared`**（`SidePaneShell`） | 浏览模式与分析模式是**同一个概念**（左侧的数据库树），此前却是两套实现：浏览模式能拖宽、分析模式写死 240dp。合成一个组件后，「折叠到侧边」「拖拽调宽」在两个模式里是同一份代码、同一套手感 | [`shared/…/ui/SidePaneShell.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/SidePaneShell.kt) |
 
 | 折叠态是**贴到左边的 44dp 窄轨**，不是「把面板变窄」 | 44dp 塞不下树 —— 画一截残影既没法看也没法点。折叠时树**整体从组合里移除**，右边因此**真的宽出 276dp** | 同上 |
 
@@ -510,6 +510,11 @@ desktopApp （本模块）
 | 「点树上的一张表」在两处的后果**不同** | 画布上**还没有正在写的 SQL**，引用插给谁？所以那里的点表是「**开一个新部件**」，起手的 SQL 由部件编辑页接手；编辑页里点表则是「**把引用插进正在写的那条 SQL**」。同一个组件、同一份数据，只是**上下文**不同 | 同上 |
 | 引用拼接的规则**住在 `:shared`** | 「树上的一个对象」到「SQL 里的一段引用」这条规则有两个调用方：分析工作台（会话的 `appendToSql` / `appendColumnToSql`）与报表设计（部件编辑页）。规则只写一份在 `AnalysisSqlRef.kt`（纯函数），两边都调它 —— 两份实现的话，改一处忘了另一处必然发生，而**两边各自的测试都是绿的** | [`AnalysisSqlRef.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) + [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
 | **还没有报表时点树会先建一张** | 部件总得有个家。而「提示用户先建报表」等于让那一下点击**白点**（用户点了，什么也没发生）—— 仓库原则是「宁可少给，不给一个点了必然失败的东西」。用户在报表设计里点了一张表，他要的就是「把它放进报表」；报表还不存在只是因为还没建 | [`ReportDesignerScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) |
+| 报表设计页的布局是「**数据树（左）｜ 画布 ｜ 报表列表（最右）**」 | 三块各司其职，位置由「它是**哪一类**东西」决定：数据树是**输入**（有哪些表、哪些字段）→ 放左，与浏览模式、分析工作台**同一个方向**；画布是**主产物**（部件一块块往下排）→ 放中间，占最大那块地方；报表列表是**另一类产物**（一张张报表）→ 贴**窗口最右**，「它不参与画布的编辑」一眼看得出来。原先是「报表列表 ｜ 数据树 ｜ 画布」—— 输入与产物挤在左边，主产物被推到最后 | [`ReportDesignerScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) |
+| 报表设计的**两侧都能折叠收纳** | 树收成**窗口最左**的一条 44dp 窄轨，报表列表收成**窗口最右**的一条 —— **折叠的意义是把宽度让给画布**（画布才是这一页的主角）。手感与浏览模式 / 分析工作台**完全一致**（同一个 `SidePaneShell`），**两块面板各收各的**（树收起来不动列表，反之亦然） | 同上 |
+| 「树面板外壳」改名「**侧边面板外壳**」 | `TreePaneShell` → `SidePaneShell`（并从 `tree/` 挪到 `ui/`）：它服务的是「**可折叠侧边面板**」这个概念，不再只是树 —— 名不副实的名字会让下一个人以为「树的东西不能乱用」。左右两侧的差异（分隔条位置、窄轨竖线位置、箭头朝向、拖动方向感）**全部由 `PaneEdge` 一个枚举驱动** —— 散成布尔参数的话，迟早漏掉一处箭头没镜像，而那种缺陷在界面上**极难看出来** | [`SidePaneShell.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/SidePaneShell.kt) |
+| 镜像的**拖动方向**由分隔条**自己**处理 | `DragHandle` 新增 `HandleSide`：受控块在分隔条右边时，往左拖才变宽。这件事**必须**在分隔条内部做 —— 调用方若在回调里反算（`旧值 + (旧值 - 新值)`），**钳位一旦发生就会算错**：拖到边界时新值已被钳过，再反算就把钳位抵消了 | [`DragHandle.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
+| 报表设计两侧面板的**宽度上限**是窗口宽的 **32%**，不是共享的 62% | 那个 62% 是给**只有一块**侧边面板的界面用的（浏览模式 / 分析工作台）—— 62% 留给主区还剩 38%，够用。这一页有**两块**：各占 62% 的话两块加起来 124%，画布被挤成 0 宽 —— 而画布才是这一页的主角 | [`ReportDesignerScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) |
 
 
 ---
@@ -546,6 +551,7 @@ desktopApp （本模块）
 | **报表与部件**（报表清单 / 选中项 / 部件数据 / 样例数据） | `AnalysisSession` | 保持 | 不适用（分析模式与连接无关） |
 | **分析模式的视图**（工作台 / 报表设计） | `AnalysisSession` | 保持 | 不适用 |
 | **报表数据树**（节点 / 展开态） | `AnalysisSession`（**与工作台共用同一份**） | 保持 | 不适用 |
+| **报表设计两侧面板的折叠态与宽度** | `ReportDesignerScreen`（**屏幕层**） | 保持 | 不适用（窗口级偏好，不落盘） |
 
 | **长生命周期 `CoroutineScope`** | `MainScreen` | 保持 | 保持 |
 

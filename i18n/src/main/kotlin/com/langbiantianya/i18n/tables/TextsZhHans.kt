@@ -680,6 +680,8 @@ internal val textsZhHans: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "点上面的 + 添加数据源，把表拉进工作区",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "点表或字段，开一个新部件",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "点表或字段，把引用加进 SQL",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "折叠报表列表",
+        StrKey.REPORT_LIST_PANE_EXPAND to "展开报表列表",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "分析查询只能跑在本地工作区上，不能直接对远端数据源执行",
         StrKey.TREE_PANE_COLLAPSE to "折叠树面板",
         StrKey.TREE_PANE_EXPAND to "展开树面板",

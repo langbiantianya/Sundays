@@ -865,6 +865,11 @@ internal fun MainScreen(
                                     onDeleteWidget = analysis::deleteWidget,
                                     onPreviewSql = { analysis.previewSql(it) },
                                     onRefreshReport = { analysis.refreshReport(it) },
+                                    // 两侧分隔条的悬停指针 —— 平台专属资源由平台侧造
+                                    // （`:shared` 只决定「什么时候用」）。
+                                    // 两侧**共用一份**：左右拉伸的箭头只有一个，
+                                    // 左右之分由分隔条自己的位置决定。
+                                    paneHoverIcon = ewResizePointerIcon(),
                                     modifier = Modifier.fillMaxWidth().weight(1f),
                                 )
                             }

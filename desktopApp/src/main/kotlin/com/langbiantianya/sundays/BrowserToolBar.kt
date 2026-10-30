@@ -43,9 +43,9 @@ import com.langbiantianya.sundays.browser.BrowserToolBar
 import com.langbiantianya.sundays.connection.ConnectionConfig
 import com.langbiantianya.sundays.connection.ConnectionState
 import com.langbiantianya.sundays.connection.ConnectionStatus
-import com.langbiantianya.sundays.tree.TREE_PANE_MAX_WIDTH_RATIO
-import com.langbiantianya.sundays.tree.TreePaneShell
 import com.langbiantianya.sundays.ui.EmptyHint
+import com.langbiantianya.sundays.ui.SIDE_PANE_MAX_WIDTH_RATIO
+import com.langbiantianya.sundays.ui.SidePaneShell
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinDivider
@@ -135,11 +135,11 @@ internal fun ActiveSheetContent(
         // 宽度上限按容器比例给，而不是固定 dp：窗口窄时若还允许拉到 600dp，
         // 右侧工作台会被挤到没法用。0.62 留足了右栏的最低可读宽度。
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val maxPanelWidth = maxWidth * TREE_PANE_MAX_WIDTH_RATIO
+            val maxPanelWidth = maxWidth * SIDE_PANE_MAX_WIDTH_RATIO
             Row(modifier = Modifier.fillMaxSize()) {
                 // 树面板外壳 —— **折叠到侧边**与**拖拽调宽**两件事都在里面，
-                // 与分析模式的左树是同一个组件（`TreePaneShell`）。
-                TreePaneShell(
+                // 与分析模式的左树是同一个组件（`SidePaneShell`）。
+                SidePaneShell(
                     collapsed = schemaPanelCollapsed,
                     onToggleCollapsed = { onSchemaPanelCollapsedChange(!schemaPanelCollapsed) },
                     width = schemaPanelWidth,

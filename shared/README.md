@@ -1,6 +1,6 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。126 个源文件（`commonMain` 90 / `commonTest` 33 /
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。127 个源文件（`commonMain` 90 / `commonTest` 34 /
 `jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 
@@ -42,7 +42,8 @@
 | `analysisTableRef` / `analysisColumnRef` / `appendAnalysisTableRef` / `appendAnalysisColumnRef` | 「树上的一个对象」到「SQL 里的一段引用」的**纯规则**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 不带前缀）—— 分析工作台与报表设计**共用这一份** | [`analysis/AnalysisSqlRef.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) |
 | `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 浏览器的**标签条 / 工作台切换 / 空态引导** —— 纯展示，只认窄数据形状 | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
 | `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 通知中心（状态 + 面板 + 铃铛入口）—— 跨界面收集错误 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |
-| `ObjectTree` / `ObjectTreeModel` / `TreePaneShell` / `TreePaneToggleButton` | **两棵数据库树共用的组件与外壳**：库 → 表 → 字段的渲染与纯模型；面板外壳（**折叠到侧边的 44dp 窄轨** + **可拖拽调宽**的分隔条）与折叠 / 展开按钮 | [`tree/`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/) |
+| `ObjectTree` / `ObjectTreeModel` | **两棵数据库树共用的组件与纯模型**：库 → 表 → 字段的渲染与「按 id 找 / 谁可以展开」等规则 | [`tree/`](./src/commonMain/kotlin/com/langbiantianya/sundays/tree/) |
+| `SidePaneShell` / `SidePaneToggleButton` / `PaneEdge` | **可折叠侧边面板的外壳**（浏览模式 / 分析工作台 / **报表设计的两侧**共用）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到窗口边的 **44dp 窄轨**；贴在左边与贴在右边是**镜像**的（箭头朝向、竖线位置、拖动方向感都由 `PaneEdge` 驱动） | [`ui/SidePaneShell.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/ui/SidePaneShell.kt) |
 
 **扩展方式**：新增语言 / formatter 走 SPI 注册；替换菜单项、详情面板、工具栏动作走 Composable lambda 插槽
 （`contextMenuItems` / `detailPanel` / `actions`）—— 不是 `List<UIElement>` 数据驱动。各扩展点的契约见

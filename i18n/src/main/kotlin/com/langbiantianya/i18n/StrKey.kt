@@ -860,9 +860,16 @@ enum class StrKey {
     REPORT_DATA_TREE_CANVAS_HINT,
     REPORT_DATA_TREE_EDITOR_HINT,
 
+    // ──────────────── 报表列表面板（折叠 / 展开） ────────────────
+    // 报表列表贴在窗口**最右边**，与左边的数据树一样能折叠成窄轨。
+    // 它需要**自己的一对文案**：屏幕上有两块可折叠的面板，
+    // 读屏念「折叠树面板」只会念错一块 —— 用户按提示去点，结果收起来的是另一块。
+    REPORT_LIST_PANE_COLLAPSE,
+    REPORT_LIST_PANE_EXPAND,
+
     ENGINE_ANALYSIS_LOCAL_ONLY,
 
-    // ──────────────── 树面板（浏览与分析共用） ────────────────
+    // ──────────────── 树面板（浏览、分析与报表设计共用） ────────────────
     TREE_PANE_COLLAPSE,
     TREE_PANE_EXPAND,
 

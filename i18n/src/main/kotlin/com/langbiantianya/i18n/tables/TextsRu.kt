@@ -680,6 +680,8 @@ internal val textsRu: Map<StrKey, String> =
         StrKey.REPORT_DATA_TREE_EMPTY_HINT to "Нажмите + сверху, чтобы добавить источник данных и загрузить таблицы в рабочую область",
         StrKey.REPORT_DATA_TREE_CANVAS_HINT to "Нажмите на таблицу или столбец, чтобы создать новую часть",
         StrKey.REPORT_DATA_TREE_EDITOR_HINT to "Нажмите на таблицу или столбец, чтобы вставить ссылку в SQL",
+        StrKey.REPORT_LIST_PANE_COLLAPSE to "Свернуть список отчетов",
+        StrKey.REPORT_LIST_PANE_EXPAND to "Развернуть список отчетов",
         StrKey.ENGINE_ANALYSIS_LOCAL_ONLY to "Аналитические запросы выполняются только в локальной рабочей области, но не напрямую против удалённого источника",
         StrKey.TREE_PANE_COLLAPSE to "Свернуть панель дерева",
         StrKey.TREE_PANE_EXPAND to "Развернуть панель дерева",

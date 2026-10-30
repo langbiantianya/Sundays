@@ -35,9 +35,9 @@ import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
-import com.langbiantianya.sundays.tree.TREE_PANE_TOGGLE_TAG
 import com.langbiantianya.sundays.tree.objectTreeRowTag
 import com.langbiantianya.sundays.ui.ProvideStrings
+import com.langbiantianya.sundays.ui.SIDE_PANE_TOGGLE_TAG
 import com.langbiantianya.sundays.ui.SundaysTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -134,9 +134,9 @@ class TreePaneScrollTest {
             )
 
             // 折叠 → 展开
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             val topAfter = onNodeWithTag(rowTag).getUnclippedBoundsInRoot().top
@@ -294,9 +294,9 @@ class TreePaneScrollTest {
             assertTrue(offset > 0, "前置条件：树应当滚得动（offset=$offset）")
 
             // 折叠 → 展开
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
-            onNodeWithTag(TREE_PANE_TOGGLE_TAG).performClick()
+            onNodeWithTag(SIDE_PANE_TOGGLE_TAG).performClick()
             waitForIdle()
 
             assertEquals(

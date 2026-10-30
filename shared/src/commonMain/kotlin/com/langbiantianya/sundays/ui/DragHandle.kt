@@ -117,6 +117,29 @@ private enum class HandleAxis {
 }
 
 /**
+ * 竖向分隔条**受控的那一块**在分隔条的哪一侧。
+ *
+ * ## 为什么要有它
+ *
+ * 竖向分隔条调整的是「分隔条某一侧那一块」的宽度，而**往哪个方向拖会变宽**
+ * 取决于受控块在哪一侧：
+ *
+ * - 受控块在**左边**（面板贴在窗口左边）：分隔条往右拖，面板变宽。
+ * - 受控块在**右边**（面板贴在窗口右边）：分隔条往左拖，面板变宽。
+ *
+ * 两者是**镜像**的。而「镜像」这件事必须由分隔条自己处理 ——
+ * 调用方若在回调里反算（`旧值 + (旧值 - 新值)`），**钳位一旦发生就会算错**：
+ * 拖到边界时新值已经被钳过，再反算就把钳位抵消了。
+ */
+enum class HandleSide {
+    /** 受控的块在分隔条**左边** —— 往右拖变宽。 */
+    LEFT,
+
+    /** 受控的块在分隔条**右边** —— 往左拖变宽。 */
+    RIGHT,
+}
+
+/**
  * 可拖拽的竖向分隔条 —— 用来调整左右两栏的宽度。
  *
  * @param hoverIcon 悬停时显示的指针图标。`null` = 不改指针（平台没有指针概念的移动端）。
@@ -126,6 +149,7 @@ private enum class HandleAxis {
  * @param defaultWidth 双击复位到的宽度
  * @param minWidth 下限
  * @param maxWidth 上限（通常由调用方按容器宽度给，如 `containerWidth * 0.6f`）
+ * @param handleSide 受控的那一块在分隔条的哪一侧 —— 决定拖动的方向感，见 [HandleSide]
  * @param color 分隔线颜色
  * @param highlightColor 拖动时的高亮色
  * @param hitWidth 命中区宽度（画线仍只有 1dp）
@@ -141,6 +165,7 @@ fun DragHandle(
     color: Color,
     highlightColor: Color,
     hitWidth: Dp = 8.dp,
+    handleSide: HandleSide = HandleSide.LEFT,
     hoverIcon: PointerIcon? = null,
 ) {
     DragHandleCore(
@@ -153,6 +178,7 @@ fun DragHandle(
         hitSize = hitWidth,
         color = color,
         highlightColor = highlightColor,
+        handleSide = handleSide,
         modifier = modifier,
         hoverIcon = hoverIcon,
     )
@@ -232,6 +258,7 @@ private fun DragHandleCore(
     highlightColor: Color,
     modifier: Modifier,
     hoverIcon: PointerIcon?,
+    handleSide: HandleSide = HandleSide.LEFT,
 ) {
     val density = LocalDensity.current
     var dragging by remember { mutableStateOf(false) }
@@ -286,10 +313,16 @@ private fun DragHandleCore(
                         // 事件往父级的滚动容器传，拖分隔条时顺带把列表滚了
                         change.consume()
                         val delta =
-                            if (axis == HandleAxis.VERTICAL) {
-                                dragAmount.x
-                            } else {
-                                dragAmount.y
+                            when (axis) {
+                                // 受控块在分隔条右边时，方向是**镜像**的 ——
+                                // 往左拖，那一块才变宽。
+                                HandleAxis.VERTICAL -> {
+                                    if (handleSide == HandleSide.LEFT) dragAmount.x else -dragAmount.x
+                                }
+
+                                HandleAxis.HORIZONTAL -> {
+                                    dragAmount.y
+                                }
                             }
                         onValueChange(
                             nextPaneSize(

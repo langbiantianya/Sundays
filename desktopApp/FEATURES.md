@@ -86,7 +86,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
 | | 树面板宽度**可拖拽**（双击复位，范围钳位），悬停显示**左右拉伸指针** | `shared/ui/DragHandle.kt` |
-| | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度，**也不丢**滚动位置 | `shared/tree/TreePaneShell.kt` |
+| | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度，**也不丢**滚动位置 | `shared/ui/SidePaneShell.kt` |
 | | **对象树右键菜单**：复制名称 / 复制引用名（按方言限定）/ 复制建表 DDL | `SqlIdentifier` + `TABLE.GET_DDL` |
 | **SQL 工作台** | 多 sheet，各自独立文本 / 光标 / 滚动 / 结果 | `SqlSheet` |
 | | 语法高亮，**随连接方言切换词表** | `SqlDialectProfile` → `CodeEditor` |
@@ -127,7 +127,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 前端方言元数据**收进一张表**（默认连接类型 / 端口 / 可选连接类型 / 引擎注册名 / URL 前缀 / 图标 / 说明文案 / 标识符引用符 / SQL 档位）—— **加一个方言 = 加一条元数据**，不再改 N 处分支 | `DialectMetadata` |
 | **数据分析模式** | 独立于「连接管理 → 数据库浏览」的**顶层模式**：远端数据源**恒为只读**（引擎 L4 闸门 + 方言级只读），计算引擎是本地 **DuckDB 工作区**（可写） | `AnalysisScreen` / `AnalysisSession` |
 | | **工作区树**：**根 = 工作区的各个 schema**（`main` 是工作区自己的表，每个**数据源**一个）；**与浏览模式的对象树共用同一个组件**（`shared/tree/ObjectTree.kt`），形状统一为「库 → 表 → **字段**」—— 展开一张表能看到它的字段（名字 / 类型 / `PK` / `非空`）；点表 → 把表名加进编辑器，点字段 → 把「表.字段」加进编辑器 | `shared/tree/ObjectTree.kt` |
-| | **左树可折叠到侧边、宽度可调** —— 与浏览模式**同一个面板外壳**（`shared/tree/TreePaneShell.kt`）：折叠成 44dp 窄轨把宽度让给右边的编辑器与结果表；展开态拖分隔条调宽（此前是写死的 240dp） | `shared/tree/TreePaneShell.kt` |
+| | **左树可折叠到侧边、宽度可调** —— 与浏览模式**同一个面板外壳**（`shared/ui/SidePaneShell.kt`）：折叠成 44dp 窄轨把宽度让给右边的编辑器与结果表；展开态拖分隔条调宽（此前是写死的 240dp） | `shared/ui/SidePaneShell.kt` |
 | | **编辑器面板高度可调** —— 与浏览模式**同一个横向分隔条**（`shared/ui/DragHandle.kt` 的 `HorizontalDragHandle`）：往下拖编辑器变高，双击复位回默认比例；**结果表有下限**（140dp），拖不下去 —— 数据看不见就等于白跑 | `shared/analysis/AnalysisScreen.kt` |
 | | **「+」添加数据源**（分析模式**专属**，不共用浏览模式的「添加连接」）：**远程数据库**（方言 / 主机 / 端口 / 库 / 用户 / 密码 → **用对应驱动预览**库与表 → **可多选可单选** → **DuckDB 官方扩展优先**，走不通退回 JDBC）与**文件 / 文件夹**（parquet / csv / Excel / jsonl → 直接用 DuckDB 的 `read_parquet` / `read_csv_auto` / `read_json_auto` / `read_xlsx` 建**视图**）。加完的源**直接在工作区 DuckDB 里**（登记表 `sundays.sources`），树里立刻多一根。路径可**调系统文件 / 文件夹选择器**挑（文本框仍在：网络路径与无头环境只能手输）；格式**能手选**（文件夹没有扩展名） | `AnalysisSourceDialog.kt` / `AnalysisSession` |
 | | **右键菜单能删掉数据源** —— 右键**数据源的那张表**就弹出菜单（菜单机制与浏览模式**共用同一份**：`shared/tree/TreeContextMenu.kt`），菜单里是「删除数据源」，**确认框**先说清后果（它带进工作区的表会一起删掉、不可撤销）。确认后工作区里那个 schema 与登记表里那一行**一起**没掉。**只有登记在册的源才给这一项** —— 用户手工建的 schema 不是数据源，工作区自己的 `main` 更不是（那是分析模式**自带的计算引擎**） | `shared/tree/TreeContextMenu.kt` / `shared/analysis/AnalysisTreeMenu.kt` / `AnalysisSession` |
@@ -136,11 +136,12 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器；点工作区的字段 → 把「表.字段」加进编辑器 | `AnalysisSession` |
 | | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析工作台**没有返回按钮**（它是一块独立的工作区） | `ConnectionManagerScreen` / `AnalysisScreen` |
-| | **报表设计视图**（分析模式的第二个视图，与工作台**共用同一份工作区**）：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。左边是**报表列表**、右边是**部件画布**；加部件时打开**编辑页**（类型 / 标题 / SQL + **样例数据**）—— 样例数据是那条 SQL **真跑出来**的结果（原始行 + 图表预览并排），「约定」只有看得见数据才能被遵守 | `shared/analysis/report/` / `AnalysisSession` |
+| | **报表设计视图**（分析模式的第二个视图，与工作台**共用同一份工作区**）：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。**最左是数据树、中间是部件画布、最右是报表列表**；加部件时打开**编辑页**（类型 / 标题 / SQL + **样例数据**）—— 样例数据是那条 SQL **真跑出来**的结果（原始行 + 图表预览并排），「约定」只有看得见数据才能被遵守 | `shared/analysis/report/` / `AnalysisSession` |
 | | **数据形状的约定写死在代码里**：第一列 = 类别，第二列 = 数值；说不清形状就**说清是哪一种**（缺列 / 只有一列 / 值不是数字 / 有负值 / 没数据），**绝不静默截断** —— 少一根柱子，用户不会知道少了什么。负值一律不画（饼图算不出角度，条形图画成正值长度是**误导**） | `shared/analysis/report/ReportModels.kt` |
 | | 图表**手绘**（`Canvas` + `drawArc` / `drawRoundRect`），不用第三方图表库 —— `:shared` 的 `commonMain` 不能引 Android-only 依赖 | `shared/analysis/report/ReportChart.kt` |
 | | 报表**暂不落盘**（住在会话里，**退出即失**）—— 但「部件 = 一条 SQL」这个形状**从此不许改**，用户搭好的报表会集体作废 | `AnalysisSession` |
-| | **报表设计里也有数据树** —— 报表设计页是「报表列表 + **数据树** + 部件画布」，部件编辑页是「**数据树** / SQL / 样例数据」；两处**共用同一棵**工作区树（同一份节点与展开态，与分析工作台也是同一份）。**点表**在画布上是「**开一个新部件**」（SQL 预填 `SELECT * FROM "表"`），在编辑页里是「**把引用插进正在写的那条 SQL**」（`"表"."字段"`）。没有树的话，用户只能切回工作台把表名字**记下来**再凭记忆敲，**敲错了要等跑 SQL 时才报错** | `shared/analysis/report/ReportDataTreePane.kt` / `shared/analysis/AnalysisSqlRef.kt` |
+| | **报表设计里也有数据树** —— 报表设计页是「**数据树** + 部件画布 + **报表列表**」，部件编辑页是「**数据树** / SQL / 样例数据」；两处**共用同一棵**工作区树（同一份节点与展开态，与分析工作台也是同一份）。**点表**在画布上是「**开一个新部件**」（SQL 预填 `SELECT * FROM "表"`），在编辑页里是「**把引用插进正在写的那条 SQL**」（`"表"."字段"`）。没有树的话，用户只能切回工作台把表名字**记下来**再凭记忆敲，**敲错了要等跑 SQL 时才报错** | `shared/analysis/report/ReportDataTreePane.kt` / `shared/analysis/AnalysisSqlRef.kt` |
+| | **报表设计的两侧都能折叠收纳** —— 数据树收成**窗口最左**的一条 44dp 窄轨，报表列表收成**窗口最右**的一条，**把宽度让给画布**（画布才是这一页的主角）；两块面板**各收各的**，手感与浏览模式 / 分析工作台**完全一致**（同一个 `SidePaneShell`，左右**镜像**） | `shared/ui/SidePaneShell.kt` / `shared/analysis/report/ReportDesignerScreen.kt` |
 | | 引用拼接的规则**只有一份**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 里的表**不带** schema 前缀）—— 分析工作台与报表设计都调它 | `shared/analysis/AnalysisSqlRef.kt` |
 
 ### 3.2 引擎已实现，**前端未接线**（不需要动引擎，做 UI 即可）

@@ -72,7 +72,7 @@
 > 1. **分析模式的左树此前是写死的 240dp** —— 想看长表名只能干瞪眼，
 >    而浏览模式的树早就能拖宽。两侧是**同一个概念**（左边的数据库树），
 >    却有两套布局 —— 现在合成**同一个面板外壳**
->    （`:shared` 的 `tree/TreePaneShell.kt`），手感一致。
+>    （`:shared` 的 `ui/SidePaneShell.kt`），手感一致。
 > 2. **折叠到侧边** —— 收成贴到屏幕左边的 **44dp 窄轨**
 >    （一个展开按钮 + 一枚图标），**把宽度让给右边**：
 >    编辑器与结果表因此宽出 196dp（240 − 44），SQL 少横向滚动、结果表少横滚。
@@ -1422,7 +1422,7 @@ spec 可以在 M1 就把类型准备好，但**别让前端先渲染出后端还
 | # | 组件 | 位置 | 为什么现有的不够用 |
 |---|---|---|---|
 | 1 | `ObjectTree` | `shared/.../tree/ObjectTree.kt`（**两棵树共用**） | ⚠️ **v1.9**：原第 1 个组件是分析模式**自建**的 `SourceTree`，现在**删掉**，改用这一个 —— 形状（库 → 表 → 字段）与浏览模式的对象树**完全同形**。模型在 `tree/ObjectTreeModel.kt`，是**纯数据**（不碰引擎），所以两边都能喂它 |
-| 2 | `TreePaneShell` | `shared/.../tree/TreePaneShell.kt`（**两棵树共用**） | ⚠️ **v1.12**：分析模式的左树此前是写死的 240dp，而浏览模式的树面板能拖宽 —— **同一个概念**（左边的数据库树）却有两套布局。新组件把「折叠到侧边（44dp 窄轨）」与「拖拽调宽」收进**一个外壳**，两侧共用。`DragHandle` 只管分隔条，**不管折叠**，也不管「折叠态长什么样」 |
+| 2 | `SidePaneShell` | `shared/.../ui/SidePaneShell.kt`（**两棵树共用**） | ⚠️ **v1.12**：分析模式的左树此前是写死的 240dp，而浏览模式的树面板能拖宽 —— **同一个概念**（左边的数据库树）却有两套布局。新组件把「折叠到侧边（44dp 窄轨）」与「拖拽调宽」收进**一个外壳**，两侧共用。`DragHandle` 只管分隔条，**不管折叠**，也不管「折叠态长什么样」 |
 | 3 | `ReportBlockList` | `shared/.../analysis/ReportBlockList.kt` | 报表区块是**有序区块序列**（可增删、可上下移），`DataTable` 是**二维表** —— 不是同一件事的两种画法 |
 | 4 | `ReportColumnSpecRow` | `shared/.../analysis/ReportColumnSpecRow.kt` | 区块的列配置 = 列 + **呈现类型** + **数字格式** + 对齐。`TableColumn` 只有 `key/header/width/weight/alignment/formatter`，**没有类型、没有数字格式**；而 `ColumnTypeCatalog`（`shared/.../table/ColumnTypeCatalog.kt`）是**数据库类型**（`VARCHAR` / `INT`…），报表要的是**呈现类型**（文本 / 整数 / 小数 / 百分比 / 货币 / 日期）—— 两者不是一回事，不能复用 |
 | 5 | `PullProgressIndicator` | `shared/.../analysis/PullProgressIndicator.kt` | 拉取是**跨进程的长任务**；`WinProgressIndicator` 是单条进度条，画不出「已经读了多少行」。⚠️ 原名 `PullStageIndicator`（三段）是**绕磁盘**时代的产物 —— 联邦直查（§3.5 的 `PULL_TABLE`）没有阶段可分，于是改名 |
@@ -1642,7 +1642,7 @@ message ReportRequest {
 > **代价**：失去 proto 的类型检查与向后兼容保证。
 > **缓解**：`ReportSpec.schemaVersion` 必带，引擎遇到不认识的版本**明确报错**而不是猜。
 
-### 7.5 报表设计页面（v2.37 已落地，v2.38 补上数据树）
+### 7.5 报表设计页面（v2.37 已落地，v2.38 补上数据树，v2.39 重排布局并让两侧可折叠）
 
 > 这一节描述**屏幕上的**报表设计页面 —— 与 §7.1–§7.4 的「导出 `.xlsx`」是两条路：
 > 前者让用户在应用里**拼**报表，后者把拼好的东西**写成文件**。
@@ -1695,11 +1695,20 @@ message ReportRequest {
 > 这五种原因**各有各的一句话**（`chartProblemText()` 是唯一的映射点）。
 > 合成一句「图表数据有问题」等于什么都没说 —— 用户不知道自己该改 SQL 的哪一处。
 
-#### 7.5.3 布局：**左报表列表 + 数据树 + 右画布**
+#### 7.5.3 布局：**左数据树 + 中画布 + 最右报表列表**（v2.39 改）
 
-- **报表是多张的，部件是报表的** —— 两者的层级不同，位置也就不同：
-  列表在左（一列 220dp 窄条），**数据树在中**（200dp 窄条），当前报表的部件在右
-  （占满剩余空间）。
+三块各司其职，位置由「它是**哪一类**东西」决定：
+
+| 块 | 位置 | 它是什么 | 宽度 |
+|---|---|---|---|
+| **数据树** | **最左** | **输入**（有哪些表、哪些字段） | 默认 200dp，可拖宽，可折叠 |
+| **画布** | **中间** | **主产物**（部件一块块往下排） | 占满剩余 |
+| **报表列表** | **最右** | **另一类产物**（一张张报表） | 默认 220dp，可拖宽，可折叠 |
+
+- **输入在左** —— 与浏览模式、分析工作台**同一个方向**，
+  用户不用为报表设计重新建立空间感。
+- **报表列表在最右** —— 它「不参与画布的编辑」这件事一眼看得出来；
+  而左边的树是**输入**、右边的列表是**产物**，两头的性质本就不同。
 - **部件排成纵向列表**，不用网格 —— 网格要求每个部件有**固定**的宽高，
   而部件的内容是 SQL 查出来的，形状不可控。纵向列表让每个部件自己决定高度。
 - **卡片高度固定**（300dp）—— 卡片里装着 `DataTable`（自己的 `LazyColumn`）
@@ -1709,9 +1718,29 @@ message ReportRequest {
   **无限高**的约束，而卡片里套着滚动：滚动套滚动，内层直接炸。
 - **部件排纵向、宽度由数据说话** —— 一张表可能有 3 列也可能有 30 列。
 
+**两侧都能折叠收纳**（v2.39）：
+
+- 树收成**窗口最左**的一条 44dp 窄轨，报表列表收成**窗口最右**的一条 44dp 窄轨。
+- 手感与浏览模式 / 分析工作台**完全一致** —— 同一个 `SidePaneShell`，
+  连折叠按钮的箭头方向都是同一套（收起时指向**贴边的那一侧**）。
+- **折叠的意义是把宽度让给画布** —— 画布才是这一页的主角。
+- **两块面板各收各的** —— 树收起来不动列表，列表收起来不动树。
+- 每块面板的**宽度上限**是窗口宽的 **32%**（不是共享的那个 62%）——
+  这一页有**两块**，各占 62% 的话画布被挤成 0 宽。
+
+**为什么左右差异只由**一个枚举**驱动**：贴左与贴右是**镜像**的 ——
+分隔条的位置、窄轨上那条竖线的位置、箭头的朝向、拖动的方向感，
+四项全都跟着「贴在窗口的哪一边」走。散成几个布尔参数的话，
+迟早漏掉一处（比如箭头没跟着镜像），而那种缺陷在界面上**极难看出来**。
+
+所以：`SidePaneShell` 的 `PaneEdge` 决定外壳怎么摆，
+`DragHandle` 的 `HandleSide` 决定往哪个方向拖会变宽 ——
+后者**必须**在分隔条内部处理：调用方若在回调里反算（`旧值 + (旧值 - 新值)`），
+**钳位一旦发生就会算错**（拖到边界时新值已被钳过，再反算就把钳位抵消了）。
+
 #### 7.5.4 数据树：**看得见有哪些数据，也点得动**
 
-报表设计页中间那棵树，与分析工作台左树**同一棵**（同一份节点与展开态，
+报表设计页**左边**那棵树，与分析工作台左树**同一棵**（同一份节点与展开态，
 住在会话里）。部件编辑页里也有一棵 —— 同一个组件、同一份数据。
 
 **为什么必须有树**：部件的形状约定是「第一列类别、第二列数值」，
@@ -1776,6 +1805,7 @@ message ReportRequest {
 | 视图（工作台 / 报表设计） | `AnalysisSession` | 切到别的顶层页再切回来，用户希望自己还在报表设计里 |
 | 树的节点 / 展开态 | `AnalysisSession`（**与工作台同一份**） | 那是同一棵工作区树，不该有两份状态 |
 | 编辑中的草稿（类型 / 标题 / SQL） | 编辑页（屏幕层） | 「还没保存」的东西不该进会话 |
+| **两侧面板的折叠态与宽度** | 屏幕层（`ReportDesignerScreen`） | 面板宽度是**窗口级偏好**，不是某张报表的属性 —— 切到别的顶层页再切回来，用户希望它还那样宽、还那样收着。而**报表本身**才是会话的状态 |
 
 **部件的 id 是保存时才有的**：新建中的部件 id 是**空串** —— id 是「存下来之后」才有的身份，
 它可能下一刻就被用户「取消」了。先发一个 id 出去等于承诺了一个它永远不会用到的身份。
@@ -1793,9 +1823,10 @@ message ReportRequest {
 | `:shared` | [`analysis/report/ReportModels.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportModels.kt) | 纯数据 + `chartDataOf()` 的形状判据 + `isPreviewStale()` |
 | `:shared` | [`analysis/report/ReportChart.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportChart.kt) | 手绘的饼图 / 条形图（`Canvas`） |
 | `:shared` | [`analysis/report/ReportLabels.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportLabels.kt) | 「种类 → 文案键」的**唯一**映射 |
-| `:shared` | [`analysis/report/ReportDesignerScreen.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) | 报表列表 + 数据树 + 部件画布 |
+| `:shared` | [`analysis/report/ReportDesignerScreen.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) | **左数据树 + 中画布 + 最右报表列表**（两侧各套一个 `SidePaneShell`，都能折叠收纳） |
 | `:shared` | [`analysis/report/ReportWidgetEditor.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportWidgetEditor.kt) | 部件编辑页（覆盖层）：数据树 / SQL / 样例数据 |
 | `:shared` | [`analysis/report/ReportDataTreePane.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDataTreePane.kt) | 报表设计用的数据树窄条（**复用** `tree/ObjectTree.kt`） |
+| `:shared` | [`ui/SidePaneShell.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/SidePaneShell.kt) | **可折叠侧边面板的外壳**（左右镜像）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到窗口边的 **44dp 窄轨**。浏览模式、分析工作台、**报表设计两侧**都套它 |
 | `:shared` | [`analysis/AnalysisSqlRef.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) | 「树上的一个对象」→「SQL 里的一段引用」的**纯规则**（两个调用方共用） |
 | `:shared` | [`analysis/AnalysisModeBar.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModeBar.kt) | 两个视图的切换条 |
 | `:shared` | [`ui/ConfirmDialog.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/ConfirmDialog.kt) | 通用「确认 / 取消」框（删报表 / 删部件共用） |
@@ -1913,14 +1944,15 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ② 分析工作区 | 中间 SQL 编辑器 | `CodeEditorWithToolbar` / `CodeEditorState` / `SqlFormatter` | —— |
 | ② 分析工作区 | 编辑器与结果表之间的**可拖分隔条**（调编辑器的高度，双击复位；**与浏览模式同一个组件**） | `HorizontalDragHandle`（`:shared` 的 `ui/DragHandle.kt`，与竖向的 `DragHandle` 同一份实现） | ——（v1.14 新增可用性，组件不是新增） |
 | ② 分析工作区 | 结果表 | `DataTable` + `TableColumn` / `TableRow` / `PageSize` / `DataTableTheme` | —— |
-| ② 分析工作区 | 左树面板的**外壳**（可拖宽的分隔条 + **折叠到侧边的 44dp 窄轨** + 折叠 / 展开按钮） | `TreePaneShell` / `TreePaneToggleButton`（**与浏览模式同一个组件**） | ★ 新增（§6.4-2，**两棵树共用**） |
+| ② 分析工作区 | 左树面板的**外壳**（可拖宽的分隔条 + **折叠到侧边的 44dp 窄轨** + 折叠 / 展开按钮） | `SidePaneShell` / `SidePaneToggleButton`（**与浏览模式同一个组件**，v2.39 起也服务**报表设计**的两侧面板） | ★ 新增（§6.4-2，**可折叠侧边面板共用**） |
 | ② 分析工作区 | 底部状态条 | `WinProgressIndicator` / `WinTextField`（只读展示） | —— |
 | ② 分析工作区 | 右键菜单（**删除数据源**） | `TreeContextMenu` / `TreeContextMenuItem`（**与浏览模式同一个组件**）+ 判据 `analysisDeleteSourceTarget` | ★ v1.15：菜单**机制**上移 `:shared`（此前只在 `desktopApp` 里）；菜单项只有「删除数据源」一项 |
 | ③ 报表设计器 | 左侧区块列表 | `ReportBlockList` | ★ 新增（§6.4-2） |
 | ③ 报表设计器 | 中间列规格 | `ReportColumnSpecRow` + `WinDropdown` | ★ 新增（§6.4-3、§6.3.4） |
 | ③ 报表设计器 | 右侧 Excel 预览 | `DataTable`（只读）+ `WinSurface` | —— |
 | ③′ 报表设计（图表型，v2.37 已落地） | 分析模式**第二个视图**的切换条（工作台 / 报表设计） | `AnalysisModeBar`（`TabRow` + `Tab`） | ★ 新增（`:shared` 的 `analysis/`） |
-| ③′ 报表设计（图表型，v2.37 已落地） | 左：**报表列表**（新建 / 重命名 / 删除） | `LazyColumn` + `WinIconButton` + `TabRenameDialog`（**复用**，只多传一个标题） | ★ 新增（`:shared` 的 `analysis/report/`） |
+| ③′ 报表设计（图表型，v2.37 已落地） | **最右：报表列表**（新建 / 重命名 / 删除） | `LazyColumn` + `WinIconButton` + `TabRenameDialog`（**复用**，只多传一个标题） | ★ 新增（`:shared` 的 `analysis/report/`） |
+| ③′ 报表设计（图表型，v2.39 已落地） | **左侧数据树 + 最右报表列表**两块面板的**外壳**（可拖宽的分隔条 + **各自折叠成 44dp 窄轨** + 折叠 / 展开按钮） | `SidePaneShell` / `SidePaneToggleButton`（**与浏览模式 / 工作台同一个组件**，左右**镜像**） | ——（组件不是新增，v2.39 起**第三处**调用方） |
 | ③′ 报表设计（图表型，v2.37 已落地） | 右：**部件画布**（部件卡片一块块往下排） | `LazyColumn` + `DataTable`（表格型部件）+ `EmptyHint` | ★ 新增 |
 | ③′ 报表设计（图表型，v2.37 已落地） | 部件卡片里的**饼图 / 条形图** | `PieChart` / `BarChart`（**手绘** `Canvas`，**不引第三方库**） | ★ 新增 |
 | ③′ 报表设计（图表型，v2.37 已落地） | **部件编辑页**（覆盖层）：类型 / 标题 / SQL + **样例数据** | `CodeEditorWithToolbar` + `DataTable` + `RadioButton` + `WinTextField` | ★ 新增 |
@@ -1953,7 +1985,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **① 分析模式说明** | 讲清本模式的边界与「复用什么」。 |
 | **② 分析工作区** | 左：**树**（**根 = 工作区的各个 schema**：`main` 是工作区自己的表，每个**数据源**一个 —— 树与浏览模式的对象树**同形**：库 → 表 → 字段；展开一张表能看到它的字段）。树的**头上**有一个 **「+」** —— 打开分析模式专属的「添加数据源」对话框（远程数据库 / 文件）。中：SQL 编辑器（**工具条上「格式化」旁边就是「▶ 运行」**）+ 结果表（带占比条形）；**两者之间那条缝可拖**（编辑器高度可调，双击复位 —— 结果表有 140dp 下限，拖不下去）。分析屏上**没有**独立工具条，也没有只读徽标。 |
 | **③ 报表设计器** | 左：区块列表（可增删排序）。中：区块配置（列规格 / 类型 / 数字格式 / 样式）。右：Excel 观感预览（标题 + 元信息 + 表头 + 斑马纹）。**（M6，尚未开工）** |
-| **③′ 报表设计（图表型，v2.38 已落地）** | 分析模式的**第二个视图**（顶部一条「工作台 / 报表设计」切换条）。左：**报表列表**（新建 / 重命名 / 删除）。中：**数据树**（工作区 → 表 → 字段，**与工作台同一棵**）。右：当前报表的**部件画布** —— 一块块往下排，每块是「**一条 SQL + 一种图表类型**」（饼图 / 条形图 / 表格）。点「添加部件」——或**点树上的一张表**——打开**覆盖层**的编辑页：左边**数据树**、中间 SQL、右边这条 SQL **真跑出来的样例数据**（原始行 + 图表预览并排）。 |
+| **③′ 报表设计（图表型，v2.39 已落地）** | 分析模式的**第二个视图**（顶部一条「工作台 / 报表设计」切换条）。**最左：数据树**（工作区 → 表 → 字段，**与工作台同一棵**）。中：当前报表的**部件画布** —— 一块块往下排，每块是「**一条 SQL + 一种图表类型**」（饼图 / 条形图 / 表格）。**最右：报表列表**（新建 / 重命名 / 删除）。**两侧都能折叠收纳** —— 各收成贴边的一条 44dp 窄轨，把宽度还给画布；折叠按钮的箭头**按贴边的那一侧镜像**。点「添加部件」——或**点树上的一张表**——打开**覆盖层**的编辑页：左边**数据树**、中间 SQL、右边这条 SQL **真跑出来的样例数据**（原始行 + 图表预览并排）。 |
 | **④ 连接管理器（复用 + 通用化后）** | **同一个**连接管理器：列表按「可浏览 / 可分析」分组、只读方言带 ⓘ 徽标；右侧是选中连接的详情（含「只读方言」说明与「在数据分析中打开」）。 |
 | **⑤ 新增连接向导（复用 + 通用化后）** | **同一个**添加连接弹窗，但表单由**方言自描述**渲染：认证方式下拉（账密 / Kerberos）、方言特有字段、「高级属性」折叠区、以及**自定义 JDBC URL** 逃生舱。 |
 | **⑥ 组件复用对照（v0.3 新增）** | 一张对照表：每个界面区域 → 复用的现成组件 / 新增的组件，并标出各自落在 `:shared` 的哪个文件。它把 §6 与 §9.3 变成**能看见的东西**。 |
@@ -1972,12 +2004,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 | 路径 | 内容 |
 |---|---|
-| `shared/src/commonMain/.../analysis/` | `AnalysisScreen.kt`、`AnalysisModeBar.kt`（两个视图的切换条）、`AnalysisSqlRef.kt`（「树上的一个对象」→「SQL 里的一段引用」的**纯规则**，分析工作台与报表设计**共用**）、`analysis/report/`（**报表设计**：`ReportModels.kt` / `ReportChart.kt` / `ReportLabels.kt` / `ReportDesignerScreen.kt` / `ReportWidgetEditor.kt` / `ReportDataTreePane.kt`） |
+| `shared/src/commonMain/.../analysis/` | `AnalysisScreen.kt`、`AnalysisModeBar.kt`（两个视图的切换条）、`AnalysisSqlRef.kt`（「树上的一个对象」→「SQL 里的一段引用」的**纯规则**，分析工作台与报表设计**共用**）、`analysis/report/`（**报表设计**：`ReportModels.kt` / `ReportChart.kt` / `ReportLabels.kt` / `ReportDesignerScreen.kt` / `ReportWidgetEditor.kt` / `ReportDataTreePane.kt`）。**v2.39**：`ReportDesignerScreen` 的布局改成「**数据树（左）｜ 画布 ｜ 报表列表（窗口最右）**」，两侧各套一个 `SidePaneShell`（都能折叠收纳） |
 | `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 结果模型 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
 | `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯模型**：进度（已读行数）、结果、终态模型（sealed）、用户取消的专用异常 |
 | `shared/src/commonMain/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换」等纯规则 |
 | `shared/src/commonMain/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 |
-| `shared/src/commonMain/.../tree/TreePaneShell.kt` | **两棵树共用的面板外壳**（**新增组件 2/6**）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到屏幕左边的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`TreePaneToggleButton`）。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） |
+| `shared/src/commonMain/.../ui/SidePaneShell.kt` | **可折叠侧边面板的外壳**（浏览模式 / 分析工作台 / **报表设计的两侧**共用；v2.39 起从 `tree/TreePaneShell.kt` 搬来并改名）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到**窗口边**的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`SidePaneToggleButton`）+ 箭头朝向的**纯函数**（`sidePaneToggleIcon`）。贴在左边与贴在右边是**镜像**的，全由 `PaneEdge` 驱动。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） |
 | `shared/src/commonMain/.../tree/TreeContextMenu.kt` | **两棵树共用的右键菜单**（v1.15）：状态（`TreeContextMenuState<T>`，泛型载荷）、弹层（定位 / 边界钳位 / 关闭）、菜单项（「点了**先关菜单**再干活」）。此前那套机制只在 `desktopApp` 里 —— 分析模式要么复制一份、要么没有菜单。**菜单项各写各的**：浏览模式六项、分析模式一项「删除数据源」 |
 | `shared/src/commonMain/.../analysis/AnalysisTreeMenu.kt` | **右键菜单的判据**（v1.15，纯函数 → 能进 `commonTest`）：`analysisDeleteSourceTarget(node, 可删清单)` 给出「这一下该删哪个数据源」，`null` = 不该给删除项。判据是「**登记表里有没有它**」—— 用户手工建的 schema 不是数据源，工作区自己的 `main` 更不是 |
 | `shared/src/commonMain/.../ui/DragHandle.kt` | **可拖拽分隔条**（**不是新增组件** —— 是既有组件的**第二种朝向**）：`DragHandle`（竖向，调宽度）与 `HorizontalDragHandle`（横向，调高度）是**同一份实现**。分析模式的编辑器高度用它调；指针图标**由调用方给**（桌面端传**上下拉伸**箭头） |
@@ -2358,7 +2390,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - `:shared` 的 `analysis/AnalysisSqlRef.kt`（「树上的一个对象」→「SQL 里的一段引用」的
     **纯规则**；`desktopApp` 的 `AnalysisSession.appendToSql` / `appendColumnToSql`
     改为调它）
-  - 报表设计页 = 报表列表 + **数据树** + 画布；部件编辑页 = **数据树** / SQL / 样例数据
+  - 报表设计页 = **数据树** + 画布 + 报表列表（v2.39 起：树在**最左**、报表列表在**最右**）；
+    部件编辑页 = **数据树** / SQL / 样例数据
   - i18n 新增 5 个键 × 六语言
 - **验收**
   - 报表设计页**看得见**那棵树，且树里**真有内容**（不是空壳面板）
@@ -2368,6 +2401,30 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - 两处树**共用同一份**节点与展开态（与工作台也是同一份）
   - 引用拼接的规则**只有一份**（两个调用方共用，`AnalysisSqlRefTest` 钉住）
 - **依赖**：M6'
+
+### M6''' —— 报表设计重排布局，两侧可折叠 ✅ **v2.39 已落地**
+
+> **与 M6'' 的关系**：M6'' 给报表设计配上了**数据树**（输入）；
+> M6''' 把这一页重新**排**了一遍 —— 输入挪到**最左**、报表列表挪到**窗口最右**，
+> 中间留给画布；并且**两侧都能折叠收纳**。
+
+- **交付**
+  - 报表设计页布局：数据树（左）｜ 画布 ｜ 报表列表（窗口最右）
+  - 两侧各套一个 `SidePaneShell`（`:shared` 的 `ui/SidePaneShell.kt`）——
+    **同一个组件**，与浏览模式 / 分析工作台手感一致
+  - `TreePaneShell` → **`SidePaneShell`**（并从 `tree/` 挪到 `ui/`）：
+    它服务的是「**可折叠侧边面板**」这个概念，不再只是树
+  - `DragHandle` 新增 `HandleSide`（镜像的拖动方向）+ `sidePaneToggleIcon`
+    （箭头朝向的**纯函数**，能进 `commonTest`）
+  - i18n 新增 2 个键 × 六语言（报表列表的折叠 / 展开文案）
+- **验收**
+  - 布局是「树 ｜ 画布 ｜ 报表列表」，且报表列表**贴着窗口的右边缘**
+  - 树能折叠成**窗口最左**的一条 44dp 窄轨，报表列表能折叠成**窗口最右**的一条
+  - 折叠后**画布真的变宽**（折叠的意义就是把宽度让给主区）
+  - **两块面板各收各的**（树收起来不动列表，反之亦然）
+  - 两侧的折叠箭头**互为镜像**（收起时指向**贴边**的那一侧）
+  - 两块面板的折叠按钮**各有各的无障碍文案**（共用一句的话，提示反而在误导人）
+- **依赖**：M6''
 
 ### M7 —— AI 洞察（后续迭代，不在 v1 范围）
 

@@ -270,7 +270,7 @@ fun ReportWidgetEditor(
                 hint = str(StrKey.REPORT_DATA_TREE_EDITOR_HINT),
                 paneTag = ReportWidgetEditorTags.DATA_TREE,
                 scrollState = treeScrollState,
-                modifier = Modifier.width(REPORT_DATA_TREE_WIDTH).fillMaxHeight(),
+                modifier = Modifier.width(REPORT_DATA_TREE_DEFAULT_WIDTH).fillMaxHeight(),
             )
             Spacer(Modifier.width(12.dp))
             CodeEditorWithToolbar(

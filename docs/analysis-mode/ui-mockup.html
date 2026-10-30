@@ -579,7 +579,10 @@ body{
 }
 .mode-tab.is-on{ color:var(--on-surface); font-weight:600; border-bottom-color:var(--primary); }
 .rd-body{ flex:1 1 auto; display:flex; min-height:0; }
-.rd-list{ width:220px; flex:none; border-right:1px solid var(--outline-variant); background:var(--surface); display:flex; flex-direction:column; }
+/* 报表列表贴在**窗口最右**（v2.39）—— 所以分隔线在**左边**。
+   它是「另一类产物」（一张张报表），放在最右边，
+   「它不参与画布的编辑」这件事一眼看得出来。 */
+.rd-list{ width:220px; flex:none; border-left:1px solid var(--outline-variant); background:var(--surface); display:flex; flex-direction:column; }
 .rd-list-head{ display:flex; align-items:center; gap:6px; padding:8px 10px; font-size:12px; line-height:15px; font-weight:600; color:var(--on-surface); }
 .rd-list-head .spacer{ flex:1 1 auto; }
 .rd-items{ flex:1 1 auto; overflow:auto; }
@@ -605,6 +608,21 @@ body{
 .rd-tree-row.lv2{ padding:0 10px 0 40px; color:var(--on-surface-variant); }
 .rd-tree-row.is-hot{ background:var(--primary-container); color:var(--on-primary-container); }
 .rd-tree-foot{ border-top:1px solid var(--outline-variant); background:var(--surface-variant); padding:5px 10px; font-size:11px; line-height:15px; color:var(--on-surface-variant); }
+/* v2.39：两侧**折叠到窗口边**的窄轨 —— 面板整体不在屏上，
+   只剩贴到窗口边的一条 44dp 窄轨（一个展开按钮 + 一枚「被收起来的是什么」的图标）。
+   与浏览模式 / 分析工作台**同一个组件**，所以手感一致。
+   竖线画在**靠主区的那一侧**：左轨的线在右边、右轨的线在左边。 */
+.rd-rail{ width:44px; flex:none; display:flex; flex-direction:column; align-items:center; background:var(--surface); padding-top:4px; }
+.rd-rail-left{ border-right:1px solid var(--outline-variant); }
+.rd-rail-right{ border-left:1px solid var(--outline-variant); }
+.rd-rail .rd-expand{
+  width:24px; height:24px; margin-top:6px; padding:0; cursor:pointer;
+  font-size:14px; line-height:22px; color:var(--on-surface-variant);
+  background:var(--surface-variant); border:1px solid var(--outline-variant); border-radius:3px;
+}
+.rd-rail .rail-icon{ margin-top:6px; font-size:14px; color:var(--on-surface-variant); opacity:.85; }
+/* `hidden` 是 UA 样式（优先级低于上面的 `display:flex`）—— 得自己压一道 */
+.rd-rail[hidden], .rd-tree[hidden], .rd-list[hidden]{ display:none; }
 .rd-canvas-head{ display:flex; align-items:center; gap:8px; padding:2px 4px 8px; }
 .rd-canvas-head .t-title-small{ font-size:13px; line-height:18px; font-weight:600; color:var(--on-surface); }
 .w-card{ border:1px solid var(--outline-variant); border-radius:var(--r-sm); padding:10px 12px 12px; margin-bottom:10px; background:var(--surface); }
@@ -981,35 +999,25 @@ body{
 
       <div class="work">
         <div class="rd-body">
-          <!-- 左：报表列表（报表是多张的，部件是报表的 —— 层级不同，位置也不同） -->
-          <aside class="rd-list">
-            <div class="rd-list-head">
-              <span>报表</span>
-              <span class="spacer"></span>
-              <button class="icon-btn" type="button" title="新建报表" aria-label="新建报表">＋</button>
-            </div>
-            <div class="rd-items">
-              <div class="rd-item is-on">
-                <span class="name">2026-10 销售分析</span>
-                <button class="icon-btn" type="button" title="重命名" aria-label="重命名">✎</button>
-                <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
-              </div>
-              <div class="rd-item">
-                <span class="name">报表 2</span>
-                <button class="icon-btn" type="button" title="重命名" aria-label="重命名">✎</button>
-                <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
-              </div>
-            </div>
+          <!-- v2.39：左侧窄轨（折叠态）—— 树整体不在屏上，
+               左边只剩一条 44dp 的窄轨，把宽度让给画布。
+               与浏览模式 / 分析工作台**同一个组件**，左侧手感一致。 -->
+          <aside class="rd-rail rd-rail-left" id="rd-tree-rail" hidden>
+            <button class="rd-expand rd-tree-expand" type="button" title="展开数据面板" aria-label="展开数据面板">›</button>
+            <span class="rail-icon" title="数据">🗄</span>
           </aside>
-
-          <!-- 中：数据树（v2.38）—— 与分析工作台**同一棵**树。
+          <!-- 左：数据树（v2.39 挪到**最左**）—— 它是**输入**（有哪些表、哪些字段），
+               与浏览模式、分析工作台**同一个方向**，用户不用重新建立空间感。
+               与分析工作台**同一棵**树。
                点表 = **开一个新部件**（画布上还没有正在写的 SQL，引用插给谁？）；
                点字段 = 开一个新部件并把字段引用填好。 -->
-          <aside class="rd-tree">
+          <aside class="rd-tree" id="rd-tree">
             <div class="rd-tree-head">
               <span>数据</span>
               <span class="spacer"></span>
               <button class="icon-btn" type="button" title="添加数据源" aria-label="添加数据源">＋</button>
+              <!-- 收起箭头指向**贴边的那一侧**（往左收）—— 与右边那侧**镜像** -->
+              <button class="icon-btn rd-tree-collapse" type="button" title="折叠数据面板" aria-label="折叠数据面板">‹</button>
             </div>
             <div class="rd-tree-list">
               <div class="rd-tree-row lv0"><span class="tw">▾</span><span class="ic">🗄</span><span class="nm">本地工作区</span><span class="badge-sm">DuckDB</span></div>
@@ -1110,6 +1118,37 @@ body{
               <button class="btn" type="button"><span class="glyph">＋</span>添加部件</button>
             </div>
           </div>
+
+          <!-- 最右：报表列表（v2.39 挪到**窗口最右**）—— 它是**另一类产物**（一张张报表），
+               放在最右边，「它不参与画布的编辑」一眼看得出来。 -->
+          <aside class="rd-list" id="rd-list">
+            <div class="rd-list-head">
+              <span>报表</span>
+              <span class="spacer"></span>
+              <button class="icon-btn" type="button" title="新建报表" aria-label="新建报表">＋</button>
+              <!-- 收起箭头指向**贴边的那一侧**（往右收）—— 与左边那棵树**镜像** -->
+              <button class="icon-btn rd-list-collapse" type="button" title="折叠报表列表" aria-label="折叠报表列表">›</button>
+            </div>
+            <div class="rd-items">
+              <div class="rd-item is-on">
+                <span class="name">2026-10 销售分析</span>
+                <button class="icon-btn" type="button" title="重命名" aria-label="重命名">✎</button>
+                <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
+              </div>
+              <div class="rd-item">
+                <span class="name">报表 2</span>
+                <button class="icon-btn" type="button" title="重命名" aria-label="重命名">✎</button>
+                <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
+              </div>
+            </div>
+          </aside>
+
+          <!-- v2.39：右侧窄轨（折叠态）—— 报表列表整体不在屏上，
+               右边只剩一条 44dp 的窄轨。展开箭头指向**离开贴边的那一侧**（往左开）。 -->
+          <aside class="rd-rail rd-rail-right" id="rd-list-rail" hidden>
+            <button class="rd-expand rd-list-expand" type="button" title="展开报表列表" aria-label="展开报表列表">‹</button>
+            <span class="rail-icon" title="报表">🗎</span>
+          </aside>
         </div>
       </div>
 
@@ -1379,7 +1418,7 @@ body{
           <div class="cmp-group">② 分析工作区</div>
           <div class="cmp-row"><span class="cmp-area">顶栏按钮</span><span class="cmp-comp">WinButton / WinOutlinedButton / WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">数据源树</span><span class="cmp-comp">ObjectTree</span><span class="cmp-path">shared/…/tree/ObjectTree.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
-          <div class="cmp-row"><span class="cmp-area">左树面板外壳</span><span class="cmp-comp">TreePaneShell / TreePaneToggleButton</span><span class="cmp-path">shared/…/tree/TreePaneShell.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">侧边面板外壳（左树）</span><span class="cmp-comp">SidePaneShell / SidePaneToggleButton</span><span class="cmp-path">shared/…/ui/SidePaneShell.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">「+ 添加数据源」对话框</span><span class="cmp-comp">WinSurface / WinButton / WinTextField / WinDivider</span><span class="cmp-path">desktopApp/…/AnalysisSourceDialog.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">文件 / 文件夹选择</span><span class="cmp-comp">NativePathPicker</span><span class="cmp-path">desktopApp/…/NativePathPicker.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
@@ -1394,6 +1433,11 @@ body{
           <div class="cmp-row"><span class="cmp-area">列规格行</span><span class="cmp-comp">ReportColumnSpecRow</span><span class="cmp-path">shared/…/analysis/ReportColumnSpecRow.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">数字格式下拉</span><span class="cmp-comp">WinDropdown</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">Excel 预览</span><span class="cmp-comp">DataTable（只读用法）</span><span class="cmp-path">shared/…/table/DataTable.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+
+          <div class="cmp-group">③′ 报表设计（图表型）</div>
+          <div class="cmp-row"><span class="cmp-area">侧边面板外壳（左侧数据树 / 最右报表列表）</span><span class="cmp-comp">SidePaneShell / SidePaneToggleButton</span><span class="cmp-path">shared/…/ui/SidePaneShell.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">数据树</span><span class="cmp-comp">ReportDataTreePane + ObjectTree</span><span class="cmp-path">shared/…/analysis/report/ReportDataTreePane.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <div class="cmp-row"><span class="cmp-area">部件画布 / 部件卡片</span><span class="cmp-comp">DataTable + LazyColumn + 手绘 PieChart / BarChart</span><span class="cmp-path">shared/…/analysis/report/</span><span class="cmp-flag tag-tertiary">新增</span></div>
 
           <div class="cmp-group">④ 连接管理器 / ⑤ 新增连接向导</div>
           <div class="cmp-row"><span class="cmp-area">整屏</span><span class="cmp-comp">ConnectionManagerScreen / AddConnectionDialog</span><span class="cmp-path">shared/…/connection/</span><span class="cmp-flag tag-xs">复用</span></div>
@@ -1678,6 +1722,25 @@ document.addEventListener("click", function(e){
   if (!tree || !rail) return;
   if (b.classList.contains("tree-collapse")) { tree.hidden = true; rail.hidden = false; }
   else { tree.hidden = false; rail.hidden = true; }
+});
+
+/* ---------- v2.39：报表设计的两侧折叠到窗口边（设计图里能真的点） ----------
+   与上面那条**同一个组件**（`:shared` 的 `ui/SidePaneShell.kt`）——
+   折叠 = 面板整体从屏上消失，窗口边只剩一条 44dp 窄轨；
+   窄轨上**没有**拖宽把手（44dp 没有「可调宽」可言）。
+   两侧的箭头是**镜像**的：左边的收起箭头往左、右边的收起箭头往右。 */
+document.addEventListener("click", function(e){
+  var b = e.target.closest ? e.target.closest(".rd-tree-collapse, .rd-tree-expand, .rd-list-collapse, .rd-list-expand") : null;
+  if (!b) return;
+  var tree = document.getElementById("rd-tree");
+  var treeRail = document.getElementById("rd-tree-rail");
+  var list = document.getElementById("rd-list");
+  var listRail = document.getElementById("rd-list-rail");
+  if (!tree || !treeRail || !list || !listRail) return;
+  if (b.classList.contains("rd-tree-collapse")) { tree.hidden = true; treeRail.hidden = false; }
+  else if (b.classList.contains("rd-tree-expand")) { tree.hidden = false; treeRail.hidden = true; }
+  else if (b.classList.contains("rd-list-collapse")) { list.hidden = true; listRail.hidden = false; }
+  else { list.hidden = false; listRail.hidden = true; }
 });
 
 /* ---------- 初始状态 ---------- */
