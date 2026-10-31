@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays.analysis.report
 
 import com.langbiantianya.sundays.analysis.AnalysisResult
+import kotlinx.serialization.Serializable
 
 /*
  * **报表设计**的数据模型 —— 一张报表由若干**部件**组成，每个部件就是
@@ -44,7 +45,15 @@ import com.langbiantianya.sundays.analysis.AnalysisResult
  * 不做折线 / 面积 / 散点 —— 那些要么需要**时间轴**（横轴是有序的数值，
  * 不是类别），要么需要**两个数值维度**（散点）。现在加进来只能是
  * 「画出来看不懂」的半成品，而半成品比没有更糟。
+ *
+ * ## 为什么它能**序列化**
+ *
+ * 报表要落盘（见 `ReportStorage`），而落盘要认得每一种图表类型 ——
+ * 枚举名（`PIE` / `BAR` / `TABLE`）就是磁盘上的取值。
+ * 序列化名与枚举常量名一致，将来加一种类型不会让老文件读不出来
+ * （老文件里根本没有那个名字）。
  */
+@Serializable
 enum class ReportWidgetType {
     /** 饼图 —— 第一列是类别，第二列是数值。 */
     PIE,
@@ -64,7 +73,14 @@ enum class ReportWidgetType {
  * @param type 图表类型
  * @param title 标题（显示在部件上方；留空时界面用「部件 N」兜底）
  * @param sql 部件的查询 —— **一条** SQL
+ *
+ * ## 为什么它能**序列化**
+ *
+ * 这三样（类型 / 标题 / SQL）就是部件的**全部**。部件不是别的东西 ——
+ * 落盘时写进去的也就是这三样，读回来还是这三样。
+ * （部件**查出来的数**不落盘 —— 那是派生数据，见 `ReportStorage`。）
  */
+@Serializable
 data class ReportWidget(
     val id: String,
     val type: ReportWidgetType,
@@ -127,12 +143,98 @@ fun isPreviewStale(
  * @param id 报表 id
  * @param name 报表名
  * @param widgets 部件清单 —— 顺序即显示顺序
+ *
+ * ## 为什么它能**序列化**
+ *
+ * 报表的**全部**就是「id + 名字 + 部件清单」这三样。
+ * 部件清单的**顺序**也是数据的一部分 —— 顺序即显示顺序，
+ * 落盘时按原样存下来，重开应用还是那个顺序。
  */
+@Serializable
 data class AnalysisReport(
     val id: String,
     val name: String,
     val widgets: List<ReportWidget>,
 )
+
+/**
+ * 部件的**移动方向**。
+ *
+ * ## 为什么用枚举而不是一个 `Int` 位移
+ *
+ * 位移量可以取任意整数（`-1` / `1` / `0` / `7`），而**只有两种**方向有意义。
+ * 枚举把「往哪挪」这件事变成**只有两个答案**的问题 ——
+ * 调用方写不出 `offset = 0`（原地不动）或者 `offset = 7`（跳七个位置）这种
+ * 说不清的东西，因为根本没有那样的取值。
+ */
+enum class ReportWidgetMove {
+    /** 往上挪一位。 */
+    UP,
+
+    /** 往下挪一位。 */
+    DOWN,
+}
+
+/**
+ * 这个部件**能不能**往那个方向挪。
+ *
+ * ## 为什么要有这么一条
+ *
+ * 界面上的「上移 / 下移」按钮要能**灰掉** —— 第一个部件不能上移、
+ * 最后一个不能下移。
+ *
+ * 而「能不能挪」是**规则**，不是界面：会话在真正执行移动时也要用同一条规则
+ * （界面上灰掉的按钮，也可能被别的调用方点到 —— 比如快捷键、或者
+ * 界面与状态之间的一帧延迟）。
+ * 规则与判定分开写，迟早会出现「界面说不行、会话说行」的裂缝。
+ *
+ * @param widgets 部件清单
+ * @param widgetId 部件 id
+ * @param move 方向
+ * @return 挪了之后清单会**不一样**吗
+ */
+fun canMoveReportWidget(
+    widgets: List<ReportWidget>,
+    widgetId: String,
+    move: ReportWidgetMove,
+): Boolean {
+    val index = widgets.indexOfFirst { it.id == widgetId }
+    if (index < 0) return false
+    val target = if (move == ReportWidgetMove.UP) index - 1 else index + 1
+    return target in widgets.indices
+}
+
+/**
+ * 把部件往那个方向挪一位。
+ *
+ * ## 为什么**挪不动时原样返回**
+ *
+ * 挪不动（已经是第一个 / 最后一个 / 压根没有这个部件）时，
+ * 返回的是**同一个清单**（内容相同、顺序相同）。
+ *
+ * 这样调用方可以直接判「有没有变」来决定要不要落盘，
+ * 而不必在调用前先问一遍 [canMoveReportWidget] ——
+ * 问两遍就会出现「问的时候能挪，执行的时候不能」这种时间差。
+ *
+ * @param widgets 部件清单
+ * @param widgetId 部件 id
+ * @param move 方向
+ * @return 挪动后的清单；挪不动时是原清单
+ */
+fun moveReportWidget(
+    widgets: List<ReportWidget>,
+    widgetId: String,
+    move: ReportWidgetMove,
+): List<ReportWidget> {
+    val index = widgets.indexOfFirst { it.id == widgetId }
+    if (index < 0) return widgets
+    val target = if (move == ReportWidgetMove.UP) index - 1 else index + 1
+    if (target !in widgets.indices) return widgets
+    val moved = widgets.toMutableList()
+    val item = moved.removeAt(index)
+    moved.add(target, item)
+    return moved
+}
 
 /**
  * 图表里的一个类别 —— 饼图的一个扇区、条形图的一根柱子。
@@ -243,3 +345,44 @@ fun chartDataOf(result: AnalysisResult?): ChartData {
  * @return 最大值；没有数据时是 `0.0`
  */
 fun chartValueScale(slices: List<ChartSlice>): Double = slices.maxOfOrNull { it.value } ?: 0.0
+
+/**
+ * 报表设计页顶部那条**状态提示**。
+ *
+ * ## 为什么是三种而不是「有 / 没有」
+ *
+ * 这条提示要说的事情有三类，而它们对用户的**分量**完全不同：
+ *
+ * - [Info] —— 「已导出到 D:/x.xlsx」。好消息，说一声。
+ * - [Warn] —— 「报表文件读不出来，已改名保留成 …」。**数据没丢**，
+ *   但有一件事用户该知道。
+ * - [Error] —— 「报表保存失败：…」。**数据正在丢**，这是最要紧的一类。
+ *
+ * 合成一句话（「操作完成 / 操作失败」）就等于把「数据没丢但要留意」
+ * 与「数据正在丢」混成一句 —— 用户分不出该不该着急。
+ *
+ * ## 为什么**消息本身**不在这儿
+ *
+ * 消息是**已经本地化好的字符串** —— 它由产生这件事的那一层
+ * （会话 / 导出流程）用当前语言取好，界面只管按轻重上色。
+ * 这一层不认识语言，也不该认识。
+ */
+sealed interface ReportStatus {
+    /** 那句话本身 —— 界面只管照着显示。 */
+    val message: String
+
+    /** 成功的消息。 */
+    data class Info(
+        override val message: String,
+    ) : ReportStatus
+
+    /** 「没出事，但有件事该知道」的消息。 */
+    data class Warn(
+        override val message: String,
+    ) : ReportStatus
+
+    /** 出错了的消息 —— 数据可能正在丢。 */
+    data class Error(
+        override val message: String,
+    ) : ReportStatus
+}

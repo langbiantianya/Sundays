@@ -826,6 +826,38 @@ enum class StrKey {
     REPORT_WIDGET_EDIT,
     REPORT_WIDGET_DELETE,
     REPORT_WIDGET_DELETE_CONFIRM,
+
+    // ──────────────── 部件的动作（v2.40） ────────────────
+    // 一个部件上现在有六种动作：刷新（只它自己）、复制、上移、下移、编辑、删除。
+    // 每一句都要说得清**动的是哪个东西** —— 读屏念「刷新」时，
+    // 用户得知道是刷新这个部件、还是刷新整张报表。
+    REPORT_WIDGET_REFRESH,
+    REPORT_WIDGET_COPY,
+    REPORT_WIDGET_MOVE_UP,
+    REPORT_WIDGET_MOVE_DOWN,
+
+    // ──────────────── 报表的落盘与导出（v2.40） ────────────────
+    REPORT_EXPORT,
+    REPORT_EXPORT_RUNNING,
+    REPORT_EXPORT_DONE,
+    REPORT_EXPORT_FAILED,
+
+    // 落盘的成败 —— 「保存失败」是**数据正在丢**，比「导出失败」严重得多，
+    // 所以它有自己的一句，不能与导出共用。
+    REPORT_SAVE_FAILED,
+    REPORT_LOAD_BACKED_UP,
+    REPORT_LOAD_FAILED,
+
+    // 导出出来的 .xlsx 里那些**我们自己加的**表头。
+    // 用户自己的列名照抄 SQL 的，不翻译；这些是我们加的，要跟着语言走。
+    REPORT_EXPORT_SHEET_REPORT,
+    REPORT_EXPORT_LABEL_NAME,
+    REPORT_EXPORT_LABEL_TIME,
+    REPORT_EXPORT_LABEL_PART,
+    REPORT_EXPORT_LABEL_TYPE,
+    REPORT_EXPORT_LABEL_SHARE,
+    REPORT_EXPORT_UNCHARTABLE,
+
     REPORT_WIDGET_FALLBACK_TITLE,
     REPORT_NO_WIDGET,
     REPORT_NO_WIDGET_HINT,

@@ -625,6 +625,17 @@ body{
 .rd-rail[hidden], .rd-tree[hidden], .rd-list[hidden]{ display:none; }
 .rd-canvas-head{ display:flex; align-items:center; gap:8px; padding:2px 4px 8px; }
 .rd-canvas-head .t-title-small{ font-size:13px; line-height:18px; font-weight:600; color:var(--on-surface); }
+/* v2.40：状态提示条 —— 有话要说时才有（导出结果 / 落盘失败 / 启动时读文件失败）。
+   它长在画布头的**下面**而不是弹窗：这类消息讲的是「刚才那一下的结果」，
+   该留在屏上让人回看，不该弹出来打断。 */
+.rd-status{
+  margin:-2px 0 8px; padding:5px 8px; border-radius:var(--r-xs);
+  background:var(--surface-variant); color:var(--on-surface-variant);
+  font-size:12px; line-height:16px;
+}
+/* 到边了就灰掉 —— 灰掉的按钮比「点了没反应」诚实。 */
+.icon-btn.is-off{ opacity:.38; }
+.icon-btn.is-off:hover{ background:transparent; color:var(--on-surface-variant); }
 .w-card{ border:1px solid var(--outline-variant); border-radius:var(--r-sm); padding:10px 12px 12px; margin-bottom:10px; background:var(--surface); }
 .w-head{ display:flex; align-items:center; gap:8px; }
 .w-head .t-title-small{ flex:1 1 auto; font-size:13px; line-height:18px; font-weight:600; color:var(--on-surface); }
@@ -1036,13 +1047,27 @@ body{
               <span class="t-title-small">2026-10 销售分析</span>
               <span class="spacer"></span>
               <button class="icon-btn" type="button" title="刷新" aria-label="刷新">↻</button>
+              <!-- v2.40：导出 —— 把当前报表写成 .xlsx（先弹「另存为」）。
+                   导出要占着工作区，所以它与「刷新」共用一把锁。 -->
+              <button class="icon-btn" type="button" title="导出 .xlsx" aria-label="导出 .xlsx">⤓</button>
             </div>
+
+            <!-- v2.40：状态提示条 —— 有话要说时才有。
+                 这里讲的是「刚才那一下的结果」，所以它常驻在画布头的下面，
+                 而不是弹一个窗把人打断。 -->
+            <div class="rd-status">已导出到 桌面 / 2026-10 销售分析.xlsx</div>
 
             <!-- 部件 1：饼图（第一列 = 类别，第二列 = 数值） -->
             <div class="w-card">
               <div class="w-head">
                 <span class="t-title-small">大区销售占比</span>
                 <span class="tag-tertiary">饼图</span>
+                <!-- v2.40：卡片头上补四个动作 —— 刷新（只刷这一个）、复制、上移、下移。
+                     它是**第一个**，所以「上移」灰掉：到边了就别让人点。 -->
+                <button class="icon-btn" type="button" title="刷新这一个" aria-label="刷新这一个">↻</button>
+                <button class="icon-btn" type="button" title="复制" aria-label="复制">⧉</button>
+                <button class="icon-btn is-off" type="button" title="上移（已是第一个）" aria-label="上移">↑</button>
+                <button class="icon-btn" type="button" title="下移" aria-label="下移">↓</button>
                 <button class="icon-btn" type="button" title="编辑" aria-label="编辑">✎</button>
                 <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
               </div>
@@ -1072,6 +1097,10 @@ body{
               <div class="w-head">
                 <span class="t-title-small">渠道订单量</span>
                 <span class="tag-tertiary">条形图</span>
+                <button class="icon-btn" type="button" title="刷新这一个" aria-label="刷新这一个">↻</button>
+                <button class="icon-btn" type="button" title="复制" aria-label="复制">⧉</button>
+                <button class="icon-btn" type="button" title="上移" aria-label="上移">↑</button>
+                <button class="icon-btn" type="button" title="下移" aria-label="下移">↓</button>
                 <button class="icon-btn" type="button" title="编辑" aria-label="编辑">✎</button>
                 <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
               </div>
@@ -1098,6 +1127,11 @@ body{
               <div class="w-head">
                 <span class="t-title-small">订单明细</span>
                 <span class="tag-tertiary">表格</span>
+                <button class="icon-btn" type="button" title="刷新这一个" aria-label="刷新这一个">↻</button>
+                <button class="icon-btn" type="button" title="复制" aria-label="复制">⧉</button>
+                <button class="icon-btn" type="button" title="上移" aria-label="上移">↑</button>
+                <!-- 它是**最后一个**，所以「下移」灰掉。 -->
+                <button class="icon-btn is-off" type="button" title="下移（已是最后一个）" aria-label="下移">↓</button>
                 <button class="icon-btn" type="button" title="编辑" aria-label="编辑">✎</button>
                 <button class="icon-btn" type="button" title="删除" aria-label="删除">🗑</button>
               </div>
@@ -1438,6 +1472,11 @@ body{
           <div class="cmp-row"><span class="cmp-area">侧边面板外壳（左侧数据树 / 最右报表列表）</span><span class="cmp-comp">SidePaneShell / SidePaneToggleButton</span><span class="cmp-path">shared/…/ui/SidePaneShell.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">数据树</span><span class="cmp-comp">ReportDataTreePane + ObjectTree</span><span class="cmp-path">shared/…/analysis/report/ReportDataTreePane.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">部件画布 / 部件卡片</span><span class="cmp-comp">DataTable + LazyColumn + 手绘 PieChart / BarChart</span><span class="cmp-path">shared/…/analysis/report/</span><span class="cmp-flag tag-tertiary">新增</span></div>
+          <!-- v2.40：报表可用化 —— 按钮与对话框**全是复用的**，
+               新写的只有后台那两件事（落盘、导文件），它们不是界面组件。 -->
+          <div class="cmp-row"><span class="cmp-area">部件卡片头的动作按钮（刷新 / 复制 / 上移 / 下移）</span><span class="cmp-comp">WinIconButton</span><span class="cmp-path">shared/…/ui/WinControls.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">画布头的「导出」按钮 + 状态提示条</span><span class="cmp-comp">WinIconButton + Text</span><span class="cmp-path">shared/…/analysis/report/ReportDesignerScreen.kt</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">「另存为」对话框</span><span class="cmp-comp">NativePathPicker.pickFile</span><span class="cmp-path">desktopApp/…/NativePathPicker.kt</span><span class="cmp-flag tag-xs">复用</span></div>
 
           <div class="cmp-group">④ 连接管理器 / ⑤ 新增连接向导</div>
           <div class="cmp-row"><span class="cmp-area">整屏</span><span class="cmp-comp">ConnectionManagerScreen / AddConnectionDialog</span><span class="cmp-path">shared/…/connection/</span><span class="cmp-flag tag-xs">复用</span></div>

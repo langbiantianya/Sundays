@@ -139,7 +139,10 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **报表设计视图**（分析模式的第二个视图，与工作台**共用同一份工作区**）：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。**最左是数据树、中间是部件画布、最右是报表列表**；加部件时打开**编辑页**（类型 / 标题 / SQL + **样例数据**）—— 样例数据是那条 SQL **真跑出来**的结果（原始行 + 图表预览并排），「约定」只有看得见数据才能被遵守 | `shared/analysis/report/` / `AnalysisSession` |
 | | **数据形状的约定写死在代码里**：第一列 = 类别，第二列 = 数值；说不清形状就**说清是哪一种**（缺列 / 只有一列 / 值不是数字 / 有负值 / 没数据），**绝不静默截断** —— 少一根柱子，用户不会知道少了什么。负值一律不画（饼图算不出角度，条形图画成正值长度是**误导**） | `shared/analysis/report/ReportModels.kt` |
 | | 图表**手绘**（`Canvas` + `drawArc` / `drawRoundRect`），不用第三方图表库 —— `:shared` 的 `commonMain` 不能引 Android-only 依赖 | `shared/analysis/report/ReportChart.kt` |
-| | 报表**暂不落盘**（住在会话里，**退出即失**）—— 但「部件 = 一条 SQL」这个形状**从此不许改**，用户搭好的报表会集体作废 | `AnalysisSession` |
+| | **报表会落盘**（`~/.config/sundays/reports.json`，**独立**文件，与 `connection.json` 同构）—— 重开应用，报表还在。**只存形状不存数**：部件查出来的数是派生数据，一落盘就开始过时，而**过时的数字比没有数字更危险**。**读不出来时绝不静默清空**：原文件改名保留，应用按空集继续并明确告知 | `shared/analysis/report/ReportStorage.kt` / `AnalysisSession` |
+| | **报表能导出成 `.xlsx`**（能直接发给别人）—— 第一个 Sheet 是「报表」（报表名 + 导出时间 + **每个部件的 SQL**），每个部件一个 Sheet；表格部件原样铺开，图表部件输出「类别 \| 数值 \| 占比%」。导出**先刷新再写** —— 导出的要是**导出那一刻**的真实数据 | `desktopApp/ReportXlsxWriter.kt` / `AnalysisSession` |
+| | **部件可以复制、可以调顺序** —— 卡片头六个动作：刷新 / 复制 / 上移 / 下移 / 编辑 / 删除。复制出来的部件**插在原件后面**并把**数据**一起带过去（SQL 一样，数据就一样）；排序用**按钮**不用拖拽 | `shared/analysis/report/ReportDesignerScreen.kt` / `AnalysisSession` |
+| | **单个部件可以单独刷新** —— 只重跑它那一条 SQL，不用重跑整张报表 | `AnalysisSession` |
 | | **报表设计里也有数据树** —— 报表设计页是「**数据树** + 部件画布 + **报表列表**」，部件编辑页是「**数据树** / SQL / 样例数据」；两处**共用同一棵**工作区树（同一份节点与展开态，与分析工作台也是同一份）。**点表**在画布上是「**开一个新部件**」（SQL 预填 `SELECT * FROM "表"`），在编辑页里是「**把引用插进正在写的那条 SQL**」（`"表"."字段"`）。没有树的话，用户只能切回工作台把表名字**记下来**再凭记忆敲，**敲错了要等跑 SQL 时才报错** | `shared/analysis/report/ReportDataTreePane.kt` / `shared/analysis/AnalysisSqlRef.kt` |
 | | **报表设计的两侧都能折叠收纳** —— 数据树收成**窗口最左**的一条 44dp 窄轨，报表列表收成**窗口最右**的一条，**把宽度让给画布**（画布才是这一页的主角）；两块面板**各收各的**，手感与浏览模式 / 分析工作台**完全一致**（同一个 `SidePaneShell`，左右**镜像**） | `shared/ui/SidePaneShell.kt` / `shared/analysis/report/ReportDesignerScreen.kt` |
 | | 引用拼接的规则**只有一份**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 里的表**不带** schema 前缀）—— 分析工作台与报表设计都调它 | `shared/analysis/AnalysisSqlRef.kt` |

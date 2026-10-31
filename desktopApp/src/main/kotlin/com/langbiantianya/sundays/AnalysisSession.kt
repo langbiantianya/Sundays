@@ -41,7 +41,13 @@ import com.langbiantianya.sundays.analysis.analysisTableNodeId
 import com.langbiantianya.sundays.analysis.appendAnalysisColumnRef
 import com.langbiantianya.sundays.analysis.appendAnalysisTableRef
 import com.langbiantianya.sundays.analysis.report.AnalysisReport
+import com.langbiantianya.sundays.analysis.report.ReportLoadResult
+import com.langbiantianya.sundays.analysis.report.ReportStatus
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import com.langbiantianya.sundays.analysis.report.ReportWidget
+import com.langbiantianya.sundays.analysis.report.ReportWidgetMove
+import com.langbiantianya.sundays.analysis.report.moveReportWidget
+import com.langbiantianya.sundays.analysis.report.reportDisplayNameText
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
@@ -267,6 +273,33 @@ class AnalysisSession(
      * 这三条路径是状态机的一部分，必须能**确定性地**各测一遍。
      */
     private val puller: AnalysisPuller = EngineAnalysisPuller(engine),
+    /**
+     * 报表的落盘。
+     *
+     * 做成构造参数（而不是在类体里现算）有两个原因：
+     * - 测试要指向临时目录，不能写死到真实用户主目录 ——
+     *   否则跑一次全量测试，用户的 `reports.json` 里就多出几张测试报表；
+     * - 落盘**停用**这件事需要能被单独测到（文件读不出来且改名失败时）。
+     */
+    private val reportStorage: ReportStorage = ReportStorage(),
+    /**
+     * 「另存为」对话框 —— **可替换的接缝**。
+     *
+     * 做成构造参数的理由与 [puller] 一样：**导出流程必须能被确定性地测**。
+     * 真实现会弹一个 AWT 模态框 —— 那在无头环境里弹不出来，
+     * 在有桌面的机器上弹得出来也**没人去点**，测试会**永远等下去**
+     * （模态框还把 AWT 事件线程占住，测试进程退不出去）。
+     *
+     * 所以这里收的是「挑一个路径」这件事本身，而不是「怎么挑」——
+     * 界面那部分（弹框、预填文件名）归 [NativePathPicker]，
+     * 会话只关心「挑到哪儿了」。
+     *
+     * @param initialDir 起始目录
+     * @param initialName 预填的文件名
+     * @return 挑中的路径；`null` = 用户取消
+     */
+    private val filePicker: suspend (initialDir: String, initialName: String) -> NativePathPicker.Picked? =
+        { initialDir, initialName -> NativePathPicker.pickFile(initialDir, initialName) },
 ) {
     /**
      * 工作区数据库文件路径 —— `~/.config/sundays/workspace.duckdb`。
@@ -437,14 +470,13 @@ class AnalysisSession(
     /**
      * 全部报表。
      *
-     * ## 为什么报表**不落盘**
+     * ## 它**落盘**（v2.40 起）
      *
-     * 落盘要么另开一个文件（要多一套读写与迁移），要么在工作区 DuckDB 里建表
-     * （要让引擎知道「这张表不是用户的数据」）。这一轮先把报表的**形状**做对，
-     * 让它**活在会话里**（退出即失）。
+     * 落在**独立**的 `~/.config/sundays/reports.json`（见 [ReportStorage]）——
+     * 不在工作区 DuckDB 里（那是**用户自己的**数据），也不与连接清单挤在一起。
      *
-     * 但有一件事不能等：部件的形状（**一条 SQL + 一种图表类型**）从此**不许改** ——
-     * 用户已经搭好的报表会因为形状变化而集体作废。
+     * 但有一件事从 v2.37 起就没变：部件的形状（**一条 SQL + 一种图表类型**）
+     * 从此**不许改** —— 用户已经搭好的报表会因为形状变化而集体作废。
      */
     var reports by mutableStateOf<List<AnalysisReport>>(emptyList())
         private set
@@ -474,11 +506,80 @@ class AnalysisSession(
     var refreshRunning by mutableStateOf(false)
         private set
 
+    /**
+     * 正在刷新的**单个**部件 id —— 界面据此禁用那个部件的刷新按钮。
+     *
+     * ## 为什么是**一组**而不是一个
+     *
+     * 一个一个地刷时，理论上可以有多个部件同时在刷。而它们**必须互斥** ——
+     * 工作区是**一个** DuckDB 文件，并发查询会互相抢锁。
+     * 所以这里记的是「**正在刷的那些**」，判定「忙不忙」时看它非空即可。
+     */
+    var refreshingWidgetIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** 正在导出报表 —— 界面据此禁用「导出」按钮。 */
+    var exportRunning by mutableStateOf(false)
+        private set
+
+    /**
+     * 报表设计页顶部那条状态提示 —— **最新**的那件事。
+     *
+     * ## 为什么要分三层
+     *
+     * - [persistError] —— **保存失败**：数据正在丢，最要紧，压过一切；
+     * - 导出**正在进行** —— 说的是「**在等什么**」；
+     * - [lastEvent] —— 最近一件**已发生**的事（导出结果、启动时的读文件提醒）；
+     * - 都没有 → 没有提示。
+     *
+     * 分成「保存错误」与「其它事件」两层，是因为它们的**寿命**不同：
+     * 保存错误会**一直**挂着（直到下一次保存成功），而导出结果只代表那一次。
+     *
+     * ## 为什么「正在导出」要压过「上一次的结果」
+     *
+     * 导出要**重跑每个部件的 SQL** —— 那不是一瞬间的事。
+     * 按钮灰掉只说明「点不动了」，没告诉用户**正在忙**；
+     * 而上一条「已导出到 …」还挂在屏上，会让人以为**导出已经结束了**。
+     */
+    val reportStatus: ReportStatus?
+        get() {
+            val error = persistError
+            if (error != null) return ReportStatus.Error(error)
+            if (exportRunning) return ReportStatus.Info(Msg.text(StrKey.REPORT_EXPORT_RUNNING))
+            return lastEvent
+        }
+
+    /** 保存失败的原因；`null` = 上次保存成功（或还没保存过）。 */
+    private var persistError by mutableStateOf<String?>(null)
+
+    /** 最近发生的一件事（导出结果 / 读文件提醒）。 */
+    private var lastEvent by mutableStateOf<ReportStatus?>(null)
+
+    /**
+     * 落盘**停用**了 —— 文件读不出来**而且改名也失败**。
+     *
+     * ## 为什么这时必须停用
+     *
+     * 原文件还在，而且我们**读不出来**它。再往它上面写，就是把用户的
+     * 报表与「半份新内容」混在一起 —— 下一次它要是读出来了，
+     * 读到的是**新写的那几行**加上**旧的坏内容**。
+     *
+     * 停用是保守的：这一轮的改动存不下来，但**原文件一个字节都没动**。
+     */
+    private var persistDisabled = false
+
     /** 报表 id 的计数器 —— 让每张报表有一个**唯一且稳定**的 id。 */
     private val reportCounter = AtomicLong(0)
 
     /** 部件 id 的计数器 —— 同上。 */
     private val widgetCounter = AtomicLong(0)
+
+    // 启动时把磁盘上的报表读进来 —— 这个 `init` 块必须**声明在**两个计数器**之后**
+    // （Kotlin 的初始化顺序 = 声明顺序；放在类开头的话计数器还是 0，
+    //  新发的 id 会与磁盘上的撞上）。为什么是这三种结果，见 [loadReports]。
+    init {
+        loadReports()
+    }
 
     /** 正在加载的节点 id —— 用来挡住**重复**加载（连点两下扭子）。 */
     private val loadingNodeIds = mutableSetOf<String>()
@@ -1258,6 +1359,7 @@ class AnalysisSession(
         val id = "report-${reportCounter.incrementAndGet()}"
         reports = reports + AnalysisReport(id = id, name = "", widgets = emptyList())
         selectedReportId = id
+        persistReports()
     }
 
     /**
@@ -1271,6 +1373,7 @@ class AnalysisSession(
         name: String,
     ) {
         reports = reports.map { report -> if (report.id == id) report.copy(name = name.trim()) else report }
+        persistReports()
     }
 
     /**
@@ -1290,6 +1393,7 @@ class AnalysisSession(
         if (selectedReportId == id) {
             selectedReportId = reports.firstOrNull()?.id
         }
+        persistReports()
     }
 
     /**
@@ -1310,6 +1414,19 @@ class AnalysisSession(
             } else {
                 widget
             }
+        // SQL 改了 → 已经取到的数据**不再对应**这条 SQL，必须丢掉。
+        //
+        // 为什么不能留着：画布上显示的那张图是**旧 SQL** 跑出来的，
+        // 而用户刚改完 SQL 正是要确认「新 SQL 对不对」。
+        // 留着旧数据 = 让他对着旧结果确认新查询 —— 那比没有数据更糟。
+        val previous =
+            reports
+                .firstOrNull { it.id == reportId }
+                ?.widgets
+                ?.firstOrNull { it.id == saved.id }
+        if (!isNew && previous != null && previous.sql != saved.sql) {
+            widgetResults = widgetResults - saved.id
+        }
         reports =
             reports.map { report ->
                 if (report.id != reportId) {
@@ -1320,6 +1437,7 @@ class AnalysisSession(
                     report.copy(widgets = report.widgets.map { if (it.id == saved.id) saved else it })
                 }
             }
+        persistReports()
     }
 
     /**
@@ -1341,6 +1459,268 @@ class AnalysisSession(
                 }
             }
         widgetResults = widgetResults - widgetId
+        persistReports()
+    }
+
+    /**
+     * 复制一个部件 —— **插在原部件后面**。
+     *
+     * ## 为什么插在**后面**而不是前面
+     *
+     * 「复制」的直觉是「多一个一样的」，而用户接着要做的是**改那个新的**。
+     * 插在后面，它就在原部件**紧挨着**的位置 —— 一眼能看出这俩是一对，
+     * 而不用在长长的列表里找。
+     *
+     * ## 为什么**数据也复制**过去
+     *
+     * 复制出来的部件是**同一条 SQL** —— 它的结果与原件**一模一样**。
+     * 而重跑一遍是「多一次查询」—— 工作区是**一个** DuckDB 文件，
+     * 查询要排队、可能要等。
+     *
+     * 复制数据的前提是「SQL 一样 ⇒ 数据一样」，而这一点由
+     * [saveWidget] 的那条规则守着：**SQL 一改，旧数据立刻作废**。
+     *
+     * @param reportId 属于哪张报表
+     * @param widgetId 被复制的部件 id
+     */
+    fun copyWidget(
+        reportId: String,
+        widgetId: String,
+    ) {
+        val report = reports.firstOrNull { it.id == reportId } ?: return
+        val index = report.widgets.indexOfFirst { it.id == widgetId }
+        if (index < 0) return
+        val source = report.widgets[index]
+        val copy = source.copy(id = "widget-${widgetCounter.incrementAndGet()}")
+        val updated = report.widgets.toMutableList().apply { add(index + 1, copy) }
+        reports = reports.map { if (it.id == reportId) it.copy(widgets = updated) else it }
+        widgetResults[widgetId]?.let { result -> widgetResults = widgetResults + (copy.id to result) }
+        persistReports()
+    }
+
+    /**
+     * 上移 / 下移一个部件。
+     *
+     * ## 为什么规则在 [moveReportWidget] 而不在这儿
+     *
+     * 「能不能挪」是**规则**，界面要用它来灰按钮、会话要用它来执行。
+     * 两处各写一遍，迟早会出现「界面说不行、会话说行」的裂缝。
+     * 所以规则只有一份（纯函数），两处都问它。
+     *
+     * @param reportId 属于哪张报表
+     * @param widgetId 部件 id
+     * @param move 方向
+     */
+    fun moveWidget(
+        reportId: String,
+        widgetId: String,
+        move: ReportWidgetMove,
+    ) {
+        val report = reports.firstOrNull { it.id == reportId } ?: return
+        val updated = moveReportWidget(report.widgets, widgetId, move)
+        // 挪不动时清单没变 —— 不用落盘（省一次写，也省一次「文件被占用」的风险）。
+        if (updated == report.widgets) return
+        reports = reports.map { if (it.id == reportId) it.copy(widgets = updated) else it }
+        persistReports()
+    }
+
+    /**
+     * 只刷新**一个**部件 —— 只重跑它那一条 SQL。
+     *
+     * ## 为什么它与「刷新整张报表」**共用一把锁**
+     *
+     * 工作区是**一个** DuckDB 文件 —— 并发查询会互相抢锁，
+     * 而且后完成的会把先完成的盖掉，用户看到的是**错配**的结果
+     * （A 部件的位置上显示着 B 部件的数据）。
+     *
+     * @param reportId 属于哪张报表
+     * @param widgetId 部件 id
+     * @return 启动的任务；`null` = 没跑（工作区忙，或这个部件没有 SQL）
+     */
+    fun refreshWidget(
+        reportId: String,
+        widgetId: String,
+    ): Job? {
+        if (workspaceBusy()) return null
+        val report = reports.firstOrNull { it.id == reportId } ?: return null
+        val widget = report.widgets.firstOrNull { it.id == widgetId } ?: return null
+        val statement = widget.sql.trim()
+        if (statement.isEmpty()) return null
+        // 同 [refreshReport]：标志**同步**置位，它就是那把锁。
+        refreshingWidgetIds = refreshingWidgetIds + widgetId
+        val job =
+            scope.launch {
+                val result = runOnWorkspace(statement)
+                widgetResults = widgetResults + (widgetId to result)
+            }
+        job.invokeOnCompletion { refreshingWidgetIds = refreshingWidgetIds - widgetId }
+        return job
+    }
+
+    /**
+     * 导出报表 —— 写成 `.xlsx`。
+     *
+     * ## 顺序为什么是「先问路径 → 再刷新 → 再写」
+     *
+     * - **先问路径**：用户可以在**任何**时候取消，而且取消时一个查询都没跑。
+     * - **再刷新**：导出的要是**导出那一刻**的真实数据。
+     *   拿内存里那份导出，用户看到的与收到的可能不是一回事。
+     * - **最后写**：写的是刚刚刷新出来的数据。
+     *
+     * @param report 要导出的报表
+     * @return 启动的任务；`null` = 没导（工作区忙）
+     */
+    fun exportReport(report: AnalysisReport): Job? {
+        if (workspaceBusy()) return null
+        val target = reports.firstOrNull { it.id == report.id } ?: return null
+        // 标志**同步**置位 —— 导出期间工作区是**被占着**的，
+        // 刷新按钮与部件刷新都要因此变灰。
+        exportRunning = true
+        val job =
+            scope.launch {
+                val index = reports.indexOfFirst { it.id == target.id }
+                val displayName =
+                    reportDisplayNameText(
+                        target.name,
+                        Msg.format(StrKey.REPORT_DEFAULT_NAME, index + 1),
+                    )
+                val picked =
+                    filePicker(
+                        userHomeDir(),
+                        "${ReportXlsxWriter.sanitizeFileName(displayName)}.xlsx",
+                    ) ?: return@launch
+                // 刷新在**弹窗之后** —— 用户取消就不用白跑一遍查询。
+                refreshWidgetsOf(target)
+                val file = Paths.get(picked.dir, ensureXlsxSuffix(picked.name))
+                val ok = ReportXlsxWriter.write(target, widgetResults, file, displayName)
+                lastEvent =
+                    if (ok) {
+                        ReportStatus.Info(Msg.format(StrKey.REPORT_EXPORT_DONE, file.toString()))
+                    } else {
+                        ReportStatus.Error(Msg.format(StrKey.REPORT_EXPORT_FAILED, file.toString()))
+                    }
+            }
+        job.invokeOnCompletion { exportRunning = false }
+        return job
+    }
+
+    /**
+     * 工作区现在**忙不忙**。
+     *
+     * 「刷新整张报表」「刷新一个部件」「导出」三件事**互斥** ——
+     * 它们都要动工作区这个**一个** DuckDB 文件。
+     */
+    private fun workspaceBusy(): Boolean = refreshRunning || refreshingWidgetIds.isNotEmpty() || exportRunning
+
+    /** 用户主目录 —— 导出对话框的起始目录。 */
+    private fun userHomeDir(): String = System.getProperty("user.home") ?: "."
+
+    /** 保证文件名以 `.xlsx` 结尾 —— 用户在对话框里改了扩展名的话。 */
+    private fun ensureXlsxSuffix(name: String): String = if (name.lowercase().endsWith(".xlsx")) name else "$name.xlsx"
+
+    /**
+     * 串行跑一张报表的**所有**部件 —— 每跑完一个就放出去。
+     *
+     * ## 为什么**串行**跑而不是并发
+     *
+     * 工作区是**一个** DuckDB 文件 —— 并发查询会互相抢锁，
+     * 而且后完成的会把先完成的盖掉，用户看到的是**错配**的结果。
+     * 串行慢一点，但每个部件拿到的都是**自己**那份。
+     */
+    private suspend fun refreshWidgetsOf(report: AnalysisReport) {
+        report.widgets.forEach { widget ->
+            val statement = widget.sql.trim()
+            if (statement.isEmpty()) return@forEach
+            val result = runOnWorkspace(statement)
+            // 每跑完一个就放出去 —— 界面能一块一块地亮起来，
+            // 而不是等最后一个跑完才一起出现。
+            widgetResults = widgetResults + (widget.id to result)
+        }
+    }
+
+    /**
+     * 把磁盘上的报表读进来。
+     *
+     * ## 为什么在 `init` 块里调它
+     *
+     * 它要用到 [reports] 与两个计数器，而 Kotlin 的**初始化顺序**是
+     * 「按声明顺序」—— 所以那个 `init` 块必须**声明在**那些属性**之后**。
+     *
+     * 三种结果（见 [ReportLoadResult]）：
+     * - 读到了 → 用它，并把计数器推到最大 id 之后；
+     * - 读不出来但**改名保留了** → 按空集继续，但**明确告诉用户**；
+     * - 读不出来**而且改名也失败** → 按空集继续，并**停掉落盘**。
+     */
+    private fun loadReports() {
+        when (val result = reportStorage.load()) {
+            is ReportLoadResult.Loaded -> {
+                reports = result.reports
+                bumpCounters(result.reports)
+                // 读完自动选中第一张 —— 否则用户打开应用看到的是**空画布**，
+                // 明明磁盘上有好几张报表。
+                selectedReportId = reports.firstOrNull()?.id
+            }
+
+            is ReportLoadResult.BackedUp -> {
+                lastEvent =
+                    ReportStatus.Warn(
+                        Msg.format(StrKey.REPORT_LOAD_BACKED_UP, result.backupPath.toString()),
+                    )
+            }
+
+            is ReportLoadResult.Unreadable -> {
+                persistDisabled = true
+                lastEvent =
+                    ReportStatus.Error(
+                        Msg.format(StrKey.REPORT_LOAD_FAILED, result.reason),
+                    )
+            }
+        }
+    }
+
+    /**
+     * 把当前报表**落盘**。
+     *
+     * ## 为什么是**同步**的
+     *
+     * 报表文件很小（几十 KB），一次写不到 1ms。
+     * 而异步写会引出「顺序」问题：两次改动各自起一个写任务，
+     * 后起的那个可能先落地 —— 文件就**退回**到旧状态。
+     * 同步写没有这些问题，而且它让「保存失败」能**当场**报给用户。
+     */
+    private fun persistReports() {
+        if (persistDisabled) return
+        if (reportStorage.save(reports)) {
+            persistError = null
+        } else {
+            persistError = Msg.format(StrKey.REPORT_SAVE_FAILED, reportStorage.path.toString())
+        }
+    }
+
+    /**
+     * 把两个计数器推到**已存在的最大 id** 之后。
+     *
+     * ## 为什么必须推
+     *
+     * 磁盘上的 id 是**稳定的**（重开应用还是那个 id）——
+     * 而 id 是**计数器**发出来的。若不推，重开应用后新建的报表会拿到
+     * `report-1`，而 `report-1` 在磁盘上**已经有一张了**。
+     *
+     * 于是两个报表共用一个 id：选中一个会选中两个，删一个会删掉两个，
+     * 而且部件的 id 也一样 —— 数据会**串**。
+     */
+    private fun bumpCounters(reports: List<AnalysisReport>) {
+        val reportSeq =
+            reports
+                .mapNotNull { it.id.removePrefix("report-").toLongOrNull() }
+                .maxOrNull() ?: 0
+        reportCounter.set(reportSeq)
+        val widgetSeq =
+            reports
+                .flatMap { it.widgets }
+                .mapNotNull { it.id.removePrefix("widget-").toLongOrNull() }
+                .maxOrNull() ?: 0
+        widgetCounter.set(widgetSeq)
     }
 
     /**
@@ -1359,14 +1739,12 @@ class AnalysisSession(
         if (previewRunning) return null
         val statement = sql.trim()
         if (statement.isEmpty()) return null
-        return scope.launch {
-            previewRunning = true
-            try {
-                previewResult = runOnWorkspace(statement)
-            } finally {
-                previewRunning = false
-            }
-        }
+        // 标志**同步**置位 —— 它是「预览正在跑」的凭据，
+        // 放在协程里置位的话，连点两下会**两次都通过检查**。
+        previewRunning = true
+        val job = scope.launch { previewResult = runOnWorkspace(statement) }
+        job.invokeOnCompletion { previewRunning = false }
+        return job
     }
 
     /**
@@ -1379,30 +1757,29 @@ class AnalysisSession(
      * （A 部件的位置上显示着 B 部件的数据）。串行慢一点，但每个部件
      * 拿到的都是**自己**那份。
      *
+     * ## 为什么它与「刷新一个部件」「导出」**互斥**
+     *
+     * 三者都要动工作区这个**一个** DuckDB 文件（见 [workspaceBusy]）。
+     *
      * @param report 要刷新的报表
-     * @return 启动的任务；`null` = 没跑（已经在刷了）
+     * @return 启动的任务；`null` = 没跑（工作区忙）
      */
     fun refreshReport(report: AnalysisReport): Job? {
-        if (refreshRunning) return null
+        if (workspaceBusy()) return null
         // 只刷新**会话里确实有**的那张报表 —— 认不出来就直接不刷。
         // 否则会把**没人引用**的数据塞进会话：界面上根本没有这张报表，
         // 数据却占着位置，而且再也删不掉（删报表时按 id 找，找不到）。
         val target = reports.firstOrNull { it.id == report.id } ?: return null
-        return scope.launch {
-            refreshRunning = true
-            try {
-                target.widgets.forEach { widget ->
-                    val statement = widget.sql.trim()
-                    if (statement.isEmpty()) return@forEach
-                    val result = runOnWorkspace(statement)
-                    // 每跑完一个就放出去 —— 界面能一块一块地亮起来，
-                    // 而不是等最后一个跑完才一起出现。
-                    widgetResults = widgetResults + (widget.id to result)
-                }
-            } finally {
-                refreshRunning = false
-            }
-        }
+        // ⚠️ 标志**同步**置位 —— 它是「这把锁已经被占了」的凭据。
+        // 放在协程里置位的话，连点两下会**两次都通过检查**，
+        // 两个刷新一起跑，后完成的把先完成的盖掉 —— 那正是
+        // 「A 部件的位置上显示着 B 部件的数据」的错配。
+        refreshRunning = true
+        val job = scope.launch { refreshWidgetsOf(target) }
+        // 用 `invokeOnCompletion` 而不是协程里的 `finally`：协程**还没开始跑**
+        // 就被取消时，`finally` 不会执行，标志会永远卡在 true 上。
+        job.invokeOnCompletion { refreshRunning = false }
+        return job
     }
 
     /**

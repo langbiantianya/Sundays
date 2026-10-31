@@ -41,8 +41,10 @@ import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.report.AnalysisReport
 import com.langbiantianya.sundays.analysis.report.ReportDesignerScreen
 import com.langbiantianya.sundays.analysis.report.ReportDesignerTags
+import com.langbiantianya.sundays.analysis.report.ReportStatus
 import com.langbiantianya.sundays.analysis.report.ReportWidget
 import com.langbiantianya.sundays.analysis.report.ReportWidgetEditorTags
+import com.langbiantianya.sundays.analysis.report.ReportWidgetMove
 import com.langbiantianya.sundays.analysis.report.ReportWidgetType
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.tree.ObjectTreeColumn
@@ -813,6 +815,255 @@ class ReportDesignerUiTest {
                 after > before,
                 "右侧面板往左拖应当变宽：before=$before after=$after",
             )
+        }
+
+    // ──────────────── 部件的动作 ────────────────
+
+    /** 两张报表 —— 第二张有**两个**部件，才能验「上移 / 下移」。 */
+    private val reportWithTwoWidgets =
+        AnalysisReport(
+            id = "r2",
+            name = "两张部件",
+            widgets =
+                listOf(
+                    widget,
+                    ReportWidget("w2", ReportWidgetType.BAR, "各月销售额", "SELECT month, amount FROM sales"),
+                ),
+        )
+
+    @Test
+    fun `every part gets a refresh a copy and two move buttons`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_REFRESH_PREFIX + "w1").assertExists()
+            onNodeWithTag(ReportDesignerTags.WIDGET_COPY_PREFIX + "w1").assertExists()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_UP_PREFIX + "w1").assertExists()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_DOWN_PREFIX + "w1").assertExists()
+        }
+
+    @Test
+    fun `the copy button tells the session which part to copy`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            val copied = mutableListOf<Pair<String, String>>()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            onCopyWidget = { reportId, widgetId -> copied += reportId to widgetId },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_COPY_PREFIX + "w1").performClick()
+
+            assertEquals(listOf("r1" to "w1"), copied)
+        }
+
+    @Test
+    fun `the move buttons tell the session which way to move`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            val moves = mutableListOf<ReportWidgetMove>()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(reportWithTwoWidgets),
+                            selectedReportId = "r2",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            onMoveWidget = { _, _, move -> moves += move },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_DOWN_PREFIX + "w1").performClick()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_UP_PREFIX + "w2").performClick()
+
+            assertEquals(listOf(ReportWidgetMove.DOWN, ReportWidgetMove.UP), moves)
+        }
+
+    @Test
+    fun `the first part cannot move up and the last cannot move down`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(reportWithTwoWidgets),
+                            selectedReportId = "r2",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_UP_PREFIX + "w1").assertIsNotEnabled()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_DOWN_PREFIX + "w1").assertIsEnabled()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_UP_PREFIX + "w2").assertIsEnabled()
+            onNodeWithTag(ReportDesignerTags.WIDGET_MOVE_DOWN_PREFIX + "w2").assertIsNotEnabled()
+        }
+
+    @Test
+    fun `the refresh button of a part is disabled while the whole report is refreshing`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            refreshRunning = true,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_REFRESH_PREFIX + "w1").assertIsNotEnabled()
+        }
+
+    @Test
+    fun `the refresh button of a part is enabled when nothing is running`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.WIDGET_REFRESH_PREFIX + "w1").assertIsEnabled()
+        }
+
+    // ──────────────── 导出与状态提示 ────────────────
+
+    @Test
+    fun `the export button asks the session to export the report`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            val exported = mutableListOf<String>()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            onExportReport = { exported += it.id },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.EXPORT_BUTTON).performClick()
+
+            assertEquals(listOf("r1"), exported)
+        }
+
+    @Test
+    fun `the export button is disabled while an export is running`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            exportRunning = true,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ReportDesignerTags.EXPORT_BUTTON).assertIsNotEnabled()
+        }
+
+    @Test
+    fun `the status line shows the message it is given`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            status = ReportStatus.Error("报表保存失败了"),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithText("报表保存失败了").assertIsDisplayed()
+            onNodeWithTag(ReportDesignerTags.STATUS_LINE).assertIsDisplayed()
+        }
+
+    @Test
+    fun `there is no status line when there is nothing to say`() =
+        runComposeUiTest(testTimeout = 2.minutes) {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideTestStrings {
+                        ReportDesignerScreen(
+                            reports = listOf(report),
+                            selectedReportId = "r1",
+                            treeRoots = treeRoots,
+                            expandedNodeIds = expandedTreeIds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            onAllNodesWithTag(ReportDesignerTags.STATUS_LINE).assertCountEquals(0)
         }
 
     // ──────────────── 圈定范围的取节点 ────────────────

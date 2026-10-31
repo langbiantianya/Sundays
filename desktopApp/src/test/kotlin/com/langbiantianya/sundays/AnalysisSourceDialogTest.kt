@@ -17,6 +17,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.ui.ProvideStrings
 import com.langbiantianya.sundays.ui.SundaysTheme
@@ -29,6 +30,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 
 /**
@@ -73,6 +75,8 @@ class AnalysisSourceDialogTest {
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            reportStorage =
+                ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
         )
 
     private fun renderDialog() {

@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays.settings
 
 import com.langbiantianya.i18n.AppLanguage
+import com.langbiantianya.sundays.config.appConfigDir
 import com.langbiantianya.sundays.ui.SystemInfoRefresh
 import com.langbiantianya.sundays.ui.ThemeMode
 import com.langbiantianya.sundays.ui.ThemePalette
@@ -17,7 +18,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 /**
  * 应用设置持久化 —— `~/.config/sundays/settings.json`。
@@ -43,7 +43,7 @@ object SettingsStorage {
             encodeDefaults = true
         }
 
-    private fun configDir(): Path = Paths.get(System.getProperty("user.home"), ".config", "sundays")
+    private fun configDir(): Path = appConfigDir()
 
     private fun configFile(): Path = configDir().resolve("settings.json")
 

@@ -14,6 +14,7 @@ import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.DeleteSourceOutcome
 import com.langbiantianya.sundays.analysis.WORKSPACE_SCHEMA
 import com.langbiantianya.sundays.analysis.analysisSchemaNodeId
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -75,6 +77,8 @@ class AnalysisRemoveSourceTest {
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            reportStorage =
+                ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
         )
 
     // ──────────────── 辅助 ────────────────

@@ -87,12 +87,19 @@ dependencies {
     // 源码里要能 new 出这四个方言来注册。
     testImplementation(project(":dialect-mysql"))
     testImplementation(project(":dialect-postgresql"))
-    // DuckDbFileSourceTest 要用 DuckDB 方言 + POI（造 .xlsx）与 duckdb_jdbc 驱动。
-    // 方言模块把 POI 声明成 implementation —— 运行时在（随 runtimeOnly 传递进来），
-    // 但测试**源码**要 import 它来造文件，故这里显式补一条 testImplementation。
+    // DuckDbFileSourceTest 要用 DuckDB 方言（造 .xlsx）与 duckdb_jdbc 驱动。
     testImplementation(project(":dialect-duckdb"))
-    testImplementation(libs.poi)
-    testImplementation(libs.poi.ooxml)
+    // POI —— **报表导出**要写 .xlsx（`ReportXlsxWriter`）。
+    //
+    // 为什么在这里**显式**声明，而不像以前那样靠 `dialect-duckdb` 传递：
+    // 那边是**它**的需要（Excel 预转换），报表导出是**本模块**的需要 ——
+    // 靠传递依赖用别人的库，等于把「本模块需要 POI」这件事藏了起来，
+    // 而依赖一旦收紧就断，且断的时候报错指向「找不到类」，与真正的原因隔了三层。
+    //
+    // ⚠️ **打包运行时不受影响**：POI 早已随 `dialect-duckdb` 进了镜像，
+    // 所以 jlink 的模块清单一个都不用加（见 nativeDistributions 的说明）。
+    implementation(libs.poi)
+    implementation(libs.poi.ooxml)
     testImplementation(project(":api"))
 }
 

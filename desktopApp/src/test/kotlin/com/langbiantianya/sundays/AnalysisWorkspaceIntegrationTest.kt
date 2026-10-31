@@ -14,6 +14,7 @@ import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.analysisRequest
 import com.langbiantianya.grpc.analysisRunQueryRequest
 import com.langbiantianya.loader.DialectLoader
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -61,6 +62,8 @@ class AnalysisWorkspaceIntegrationTest {
                 engine = engine,
                 scope = CoroutineScope(Dispatchers.IO),
                 workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+                reportStorage =
+                    ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
             )
     }
 

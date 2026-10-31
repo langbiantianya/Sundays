@@ -9,6 +9,7 @@
 package com.langbiantianya.sundays.connection
 
 import com.langbiantianya.dialect.contract.AuthMethod
+import com.langbiantianya.sundays.config.appConfigDir
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -17,7 +18,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
@@ -55,10 +55,7 @@ object ConnectionStorage {
         }
 
     /** 获取配置目录路径 */
-    private fun configDir(): Path {
-        val home = System.getProperty("user.home")
-        return Paths.get(home, ".config", "sundays")
-    }
+    private fun configDir(): Path = appConfigDir()
 
     /** 获取配置文件路径 */
     private fun configFile(): Path = configDir().resolve("connection.json")

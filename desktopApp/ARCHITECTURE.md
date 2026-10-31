@@ -499,7 +499,24 @@ desktopApp （本模块）
 | 菜单机制**与浏览模式共用一份** | `TreeContextMenuState` / `TreeContextMenu` / `TreeContextMenuItem` 现在住在 `:shared` 的 `tree/TreeContextMenu.kt`。此前那套机制只在 `desktopApp` 里 —— 分析模式要么复制一份（同一个概念两份实现，改一处忘另一处），要么根本没有右键菜单。菜单项各写各的，但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里（漏了的后果：菜单杵在树上不消失，下一次右键被压在旧 Popup 底下，看起来像「右键没反应了」） | [`TreeContextMenu.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/tree/TreeContextMenu.kt) |
 
 | 分析模式是**两个视图**，不是两个顶层页 | 工作台与报表设计共用**同一份工作区**（同一批拉进来的表、同一套 SQL 语义）。做成两个顶层页的话，「拉好的数据」与「做好的报表」就被分到了两个互不相干的地方 —— 而它们本来就是一件事的两个面。切换条在 `:shared` 的 `analysis/AnalysisModeBar.kt` | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`AnalysisModeBar.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisModeBar.kt) |
-| 报表状态住在**会话**里，不落盘 | 报表 = 若干**部件**，每个部件 = **一条 SQL + 一种图表类型**。落盘要么另开一个文件（要多一套读写与迁移），要么在工作区 DuckDB 里建表（要让引擎知道「这张表不是用户的数据」）—— 这一轮先把**形状**做对，让它住在会话里（**退出即失**）。但「部件 = 一条 SQL」这个形状**从此不许改**：用户搭好的报表会因为形状变化而集体作废 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 报表状态住在**会话**里，而**报表本身落盘**（独立文件） | 报表 = 若干**部件**，每个部件 = **一条 SQL + 一种图表类型**。落盘走**独立**的 `~/.config/sundays/reports.json`（与 `connection.json` 同构），**不进工作区 DuckDB** —— 工作区是**用户自己的**数据，把应用的报表塞进去，用户在自己的工作区里就能查到一张**他没建过的表**；而「应用的文件都在哪」必须**只有一个答案**。「部件 = 一条 SQL」这个形状**从此不许改**：用户搭好的报表会因为形状变化而集体作废 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) + [`ReportStorage.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportStorage.kt) |
+| 落盘的**只有形状**，没有查出来的数 | 部件数据是**派生**的：它由 SQL 在工作区上跑出来，一落盘就开始过时 —— 而**过时的数字比没有数字更危险**（用户会拿它当真的）。重开应用后点一次刷新，数据就回来了 | 同上 |
+| 读不出来时**改名保留**，绝不静默清空 | 静默当成空集（`ConnectionStorage` 现在的做法）会把「文件坏了」变成「数据没了」，而后者**不可逆**。改名的文件**一个字节都没动**，用户可以自己打开看、自己改回来；应用按空集继续，并**明确告知**。连改名都失败时**停掉落盘** —— 绝不能往那个读不出来的文件上写 | 同上 |
+| 磁盘上的 **id 原样保留**，计数器推到最大值 | id 是**计数器**发出来的。不推的话，重开应用后新建的报表会拿到一个**已被占用**的 id —— 两个报表共用一个 id：选中一个会选中两个，删一个会删掉两个，部件的 id 也一样，数据会**串** | 同上 |
+| 部件排序用**按钮**，不用拖拽 | 拖拽要给「部件 = 一条 SQL」之外再加一层**几何信息**，而那对「一张报表」不是必需品。按钮不引入几何信息，那条取舍不用推翻 | 同上 |
+| 「能不能挪」是**规则**，不是界面的判断 | 纯函数 `canMoveReportWidget()` —— 界面拿它**灰按钮**、会话拿它**执行**。两处各写一遍，迟早出现「界面说不行、会话说行」的裂缝 | [`ReportModels.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportModels.kt) |
+| 复制出来的部件**把数据也带过去** | 复制的是**同一条 SQL** —— 结果一模一样，不必再跑一遍（工作区是**一个** DuckDB 文件，查询要排队）。前提由「SQL 一改、旧数据立刻作废」那条规则守着 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 改了 SQL 就把**旧数据丢掉** | 画布上那张图是**旧 SQL** 跑出来的，而用户刚改完 SQL 正是要确认「新 SQL 对不对」—— 留着旧数据就是让他对着旧结果确认新查询，那比没有数据更糟 | 同上 |
+| 导出走 **desktopApp 侧直接 POI**，不走引擎 | 数据**已经在这儿**（前端的 `widgetResults`）。走引擎要把「部件清单 + 每块的数据」整个传过去，再让引擎写文件 —— 为了同一个结果，多出一条协议、一份 proto、一个路由。而且走引擎意味着**重跑一遍 SQL**，重跑的结果可能与屏幕上看到的不一样：**发出去的文件与眼前对不上**，比慢一点糟糕得多。**POI 早已随 `dialect-duckdb` 进了打包运行时**，所以这里**不新增任何运行时依赖**，jlink 的模块清单一个都不用加 | [`ReportXlsxWriter.kt`](./src/main/kotlin/com/langbiantianya/sundays/ReportXlsxWriter.kt) |
+| 导出里图表落成**表格**（类别 / 数值 / 占比%） | POI 的 XDDF 能画真图表，但那份代码要伺候 Excel / WPS / LibreOffice 三方的差异，而「表格 + 占比」在哪儿都打得开。仓库原则是「宁可少给，不给一个点了必然失败的东西」—— 一个发出去打不开的 xlsx，比一个只有数字的 xlsx 糟得多 | 同上 |
+| 表格部件的单元格**原样写成文本** | 那一列可能是编号（`007` 写成数字就变成 `7`）、可能是长 ID（写成数字会变科学计数法）。把用户的数据「顺手」转成数字，是**篡改** | 同上 |
+| 数据画不出来时**原样导出** | 画不出来只说明**这个形状画不成图**（缺列 / 值不是数字 / 有负值），不说明数据没用。用户拿到的仍然是**那些数** —— 丢掉它们才是真正的损失 | 同上 |
+| 导出**先刷新再写** | 导出的要是**导出那一刻**的真实数据。拿内存里那份导出，用户看到的与收到的可能不是一回事 | [`AnalysisSession.kt`](./src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) |
+| 「另存为」是会话的**构造参数**（接缝） | 会话收的是「挑一个路径」这件事本身，不是「怎么挑」（弹框、预填文件名归 `NativePathPicker`）。理由是**导出流程必须能被确定性地测** —— 真实现会弹一个 AWT 模态框：无头环境弹不出来，有桌面的机器上弹得出来也**没人去点**，测试会**永远等下去**（模态框还占住 AWT 事件线程，测试进程退不出去）。与 `puller` 同一个道理：**接缝是为了让状态机可测** | 同上 + [`NativePathPicker.kt`](./src/main/kotlin/com/langbiantianya/sundays/NativePathPicker.kt) |
+| 导出期间的状态提示**压过**「上一次的结果」 | 导出要**重跑每个部件的 SQL**，那不是一瞬间的事。按钮灰掉只说明「点不动了」，没告诉用户**正在忙**；而上一条「已导出到 …」还挂在屏上，会让人以为**导出已经结束了**。「正在导出」说的是**在等什么**，而不是**上一次发生了什么** | 同上（`reportStatus`） |
+| 「刷新整张报表」「刷新一个部件」「导出」**互斥** | 三者都要动工作区这个**一个** DuckDB 文件 —— 并发查询会互相抢锁，而且后完成的会把先完成的盖掉（A 部件的位置上显示着 B 部件的数据）。判据收在一个 `workspaceBusy()` 里 | 同上 |
+| 运行标志**同步**置位 | 它是「这把锁已经被占了」的凭据。放在协程里置位的话，连点两下会**两次都通过检查** —— 两个刷新一起跑，后完成的把先完成的盖掉。而标志必须**在调用返回之前**就置上，所以清标志用 `invokeOnCompletion`（协程**还没开始跑**就被取消时，`finally` 不会执行，标志会永远卡在 true 上） | 同上 |
+| 「应用配置目录」只有**一份**实现 | `connection.json` / `settings.json` / `workspace.duckdb` / `reports.json` 各自都写了一遍 `~/.config/sundays`。四份字面量今天一样，明天改目录名就会漏掉一份 —— 而漏掉的那一份的症状是「设置没了 / 报表没了」，用户完全不知道该去哪找 | [`AppConfigDir.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/config/AppConfigDir.kt) |
 | 部件的 **id 是保存时才有的** | 新建中的部件 id 是**空串**（`newReportWidgetDraft()`）：id 是「存下来之后」才有的身份 —— 它可能下一刻就被用户「取消」了。先发一个 id 出去等于承诺了一个它永远不会用到的身份，而这些 id 会一直留在会话的计数里，让后面的部件都带着一个空洞的序号 | 同上 |
 | 删部件 / 删报表要**连它的数据一起删** | 删掉却不删，会留下一堆**永远没人引用**的查询结果 —— 地图越攒越大，而界面上再也看不到它们（而且按 id 找不回来，再也删不掉） | 同上 |
 | 刷新一张报表**串行**跑它的部件 | 工作区是**一个** DuckDB 文件 —— 并发查询会互相抢锁，而且后完成的会把先完成的盖掉，用户看到的是**错配**的结果（A 部件的位置上显示着 B 部件的数据）。串行慢一点，但每个部件拿到的都是**自己**那份 | 同上（`refreshReport`） |
@@ -549,6 +566,8 @@ desktopApp （本模块）
 | **通知中心** | `MainScreen`（**屏级**） | 保持 | 保持 |
 
 | **报表与部件**（报表清单 / 选中项 / 部件数据 / 样例数据） | `AnalysisSession` | 保持 | 不适用（分析模式与连接无关） |
+| **报表本身**（形状：id / 名字 / 部件的类型 / 标题 / SQL） | `AnalysisSession` + `~/.config/sundays/reports.json`（**每次改动自动落盘**） | 保持 | 不适用（**跨会话也在** —— 重开应用还在） |
+| **报表的运行态**（正在刷新的部件 / 正在导出 / 状态提示） | `AnalysisSession` | 保持 | 不适用 |
 | **分析模式的视图**（工作台 / 报表设计） | `AnalysisSession` | 保持 | 不适用 |
 | **报表数据树**（节点 / 展开态） | `AnalysisSession`（**与工作台共用同一份**） | 保持 | 不适用 |
 | **报表设计两侧面板的折叠态与宽度** | `ReportDesignerScreen`（**屏幕层**） | 保持 | 不适用（窗口级偏好，不落盘） |

@@ -1,7 +1,7 @@
 # shared — KMP 共享 UI 组件
 
-面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。127 个源文件（`commonMain` 90 / `commonTest` 34 /
-`jvmTest` 3），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
+面向 **Compose Multiplatform Desktop** 的可扩展 UI 组件库。131 个源文件（`commonMain` 92 / `commonTest` 35 /
+`jvmTest` 4），KMP 工程结构，当前仅启用 `jvm` 单一目标（macOS / Linux / Windows Desktop），KMP 结构天然支持后续
 扩展 `androidMain` / `iosMain`。
 
 > **本文档的形态**：**大纲 + 组件目录**。「有哪些组件、各自一句话、源码在哪」留在这里；
@@ -39,6 +39,9 @@
 | `AnalysisScreen` / `AnalysisModeBar` | 数据分析模式的界面层：工作台（工作区树 + 编辑器 + 只读结果表）与**两个视图的切换条**（工作台 / 报表设计） | [`analysis/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/) |
 | `ReportDesignerScreen` / `ReportWidgetEditor` / `PieChart` / `BarChart` | **报表设计**：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**。设计页面（报表列表 + **数据树** + 部件画布）、部件编辑页（**数据树** / 类型 / 标题 / SQL + **样例数据**）、**手绘**的饼图与条形图（不用第三方库） | [`analysis/report/`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/) |
 | `ReportDataTreePane` | 报表设计用的**数据树**窄条（工作区 → 表 → 字段），复用共享树组件 `ObjectTree` —— 报表设计页与部件编辑页**各一棵、同一份数据** | [`analysis/report/ReportDataTreePane.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDataTreePane.kt) |
+| `ReportStorage` | **报表落盘**（`~/.config/sundays/reports.json`）—— 与 `ConnectionStorage` 同构。**只存形状不存数**；写盘走「临时文件 + 原子替换」；**读不出来时绝不静默清空** —— 原文件改名保留，应用按空集继续并明确告知 | [`analysis/report/ReportStorage.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportStorage.kt) |
+| `canMoveReportWidget` / `moveReportWidget` | **部件顺序的纯规则** —— 界面拿它灰按钮、会话拿它执行，两边都问同一份规则（各写一遍迟早出现「界面说不行、会话说行」的裂缝） | [`analysis/report/ReportModels.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportModels.kt) |
+| `appConfigDir` / `appConfigDirText` / `appConfigFile` | 应用配置目录（`~/.config/sundays`）的**唯一**算法 —— 四个应用级文件各写一遍那两个字面量的话，改目录名就会漏掉一份 | [`config/AppConfigDir.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/config/AppConfigDir.kt) |
 | `analysisTableRef` / `analysisColumnRef` / `appendAnalysisTableRef` / `appendAnalysisColumnRef` | 「树上的一个对象」到「SQL 里的一段引用」的**纯规则**（`"schema"."表"` / `"schema"."表"."字段"`，`main` 不带前缀）—— 分析工作台与报表设计**共用这一份** | [`analysis/AnalysisSqlRef.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisSqlRef.kt) |
 | `SheetTabRow` / `EmptySheetsHint` / `BrowserToolBar` / `BrowserPane` / `SheetSummary` | 浏览器的**标签条 / 工作台切换 / 空态引导** —— 纯展示，只认窄数据形状 | [`browser/`](./src/commonMain/kotlin/com/langbiantianya/sundays/browser/) |
 | `NotificationCenter` / `NotificationCenterPanel` / `NotificationBell` | 通知中心（状态 + 面板 + 铃铛入口）—— 跨界面收集错误 | [`notifications/`](./src/commonMain/kotlin/com/langbiantianya/sundays/notifications/) |

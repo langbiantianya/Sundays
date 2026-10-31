@@ -11,6 +11,7 @@ package com.langbiantianya.sundays
 import com.langbiantianya.engine.IdbEngine
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.findObjectTreeNode
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -66,6 +68,8 @@ class AnalysisSourceSessionTest {
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            reportStorage =
+                ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
         )
 
     private fun csvFile(

@@ -849,6 +849,9 @@ internal fun MainScreen(
                                     previewResult = analysis.previewResult,
                                     previewRunning = analysis.previewRunning,
                                     refreshRunning = analysis.refreshRunning,
+                                    refreshingWidgetIds = analysis.refreshingWidgetIds,
+                                    exportRunning = analysis.exportRunning,
+                                    status = analysis.reportStatus,
                                     // 树与展开态**与工作台共用同一份** ——
                                     // 那是同一棵工作区树，不该有两份状态。
                                     treeRoots = analysis.treeRoots,
@@ -863,6 +866,12 @@ internal fun MainScreen(
                                     onDeleteReport = analysis::deleteReport,
                                     onSaveWidget = analysis::saveWidget,
                                     onDeleteWidget = analysis::deleteWidget,
+                                    onCopyWidget = analysis::copyWidget,
+                                    onMoveWidget = analysis::moveWidget,
+                                    onRefreshWidget = { reportId, widgetId ->
+                                        analysis.refreshWidget(reportId, widgetId)
+                                    },
+                                    onExportReport = { report -> analysis.exportReport(report) },
                                     onPreviewSql = { analysis.previewSql(it) },
                                     onRefreshReport = { analysis.refreshReport(it) },
                                     // 两侧分隔条的悬停指针 —— 平台专属资源由平台侧造

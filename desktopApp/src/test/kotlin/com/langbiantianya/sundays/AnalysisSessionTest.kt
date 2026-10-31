@@ -16,6 +16,7 @@ import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
 import com.langbiantianya.sundays.analysis.PullOutcome
 import com.langbiantianya.sundays.analysis.PullResult
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import com.langbiantianya.sundays.connection.DialectType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,7 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -77,6 +79,8 @@ class AnalysisSessionTest {
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            reportStorage =
+                ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
             puller = puller,
         )
 

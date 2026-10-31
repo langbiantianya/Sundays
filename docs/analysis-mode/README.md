@@ -1833,6 +1833,10 @@ message ReportRequest {
 | `desktopApp` | [`AnalysisSession.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | 报表状态 + `previewSql()` / `refreshReport()` |
 | `desktopApp` | [`main.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/main.kt) | 两个视图的装配 |
 
+> **v2.40 的新增落点单列一节** —— 见 §7.6.6。本表是「报表设计器」落地时的落点；
+> v2.40 给报表补上落盘 / 导出 / 复制排序 / 单部件刷新，那几样的落点
+> **不在本表里叠加**（否则同一个文件会在两张表里各写一遍，改一处漏一处）。
+
 **为什么图表不用第三方库**：`:shared` 的 `commonMain` 不能引 Android-only 依赖，
 而为一个「饼图 + 条形图」引入一整套图表框架不划算。手绘这两个图形不到一百行
 （`drawArc` + `drawRoundRect`）。图例用普通 `Text` —— **Canvas 里画不了文字**
@@ -1973,6 +1977,19 @@ Excel / WPS / LibreOffice 三方的差异，而「表格 + 占比」在哪儿都
 **为什么先刷新再导出**：导出的应该是**导出那一刻**的真实数据。
 拿内存里那份导出，用户看到的与收到的可能不是一回事。
 
+**导出期间状态条说「正在导出…」**：导出要**重跑每个部件的 SQL**，
+那不是一瞬间的事。按钮灰掉只说明「点不动了」，没告诉用户**正在忙**；
+而上一条「已导出到 …」还挂在屏上，会让人以为**导出已经结束了**。
+所以「正在导出」在状态提示里**压过**「上一次的结果」——
+它说的是**在等什么**，而不是**上一次发生了什么**。
+
+**「另存为」是会话的一个构造参数**：会话收的是「挑一个路径」这件事本身，
+而不是「怎么挑」（弹框、预填文件名归 `NativePathPicker`）。
+理由是**导出流程必须能被确定性地测** —— 真实现会弹一个 AWT 模态框：
+无头环境里弹不出来，有桌面的机器上弹得出来也**没人去点**，
+测试会**永远等下去**（模态框还把 AWT 事件线程占住，测试进程退不出去）。
+与 `puller` 同一个道理：**接缝是为了让状态机可测**。
+
 #### 7.6.6 代码落点
 
 | 层 | 文件 | 内容 |
@@ -1981,7 +1998,7 @@ Excel / WPS / LibreOffice 三方的差异，而「表格 + 占比」在哪儿都
 | `:shared` | [`analysis/report/ReportStorage.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportStorage.kt) | **新增**：报表落盘（原子写 + 读失败改名保留） |
 | `:shared` | [`config/AppConfigDir.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/config/AppConfigDir.kt) | **新增**：应用配置目录的**唯一**算法（`connection.json` / `reports.json` / `workspace.duckdb` 共用） |
 | `:shared` | [`analysis/report/ReportDesignerScreen.kt`](../../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) | 部件卡片头加「刷新 / 复制 / 上移 / 下移」；画布头加「导出」；顶部加状态提示条 |
-| `desktopApp` | [`AnalysisSession.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | 复制 / 移动 / 单部件刷新；自动落盘；导出编排 |
+| `desktopApp` | [`AnalysisSession.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/AnalysisSession.kt) | 复制 / 移动 / 单部件刷新；自动落盘；导出编排（**「另存为」是构造参数** —— 见下） |
 | `desktopApp` | [`ReportXlsxWriter.kt`](../../desktopApp/src/main/kotlin/com/langbiantianya/sundays/ReportXlsxWriter.kt) | **新增**：报表 → `.xlsx`（POI） |
 
 #### 7.6.7 明确的取舍（这一轮的）
@@ -2102,6 +2119,10 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ③′ 报表设计（图表型，v2.37 已落地） | 删报表 / 删部件的**确认框** | `ConfirmDialog`（**新增通用件** —— 同一个概念只有一份实现） | ★ 新增（`:shared` 的 `ui/`） |
 | ③′ 报表设计（图表型，v2.38 已落地） | **数据树**（画布上与编辑页里各一棵，**同一份**节点与展开态） | `ReportDataTreePane` + `ObjectTree`（**与浏览 / 工作台同一个树组件** —— 不重画） | ★ 新增（`:shared` 的 `analysis/report/`） |
 | ③′ 报表设计（图表型，v2.38 已落地） | 「树上的一个对象」→「SQL 里的一段引用」 | `analysisTableRef` / `analysisColumnRef` / `appendAnalysis*Ref`（**纯函数**，分析工作台与报表设计**共用这一份**） | ★ 新增（`:shared` 的 `analysis/AnalysisSqlRef.kt`） |
+| ③′ 报表设计（v2.40 已落地） | 部件卡片头的**六个按钮**（刷新 / 复制 / 上移 / 下移 / 编辑 / 删除） | `WinIconButton` | ——（组件不是新增，v2.40 加了四个按钮） |
+| ③′ 报表设计（v2.40 已落地） | 画布头的**「导出」按钮**（把报表写成 `.xlsx`） | `WinIconButton`（`Icons.Filled.Download`） | —— |
+| ③′ 报表设计（v2.40 已落地） | 画布上的**状态提示条**（有话要说时才有：导出结果 / 落盘失败 / 启动时读文件失败） | `Text` | —— |
+| ③′ 报表设计（v2.40 已落地） | **「另存为」对话框**（选导出路径，默认文件名预填 `<报表名>.xlsx`） | `NativePathPicker.pickFile`（`desktopApp`，**平台专属** —— `:shared` 里没有也不该有文件对话框） | —— |
 | ④ 连接管理器 | **整屏** | `ConnectionManagerScreen`（**同一个**，只换分组方式） | —— |
 | ⑤ 连接向导 | **整屏** | `AddConnectionDialog` / `ConnectionWizardContent`（**同一个**） | —— |
 | ⑤ 连接向导 | 认证方式下拉 | `WinDropdown` | ★ 新增（§6.3.4） |
@@ -2111,6 +2132,12 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 > **统计**：本模式**零改动复用的组件 19 项**，**新增组件 5 项**（其中 1 项是扩充 `WinControls`）。
 > 没有一项是「另写一套看起来差不多的」。
+>
+> **v2.40 又零改动复用了 4 处，新增组件 0 项** —— 部件卡片头的四个按钮、
+> 画布头的「导出」按钮、状态提示条用的 `Text`，以及「另存为」对话框用的
+> `NativePathPicker`（**desktopApp 侧的平台专属件**，`:shared` 里没有也不该有文件对话框）。
+> 报表落盘的 `ReportStorage` 与导出的 `ReportXlsxWriter` **不是界面组件**，
+> 它们不进这张表 —— 这张表只回答「设计图上看到的每一块由谁渲染」。
 
 > ⚠️ **顶栏右上角只放一个 ⚙ 设置入口**（与浏览模式同一个 `SettingsEntryButton`），
 > **不放主题切换、不放语言切换**。理由跟真实应用一致：
@@ -2128,7 +2155,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | **① 分析模式说明** | 讲清本模式的边界与「复用什么」。 |
 | **② 分析工作区** | 左：**树**（**根 = 工作区的各个 schema**：`main` 是工作区自己的表，每个**数据源**一个 —— 树与浏览模式的对象树**同形**：库 → 表 → 字段；展开一张表能看到它的字段）。树的**头上**有一个 **「+」** —— 打开分析模式专属的「添加数据源」对话框（远程数据库 / 文件）。中：SQL 编辑器（**工具条上「格式化」旁边就是「▶ 运行」**）+ 结果表（带占比条形）；**两者之间那条缝可拖**（编辑器高度可调，双击复位 —— 结果表有 140dp 下限，拖不下去）。分析屏上**没有**独立工具条，也没有只读徽标。 |
 | **③ 报表设计器** | 左：区块列表（可增删排序）。中：区块配置（列规格 / 类型 / 数字格式 / 样式）。右：Excel 观感预览（标题 + 元信息 + 表头 + 斑马纹）。**（M6，尚未开工）** |
-| **③′ 报表设计（图表型，v2.39 已落地）** | 分析模式的**第二个视图**（顶部一条「工作台 / 报表设计」切换条）。**最左：数据树**（工作区 → 表 → 字段，**与工作台同一棵**）。中：当前报表的**部件画布** —— 一块块往下排，每块是「**一条 SQL + 一种图表类型**」（饼图 / 条形图 / 表格）。**最右：报表列表**（新建 / 重命名 / 删除）。**两侧都能折叠收纳** —— 各收成贴边的一条 44dp 窄轨，把宽度还给画布；折叠按钮的箭头**按贴边的那一侧镜像**。点「添加部件」——或**点树上的一张表**——打开**覆盖层**的编辑页：左边**数据树**、中间 SQL、右边这条 SQL **真跑出来的样例数据**（原始行 + 图表预览并排）。 |
+| **③′ 报表设计（图表型，v2.39 布局已落地、v2.40 补齐可用性）** | 分析模式的**第二个视图**（顶部一条「工作台 / 报表设计」切换条）。**最左：数据树**（工作区 → 表 → 字段，**与工作台同一棵**）。中：当前报表的**部件画布** —— 一块块往下排，每块是「**一条 SQL + 一种图表类型**」（饼图 / 条形图 / 表格）；每块卡片的**头上一排按钮**：刷新（只刷这一个）、复制、上移、下移、编辑、删除。**最右：报表列表**（新建 / 重命名 / 删除）。**两侧都能折叠收纳** —— 各收成贴边的一条 44dp 窄轨，把宽度还给画布；折叠按钮的箭头**按贴边的那一侧镜像**。画布头上一枚**「导出」按钮**（把当前报表写成 `.xlsx`，先弹「另存为」），下面一条**状态提示条**（有话要说时才有：导出成没成、报表存没存上）。点「添加部件」——或**点树上的一张表**——打开**覆盖层**的编辑页：左边**数据树**、中间 SQL、右边这条 SQL **真跑出来的样例数据**（原始行 + 图表预览并排）。**报表自己会落盘**（`~/.config/sundays/reports.json`），关掉应用再打开，搭好的报表还在 |
 | **④ 连接管理器（复用 + 通用化后）** | **同一个**连接管理器：列表按「可浏览 / 可分析」分组、只读方言带 ⓘ 徽标；右侧是选中连接的详情（含「只读方言」说明与「在数据分析中打开」）。 |
 | **⑤ 新增连接向导（复用 + 通用化后）** | **同一个**添加连接弹窗，但表单由**方言自描述**渲染：认证方式下拉（账密 / Kerberos）、方言特有字段、「高级属性」折叠区、以及**自定义 JDBC URL** 逃生舱。 |
 | **⑥ 组件复用对照（v0.3 新增）** | 一张对照表：每个界面区域 → 复用的现成组件 / 新增的组件，并标出各自落在 `:shared` 的哪个文件。它把 §6 与 §9.3 变成**能看见的东西**。 |
@@ -2150,6 +2177,9 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `shared/src/commonMain/.../analysis/` | `AnalysisScreen.kt`、`AnalysisModeBar.kt`（两个视图的切换条）、`AnalysisSqlRef.kt`（「树上的一个对象」→「SQL 里的一段引用」的**纯规则**，分析工作台与报表设计**共用**）、`analysis/report/`（**报表设计**：`ReportModels.kt` / `ReportChart.kt` / `ReportLabels.kt` / `ReportDesignerScreen.kt` / `ReportWidgetEditor.kt` / `ReportDataTreePane.kt`）。**v2.39**：`ReportDesignerScreen` 的布局改成「**数据树（左）｜ 画布 ｜ 报表列表（窗口最右）**」，两侧各套一个 `SidePaneShell`（都能折叠收纳） |
 | `shared/src/commonMain/.../analysis/AnalysisModels.kt` | 数据源条目（id / 名称 / 方言标签）+ 结果模型 —— **只带界面显示需要的字段**：凭据与连接配置留在 desktopApp 侧，这一层不携带凭据、也不决定连不连 |
 | `shared/src/commonMain/.../analysis/AnalysisPull.kt` | 拉取的**纯模型**：进度（已读行数）、结果、终态模型（sealed）、用户取消的专用异常 |
+| `shared/src/commonMain/.../config/AppConfigDir.kt` | **新增（v2.40）**：应用配置目录的**唯一**算法（`~/.config/sundays`）—— `connection.json` / `settings.json` / `workspace.duckdb` / `reports.json` **四个应用级文件共用这一份**。原先各写一遍那两个字面量，改目录名就会漏掉一份，而漏掉的那一份症状是「设置没了 / 报表没了」，用户完全不知道该去哪找 |
+| `shared/src/commonMain/.../analysis/report/ReportStorage.kt` | **新增（v2.40）**：报表落盘 —— 只存**形状**不存**数**（部件 = 一条 SQL + 一种图表类型）；原子写（临时文件 → 落位）；读不出来**改名保留**，绝不静默清空 |
+| `desktopApp/src/main/.../ReportXlsxWriter.kt` | **新增（v2.40）**：报表 → `.xlsx`（POI，**desktopApp 侧**、不走引擎）—— 抬头页（含每个部件的 SQL）+ 每部件一个 Sheet；图表落成「类别 \| 数值 \| 占比%」三列 |
 | `shared/src/commonMain/.../tree/ObjectTreeModel.kt` | **两棵树共用的模型**（纯数据）：节点种类（库 / 表 / 字段）、字段信息、对象组、「按 id 找 / 按 id 替换」等纯规则 |
 | `shared/src/commonMain/.../tree/ObjectTree.kt` | **两棵树共用的组件**：库 → 表 → 字段的渲染（箭头、图标、字段行的 `PK/AI/非空` 标记）、展开 / 收起、点表 / 点字段的回调、右键回调 |
 | `shared/src/commonMain/.../ui/SidePaneShell.kt` | **可折叠侧边面板的外壳**（浏览模式 / 分析工作台 / **报表设计的两侧**共用；v2.39 起从 `tree/TreePaneShell.kt` 搬来并改名）：展开态 = 面板 + 可拖宽的分隔条，折叠态 = 贴到**窗口边**的 **44dp 窄轨**（展开按钮 + 一枚图标）；折叠 / 展开按钮（`SidePaneToggleButton`）+ 箭头朝向的**纯函数**（`sidePaneToggleIcon`）。贴在左边与贴在右边是**镜像**的，全由 `PaneEdge` 驱动。宽度**不由它持有**（受控），指针图标**由调用方给**（平台专属），**滚动状态也不由它持有**（提到面板外：分析模式在屏幕层、浏览模式在会话里） |
@@ -2203,7 +2233,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `desktopApp/src/test/.../DialectFormContractTest.kt` | **新增**：连接类型名的**三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）—— 漂移的症状是**静默回退旧分支**，只能靠测试钉住 |
 | `desktopApp/.../ConnectionSession.kt` | 持有 `dialectForms` + `refreshDialectForms()`（启动时拉一次，失败保持空注册表）+ `analysisCapableDialects`（声明了 `ANALYSIS_SOURCE` 的方言集合，**来自引擎**） |
 | `shared/.../connection/DialectMetadata.kt` | **新增**：前端方言元数据的唯一真相源（`mapOf` 表） |
-| `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL |
+| `shared/.../connection/ConnectionStorage.kt` | 持久化版本 2 → 3，v2 记录补齐新字段；**自定义 URL 靠「前缀对不上」识别**，加载后仍是自定义 URL。**v2.40**：`configDir()` 改用 `appConfigDir()` —— 配置目录的算法**收口到一处** |
 | `shared/.../settings/SettingsCategory.kt` | 加「数据分析」分类（AI 配置 / 报表默认样式 / 输出目录） |
 | `shared/.../ui/WinControls.kt` | **加** `WinDropdown` / `WinDropdownMenu`（**新增组件 5/5**，§6.3.4） |
 | `shared/.../editor/SqlDialectProfileRegistry.kt` | **新增**：方言档位注册表（§6.3.1） |
@@ -2216,9 +2246,16 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `engine-protocol/.../idb_engine.proto` | `Category.ANALYSIS/REPORT` + 新 Action + `ReportRequest` + `ConnectionConfig.read_only` |
 | `engine/.../dispatcher/RequestDispatcher.kt` | 只读闸门（L4） |
 | `engine/.../export/ExcelWriter.kt` | 类型分派抽到 `CellValueWriter`（**不改变现有行为**） |
-| `i18n/src/main/.../StrKey` + 6 张文案表 | 新增文案键（**六语言必须同步**） |
+| `shared/.../analysis/report/ReportModels.kt` | **v2.40**：加 `@Serializable`（落盘要能序列化）；新增部件顺序的**纯规则**（`canMoveReportWidget()` / `moveReportWidget()` —— 挪不动时**原样返回**，界面灰按钮与会话执行都问它） |
+| `shared/.../analysis/report/ReportLabels.kt` | **v2.40**：新增 `reportDisplayNameText()` —— 报表**显示名**的规则只有一份（会话不是 Composable，取不到当前语言，兜底名由调用方按语言算好） |
+| `shared/.../analysis/report/ReportDesignerScreen.kt` | **v2.40**：部件卡片头加四个按钮（刷新 / 复制 / 上移 / 下移）、画布头加「导出」、顶部加状态提示条；新增参数（`refreshingWidgetIds` / `exportRunning` / `status`）与四个回调 |
+| `shared/.../settings/SettingsStorage.kt` | **v2.40**：`configDir()` 改用 `appConfigDir()`（同 `ConnectionStorage`） |
+| `shared/.../analysis/AnalysisWorkspace.kt` | **v2.40**：工作区默认目录改用 `appConfigDirText(home)` |
+| `desktopApp/.../AnalysisSession.kt` | **v2.40**：复制 / 移动 / 单部件刷新 / 导出；报表**自动落盘**（`persistReports()` 同步写盘 —— 同步写不会「后起的那个先落地」把文件退回旧状态）；`reportStatus` 状态提示；`workspaceBusy()` 把「刷新整张 / 刷新单个 / 导出」收成**一把互斥锁**（工作区是**一个** DuckDB 文件，并发查询会互相抢锁）；**运行标志同步置位** + `invokeOnCompletion` 清标志（原先在协程内部置位 → 连点两下会两个刷新一起跑，造成数据错配） |
+| `desktopApp/.../main.kt` | **v2.40**：装配新的回调与状态（`refreshingWidgetIds` / `exportRunning` / `reportStatus`） |
+| `i18n/src/main/.../StrKey` + 6 张文案表 | 新增文案键（**六语言必须同步**）。**v2.40**：再加 19 个（部件的刷新 / 复制 / 上移 / 下移、导出与导出中、状态提示、导出页里那几张表的标签） |
 | `settings.gradle.kts` | `include(":dialect-hive")` / `include(":dialect-impala")` |
-| `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖；**加** `implementation(project(":api"))` —— 前端要按**引擎侧同一个** `DialectCapability` 枚举判「哪些方言可分析」，前端另写一份名单就是第二个真相源 |
+| `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖；**加** `implementation(project(":api"))` —— 前端要按**引擎侧同一个** `DialectCapability` 枚举判「哪些方言可分析」，前端另写一份名单就是第二个真相源。**v2.40**：POI 从 `testImplementation` 改 `implementation`（`dialect-duckdb` 本就带着它 → **打包运行时不变**，jlink 清单不用动） |
 | `gradle/libs.versions.toml` | `hive-jdbc` 版本（spike 结论出来后定） |
 
 ### 10.3 打包要留意
@@ -2568,6 +2605,38 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
   - 两侧的折叠箭头**互为镜像**（收起时指向**贴边**的那一侧）
   - 两块面板的折叠按钮**各有各的无障碍文案**（共用一句的话，提示反而在误导人）
 - **依赖**：M6''
+
+### M6'''' —— 报表可用化：存得住 / 给得出去 / 搭得省力 / 看得快 ✅ **v2.40 已落地**
+
+> **与 M6''' 的关系**：M6''' 把这一页**排**好了；M6'''' 让它**真的能用** ——
+> 搭好的报表**存得住**（重开应用还在）、**给得出去**（导出 `.xlsx`）、
+> **搭得省力**（复制 / 调顺序）、**看得快**（只刷一个部件）。
+> 四个缺口的取舍见 §7.6。
+
+- **交付**
+  - **落盘**：报表写进 `~/.config/sundays/reports.json`（独立 JSON 文件，**不进工作区 DuckDB**）
+    - 只存**形状**不存**数** —— 数据是派生数据，一落盘就开始过时，而**过时的数字比没有数字更危险**
+    - 原子写（临时文件 → 落位 → 删临时文件）；读不出来**改名保留**，绝不静默清空
+    - 磁盘上的 id 原样保留，**计数器推到最大值**（否则重开应用后新建报表会拿到已占用的 id → 选中 / 删除串）
+  - `AppConfigDir` —— 应用配置目录的**唯一**算法（`connection.json` / `settings.json` /
+    `workspace.duckdb` / `reports.json` 共用）
+  - 部件**复制**（插在原件**后面**、内容一样、**id 是自己的**、**数据一起带过去**）
+  - 部件**上移 / 下移**（按钮，不做拖拽；能不能挪是**纯规则** `canMoveReportWidget()`）
+  - 部件**单部件刷新**（只重跑那一条 SQL）
+  - **导出 `.xlsx`**：抬头页（报表名 / 导出时间 / **每个部件的 SQL**）+ 每部件一个 Sheet；
+    图表落成「类别 | 数值 | 占比%」，画不出来时**原样导出 SQL 结果**
+  - **「另存为」对话框**（复用 `NativePathPicker.pickFile`，默认文件名预填 `<报表名>.xlsx`）
+  - **状态提示条**（导出结果 / 落盘失败 / 启动时读文件失败）
+- **验收**
+  - 报表**重开应用还在**；磁盘上的 id **不会被再发一遍**
+  - 坏掉的 `reports.json` 被**改名保留**，**一个字节都没动**；应用按空集继续并**明确告知**
+  - 复制出来的部件**在原件后面**、**数据也带过去**、**id 是自己的**
+  - 第一个不能上移、最后一个不能下移（到边了**灰掉**）；挪不动时**什么也不变**
+  - 单部件刷新**只刷那一个**
+  - 导出的 `.xlsx` **读得回来**：抬头页找得到部件的 SQL；表格部件逐行铺开且**单元格保持文本**
+    （`007` 不能变成 `7`）；图表部件有**占比列**且**加起来是 100%**；同名部件**拿到不同的 Sheet 名**
+  - 「刷新整张 / 刷新单个 / 导出」**共用一把锁**（工作区是**一个** DuckDB 文件）
+- **依赖**：M6'''
 
 ### M7 —— AI 洞察（后续迭代，不在 v1 范围）
 

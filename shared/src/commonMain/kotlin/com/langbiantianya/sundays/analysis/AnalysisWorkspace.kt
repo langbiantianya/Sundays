@@ -8,6 +8,8 @@
 
 package com.langbiantianya.sundays.analysis
 
+import com.langbiantianya.sundays.config.appConfigDirText
+
 /*
  * 分析工作区的**纯规则** —— 工作区文件的位置、staging 表名怎么拼。
  *
@@ -42,10 +44,16 @@ const val WORKSPACE_FILE_NAME: String = "workspace.duckdb"
  * 仓库现有的应用级文件（`connection.json`）就在 `~/.config/sundays/`。
  * 为一个文件另立一套目录规则，会让「应用的文件都在哪」这个问题多一个答案 ——
  * 而多一个答案就意味着将来清理 / 备份 / 迁移要记得两处。
+ *
+ * ## 为什么默认目录是**问**出来的而不是**写**出来的
+ *
+ * 目录名只有一份实现（`config/AppConfigDir.kt`）。这一处要是自己写一遍
+ * `".config" / "sundays"`，改目录名时就会漏掉它 —— 而漏掉的后果是
+ * 「工作区不见了」，用户拉了半天数据全没了。
  */
 fun workspaceFilePath(
     home: String,
-    configDir: String = "$home/.config/sundays",
+    configDir: String = appConfigDirText(home),
 ): String = "$configDir/$WORKSPACE_FILE_NAME"
 
 /**

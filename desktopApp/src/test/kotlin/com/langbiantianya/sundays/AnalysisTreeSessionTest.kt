@@ -13,6 +13,7 @@ import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.loader.DialectLoader
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
+import com.langbiantianya.sundays.analysis.report.ReportStorage
 import com.langbiantianya.sundays.connection.DialectType
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
@@ -27,6 +28,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -71,6 +73,8 @@ class AnalysisTreeSessionTest {
             engine = engine,
             scope = scope,
             workspaceFile = "${tempHome.absolutePath}/.config/sundays/workspace.duckdb",
+            reportStorage =
+                ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
         )
 
     private fun binding(
@@ -255,6 +259,8 @@ class AnalysisTreeSessionTest {
                 scope = scope,
                 // 指向 tempHome **这个目录**本身 —— 它不是文件，DuckDB 开不了。
                 workspaceFile = tempHome.absolutePath,
+                reportStorage =
+                    ReportStorage(Paths.get(tempHome.absolutePath, ".config", "sundays", "reports.json")),
             )
         session.setSources(emptyList())
 

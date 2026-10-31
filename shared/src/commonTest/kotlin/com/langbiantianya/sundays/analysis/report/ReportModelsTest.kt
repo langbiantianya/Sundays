@@ -204,4 +204,76 @@ class ReportModelsTest {
         // 不说清楚的话，用户会以为那就是新 SQL 的结果。
         assertTrue(isPreviewStale("SELECT 1", "SELECT 2"))
     }
+
+    // ──────────────── 部件的顺序 ────────────────
+
+    /** 三个部件 —— 顺序即显示顺序。 */
+    private fun widgets() =
+        listOf(
+            ReportWidget("w1", ReportWidgetType.BAR, "甲", "SELECT 1 AS a, 2 AS b"),
+            ReportWidget("w2", ReportWidgetType.PIE, "乙", "SELECT 1 AS a, 2 AS b"),
+            ReportWidget("w3", ReportWidgetType.TABLE, "丙", "SELECT 1 AS a, 2 AS b"),
+        )
+
+    @Test
+    fun `the first widget cannot move up`() {
+        // 已经是第一个了 —— 再往上挪没有意义，按钮要灰掉。
+        assertFalse(canMoveReportWidget(widgets(), "w1", ReportWidgetMove.UP))
+    }
+
+    @Test
+    fun `the last widget cannot move down`() {
+        assertFalse(canMoveReportWidget(widgets(), "w3", ReportWidgetMove.DOWN))
+    }
+
+    @Test
+    fun `a widget in the middle can move both ways`() {
+        assertTrue(canMoveReportWidget(widgets(), "w2", ReportWidgetMove.UP))
+        assertTrue(canMoveReportWidget(widgets(), "w2", ReportWidgetMove.DOWN))
+    }
+
+    @Test
+    fun `an unknown widget cannot move at all`() {
+        assertFalse(canMoveReportWidget(widgets(), "根本没有这个部件", ReportWidgetMove.UP))
+    }
+
+    @Test
+    fun `moving up puts the widget in front of the one above it`() {
+        val moved = moveReportWidget(widgets(), "w2", ReportWidgetMove.UP)
+        assertEquals(listOf("w2", "w1", "w3"), moved.map { it.id })
+    }
+
+    @Test
+    fun `moving down puts the widget behind the one below it`() {
+        val moved = moveReportWidget(widgets(), "w2", ReportWidgetMove.DOWN)
+        assertEquals(listOf("w1", "w3", "w2"), moved.map { it.id })
+    }
+
+    @Test
+    fun `moving a widget that cannot move changes nothing`() {
+        val original = widgets()
+        assertEquals(original, moveReportWidget(original, "w1", ReportWidgetMove.UP))
+        assertEquals(original, moveReportWidget(original, "w3", ReportWidgetMove.DOWN))
+    }
+
+    @Test
+    fun `moving an unknown widget changes nothing`() {
+        val original = widgets()
+        assertEquals(original, moveReportWidget(original, "根本没有这个部件", ReportWidgetMove.UP))
+    }
+
+    // ──────────────── 报表的显示名 ────────────────
+
+    @Test
+    fun `a named report shows its name`() {
+        assertEquals("销售月报", reportDisplayNameText("销售月报", "报表 3"))
+    }
+
+    @Test
+    fun `a report without a name falls back to the given one`() {
+        // 兜底名由调用方按语言算好（「报表 N」）—— 会话层不是 Composable，
+        // 它取不到当前语言，所以兜底名得由它自己算好后传进来。
+        assertEquals("报表 3", reportDisplayNameText("", "报表 3"))
+        assertEquals("报表 3", reportDisplayNameText("   ", "报表 3"))
+    }
 }

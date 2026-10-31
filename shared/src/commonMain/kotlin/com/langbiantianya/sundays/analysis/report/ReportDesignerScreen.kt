@@ -29,8 +29,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
@@ -45,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -131,6 +136,24 @@ object ReportDesignerTags {
 
     /** 某个部件的「删除」按钮（tag = 部件 id）。 */
     const val WIDGET_DELETE_PREFIX = "reportWidgetDelete_"
+
+    /** 某个部件的「刷新」按钮（tag = 部件 id）—— 只重跑这一个部件。 */
+    const val WIDGET_REFRESH_PREFIX = "reportWidgetRefresh_"
+
+    /** 某个部件的「复制」按钮（tag = 部件 id）。 */
+    const val WIDGET_COPY_PREFIX = "reportWidgetCopy_"
+
+    /** 某个部件的「上移」按钮（tag = 部件 id）。 */
+    const val WIDGET_MOVE_UP_PREFIX = "reportWidgetMoveUp_"
+
+    /** 某个部件的「下移」按钮（tag = 部件 id）。 */
+    const val WIDGET_MOVE_DOWN_PREFIX = "reportWidgetMoveDown_"
+
+    /** 画布上的「导出」按钮（把报表写成 .xlsx）。 */
+    const val EXPORT_BUTTON = "reportExportBtn"
+
+    /** 画布上那条状态提示（有话要说时才有）。 */
+    const val STATUS_LINE = "reportStatusLine"
 
     /** 某张报表的「重命名」按钮（tag = 报表 id）。 */
     const val REPORT_ITEM_RENAME_PREFIX = "reportItemRename_"
@@ -230,6 +253,13 @@ private const val REPORT_DESIGNER_PANE_MAX_WIDTH_RATIO: Float = 0.32f
  * @param onDeleteReport 删除报表
  * @param onSaveWidget 保存部件（参数：报表 id、部件、是不是新增）
  * @param onDeleteWidget 删除部件（参数：报表 id、部件 id）
+ * @param onCopyWidget 复制部件（参数：报表 id、部件 id）
+ * @param onMoveWidget 上移 / 下移部件（参数：报表 id、部件 id、方向）
+ * @param onRefreshWidget 只刷新一个部件（参数：报表 id、部件 id）
+ * @param refreshingWidgetIds 正在刷新的部件 id —— 界面据此禁用那个部件的刷新按钮
+ * @param onExportReport 导出报表（写成 .xlsx）
+ * @param exportRunning 正在导出 —— 界面据此禁用「导出」按钮
+ * @param status 顶部那条状态提示（保存失败 / 读不出来 / 导出结果）；`null` = 没有
  * @param onPreviewSql 预览一条 SQL 的样例数据
  * @param onRefreshReport 重新取一张报表里所有部件的数据
  * @param refreshRunning 正在刷新 —— 界面据此禁用「刷新」按钮
@@ -247,6 +277,9 @@ fun ReportDesignerScreen(
     previewResult: AnalysisResult? = null,
     previewRunning: Boolean = false,
     refreshRunning: Boolean = false,
+    refreshingWidgetIds: Set<String> = emptySet(),
+    exportRunning: Boolean = false,
+    status: ReportStatus? = null,
     treeRoots: List<ObjectTreeNode> = emptyList(),
     expandedNodeIds: Set<String> = emptySet(),
     onToggleNode: (ObjectTreeNode) -> Unit = {},
@@ -257,6 +290,10 @@ fun ReportDesignerScreen(
     onDeleteReport: (String) -> Unit = {},
     onSaveWidget: (String, ReportWidget, Boolean) -> Unit = { _, _, _ -> },
     onDeleteWidget: (String, String) -> Unit = { _, _ -> },
+    onCopyWidget: (String, String) -> Unit = { _, _ -> },
+    onMoveWidget: (String, String, ReportWidgetMove) -> Unit = { _, _, _ -> },
+    onRefreshWidget: (String, String) -> Unit = { _, _ -> },
+    onExportReport: (AnalysisReport) -> Unit = {},
     onPreviewSql: (String) -> Unit = {},
     onRefreshReport: (AnalysisReport) -> Unit = {},
     paneHoverIcon: PointerIcon? = null,
@@ -370,6 +407,9 @@ fun ReportDesignerScreen(
                     reportIndex = selectedIndex,
                     widgetResults = widgetResults,
                     refreshRunning = refreshRunning,
+                    refreshingWidgetIds = refreshingWidgetIds,
+                    exportRunning = exportRunning,
+                    status = status,
                     onAddWidget = {
                         editingWidget = newReportWidgetDraft()
                         editingIsNew = true
@@ -379,6 +419,10 @@ fun ReportDesignerScreen(
                         editingIsNew = false
                     },
                     onDeleteWidget = { reportId, widgetId -> deletingWidget = reportId to widgetId },
+                    onCopyWidget = onCopyWidget,
+                    onMoveWidget = onMoveWidget,
+                    onRefreshWidget = onRefreshWidget,
+                    onExportReport = onExportReport,
                     onRefreshReport = onRefreshReport,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
@@ -656,10 +700,17 @@ private fun ReportListItem(
  * @param report 当前报表；`null` = 还没选
  * @param reportIndex 它在报表列表里的序号（**0-based**，用于「报表 N」的兜底名字）
  * @param widgetResults 部件 id → 数据
- * @param refreshRunning 正在刷新
+ * @param refreshRunning 正在刷新（整张报表）
+ * @param refreshingWidgetIds 正在刷新的部件 id
+ * @param exportRunning 正在导出
+ * @param status 顶部那条状态提示；`null` = 没有
  * @param onAddWidget 添加部件
  * @param onEditWidget 编辑部件
  * @param onDeleteWidget 删除部件
+ * @param onCopyWidget 复制部件
+ * @param onMoveWidget 上移 / 下移部件
+ * @param onRefreshWidget 只刷新一个部件
+ * @param onExportReport 导出报表
  * @param onRefreshReport 重新取所有部件的数据
  * @param modifier 布局修饰
  */
@@ -669,9 +720,16 @@ private fun ReportCanvas(
     reportIndex: Int,
     widgetResults: Map<String, AnalysisResult>,
     refreshRunning: Boolean,
+    refreshingWidgetIds: Set<String>,
+    exportRunning: Boolean,
+    status: ReportStatus?,
     onAddWidget: () -> Unit,
     onEditWidget: (ReportWidget) -> Unit,
     onDeleteWidget: (String, String) -> Unit,
+    onCopyWidget: (String, String) -> Unit,
+    onMoveWidget: (String, String, ReportWidgetMove) -> Unit,
+    onRefreshWidget: (String, String) -> Unit,
+    onExportReport: (AnalysisReport) -> Unit,
     onRefreshReport: (AnalysisReport) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -701,15 +759,43 @@ private fun ReportCanvas(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                // 「导出」—— 把这张报表写成 .xlsx 发出去。
+                //
+                // 它排在「刷新」**前面**：导出是这一页对外的那一头（成果），
+                // 刷新是内部那一头（取数）。而导出前**自己会先刷新一遍**，
+                // 所以用户不需要先点刷新再点导出。
+                WinIconButton(
+                    onClick = { onExportReport(report) },
+                    // 正在导出 / 正在刷新时禁掉 —— 两者都会去动工作区，
+                    // 而工作区是**一个** DuckDB 文件，并发查询会互相抢锁。
+                    enabled = !exportRunning && !refreshRunning && refreshingWidgetIds.isEmpty(),
+                    modifier = Modifier.testTag(ReportDesignerTags.EXPORT_BUTTON),
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = str(StrKey.REPORT_EXPORT))
+                }
                 WinIconButton(
                     onClick = { onRefreshReport(report) },
                     // 正在刷的时候禁掉：再点一下不会跑第二遍（会话会挡），
                     // 但按钮还亮着就成了「点了没反应」—— 那比明确地灰掉更让人困惑。
-                    enabled = !refreshRunning,
+                    enabled = !refreshRunning && refreshingWidgetIds.isEmpty(),
                     modifier = Modifier.testTag(ReportDesignerTags.REFRESH_BUTTON),
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = str(StrKey.REFRESH))
                 }
+            }
+            // 状态提示条 —— 保存失败 / 读不出来 / 导出结果。
+            //
+            // 为什么放在画布里而不是页面上方：画布是这一页**一直都在**的那块，
+            // 提示条贴在它头上，用户改报表时不会错过。
+            status?.let { current ->
+                Text(
+                    text = current.message,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = reportStatusColor(current),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp).testTag(ReportDesignerTags.STATUS_LINE),
+                )
             }
             if (report.widgets.isEmpty()) {
                 EmptyHint(
@@ -732,8 +818,19 @@ private fun ReportCanvas(
                             widget = widget,
                             index = index,
                             result = widgetResults[widget.id],
+                            // 单部件刷新与整张报表刷新**共用一把锁** ——
+                            // 工作区是**一个** DuckDB 文件，并发查询会互相抢锁。
+                            refreshEnabled = !refreshRunning && widget.id !in refreshingWidgetIds,
+                            // 能不能挪是**规则**（`canMoveReportWidget`），
+                            // 界面只拿结论去灰按钮 —— 规则不在这儿再写一遍。
+                            canMoveUp = canMoveReportWidget(report.widgets, widget.id, ReportWidgetMove.UP),
+                            canMoveDown = canMoveReportWidget(report.widgets, widget.id, ReportWidgetMove.DOWN),
                             onEdit = { onEditWidget(widget) },
                             onDelete = { onDeleteWidget(report.id, widget.id) },
+                            onCopy = { onCopyWidget(report.id, widget.id) },
+                            onMoveUp = { onMoveWidget(report.id, widget.id, ReportWidgetMove.UP) },
+                            onMoveDown = { onMoveWidget(report.id, widget.id, ReportWidgetMove.DOWN) },
+                            onRefresh = { onRefreshWidget(report.id, widget.id) },
                             modifier = Modifier.fillMaxWidth().height(REPORT_WIDGET_CARD_HEIGHT),
                         )
                     }
@@ -754,13 +851,29 @@ private fun ReportCanvas(
 }
 
 /**
- * 部件**卡片** —— 标题 + 图表 / 表格。
+ * 部件**卡片** —— 标题 + 一排动作 + 图表 / 表格。
+ *
+ * ## 为什么卡片头要挤**六个**按钮
+ *
+ * 部件是这一页的**基本单位**，用户对它的动作有六种：刷新、复制、上移、下移、
+ * 编辑、删除。少给一个，用户就得绕远路 —— 比如「再要一个一样的部件」
+ * 只能手抄一遍 SQL，而手抄出来的 SQL 与原件**慢慢会长得不一样**。
+ *
+ * 六个按钮排成一行，标题让出位置（`weight(1f)` + 省略号）——
+ * 标题挤没了还能从卡片里的图表认出来，按钮挤没了就真用不了了。
  *
  * @param widget 部件
  * @param index 它在报表里的序号（**0-based**，用于「部件 N」的兜底标题）
  * @param result 该部件的数据；`null` = 还没取过
+ * @param refreshEnabled 能不能刷新这个部件（整张报表在刷时为 `false`）
+ * @param canMoveUp 能不能上移（已经是第一个时为 `false`）
+ * @param canMoveDown 能不能下移（已经是最后一个时为 `false`）
  * @param onEdit 编辑
  * @param onDelete 删除
+ * @param onCopy 复制
+ * @param onMoveUp 上移
+ * @param onMoveDown 下移
+ * @param onRefresh 只刷新这一个部件
  * @param modifier 布局修饰
  */
 @Composable
@@ -768,8 +881,15 @@ private fun ReportWidgetCard(
     widget: ReportWidget,
     index: Int,
     result: AnalysisResult?,
+    refreshEnabled: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onCopy: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -804,6 +924,54 @@ private fun ReportWidgetCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(end = 4.dp),
             )
+            // 刷新（只这一个部件）
+            WinIconButton(
+                onClick = onRefresh,
+                enabled = refreshEnabled,
+                modifier = Modifier.testTag(ReportDesignerTags.WIDGET_REFRESH_PREFIX + widget.id),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = str(StrKey.REPORT_WIDGET_REFRESH),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            // 复制（插在原部件后面）
+            WinIconButton(
+                onClick = onCopy,
+                modifier = Modifier.testTag(ReportDesignerTags.WIDGET_COPY_PREFIX + widget.id),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ContentCopy,
+                    contentDescription = str(StrKey.REPORT_WIDGET_COPY),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            // 上移 / 下移 —— 顺序即显示顺序，所以它们是**这一页**的操作。
+            //
+            // 到边了就灰掉：灰掉的按钮比「点了没反应」诚实。
+            WinIconButton(
+                onClick = onMoveUp,
+                enabled = canMoveUp,
+                modifier = Modifier.testTag(ReportDesignerTags.WIDGET_MOVE_UP_PREFIX + widget.id),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowUpward,
+                    contentDescription = str(StrKey.REPORT_WIDGET_MOVE_UP),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            WinIconButton(
+                onClick = onMoveDown,
+                enabled = canMoveDown,
+                modifier = Modifier.testTag(ReportDesignerTags.WIDGET_MOVE_DOWN_PREFIX + widget.id),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowDownward,
+                    contentDescription = str(StrKey.REPORT_WIDGET_MOVE_DOWN),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
             WinIconButton(
                 onClick = onEdit,
                 modifier = Modifier.testTag(ReportDesignerTags.WIDGET_EDIT_PREFIX + widget.id),
@@ -936,4 +1104,25 @@ private val REPORT_WIDGET_CARD_HEIGHT = 300.dp
 private fun reportDisplayName(
     report: AnalysisReport,
     index: Int,
-): String = report.name.ifBlank { str(StrKey.REPORT_DEFAULT_NAME, index + 1) }
+): String = reportDisplayNameText(report.name, str(StrKey.REPORT_DEFAULT_NAME, index + 1))
+
+/**
+ * 状态提示的**颜色** —— 按轻重分三档。
+ *
+ * ## 为什么「警告」不是红色
+ *
+ * 红色是 [ReportStatus.Error] 的（数据正在丢）。
+ * 而 [ReportStatus.Warn] 是「数据没丢，但有件事该知道」——
+ * 用同一个红色，用户分不出该不该着急；用同一个灰色，又会把它当成
+ * 一条无关紧要的提示划过去。
+ *
+ * @param status 状态
+ * @return 该状态用的颜色
+ */
+@Composable
+private fun reportStatusColor(status: ReportStatus): Color =
+    when (status) {
+        is ReportStatus.Info -> MaterialTheme.colorScheme.onSurfaceVariant
+        is ReportStatus.Warn -> MaterialTheme.colorScheme.tertiary
+        is ReportStatus.Error -> MaterialTheme.colorScheme.error
+    }

@@ -47,3 +47,25 @@ fun reportWidgetTypeText(type: ReportWidgetType): StrKey =
         ReportWidgetType.BAR -> StrKey.REPORT_TYPE_BAR
         ReportWidgetType.TABLE -> StrKey.REPORT_TYPE_TABLE
     }
+
+/**
+ * 报表的**显示名** —— 没起名字的用兜底名。
+ *
+ * ## 为什么这条规则要**只有一份**
+ *
+ * 报表名有两处要用：画布与列表的**标题**，以及导出时**预填的文件名**。
+ * 两处都在不同的层（界面层 / 会话层），而会话层不是 Composable ——
+ * 它取不到当前语言，只能由调用方把**兜底名算好**再传进来。
+ *
+ * 若两边各写各的「`name.ifBlank { ... }`」，将来有人把兜底名改成
+ * 「未命名报表」，就会漏掉一处 —— 而漏掉的那一处是**导出的文件名**，
+ * 用户会拿到一个说不清的名字。
+ *
+ * @param name 报表自己起的名字（可能为空）
+ * @param fallback 兜底名（调用方按语言算好，形如「报表 3」）
+ * @return 该显示的名字
+ */
+fun reportDisplayNameText(
+    name: String,
+    fallback: String,
+): String = name.ifBlank { fallback }

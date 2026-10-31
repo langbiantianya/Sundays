@@ -2,7 +2,7 @@
 
 `desktopApp/` 是 sundays 的**桌面客户端模块**：Kotlin Multiplatform + Compose Multiplatform，
 当前仅启用 **JVM Desktop** 单平台目标（macOS / Linux / Windows 共享同一份 Compose Desktop 渲染）。
-9 个主源文件 —— 界面组件全在 `:shared`，本模块只剩「**平台窗口 + 引擎状态机接线**」。
+23 个主源文件 —— 界面组件全在 `:shared`，本模块只剩「**平台窗口 + 引擎状态机接线**」。
 
 > **本文档的形态**：**大纲**。窗口与状态机的设计决策见 [`./ARCHITECTURE.md`](./ARCHITECTURE.md)，
 > 能力清单见 [`./FEATURES.md`](./FEATURES.md)，测试覆盖矩阵见 [`./TEST_CASES.md`](./TEST_CASES.md)。
