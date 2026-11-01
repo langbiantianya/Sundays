@@ -69,4 +69,7 @@ enum class PluralStrKey {
     UPTIME_DAYS,
     UPTIME_HOURS,
     UPTIME_MINUTES,
+
+    /** 复制表格内容成功时的提示 —— 「已复制 {0} 行」。 */
+    COPIED_ROWS,
 }

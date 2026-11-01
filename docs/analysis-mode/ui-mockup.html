@@ -302,6 +302,9 @@ body{
   padding:6px 12px; font-size:12px; line-height:16px; color:var(--on-surface); white-space:nowrap;
 }
 .ctx-item.is-danger{ color:var(--error); }
+/* v2.42：结果表的右键菜单（复制此行 / 复制整表）——
+   同一个浮层样式，位置相对**结果面板**（`.panel-result` 是 relative）。 */
+.ctx-menu.is-table{ left:168px; top:52px; }
 .ctx-hint{
   position:absolute; z-index:21; font-size:10px; line-height:14px; color:var(--on-surface-variant);
 }
@@ -317,7 +320,7 @@ body{
 }
 .panel-head .sub{ margin-left:auto; font-size:11px; line-height:14px; font-weight:400; color:var(--on-surface-variant); }
 .panel-editor{ flex:1 1 auto; }
-.panel-result{ flex:0 0 auto; }
+.panel-result{ flex:0 0 auto; position:relative; /* 结果表的右键菜单是**浮层**，要相对结果面板定位 */ }
 /* v1.14：编辑器与结果表之间那条**可拖**的缝 —— `:shared` 的 `HorizontalDragHandle`。
    它与竖向那条（树的宽度）是**同一个组件的两种朝向**：命中区 8dp、画线 1dp。
    悬停时换**上下拉伸**指针 —— 画成左右拉伸就是在说反方向，
@@ -902,16 +905,30 @@ body{
                       <td class="bar-cell"><span class="bar"><span class="bar-fill fill-10"></span></span><span class="bar-label">9.8%</span></td></tr>
                 </tbody>
               </table>
+              <!-- v2.42：结果表的**右键菜单** —— 「复制此行 / 复制整表」。
+                   与树上的右键菜单**不是**同一个菜单，但「点了菜单项先关菜单」
+                   这条规矩是同一份（`TableCopyMenuItems` 自己带）。
+                   复制出来的是 **TSV**（制表符分隔）：粘进 Excel 按列落格，
+                   而 CSV 会弹「文本导入向导」。 -->
+              <div class="ctx-menu is-table">
+                <div class="ctx-item">复制此行</div>
+                <div class="ctx-item">复制整表</div>
+              </div>
             </div>
 
-            <!-- 底栏：行数 / 导出状态 / 引擎。
+            <!-- 底栏：行数 / 导出状态 / 复制状态 / 引擎。
                  ⚠️ 这里**不写**「只读会话」—— 那是**远端**会话的属性，
                  而这一栏说的是**工作区**（本地 DuckDB 文件），它是**可写**的。
                  写上「只读会话」就是假信息（§6.3 的更正）。
                  「导出状态」是 v2.41 新增的：导出可能跑好几秒，
-                 用户必须能看见「在跑」与「跑完了没有」。 -->
+                 用户必须能看见「在跑」与「跑完了没有」。
+                 「复制状态」是 v2.42 新增的：剪贴板写不进去时（无头环境 /
+                 被别的进程占着）用户点了菜单**什么都不会发生**，
+                 界面必须看得见 —— 失败与成功**后果完全不同**，
+                 用户拿着「以为复制到了」的数据去别处粘贴，比复制失败更糟。 -->
             <div class="status-bar">
               <span>行数 12</span><span>耗时 1.2 s</span><span>结果上限 1000 行</span>
+              <span class="right">已复制 12 行</span>
               <span class="right">已导出 12 行 → C:\tmp\orders.csv</span>
               <span class="right">引擎 DuckDB</span>
             </div>
@@ -1470,6 +1487,7 @@ body{
           <div class="cmp-row"><span class="cmp-area">文件 / 文件夹选择</span><span class="cmp-comp">NativePathPicker</span><span class="cmp-path">desktopApp/…/NativePathPicker.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">SQL 编辑器</span><span class="cmp-comp">CodeEditorWithToolbar / CodeEditorState</span><span class="cmp-path">shared/…/editor/ui/CodeEditor.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">查询结果表</span><span class="cmp-comp">DataTable / TableColumn / TableRow / PageSize</span><span class="cmp-path">shared/…/table/</span><span class="cmp-flag tag-xs">复用</span></div>
+          <div class="cmp-row"><span class="cmp-area">结果表右键菜单（复制此行 / 复制整表）</span><span class="cmp-comp">TableCopyMenuItems + tableCopyText / rowCopyText（剪贴板由 desktopApp 注入）</span><span class="cmp-path">shared/…/table/TableCopyMenu.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>
           <div class="cmp-row"><span class="cmp-area">面板分隔条</span><span class="cmp-comp">DragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">编辑器高度分隔条（横向）</span><span class="cmp-comp">HorizontalDragHandle</span><span class="cmp-path">shared/…/ui/DragHandle.kt</span><span class="cmp-flag tag-xs">复用</span></div>
           <div class="cmp-row"><span class="cmp-area">右键菜单</span><span class="cmp-comp">TreeContextMenu / TreeContextMenuItem</span><span class="cmp-path">shared/…/tree/TreeContextMenu.kt</span><span class="cmp-flag tag-tertiary">新增</span></div>

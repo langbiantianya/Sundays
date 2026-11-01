@@ -169,4 +169,9 @@ internal val pluralsEn: Map<PluralStrKey, Map<PluralForm, String>> =
                 PluralForm.ONE to "{0} minute",
                 PluralForm.OTHER to "{0} minutes",
             ),
+        PluralStrKey.COPIED_ROWS to
+            mapOf(
+                PluralForm.ONE to "Copied {0} row",
+                PluralForm.OTHER to "Copied {0} rows",
+            ),
     )

@@ -371,11 +371,11 @@ class SqlEditorHeightTest {
             SundaysTheme {
                 ProvideStrings(AppLanguage.ZH_HANS) {
                     if (height == null) {
-                        AnalysisScreen(sources = sources)
+                        AnalysisScreen(sources = sources, onCopyToClipboard = { false })
                     } else {
                         // 固定尺寸的容器 —— 用来模拟「窗口很矮」那种情形。
                         Box(Modifier.size(1400.dp, height)) {
-                            AnalysisScreen(sources = sources)
+                            AnalysisScreen(sources = sources, onCopyToClipboard = { false })
                         }
                     }
                 }

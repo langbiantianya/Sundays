@@ -849,6 +849,11 @@ internal fun MainScreen(
                                     // 格式与浏览模式完全一致（CSV / JSON / SQL / Excel / Parquet）。
                                     onExport = { exportDialogVisible = true },
                                     exportStatus = analysis.exportStatus,
+                                    // 「复制」要写**系统剪贴板** —— 平台专属能力，`:shared` 里没有 `java.*`，
+                                    // 所以由这一侧注入。失败（无头环境 / 剪贴板被占用）返回 `false`，
+                                    // 分析屏会把它显示在底栏上 —— 失败必须**看得见**，
+                                    // 否则用户点了菜单什么都不会发生。
+                                    onCopyToClipboard = { text -> ClipboardWriter.copy(text) },
                                     // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
                                     // （`:shared` 只决定「什么时候用」）。
                                     treePaneHoverIcon = ewResizePointerIcon(),

@@ -540,6 +540,8 @@ desktopApp （本模块）
 | 分析模式的查询导出**走引擎既有的导出链路** | `EXPORT.RUN_EXPORT` + `ExportEngine`，五种格式（CSV / JSON_LINES / SQL_INSERT / EXCEL / PARQUET）**全部复用** —— 前端自己写文件就得把五种格式各写一遍，而写出来的那份与浏览模式导出的那份**不是一个东西**（「同一个概念只能有一份实现」）。**报表**导出不走引擎（数据已经在前端手里，且要**先刷新再写**），那是另一回事 | [`ExportSupport.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportSupport.kt) |
 | 嵌入式连接的导出**必须留在主进程** | 子进程打不开**主进程正占着**的文件（Windows 直接报「另一个程序正在使用此文件」），内存库在子进程里是**另一个空库**。判据是方言声明的 `ConnectionType`（EMBEDDED / IN_MEMORY / FILE_BASED），不是**路径拓扑**去猜。远端连接维持子进程（隔离是那里才需要的）。这一条顺带修掉了一个真 bug：浏览模式**从 DuckDB / SQLite 文件连接导出**此前根本跑不通 | 引擎的 [`ExportHandler.kt`](../engine/src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt) |
 | 导出对话框画在**最外层**，不画在分析屏里 | 画在分析屏里的话，切去别的页面它就跟着消失 —— 而导出是个**跨页面也要看得见**的过程。放在最外层与「添加数据源」同一层级 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) |
+| 结果表的「复制」实现住在 **`:shared`**，剪贴板留在 **`desktopApp`** | 「把一张表复制成文本」是**一个概念** —— 分析模式的结果表要它，浏览模式的表预览 / SQL 工作台结果表将来也要它。实现住在 `:shared` 的 `table/TableCopyMenu.kt`（浏览模式接**同一份**，不是第二份）；而**剪贴板**是平台专属的（`java.awt`），`commonMain` 里没有 `java.*` —— 所以由 `desktopApp` 注入回调 | [`TableCopyMenu.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/table/TableCopyMenu.kt) + [`ClipboardWriter.kt`](./src/main/kotlin/com/langbiantianya/sundays/ClipboardWriter.kt) |
+| 剪贴板回调**必填**，不给默认值 | 默认值（比如 `{ false }`）意味着「忘了接线」在编译期看不出来，界面上却摆着一个**点了必然失败**的菜单项 —— 而「宁可少给，不给一个点了必然失败的东西」是这个仓库的明确原则。必填参数把那条线画在**编译期** | [`AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) 的 `onCopyToClipboard` |
 
 
 ---

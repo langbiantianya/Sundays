@@ -110,6 +110,7 @@ class TreePaneScrollTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = listOf(AnalysisSourceItem(id = "c1", name = "本地 MySQL", dialectLabel = "MySQL")),
                             treeRoots = tallTree,
                             expandedNodeIds = setOf("workspace"),

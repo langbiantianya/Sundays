@@ -201,6 +201,7 @@ class AnalysisPullIndicatorTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             pullProgress = PullProgress(rows = 3),
                         )
@@ -219,6 +220,7 @@ class AnalysisPullIndicatorTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             pullProgress = PullProgress(rows = 3),
                             pullOutcome = PullOutcome.Done(PullResult(stagingTable = "staging_x")),

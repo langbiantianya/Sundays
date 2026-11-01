@@ -139,6 +139,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                         )
                     }
@@ -170,6 +171,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             onAddSource = { asked = true },
                         )
@@ -192,6 +194,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             treeRoots = treeRoots,
                             expandedNodeIds = expandedNodeIds,
@@ -216,6 +219,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = emptyList(),
                         )
                     }
@@ -237,6 +241,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             treeRoots = treeRoots,
                         )
@@ -265,6 +270,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             result = result,
                         )
@@ -299,6 +305,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             result = result,
                         )
@@ -322,6 +329,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             result = AnalysisResult(error = "Catalog Error: Table with name orders does not exist"),
                         )
@@ -345,6 +353,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             onRun = { runs++ },
                         )
@@ -366,6 +375,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             running = true,
                             onRun = {},
@@ -390,6 +400,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             sql = "SELECT * FROM staging_shop_orders",
                         )
@@ -414,6 +425,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             sql = "SELECT 1",
                             onExport = { asked++ },
@@ -436,6 +448,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             // 编辑器里没有 SQL —— 没什么可导的，
                             // 给一个「点了必然失败」的入口是不该做的。
@@ -458,6 +471,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             exportStatus = AnalysisExportStatus.Succeeded("C:/tmp/out.csv", 12),
                         )
@@ -480,6 +494,7 @@ class AnalysisScreenTest {
                 SundaysTheme {
                     ProvideStrings(AppLanguage.ZH_HANS) {
                         AnalysisScreen(
+                            onCopyToClipboard = { false },
                             sources = sources,
                             exportStatus = AnalysisExportStatus.Failed("Table 不存在"),
                         )

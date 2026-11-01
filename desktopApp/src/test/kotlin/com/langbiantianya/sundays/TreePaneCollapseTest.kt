@@ -150,6 +150,7 @@ class TreePaneCollapseTest {
             SundaysTheme {
                 ProvideStrings(AppLanguage.ZH_HANS) {
                     AnalysisScreen(
+                        onCopyToClipboard = { false },
                         sources = sources,
                         treeRoots = treeRoots,
                     )

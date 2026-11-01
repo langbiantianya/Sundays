@@ -138,4 +138,8 @@ internal val pluralsJa: Map<PluralStrKey, Map<PluralForm, String>> =
             mapOf(
                 PluralForm.OTHER to "{0} 分",
             ),
+        PluralStrKey.COPIED_ROWS to
+            mapOf(
+                PluralForm.OTHER to "{0} 行をコピーしました",
+            ),
     )

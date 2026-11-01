@@ -138,4 +138,8 @@ internal val pluralsZhHans: Map<PluralStrKey, Map<PluralForm, String>> =
             mapOf(
                 PluralForm.OTHER to "{0} 分",
             ),
+        PluralStrKey.COPIED_ROWS to
+            mapOf(
+                PluralForm.OTHER to "已复制 {0} 行",
+            ),
     )

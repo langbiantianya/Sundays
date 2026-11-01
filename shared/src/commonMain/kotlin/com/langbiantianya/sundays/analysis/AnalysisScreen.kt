@@ -52,6 +52,8 @@ import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.PageSize
+import com.langbiantianya.sundays.table.TableCopyMenuItems
+import com.langbiantianya.sundays.table.rememberContextMenuState
 import com.langbiantianya.sundays.tree.ObjectTree
 import com.langbiantianya.sundays.tree.ObjectTreeNode
 import com.langbiantianya.sundays.tree.TreeContextMenu
@@ -167,6 +169,20 @@ fun AnalysisScreen(
     onRun: () -> Unit = {},
     exportStatus: AnalysisExportStatus? = null,
     onExport: () -> Unit = {},
+    /**
+     * 把文本写进**系统剪贴板** —— 返回 `false` = 写不进去（无头环境 / 剪贴板被占用）。
+     *
+     * ## 为什么它是**必填**参数而不是给个默认值
+     *
+     * 剪贴板是**平台专属**能力（`java.awt`，见 `desktopApp` 的 `ClipboardWriter`），
+     * `:shared` 的 `commonMain` 里没有 `java.*` —— 所以只能回调出去。
+     *
+     * 但**不能给默认值**：默认值（比如 `{ false }`）意味着「忘了接线」这件事
+     * 在编译期看不出来，界面上却摆着一个**点了必然失败**的「复制」菜单项 ——
+     * 而「宁可少给，不给一个点了必然失败的东西」是这个仓库的明确原则。
+     * 必填参数把那条线画在**编译期**。
+     */
+    onCopyToClipboard: (String) -> Boolean,
     treePaneHoverIcon: PointerIcon? = null,
     editorPaneHoverIcon: PointerIcon? = null,
     modifier: Modifier = Modifier,
@@ -208,6 +224,15 @@ fun AnalysisScreen(
     // （`SidePaneShell` 的窄轨只有 44dp，塞不下树）—— 确认框要是跟着面板走，
     // 用户折叠一下树，正在确认的删除就**无声消失**了（而删除本身还没发生）。
     var pendingDeleteSource by remember { mutableStateOf<String?>(null) }
+
+    // 「复制查询结果」的**终态** —— 复制是**一瞬间**的事，所以状态住在屏幕层就够
+    // （切走再回来消息没了无所谓 —— 那种**跨页存活**的动作才需要进会话，
+    // 见 `AnalysisSession.exportStatus`）。
+    //
+    // 为什么要留着它：剪贴板有三条真实的失败路径（无头环境 / 被别的进程占着 /
+    // X11 下服务不可用），失败时用户点了菜单**什么都不会发生** ——
+    // 界面必须**看得见**这件事，否则那就是「点了必然失败的东西」。
+    var copyStatus by remember { mutableStateOf<AnalysisCopyStatus?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
         // 拉取状态条 —— 在树与主区**上面**横贯一条。
@@ -319,6 +344,16 @@ fun AnalysisScreen(
                                 // 一个远端源都没有时，空态要说的是「去建连接」而不是「去跑一条 SQL」——
                                 // 没有源就拉不到任何表，跑出来的结果只能是工作区里原有的东西。
                                 noSources = sources.isEmpty(),
+                                // 复制是**平台能力**（剪贴板），由调用方注入。
+                                onCopyToClipboard = onCopyToClipboard,
+                                onCopied = { count, ok ->
+                                    copyStatus =
+                                        if (ok) {
+                                            AnalysisCopyStatus.Copied(count)
+                                        } else {
+                                            AnalysisCopyStatus.Failed
+                                        }
+                                },
                                 modifier =
                                     Modifier
                                         .weight(1f)
@@ -326,7 +361,11 @@ fun AnalysisScreen(
                             )
                         }
                     }
-                    AnalysisStatusBar(result = result, exportStatus = exportStatus)
+                    AnalysisStatusBar(
+                        result = result,
+                        exportStatus = exportStatus,
+                        copyStatus = copyStatus,
+                    )
                 }
             }
         }
@@ -380,6 +419,9 @@ const val ANALYSIS_EXPORT_BUTTON_TAG: String = "analysisExportButton"
 
 /** 底栏里那一行导出状态的测试标记。 */
 const val ANALYSIS_EXPORT_STATUS_TAG: String = "analysisExportStatus"
+
+/** 底栏里那一行复制状态的测试标记。 */
+const val ANALYSIS_COPY_STATUS_TAG: String = "analysisCopyStatus"
 
 /** 「添加数据源」按钮的测试标记。 */
 const val ANALYSIS_ADD_SOURCE_BUTTON_TAG: String = "analysisAddSourceButton"
@@ -844,11 +886,21 @@ private fun AnalysisEditorPanel(
  * - 还没跑过 → 空态（说清下一步做什么）
  * - 跑失败了 → 错误原文（顶对齐，不居中 —— 报错要从上往下顺着读）
  * - 跑成功了 → 结果表
+ *
+ * ## 结果表的**右键菜单**：复制此行 / 复制整表
+ *
+ * 只读表本来就有 `SelectionContainer`，单元格文本可以**拖选复制** ——
+ * 右键菜单的增量是「按行 / 按整表」这两个**整块**的动作。
+ *
+ * 菜单的实现住在 `:shared` 的 `table/TableCopyMenu.kt`（与浏览模式的表预览**共用一份**），
+ * 这里只负责把**剪贴板**这个平台能力接上去。
  */
 @Composable
 private fun AnalysisResultPanel(
     result: AnalysisResult?,
     noSources: Boolean,
+    onCopyToClipboard: (String) -> Boolean,
+    onCopied: (rowCount: Int, ok: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -856,6 +908,10 @@ private fun AnalysisResultPanel(
             title = str(StrKey.ANALYSIS_RESULT_ROWS, result?.rows?.size ?: 0),
             sub = result?.let { str(StrKey.ANALYSIS_ELAPSED, it.elapsedMs) },
         )
+        // 右键菜单的状态 —— **建在 `when` 之外**：
+        // 放在分支里的话，条件一变（跑失败 → 跑成功）这个 state 会被丢掉，
+        // 而菜单正开着的时候恰恰不该把它丢掉。
+        val contextMenuState = rememberContextMenuState()
         Box(
             modifier =
                 Modifier
@@ -890,9 +946,11 @@ private fun AnalysisResultPanel(
                 }
 
                 else -> {
+                    val columns = analysisTableColumns(result)
+                    val rows = analysisTableRows(result)
                     DataTable(
-                        columns = analysisTableColumns(result),
-                        rows = analysisTableRows(result),
+                        columns = columns,
+                        rows = rows,
                         // 只读：`onCellEdit = null` —— 结果不是一张可以改的表。
                         // `cellEditable` 也显式给 `false`：前者是「收到编辑后做什么」，
                         // 后者是「这张表能不能改」，两者不是一回事。
@@ -906,6 +964,20 @@ private fun AnalysisResultPanel(
                         serverSidePaging = false,
                         // 详情面板是浏览模式的遗产 —— 分析结果要看的是整张表。
                         showDetailPanel = false,
+                        // 右键菜单：复制此行 / 复制整表。
+                        // 菜单**状态**由这里创建并交给菜单组件 —— 菜单项点完要**自己把菜单关掉**
+                        // （菜单不会因为「项被点了」而自动关闭），而关掉它的正是这个 state。
+                        contextMenuState = contextMenuState,
+                        contextMenuItems = { row ->
+                            TableCopyMenuItems(
+                                columns = columns,
+                                rows = rows,
+                                target = row,
+                                menu = contextMenuState,
+                                onCopy = onCopyToClipboard,
+                                onCopied = onCopied,
+                            )
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -924,7 +996,7 @@ private fun AnalysisResultPanel(
 }
 
 /**
- * 底栏 —— 行数与引擎，外加**导出状态**。
+ * 底栏 —— 行数与引擎，外加**导出状态**与**复制状态**。
  *
  * ## 为什么**不**写「只读会话」
  *
@@ -938,11 +1010,19 @@ private fun AnalysisResultPanel(
  * 顶部的横贯带子已经给了「拉取」（那是**跨树与主区**的动作）。
  * 导出是**编辑器自己的**动作 —— 它离编辑器近才找得到，
  * 而底栏正好贴着结果区与编辑器下沿。
+ *
+ * ## 为什么复制状态也在这条栏里
+ *
+ * 复制是**结果表**上的动作，而结果表就贴着这条栏。
+ * 更要紧的是**失败必须看得见**：剪贴板写不进去时（无头环境 /
+ * 被别的进程占着）用户点了菜单**什么都不会发生** ——
+ * 界面不说一句，用户只会以为是自己点歪了。
  */
 @Composable
 private fun AnalysisStatusBar(
     result: AnalysisResult?,
     exportStatus: AnalysisExportStatus?,
+    copyStatus: AnalysisCopyStatus?,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -960,12 +1040,49 @@ private fun AnalysisStatusBar(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.weight(1f))
+        AnalysisCopyStatusText(copyStatus)
         AnalysisExportStatusText(exportStatus)
         Text(
             text = str(StrKey.ANALYSIS_ENGINE, "DuckDB"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * 复制状态的那一行字 —— 成功说「已复制 N 行」，失败说「复制失败」。
+ *
+ * ## 为什么失败是**红的**
+ *
+ * 成功与失败的**后果完全不同**：成功的话数据已经在剪贴板里，
+ * 失败的话用户以为复制了、其实没有 —— 而他可能正拿着这份「以为复制到了」的数据
+ * 去别处粘贴。失败必须**显眼**。
+ */
+@Composable
+private fun AnalysisCopyStatusText(copyStatus: AnalysisCopyStatus?) {
+    when (copyStatus) {
+        null -> {
+            // 没复制过 —— 不占地方（空 composable 什么都不画）
+        }
+
+        is AnalysisCopyStatus.Copied -> {
+            Text(
+                text = plural(PluralStrKey.COPIED_ROWS, copyStatus.rows),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(ANALYSIS_COPY_STATUS_TAG),
+            )
+        }
+
+        AnalysisCopyStatus.Failed -> {
+            Text(
+                text = str(StrKey.COPY_TABLE_FAILED),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag(ANALYSIS_COPY_STATUS_TAG),
+            )
+        }
     }
 }
 

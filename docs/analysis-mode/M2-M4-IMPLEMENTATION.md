@@ -1082,6 +1082,72 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 
 ---
 
+### 6.12 结果表右键复制（第 20 片 —— M4 的最后一项）
+
+#### 6.12.1 口径：复制的是**表的内容**，不是「导出」的另一个出口
+
+主设计 §6.3.3 里那句「**还差的一项**：右键菜单里的『复制』仍未接」到此作废。
+
+这一项与上一片（导出）**不是同一件事**：
+
+| | 导出 | 复制 |
+|---|---|---|
+| 落点 | **文件**（五种格式，用户挑目录与文件名） | **剪贴板**（粘进 Excel / 聊天） |
+| 引擎 | 走 `EXPORT.RUN_EXPORT` | 不走引擎 —— 纯前端拼文本 |
+| 格式 | CSV / JSON_LINES / SQL_INSERT / EXCEL / PARQUET | **TSV**（制表符分隔） |
+
+⚠️ **为什么复制用 TSV 而不是 CSV**：剪贴板要去的地方是**表格软件**——
+CSV 粘进 Excel 会弹「文本导入向导」，TSV 直接按列落格。
+这也是所有数据库工具「复制到剪贴板」的默认做法。
+
+⚠️ **为什么复制的是原始值而不是显示值**：`TableColumn.formatter` 是**显示层**的转换，
+它可能截断（`abc…`）、也可能把值换成符号（`✓`）——
+拿那种文本去粘进表格，用户拿到的是**假数据**。
+
+⚠️ **为什么表头只在「复制整表」里**：「复制此行」多半是粘进聊天 / 邮件里，
+带一行表头过去会被读成**两条记录**（Excel 自己「复制一个单元格」也只给值，不给表头）。
+
+#### 6.12.2 实现是一份，剪贴板是平台能力
+
+- **纯函数** `tableCopyText()` / `rowCopyText()` 住在 `:shared` 的
+  `table/TableCopyMenu.kt` —— 转义规则与引擎侧 `CsvWriter.escapeField`
+  **同一套**（同一份数据在「导出成文件」与「复制到剪贴板」两条路上不该有两套转义）。
+- **菜单组件** `TableCopyMenuItems()` 也住在那儿 ——
+  「把一张表复制成文本」是**一个概念**，浏览模式的表预览 / SQL 工作台结果表
+  将来接的是**同一份**。
+- **剪贴板是回调**：`java.awt` 是平台专属的，`:shared` 的 `commonMain` 里没有 `java.*`。
+  `AnalysisScreen` 的 `onCopyToClipboard: (String) -> Boolean` **必填** ——
+  默认值会让「忘了接线」在编译期看不出来，而界面上却摆着一个**点了必然失败**的菜单项。
+
+#### 6.12.3 成没成必须看得见
+
+剪贴板有三条真实的失败路径（无头环境 / 被别的进程占着 / X11 下服务不可用）。
+失败时用户点了菜单**什么都不会发生** —— 界面必须**看得见**这件事，
+所以底栏多一行「已复制 N 行」/「复制失败」（与导出状态同一处）。
+
+#### 6.12.4 落点
+
+| 文件 | 内容 |
+|---|---|
+| `shared/.../table/TableCopyMenu.kt` | **新增**：纯函数 `tableCopyText()` / `rowCopyText()` + 菜单组件 `TableCopyMenuItems()` + 两个测试 tag |
+| `shared/.../analysis/AnalysisModels.kt` | **新增**：`AnalysisCopyStatus`（成功 / 失败，穷举） |
+| `shared/.../analysis/AnalysisScreen.kt` | **改动**：结果表接上右键菜单；底栏显示复制状态；新增必填参数 `onCopyToClipboard` |
+| `desktopApp/.../main.kt` | **改动**：`onCopyToClipboard = { text -> ClipboardWriter.copy(text) }` |
+| `i18n/.../StrKey.kt` + 六张表 | **新增** 3 个键：`COPY_ROW` / `COPY_ALL_ROWS` / `COPY_TABLE_FAILED` |
+| `i18n/.../PluralStrKey.kt` + 六张复数表 | **新增** 1 个键：`COPIED_ROWS`（「已复制 {0} 行」） |
+
+#### 6.12.5 判据（都做过变异验证）
+
+| 判据 | 变异 |
+|---|---|
+| 表头取的是**列名**（`header`）而不是绑定键 | 改成取 `key` → `:shared` 7 条 + 桌面 1 条变红 |
+| 含制表符 / 换行 / 引号的值**被正确转义** | 去掉转义 → 转义那条用例变红 |
+| `NULL` 复制成**空串** | 改成 `NULL` 字样 → 两条用例变红 |
+| 点菜单项之后**菜单消失** | 去掉 `menu.dismiss()` → 那条用例变红 |
+| 复制**失败**时底栏明说失败 | 失败分支改成成功文案 → 那条用例变红 |
+
+---
+
 ## 7. 测试判据
 
 ### 7.1 §3.6 会话级（`ReadOnlySessionGateTest`）
@@ -1146,6 +1212,21 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 - 导出按钮点了会回调；**没有 SQL 时禁用**（不给一个「点了必然失败」的入口）
 - 导出状态在底栏**看得见**（在跑 / 成没成 / 失败原因）
 
+### 7.7 结果表右键复制（第 20 片）
+
+- **复制出来的文本对不对**（`TableCopyTextTest`，`:shared` 的 `commonTest`）：
+  整表**带表头**、单行**不带表头**、列按**列定义**的顺序（不是 `cells` 映射的顺序）、
+  `NULL` 变成**空串**、含制表符 / 换行 / 引号的值**按引擎侧 CSV writer 的同一套规则转义**
+  （不转义的话一个带换行的值粘过去会被拆成**两行** —— 那是**复制出来的数据是错的**）、
+  缺列的行**少一格**而不是让后面的列左移
+- **右键真的弹得出菜单**（`AnalysisCopyMenuTest`）：菜单项有「复制此行」与「复制整表」两项
+- **复制此行**给的是**那一行的值**（不含表头）；**复制整表**给的是**表头 + 全部行**
+- **成没成看得见**：底栏有「已复制 N 行」；剪贴板写不进去时底栏明说「复制失败」
+  （剪贴板有三条真实的失败路径：无头环境 / 被别的进程占着 / X11 下服务不可用）
+- **点了菜单项之后菜单消失** —— 菜单**不会**因为「项被点了」而自动关闭，
+  不关的话它会杵在表上，下一次右键被压在旧菜单底下，表现为「右键没反应了」
+- **没跑出结果时没有复制菜单可点**（不给一个「点了复制空表」的入口）
+
 ---
 
 ## 8. 提交切分
@@ -1172,6 +1253,8 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 16 | `feat(analysis): 分析模式能自己加数据源 —— 树头上一个「+」，加完直接进 DuckDB` | 协议（`AnalysisPullRequest` 加 `target_schema` / `access_mode`）+ 会话的**数据源登记表**（工作区 DuckDB 里的 `sundays.sources`）+ **「添加数据源」对话框**（驱动预览 + 勾选表 / 文件路径）+ 树按 **schema** 组织 | 加一个 CSV → 工作区里有它、树上看得见、换个会话还在；远程源走**扩展优先、JDBC 兜底** | ✅ **已提交** |
 | 17 | `fix(analysis): 「添加数据源」对话框跟着全局主题走，文件改用系统选择器` | 对话框从 Material3 `AlertDialog` 换成仓库的 Win 控件自拼（`WinSurface` / `WinButton` / `WinTextField` / `WinDivider`）；路径框旁加「浏览」→ `NativePathPicker.pickPath`（系统文件 / 文件夹选择器）；格式改成**能手选**（文件夹没有扩展名）；i18n 加一个键 | 对话框在复古档里也是 Win 风格；路径不必手抄；文件夹的格式能选 | ✅ **本轮落地** |
 | 18 | `feat(analysis): 分析模式的树能删掉数据源 —— 右键表 → 菜单 → 确认 → 删除` | 新增 `:shared` 的 `tree/TreeContextMenu.kt`（**两棵树共用的右键菜单机制**，从 `desktopApp` 上移）+ `analysis/AnalysisTreeMenu.kt`（判据是纯函数）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`；会话新增 `removeSource()`（`DROP SCHEMA … CASCADE` + 删登记 + 刷树）与 `deletableSourceNames`；i18n 加 7 个键 × 六语言；UI 设计图补上菜单 | 右键**表**能弹菜单、菜单里能删数据源；删得掉（schema 与登记**两处**都没）；**工作区自己不能被删**；**没登记过的 schema 不能被删**；**变异验证 9 处全被抓住**（其中一处原本是**假绿** —— 前置条件不成立，改成「特意登记一个叫 `main` 的源」之后才抓住） | ✅ **本轮落地** |
+| 19 | `feat(analysis): 查询结果能导出了 —— 五种格式全在 / 共用那个对话框 / 嵌入式留在本进程` | 引擎的 `ExportHandler` 按**方言声明的连接类型**分叉（嵌入式**本进程直跑**，远端维持子进程）+ 顶层 `ExportSupport.kt`（格式与「跑一次导出」各一份，两个模式共用）+ `ExportDialog` 去绑 `DatabaseBrowserState` + 分析工作台的「导出」按钮与底栏状态 + i18n 4 个键 × 六语言 | §7.6 全绿；**变异验证** 3 处全被抓住（其中引擎那处是**挂死 900 秒**才暴露的）；顺带修掉「从 DuckDB / SQLite 文件连接导出」这个**真 bug** | ✅ **已提交**（`a27fab3`） |
+| 20 | `feat(analysis): 结果表能复制走了 —— 右键复制此行 / 复制整表` | 新增 `:shared` 的 `table/TableCopyMenu.kt`（纯函数 `tableCopyText()` / `rowCopyText()` + 共用的菜单组件）+ `AnalysisCopyStatus` + 结果表的右键菜单与底栏状态 + `onCopyToClipboard` 接线（`desktopApp` 侧接 `ClipboardWriter`）+ i18n 4 个键 × 六语言 | §7.7 全绿；**变异验证** 5 处全被抓住 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——

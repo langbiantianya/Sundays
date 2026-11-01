@@ -249,6 +249,15 @@ enum class StrKey {
     COPIED,
     COPY_FAILED,
     REFERENCE_NAME,
+
+    /** 结果表右键菜单的「复制此行」。 */
+    COPY_ROW,
+
+    /** 结果表右键菜单的「复制整表」。 */
+    COPY_ALL_ROWS,
+
+    /** 结果表复制失败（剪贴板不可用 / 被占用）。 */
+    COPY_TABLE_FAILED,
     ENGINE_NO_DDL,
     CREATE_TABLE_DDL,
     DB_NAME_PLACEHOLDER,

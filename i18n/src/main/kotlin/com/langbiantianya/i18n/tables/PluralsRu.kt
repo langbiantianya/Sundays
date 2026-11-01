@@ -200,4 +200,10 @@ internal val pluralsRu: Map<PluralStrKey, Map<PluralForm, String>> =
                 PluralForm.FEW to "{0} минуты",
                 PluralForm.MANY to "{0} минут",
             ),
+        PluralStrKey.COPIED_ROWS to
+            mapOf(
+                PluralForm.ONE to "Скопирована {0} строка",
+                PluralForm.FEW to "Скопировано {0} строки",
+                PluralForm.MANY to "Скопировано {0} строк",
+            ),
     )
