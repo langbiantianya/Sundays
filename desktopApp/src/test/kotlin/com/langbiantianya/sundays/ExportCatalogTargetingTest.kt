@@ -110,7 +110,7 @@ class ExportCatalogTargetingTest {
 
             state.exportQuery(
                 sql = "SELECT * FROM `sundays_xdb`.`probe_shared_name`",
-                format = DatabaseBrowserState.ExportFormat.CSV,
+                format = ExportFormat.CSV,
                 outputDir = out.absolutePath,
                 fileName = "out.csv",
                 tableName = "",
@@ -136,7 +136,7 @@ class ExportCatalogTargetingTest {
             // SQL 工作台那条路没有「某一张表」，catalog 留空 → 退回 currentSchema()
             state.exportQuery(
                 sql = "SELECT 1",
-                format = DatabaseBrowserState.ExportFormat.CSV,
+                format = ExportFormat.CSV,
                 outputDir = out.absolutePath,
                 fileName = "out.csv",
                 tableName = "",

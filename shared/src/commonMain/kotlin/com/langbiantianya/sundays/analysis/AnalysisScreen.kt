@@ -43,8 +43,10 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
@@ -64,6 +66,7 @@ import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
 import com.langbiantianya.sundays.ui.WinIconButton
 import com.langbiantianya.sundays.ui.WinTextButton
+import com.langbiantianya.sundays.ui.plural
 import com.langbiantianya.sundays.ui.str
 
 /**
@@ -126,6 +129,10 @@ import com.langbiantianya.sundays.ui.str
  * @param result 最近一次查询的结果；`null` = 还没跑过
  * @param running 正在跑 —— 界面据此禁用「运行」按钮
  * @param onRun 「运行」被点时回调
+ * @param exportStatus 「导出查询结果」的**当前状态**；`null` = 没导过。
+ *   画在底栏 —— 导出可能跑好几秒，用户必须能看见「在跑」与「跑完了没有」，
+ *   否则「点了导出然后什么也没发生」会和真失败分不清
+ * @param onExport 「导出」被点时回调 —— 打开导出对话框（格式 / 路径 / 预览都在那儿）
  * @param treePaneHoverIcon 左树分隔条悬停时的指针图标。`null` = 不改指针。
  *
  *   **为什么由调用方给**：「左右拉伸」箭头是**平台专属**资源
@@ -158,6 +165,8 @@ fun AnalysisScreen(
     result: AnalysisResult? = null,
     running: Boolean = false,
     onRun: () -> Unit = {},
+    exportStatus: AnalysisExportStatus? = null,
+    onExport: () -> Unit = {},
     treePaneHoverIcon: PointerIcon? = null,
     editorPaneHoverIcon: PointerIcon? = null,
     modifier: Modifier = Modifier,
@@ -285,6 +294,8 @@ fun AnalysisScreen(
                                 onSqlChange = onSqlChange,
                                 running = running,
                                 onRun = onRun,
+                                exporting = exportStatus is AnalysisExportStatus.Running,
+                                onExport = onExport,
                                 modifier =
                                     Modifier
                                         .height(editorHeightNow)
@@ -315,7 +326,7 @@ fun AnalysisScreen(
                             )
                         }
                     }
-                    AnalysisStatusBar(result = result)
+                    AnalysisStatusBar(result = result, exportStatus = exportStatus)
                 }
             }
         }
@@ -363,6 +374,12 @@ const val ANALYSIS_RESULT_TABLE_TAG: String = "analysisResultTable"
 
 /** 「运行」按钮的测试标记。 */
 const val ANALYSIS_RUN_BUTTON_TAG: String = "analysisRunButton"
+
+/** 「导出」按钮的测试标记。 */
+const val ANALYSIS_EXPORT_BUTTON_TAG: String = "analysisExportButton"
+
+/** 底栏里那一行导出状态的测试标记。 */
+const val ANALYSIS_EXPORT_STATUS_TAG: String = "analysisExportStatus"
 
 /** 「添加数据源」按钮的测试标记。 */
 const val ANALYSIS_ADD_SOURCE_BUTTON_TAG: String = "analysisAddSourceButton"
@@ -492,7 +509,7 @@ private fun AnalysisPullStrip(
 }
 
 /**
- * 编辑器面板 —— 面板头 + SQL 编辑器（**工具条上带「格式化」与「运行」**）。
+ * 编辑器面板 —— 面板头 + SQL 编辑器（**工具条上带「格式化」「导出」与「运行」**）。
  *
  * ## 为什么固定成 DuckDB 方言
  *
@@ -501,11 +518,18 @@ private fun AnalysisPullStrip(
  * 所以编辑器的语言是 `sql-duckdb`，而且**隐藏语言切换器** ——
  * 摆一个能让用户切到 Lua 的下拉框，只会让「这条 SQL 到底打在哪」变得含糊。
  *
- * ## 为什么「运行」跟「格式化」同一行
+ * ## 为什么「运行」「导出」跟「格式化」同一行
  *
  * 它俩都是**对编辑器里这段 SQL 的动作** —— 分开放两行就让人多扫一眼，
  * 而且分析模式原来那条工具条（只读徽标 + 运行）本来就是一行没别的内容的行，
  * 去掉徽标之后**整行都空了**。
+ *
+ * ## 为什么「导出」紧挨着「运行」
+ *
+ * 两个动作都作用于**编辑器里这段 SQL**，而且用户常常是「先跑一下看看，
+ * 再把它导出去」—— 挨在一起才像一组。
+ * 「导出」在左边、「运行」在右边：运行是**看一眼**（快、常用），
+ * 导出是**拿走**（慢、要挑地方），前者更常用就该更靠右手。
  */
 @Composable
 private fun AnalysisEditorPanel(
@@ -513,6 +537,8 @@ private fun AnalysisEditorPanel(
     onSqlChange: (String) -> Unit,
     running: Boolean,
     onRun: () -> Unit,
+    exporting: Boolean,
+    onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -526,6 +552,15 @@ private fun AnalysisEditorPanel(
             languageId = SqlDialectProfile.DUCKDB.languageId,
             showLanguageSwitcher = false,
             actions = {
+                // ⚠️ 导出中禁掉：工作区是**一个** DuckDB 文件，
+                // 并发跑两条查询会互相抢锁；导出时更不能再来一条查询。
+                WinButton(
+                    onClick = onExport,
+                    enabled = !exporting && sql.isNotBlank(),
+                    modifier = Modifier.testTag(ANALYSIS_EXPORT_BUTTON_TAG),
+                ) {
+                    Text(text = str(StrKey.ANALYSIS_EXPORT))
+                }
                 WinButton(
                     onClick = onRun,
                     // 正在跑的时候禁掉：连点两下就是两条并发查询，
@@ -889,7 +924,7 @@ private fun AnalysisResultPanel(
 }
 
 /**
- * 底栏 —— 行数与引擎。
+ * 底栏 —— 行数与引擎，外加**导出状态**。
  *
  * ## 为什么**不**写「只读会话」
  *
@@ -897,10 +932,17 @@ private fun AnalysisResultPanel(
  * 但那是**远端**会话的只读，而这一栏说的是**工作区**（本地 DuckDB 文件）。
  * 工作区是**可写**的（M4 的验收明确要求 `CREATE TABLE tmp AS SELECT …` 能成功）。
  * 在这儿写「只读会话」就是**假信息**，会让用户不敢在工作区里建表。
+ *
+ * ## 为什么导出状态放在**底栏**而不是顶部的进度条
+ *
+ * 顶部的横贯带子已经给了「拉取」（那是**跨树与主区**的动作）。
+ * 导出是**编辑器自己的**动作 —— 它离编辑器近才找得到，
+ * 而底栏正好贴着结果区与编辑器下沿。
  */
 @Composable
 private fun AnalysisStatusBar(
     result: AnalysisResult?,
+    exportStatus: AnalysisExportStatus?,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -918,11 +960,63 @@ private fun AnalysisStatusBar(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.weight(1f))
+        AnalysisExportStatusText(exportStatus)
         Text(
             text = str(StrKey.ANALYSIS_ENGINE, "DuckDB"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * 导出状态的那一行字。
+ *
+ * ## 为什么「正在导出」时不写「0 行」
+ *
+ * 「0 行」会被读成「导出失败」—— 引擎启动与第一帧之间有延迟，
+ * 那段时间里「0 行」是**假信息**。所以还没收到第一帧时只说「正在导出」。
+ */
+@Composable
+private fun AnalysisExportStatusText(exportStatus: AnalysisExportStatus?) {
+    when (exportStatus) {
+        null -> {
+            // 没导过 —— 不占地方（空 composable 什么都不画）
+        }
+
+        is AnalysisExportStatus.Running -> {
+            Text(
+                text =
+                    exportStatus.rows?.let {
+                        plural(PluralStrKey.EXPORT_PROGRESS_ROWS, it.toInt(), it)
+                    } ?: str(StrKey.ANALYSIS_EXPORT_RUNNING),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(ANALYSIS_EXPORT_STATUS_TAG),
+            )
+        }
+
+        is AnalysisExportStatus.Succeeded -> {
+            Text(
+                text = str(StrKey.ANALYSIS_EXPORT_DONE, exportStatus.rowsWritten.toString(), exportStatus.file),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag(ANALYSIS_EXPORT_STATUS_TAG),
+            )
+        }
+
+        is AnalysisExportStatus.Failed -> {
+            Text(
+                text = str(StrKey.ANALYSIS_EXPORT_FAILED, exportStatus.reason),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag(ANALYSIS_EXPORT_STATUS_TAG),
+            )
+        }
     }
 }
 

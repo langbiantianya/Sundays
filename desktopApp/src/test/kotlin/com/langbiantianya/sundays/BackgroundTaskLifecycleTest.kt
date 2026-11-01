@@ -220,7 +220,7 @@ class BackgroundTaskLifecycleTest {
             val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
             val state = newState(CompletingEngine(out, gate))
 
-            val taskId = state.startExport("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "a.csv")
+            val taskId = state.startExport("SELECT 1", ExportFormat.CSV, dir.absolutePath, "a.csv")
 
             // 刚登记时：运行中，且**进度是 null 而不是 0** ——
             // 「0 行」会被读成「导出失败」，而引擎起子进程本来就要几秒
@@ -245,7 +245,7 @@ class BackgroundTaskLifecycleTest {
         runBlocking<Unit> {
             val dir = Files.createTempDirectory("sundays-task-fail").toFile()
             val state = newState(FailingEngine())
-            val taskId = state.startExport("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "a.csv")
+            val taskId = state.startExport("SELECT 1", ExportFormat.CSV, dir.absolutePath, "a.csv")
 
             awaitSettled(state, taskId)
 
@@ -265,7 +265,7 @@ class BackgroundTaskLifecycleTest {
             val state = newState(CompletingEngine(File(dir, "a.csv")))
             assertEquals(0, state.runningTasks.size, "初始没有运行中任务")
 
-            val id = state.startExport("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "a.csv")
+            val id = state.startExport("SELECT 1", ExportFormat.CSV, dir.absolutePath, "a.csv")
             assertEquals(1, state.runningTasks.size, "登记后徽标该是 1")
 
             awaitSettled(state, id)
@@ -283,10 +283,10 @@ class BackgroundTaskLifecycleTest {
             // 串行发起：先让第一条跑完（引擎第 1 次调用会正常完成），
             // 再发起第二条（引擎第 2 次调用永不收口 = 运行中）。
             // 不并发发起，就不需要对「两次 handle 谁先到」做任何假设。
-            val first = state.startExport("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "first.csv")
+            val first = state.startExport("SELECT 1", ExportFormat.CSV, dir.absolutePath, "first.csv")
             awaitSettled(state, first)
 
-            val second = state.startExport("SELECT 2", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "run2.csv")
+            val second = state.startExport("SELECT 2", ExportFormat.CSV, dir.absolutePath, "run2.csv")
             // 等它真的跑起来（拿到第一帧进度），否则下面「恰好一个在跑」是空断言
             withTimeout(10_000) {
                 while (state.backgroundTasks.first { it.id == second }.progress == null) delay(10)
@@ -313,7 +313,7 @@ class BackgroundTaskLifecycleTest {
             val state = newState(CompletingEngine(File(dir, "out.csv")))
             val stmts = listOf("SELECT 1", "SELECT 2", "SELECT 3")
 
-            val ids = state.startExportBatch(stmts, DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, "export.csv")
+            val ids = state.startExportBatch(stmts, ExportFormat.CSV, dir.absolutePath, "export.csv")
 
             assertEquals(3, ids.size, "每条语句一个任务 —— 面板要能回答「哪一条失败了」")
             assertEquals(3, state.backgroundTasks.size)
@@ -335,7 +335,7 @@ class BackgroundTaskLifecycleTest {
     @Test
     fun `批量导出空语句列表不登记任何任务`() {
         val state = newState(CompletingEngine(File(".", "x.csv")))
-        assertTrue(state.startExportBatch(emptyList(), DatabaseBrowserState.ExportFormat.CSV, ".", "x.csv").isEmpty())
+        assertTrue(state.startExportBatch(emptyList(), ExportFormat.CSV, ".", "x.csv").isEmpty())
         assertTrue(state.backgroundTasks.isEmpty())
     }
 

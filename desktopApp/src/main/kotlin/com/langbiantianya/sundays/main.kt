@@ -41,6 +41,7 @@ import com.langbiantianya.grpc.Action
 import com.langbiantianya.grpc.Category
 import com.langbiantianya.grpc.connectionConfig
 import com.langbiantianya.i18n.LanguageScope
+import com.langbiantianya.sundays.analysis.AnalysisExportStatus
 import com.langbiantianya.sundays.analysis.AnalysisMode
 import com.langbiantianya.sundays.analysis.AnalysisModeBar
 import com.langbiantianya.sundays.analysis.AnalysisScreen
@@ -50,6 +51,7 @@ import com.langbiantianya.sundays.connection.AddConnectionDialog
 import com.langbiantianya.sundays.connection.ConnectionManagerScreen
 import com.langbiantianya.sundays.connection.ConnectionStatus
 import com.langbiantianya.sundays.connection.DialectMetadata
+import com.langbiantianya.sundays.editor.language.SqlDialectProfile
 import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.navigation.AppDestination
 import com.langbiantianya.sundays.navigation.StartScreen
@@ -517,6 +519,17 @@ internal fun MainScreen(
     // `connection.json` 里的连接（浏览模式用），「添加数据源」加的是
     // **工作区 DuckDB 里**的数据源（分析模式用）。
     var sourceDialogVisible by remember { mutableStateOf(false) }
+    // 「导出查询结果」对话框开关 —— 分析模式与浏览模式**共用同一个**对话框
+    // （格式 / 路径 / 可编辑 SQL / 预览全在里面，见 ExportDialog）。
+    var exportDialogVisible by remember { mutableStateOf(false) }
+    // 正在跑的那次导出的落点 —— 进度弹窗要显示文件名与目录。
+    // 为什么存在界面侧而不是会话里：会话只管「导成了没」，
+    // 而「文件名 / 目录」是**这一次**导出的参数，不是会话的长期状态。
+    var exportFileName by remember { mutableStateOf("") }
+    var exportOutputDir by remember { mutableStateOf("") }
+    // 进度弹窗被「后台运行」收起来之后不再自动弹回 ——
+    // 导出还在跑，跑完了底栏会显示结果（见 AnalysisStatusBar）。
+    var exportProgressDismissed by remember { mutableStateOf(false) }
     // 进入设置页前所在的屏 —— 设置页左上角「返回」按钮据此回到原处，而不是固定回首屏。
     var destinationBeforeSettings by remember { mutableStateOf(AppDestination.CONNECTIONS) }
     // 「重新打开外观引导」的浮层开关（设置 → 个性化底部那个按钮）。
@@ -831,6 +844,11 @@ internal fun MainScreen(
                                     result = analysis.result,
                                     running = analysis.running,
                                     onRun = { analysis.run() },
+                                    // 「导出」→ 打开**共用**的导出对话框（与浏览模式同一个）。
+                                    // 导出的是**编辑器里这段 SQL 的查询结果**，
+                                    // 格式与浏览模式完全一致（CSV / JSON / SQL / Excel / Parquet）。
+                                    onExport = { exportDialogVisible = true },
+                                    exportStatus = analysis.exportStatus,
                                     // 左树分隔条的悬停指针 —— 平台专属资源由平台侧造
                                     // （`:shared` 只决定「什么时候用」）。
                                     treePaneHoverIcon = ewResizePointerIcon(),
@@ -900,6 +918,45 @@ internal fun MainScreen(
                 // 界面就会给出「点进去必然失败」的入口。
                 dialects = session.analysisCapableDialects.toList(),
                 onDismiss = { sourceDialogVisible = false },
+            )
+        }
+
+        // 分析模式的「导出查询结果」对话框 —— 与浏览模式**共用同一个**对话框。
+        //
+        // 它画在**最外层**而不是分析分支里：对话框是屏级浮层，
+        // 放分支里的话，切走分析页时它会跟着被移出组合而突然消失。
+        if (exportDialogVisible) {
+            ExportDialog(
+                // 起手 SQL = 编辑器里**当前**那段。
+                presetSql = analysis.sql,
+                // 分析模式没有「某一张表」，所以不给目标表预设 ——
+                // 只有选 SQL INSERT 时用户才需要填它。
+                presetTableName = "",
+                // 分析 SQL 恒在本地工作区（DuckDB）上跑 —— 高亮也就该是 DuckDB 的。
+                languageId = SqlDialectProfile.DUCKDB.languageId,
+                // 预览打在**工作区**上 —— 与导出的落点一致。
+                onPreview = { sql -> analysis.previewExportSql(sql) },
+                onDismiss = { exportDialogVisible = false },
+                onConfirm = { format, sql, dir, name, table ->
+                    exportDialogVisible = false
+                    exportFileName = name
+                    exportOutputDir = dir
+                    exportProgressDismissed = false
+                    analysis.startQueryExport(sql, format, dir, name, table)
+                },
+            )
+        }
+
+        // 导出进度弹窗 —— 复用浏览模式那一个（它本来就是无状态的）。
+        //
+        // 「后台运行」只把弹窗收起来：导出继续，跑完了底栏会显示结果。
+        val exportProgress = analysis.exportStatus as? AnalysisExportStatus.Running
+        if (exportProgress != null && !exportProgressDismissed) {
+            ExportProgressDialog(
+                fileName = exportFileName,
+                outputDir = exportOutputDir,
+                rowsWritten = exportProgress.rows ?: 0L,
+                onBackground = { exportProgressDismissed = true },
             )
         }
 

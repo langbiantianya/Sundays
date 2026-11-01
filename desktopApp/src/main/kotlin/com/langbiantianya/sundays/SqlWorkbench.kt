@@ -302,12 +302,13 @@ internal fun SqlWorkbenchPane(
             // （真窗口实测抓到，标题写着「2 条语句」而实际按 1 条跑，两个信息还互相矛盾。）
             val joined = statements.joinToString(";\n")
             ExportDialog(
-                state = state,
                 presetSql = joined,
                 // 多语句时不给「目标表」预设：逐条导出时每条自己带 WHERE / 列，
                 // 同一个目标表名多半是错的，让用户自己填
                 presetTableName = if (statements.size == 1) "" else "",
-                catalog = schema,
+                languageId = state.sqlDialectProfile().languageId,
+                // 预览打在**当前库**上 —— 与导出的落点一致。
+                onPreview = { sql -> state.previewExportSql(sql, schema) },
                 statementCount = statements.size,
                 onDismiss = { exportStatements = null },
                 onConfirm = { fmt, sql, dir, name, tbl ->

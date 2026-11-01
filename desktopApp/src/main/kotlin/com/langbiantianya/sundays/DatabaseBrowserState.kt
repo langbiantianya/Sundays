@@ -2559,26 +2559,10 @@ class DatabaseBrowserState(
 
     // ------------------------------------------------------------------------
     // 导出（引擎 v2.16 已实现，此前前端未接线）
+    //
+    // 格式 / 结果 / 进度 / 「跑一次导出」都在**顶层**（见 ExportSupport.kt）——
+    // 浏览模式与分析模式共用同一份，不在这里再抄一遍。
     // ------------------------------------------------------------------------
-
-    /** 导出格式 —— 与 `ExportRunRequest.format` 一一对应。 */
-    enum class ExportFormat(
-        val labelKey: StrKey,
-        val protoValue: String,
-        val extension: String,
-    ) {
-        CSV(StrKey.FORMAT_CSV, "CSV", "csv"),
-        JSON_LINES(StrKey.FORMAT_JSON_LINES, "JSON_LINES", "jsonl"),
-        SQL_INSERT(StrKey.FORMAT_SQL_INSERT, "SQL_INSERT", "sql"),
-        EXCEL(StrKey.FORMAT_EXCEL, "EXCEL", "xlsx"),
-        PARQUET(StrKey.FORMAT_PARQUET, "PARQUET", "parquet"),
-    }
-
-    /** 导出结果 —— 引擎终止帧回的实际文件路径。 */
-    data class ExportResult(
-        val file: String,
-        val rowsWritten: Long,
-    )
 
     // --------------------------------------------------------------------
     // 后台任务
@@ -2875,25 +2859,6 @@ class DatabaseBrowserState(
     }
 
     /**
-     * 导出进度的一帧 —— 引擎每导出一批就推一次。
-     *
-     * ## 为什么只有行数、没有百分比
-     *
-     * 引擎的 `ExportProgressFrame` 里就只有 `exported_rows` / `column_count` /
-     * `completed`，**没有总行数**：导出走的是一条普通 `SELECT`，引擎不会为了报进度
-     * 先跑一遍 `COUNT(*)`（大表上那是白等一遍）。
-     *
-     * 前端**不能**拿表预览那一行的行数来充当总数 ——
-     * 预览可能带着过滤/搜索条件，而导出的是整张表，两者对不上。
-     * 报一个假的百分比比不报更糟，所以进度条走不确定态（indeterminate），
-     * 旁边如实显示「已导出 N 行」。
-     */
-    data class ExportProgress(
-        val rowsWritten: Long,
-        val completed: Boolean,
-    )
-
-    /**
      * 导出的**看门狗超时**（毫秒）。
      *
      * 取 5 分钟：真正的大表导出按行推进、可能跑很久，这个值不该误伤正常导出；
@@ -2904,16 +2869,15 @@ class DatabaseBrowserState(
      * 与其指望每一层都记得收口，不如在这层兜一道底：
      * 超时也要变成一条**用户看得见**的失败。
      */
-    internal var exportTimeoutMs: Long = 5 * 60 * 1000
+    internal var exportTimeoutMs: Long = DEFAULT_EXPORT_TIMEOUT_MS
 
     /**
      * 导出一段 SQL 的结果 —— 发 `EXPORT.RUN_EXPORT`。
      *
-     * ## 为什么要用 [EngineClient.handle] 而不是 [EngineClient.invoke]
+     * ## 真正跑导出的是 [runExport]
      *
-     * 导出是**流式**的：每导出一批推一帧 `ExportProgressFrame`，终止帧带 `completed=true`
-     * 与最终 `file_path`。`invoke` 只 collect 到**第一条**终止帧就返回，中间进度与最终
-     * 文件路径都会丢。
+     * 参数校验、请求构造、流式收帧、看门狗都在那儿 —— 浏览模式与分析模式共用**同一份**。
+     * 这里只负责**决定打到哪个库**。
      *
      * ## 为什么导出打到的库不能只问树
      *
@@ -2944,72 +2908,20 @@ class DatabaseBrowserState(
         catalog: String = "",
         onProgress: (ExportProgress) -> Unit = {},
     ): Result<ExportResult> {
-        // 参数先在**前端**校验：让引擎那边才报错的话，用户看到的是一句 JDBC 异常，
-        // 还要在对话框里猜是自己哪里填错了
-        if (sql.isBlank()) return Result.failure(IllegalArgumentException(Msg.text(StrKey.SQL_EMPTY)))
-        if (outputDir.isBlank()) {
-            return Result.failure(IllegalArgumentException(Msg.text(StrKey.OUTPUT_DIR_REQUIRED)))
-        }
-        if (fileName.isBlank()) {
-            return Result.failure(IllegalArgumentException(Msg.text(StrKey.FILE_NAME_REQUIRED)))
-        }
-        if (format == ExportFormat.SQL_INSERT && tableName.isBlank()) {
-            return Result.failure(IllegalArgumentException(Msg.text(StrKey.EXPORT_TABLE_NAME_REQUIRED)))
-        }
         // 导出打到的库：调用方给的那张表所在的库优先，空串才退回「树里第一个展开的库」。
         val schema = catalog.ifBlank { currentSchema() }
         activeDatabases.add(schema)
-        // 在 DSL 之外构造：`sql` / `outputDir` 等字段名会与外层 `dataRequest` 的兄弟消息
-        // 撞名，内联赋值会被解析到外层去（见 updateCell 的 KDoc）
-        val runReq =
-            com.langbiantianya.grpc.exportRunRequest {
-                this.sql = sql
-                this.outputDir = outputDir
-                this.fileName = fileName
-                this.format = format.protoValue
-                this.tableName = tableName
-            }
-        return runCatching {
-            val req =
-                request {
-                    id =
-                        java.util.UUID
-                            .randomUUID()
-                            .toString()
-                    this.connection = engineConn(database = schema)
-                    category = Category.EXPORT
-                    action = Action.RUN_EXPORT
-                    exportRequest = com.langbiantianya.grpc.exportRequest { runExport = runReq }
-                }
-            var file = ""
-            var rows = 0L
-            // ⚠️ `withTimeoutOrNull` 不是「防御性编程」，是这条契约的**实现**：
-            // 引擎在命令没发出去 / 子进程中途消失时会**一帧都不回**，
-            // 光靠 `collect` 结束前的检查是够不着的 —— 得有人替它兜底。
-            // 没有这一行时，真窗口上点「开始导出」的表现是：对话框关了，
-            // 文件没有，界面上一个字都没有（实测，见 TEST_CASES.md §9.13）。
-            val finished =
-                withTimeoutOrNull(exportTimeoutMs) {
-                    engine.handle(req).collect { resp ->
-                        if (!resp.success) throw IllegalStateException(resp.error.ifBlank { Msg.text(StrKey.EXPORT_FAILED) })
-                        val p = resp.export.progress
-                        rows = p.exportedRows
-                        // 进度要**逐帧**往外抛，而不是只留最后一帧：
-                        // 进度弹窗的价值全在「动起来」这件事上，只报最终行数等于没报
-                        onProgress(ExportProgress(rowsWritten = p.exportedRows, completed = p.completed))
-                        if (p.completed) {
-                            file = p.filePath
-                            if (p.error.isNotBlank()) throw IllegalStateException(p.error)
-                        }
-                    }
-                    true
-                }
-            if (finished != true) {
-                throw IllegalStateException(Msg.format(StrKey.EXPORT_TIMEOUT, exportTimeoutMs / 1000))
-            }
-            if (file.isBlank()) throw IllegalStateException(Msg.text(StrKey.EXPORT_NO_FILE_REPORTED))
-            ExportResult(file = file, rowsWritten = rows)
-        }
+        return runExport(
+            engine = engine,
+            connection = engineConn(database = schema),
+            sql = sql,
+            format = format,
+            outputDir = outputDir,
+            fileName = fileName,
+            tableName = tableName,
+            timeoutMs = exportTimeoutMs,
+            onProgress = onProgress,
+        )
     }
 
     // 改单元格只有两个入口：`stageCellEdit` 只进暂存缓冲，`applyCellEdits` 才把

@@ -8,10 +8,12 @@
 
 package com.langbiantianya.handlers
 
+import com.langbiantianya.dialect.ConnectionType
 import com.langbiantianya.export.ExportEngine
 import com.langbiantianya.export.ExportFormat
 import com.langbiantianya.export.ExportProcessManager
 import com.langbiantianya.export.ExportRequest
+import com.langbiantianya.grpc.ConnectionConfig
 import com.langbiantianya.grpc.ExportHubResponse
 import com.langbiantianya.grpc.ExportResponse
 import com.langbiantianya.grpc.ExportRunRequest
@@ -20,16 +22,19 @@ import com.langbiantianya.grpc.PayloadAdapter
 import com.langbiantianya.grpc.Request
 import com.langbiantianya.grpc.Response
 import com.langbiantianya.grpc.exportHubResponse
+import com.langbiantianya.grpc.exportProgressFrame
 import com.langbiantianya.grpc.exportResponse
 import com.langbiantianya.grpc.exportStopResponse
 import com.langbiantianya.grpc.response
 import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
+import com.langbiantianya.pool.PoolManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.transformWhile
@@ -94,6 +99,11 @@ object ExportHandler {
     /**
      * 主进程模式入口 — 由 [com.langbiantianya.dispatcher.RequestDispatcher] 直接调用。
      * 编排子进程 + 收集子进程响应并组装为 typed Response 流。
+     *
+     * ## 两条路：嵌入式**本进程直跑**，远端**子进程**
+     *
+     * 见 [mustRunInMainProcess] 的两条理由 —— 子进程打不开主进程占着的嵌入式库文件，
+     * 而内存库在子进程里是**另一个**空库。
      */
     fun executeInMainProcess(request: Request): Flow<Response> =
         flow {
@@ -117,8 +127,14 @@ object ExportHandler {
             // 停止导出分支
             val stopExportId = runReq.stopExportId.ifBlank { null }
             if (stopExportId != null) {
-                ensureSubprocessRunning(jarPath)
-                ExportProcessManager.stopExport(stopExportId)
+                if (mustRunInMainProcess(config)) {
+                    // 本进程直跑 —— 取消标志（[ExportEngine.isCancelled]）就在本进程里，
+                    // 不必为一个**不存在**的导出子进程去拉起一台 JVM。
+                    ExportEngine.isCancelled = true
+                } else {
+                    ensureSubprocessRunning(jarPath)
+                    ExportProcessManager.stopExport(stopExportId)
+                }
                 emit(
                     response {
                         this.id = id
@@ -129,6 +145,13 @@ object ExportHandler {
                             }
                     },
                 )
+                return@flow
+            }
+
+            // 嵌入式连接 → 本进程直跑（理由见 [mustRunInMainProcess]）。
+            if (mustRunInMainProcess(config)) {
+                log("嵌入式连接，改在本进程直跑导出: id=$id driver=${config.driver}")
+                emitAll(executeLocally(request))
                 return@flow
             }
 
@@ -197,6 +220,133 @@ object ExportHandler {
                     },
                 )
             }
+        }
+
+    /**
+     * 这个连接**必须**留在主进程导出吗？
+     *
+     * ## 为什么嵌入式方言不能丢给子进程
+     *
+     * 导出默认在**子进程**里跑（见 [executeInMainProcess]）——那是为了让重活不占主进程。
+     * 但嵌入式方言（DuckDB / SQLite / H2）**只有主进程能导**，原因是两条**实测**事实：
+     *
+     * 1. **文件锁** —— DuckDB 的库文件被主进程开着时，子进程打开同一个文件会失败：
+     *    `IO Error: Cannot open file … 另一个程序正在使用此文件`。
+     *    分析模式的工作区正是这样一个被主进程占着的 DuckDB 文件，
+     *    所以「分析工作台导出查询结果」在子进程那条路上**根本跑不起来**。
+     * 2. **内存库是另一个库** —— 子进程里的 `:memory:` / `jdbc:h2:mem:` 与父进程**不共享**，
+     *    导出「成功」但文件里是**另一个空库**的数据。
+     *    静默的错误比报错更糟 —— 用户拿到一份看着正常、实则空的 CSV。
+     *
+     * 远端连接（MySQL / PostgreSQL）不受这两条影响 —— 它们本来就该在子进程里导。
+     *
+     * ## 为什么判据是**方言声明**而不是「路径是不是本地文件」
+     *
+     * 用「路径像不像本地文件」去猜，远程主机上的 DuckDB 就会被误判成本地；
+     * 而把正确性判据寄托在网络拓扑上是脆的。
+     * 方言自己声明的 [ConnectionType] 正是「我是不是嵌入式」这一事实的来源。
+     *
+     * ## 认不出来时怎么办
+     *
+     * 解析方言失败（没有任何插件声明这个 JDBC URL）时**退回子进程** ——
+     * 那条路今天怎么跑的就还怎么跑，不因为这次改动多出新故障。
+     * 真到那一步，导出本来也会因为「找不到方言」而失败。
+     *
+     * @param config 目标连接配置
+     * @return `true` = 在本进程里导
+     */
+    private fun mustRunInMainProcess(config: ConnectionConfig): Boolean {
+        val dialect =
+            runCatching { PoolManager.resolveDialect(config) }.getOrNull()
+                ?: return false
+        return dialect.connectionType != ConnectionType.CLIENT_SERVER
+    }
+
+    /**
+     * 在**本进程**里跑一次导出 —— 嵌入式连接专用的那条路。
+     *
+     * ## 为什么结构与 [executeAsSubprocess] 一样（`callbackFlow` + [Channel]）
+     *
+     * 同一个理由：[ExportEngine.export] 内部有自己的 `withContext(Dispatchers.IO)`，
+     * 在 `flow { }` 里直接 `emit` 会撞上 Flow 不变量（"Flow invariant is violated"）。
+     * 所以工作协程只往 [Channel] 里 `trySend`，`send` 全部发生在本 flow 自己的协程里。
+     *
+     * ## 与子进程那条路的差别只有「帧的形态」
+     *
+     * 子进程发的是 `ExportHubResponse`（wire 形态，data 是 `map<string, Value>`），
+     * 主进程对外的契约是 typed `Response`（body 是 `ExportProgressFrame`）。
+     * 本进程这条路上没有跨进程传输，那层 map ↔ typed 的来回转换
+     * （[ExportProcessManager.publishResponse]）是多余的 —— 直接造 typed 帧。
+     *
+     * ## 失败必须**补一帧**
+     *
+     * [ExportEngine.export] 失败时**只返回** `ExportResult(success=false)` 而不抛，
+     * 那条路径上 `onProgress` 一次都不会被调 —— 不补终止帧的话整个流**一帧不发**就结束，
+     * 上游永远等不到结论。
+     */
+    fun executeLocally(request: Request): Flow<Response> =
+        callbackFlow {
+            val id = request.id
+            val config = request.connection
+            val frames = Channel<Response>(Channel.UNLIMITED)
+
+            val worker =
+                launch(Dispatchers.IO) {
+                    fun failure(message: String) =
+                        response {
+                            this.id = id
+                            success = false
+                            error = message
+                            end = true
+                        }
+
+                    try {
+                        val exportRequest = parseExportRequest(request.exportRequest.runExport)
+                        log("导出开始（本进程直跑）: id=$id driver=${config.driver} sql=${exportRequest.sql}")
+                        val result =
+                            ExportEngine.export(config, exportRequest) { p ->
+                                frames.trySend(
+                                    response {
+                                        this.id = id
+                                        success = true
+                                        stream = true
+                                        end = p.completed
+                                        export =
+                                            exportResponse {
+                                                progress =
+                                                    exportProgressFrame {
+                                                        exportedRows = p.exportedRows
+                                                        columnCount = p.columnCount
+                                                        completed = p.completed
+                                                        if (p.filePath != null) filePath = p.filePath
+                                                        if (p.error != null) error = p.error
+                                                    }
+                                            }
+                                    },
+                                )
+                            }
+                        if (!result.success) {
+                            logWarn("导出失败（引擎已返回失败结果）: id=$id error=${result.error}")
+                            frames.trySend(failure(result.error ?: Msg.text(StrKey.EXPORT_FAILED)))
+                        } else {
+                            log("导出完成: id=$id rows=${result.exportedRows} file=${result.filePath}")
+                        }
+                    } catch (e: Throwable) {
+                        // ⚠️ 必须是 **Throwable** —— 驱动装不上时抛的是
+                        // `ServiceConfigurationError` / `NoClassDefFoundError`，那是 `Error`。
+                        logError("导出抛异常: id=$id", e)
+                        frames.trySend(failure(e.message ?: e::class.java.simpleName))
+                    } finally {
+                        frames.close()
+                    }
+                }
+
+            // emit 只在**本 flow 自己的协程**里做 —— 这是 Flow 的硬性要求
+            for (frame in frames) {
+                send(frame)
+            }
+            worker.join()
+            close()
         }
 
     /**

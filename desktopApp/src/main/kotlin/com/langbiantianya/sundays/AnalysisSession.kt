@@ -27,6 +27,7 @@ import com.langbiantianya.i18n.Msg
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_WORKSPACE_NODE_ID
 import com.langbiantianya.sundays.analysis.AnalysisColumn
+import com.langbiantianya.sundays.analysis.AnalysisExportStatus
 import com.langbiantianya.sundays.analysis.AnalysisMode
 import com.langbiantianya.sundays.analysis.AnalysisPullCancelledException
 import com.langbiantianya.sundays.analysis.AnalysisResult
@@ -51,6 +52,7 @@ import com.langbiantianya.sundays.analysis.report.reportDisplayNameText
 import com.langbiantianya.sundays.analysis.stagingTableName
 import com.langbiantianya.sundays.analysis.workspaceFilePath
 import com.langbiantianya.sundays.connection.DialectType
+import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.tree.ObjectTreeColumn
 import com.langbiantianya.sundays.tree.ObjectTreeKind
 import com.langbiantianya.sundays.tree.ObjectTreeNode
@@ -1317,6 +1319,122 @@ class AnalysisSession(
             } finally {
                 running = false
             }
+        }
+    }
+
+    // ──────────────── 导出查询结果 ────────────────
+
+    /**
+     * 「导出查询结果」的**当前状态**；`null` = 没导过。
+     *
+     * ## 为什么它是**会话**状态而不是界面状态
+     *
+     * 导出可能跑好几秒，而分析屏会被拆掉重建（切顶层页、换模式）。
+     * 状态放在 `remember` 里的话，用户切个页回来就看不出「刚才那一导成没成」。
+     * 它与 [sql] / [result] 是同一类东西 —— 跨页存活的分析模式状态。
+     */
+    var exportStatus by mutableStateOf<AnalysisExportStatus?>(null)
+        private set
+
+    /**
+     * 导出对话框里的「预览」 —— 在**本地工作区**上跑一条 SQL，取回前 [limit] 行。
+     *
+     * ## 为什么**只允许 SELECT / WITH**
+     *
+     * 预览是「点一下就发到数据库」的动作，而它出现的地方恰恰是用户**刚编辑完
+     * 一条任意 SQL** 的编辑器里。让用户在这里敲一条 `UPDATE` 然后点「预览」，
+     * 却在按钮旁边没有半个字提示，是不可接受的。
+     *
+     * 所以判据放在**发送之前**：不是 SELECT 开头就拒绝，并把原因说清楚。
+     * 代价是 CTE（`WITH …`）也在白名单里 —— 它最终要么是 SELECT 要么是 DML，
+     * 后者仍会被 [DangerousSql.scan] 二次拦下。
+     *
+     * ## 为什么走 [runAnalysisQuery] 而不是另开一条路
+     *
+     * 分析模式跑 SQL 只有**一条**路（`ANALYSIS.RUN_QUERY`，见 [run]）。
+     * 预览是「同一条路的前 N 行」，不是第二种查询方式 ——
+     * 再造一条就多了一份可能对不上的真相。
+     *
+     * @return 成功时是「列名 + 行」，失败时是给用户看的文案。
+     */
+    suspend fun previewExportSql(
+        sql: String,
+        limit: Int = 100,
+    ): Result<SqlPreviewRows> {
+        val statement = sql.trim()
+        if (statement.isEmpty()) return Result.failure(IllegalArgumentException(Msg.text(StrKey.SQL_EMPTY)))
+        if (!DangerousSql.isReadOnlyQuery(statement)) {
+            return Result.failure(
+                IllegalArgumentException(Msg.text(StrKey.PREVIEW_WRITE_REJECTED)),
+            )
+        }
+        return runCatching {
+            val outcome = runAnalysisQuery(engine, workspaceConnection(), statement)
+            if (outcome.failed) {
+                throw IllegalStateException(outcome.error ?: Msg.text(StrKey.PREVIEW_FAILED))
+            }
+            val columns = outcome.columns.map { it.name }
+            SqlPreviewRows(
+                columns = columns,
+                columnTypes = outcome.columns.map { it.type },
+                rows =
+                    outcome.rows.take(limit).map { row ->
+                        columns.indices.associate { index -> columns[index] to (row.getOrNull(index) ?: "") }
+                    },
+                // 两种截断都要说出来：引擎侧的 5000 行上限，和这里的 [limit]。
+                truncated = outcome.truncated || outcome.rows.size > limit,
+            )
+        }
+    }
+
+    /**
+     * 导出当前这段 SQL 的**查询结果**。
+     *
+     * 走的是**引擎那条既有导出链路**（`EXPORT.RUN_EXPORT`）——
+     * 与浏览模式导出表预览**完全同一条**，所以**五种格式全都在**：
+     * CSV / JSON Lines / SQL INSERT / Excel / Parquet。
+     *
+     * ## 为什么落点在**工作区**而不是远端
+     *
+     * 分析模式的 SQL 恒在本地工作区上跑（远端恒为只读），
+     * 所以它查出来的数据也在工作区里 —— 导出自然也是从工作区取数。
+     *
+     * ## 为什么状态住在会话里
+     *
+     * 导出可能跑好几秒，界面会被拆掉重建（切顶层页、换模式）。
+     * 状态放在 `remember` 里的话，用户切个页回来就看不出「刚才那一导成没成」。
+     *
+     * @return 启动的任务；`null` = 没导（SQL 为空，或上一次还没导出完）
+     */
+    fun startQueryExport(
+        sql: String,
+        format: ExportFormat,
+        outputDir: String,
+        fileName: String,
+        tableName: String = "",
+    ): Job? {
+        val statement = sql.trim()
+        if (statement.isEmpty()) return null
+        if (exportStatus is AnalysisExportStatus.Running) return null
+        exportStatus = AnalysisExportStatus.Running(null)
+        return scope.launch {
+            val result =
+                runExport(
+                    engine = engine,
+                    connection = workspaceConnection(),
+                    sql = statement,
+                    format = format,
+                    outputDir = outputDir,
+                    fileName = fileName,
+                    tableName = tableName,
+                ) { progress -> exportStatus = AnalysisExportStatus.Running(progress.rowsWritten) }
+            exportStatus =
+                result.fold(
+                    onSuccess = { AnalysisExportStatus.Succeeded(it.file, it.rowsWritten) },
+                    onFailure = {
+                        AnalysisExportStatus.Failed(it.message ?: Msg.text(StrKey.EXPORT_FAILED))
+                    },
+                )
         }
     }
 

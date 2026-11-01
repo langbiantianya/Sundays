@@ -61,7 +61,7 @@
 | 15 | 多语句词法分句 | 引号 / 注释 / dollar-quoting 感知的顶层 `;` 切分，按序执行、遇错即停 | [`SqlScriptSplitter.kt`](./src/main/kotlin/com/langbiantianya/engine/SqlScriptSplitter.kt) |
 | 16 | 导入在主进程运行 | CSV / JSON_LINES 流式直插，主进程不背 POI / Parquet / Hadoop 负担 —— 这也是导入可取消的前提 | [`ImportHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/ImportHandler.kt) |
 | 17 | 读源是状态机 | CSV 处理引号转义 / CRLF / 参差行补齐；JSON Lines 单趟读取并带行号报错 | [`CsvReader.kt`](./src/main/kotlin/com/langbiantianya/importer/CsvReader.kt) · [`JsonLinesReader.kt`](./src/main/kotlin/com/langbiantianya/importer/JsonLinesReader.kt) |
-| 18 | 导出子进程隔离 | 导出跑在 `-Xmx512m` 子进程，父进程只转发进度帧，避免大导出让主进程 OOM | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
+| 18 | 导出子进程隔离 | 导出跑在 `-Xmx512m` 子进程，父进程只转发进度帧，避免大导出让主进程 OOM。**例外见第 47 条**（嵌入式连接必须留在本进程） | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
 | 19 | 每层流式路由必须收口 | 缺一层收口就退化成静默失败，界面表现是「点了导出，什么也没发生」 | [`ExportHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt) |
 | 20 | `onNext` 不是线程安全的 | 并发导出时父子两侧都要加锁（子进程侧发帧锁、父进程侧发命令锁），否则整条流当场废掉 | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
 | 21 | hub 地址写死 `127.0.0.1` | `localhost` 在 Windows 可能解析成 `::1`，同机进程没有「跨主机」，一律走 IPv4 回环 | [`ExportProcessManager.kt`](./src/main/kotlin/com/langbiantianya/export/ExportProcessManager.kt) |
@@ -90,6 +90,7 @@
 | 44 | 取消要打在**正在跑的那条语句**上 | DuckDB JDBC 的 `Statement.cancel()` 第一件事是 `if (!stmtRefLock.isLocked()) return;` —— 拿一条**新**语句去 cancel 是**空操作**（取消发出去了，拉取照跑到底还报「成功」）。所以引擎把「本次事务正在用的那条语句」登记给 `StatementRegistry`，取消时打的就是它；取消若落在扫描开始之前，则在**提交前**再看一眼标志 → 回滚并收成「取消」 | [`AnalysisHandler.kt`](./src/main/kotlin/com/langbiantianya/analysis/AnalysisHandler.kt) |
 | 45 | 原生扫描器是**可选加速**，默认关 | `mysql_scanner` / `postgres_scanner` **随 JDBC 驱动发布**（静态链接，`duckdb_extensions()` 里 `installed_from = core`），所以「装没装扩展」不是变量；但两条路的**类型映射不同**（`SMALLINT` → 原生 `SMALLINT` / 我们 `INTEGER`），「装没装扩展」不该隐式决定用户拿到的类型 —— 所以做成显式开关（`SUNDAYS_DUCKDB_NATIVE_EXT=1`），走不通就**降级**回纯 Java | [`NativeExtensionScanner.kt`](./src/main/kotlin/com/langbiantianya/analysis/NativeExtensionScanner.kt) |
 | 46 | 挂载的远端必须**摘掉**，且摘除在**提交之后** | 挂着的远端留在 DuckDB 的目录表里，而那条记录的 `path` **含明文密码**（用户在编辑器里 `SELECT * FROM duckdb_databases()` 就能看见）。而摘除若落在事务里，DuckDB 会中止事务 → 提交落空 → **建出来的表整张消失**（症状：拉取报成功、可工作区里查不到表） | [`NativeExtensionScanner.kt`](./src/main/kotlin/com/langbiantianya/analysis/NativeExtensionScanner.kt) |
+| 47 | **嵌入式连接的导出必须留在本进程** | 子进程打不开主进程正占着的 DuckDB 库文件（`另一个程序正在使用此文件`），而内存库在子进程里**是另一个库** —— 导出「成功」但内容是空的（静默的错误比报错更糟）。判据是**方言声明的连接类型**（`EMBEDDED` / `IN_MEMORY` / `FILE_BASED`），不是「路径像不像本地文件」—— 按拓扑猜，远程主机上的 DuckDB 会被误判成本地。远端连接维持子进程不变 | [`ExportHandler.kt`](./src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt) |
 
 ## 4. 请求处理链路
 

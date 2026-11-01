@@ -134,6 +134,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | **拉取链路**：DuckDB **联邦直查**远端 JDBC 源 → 工作区表（**零 CSV 中转、零临时文件**），带行数进度与可取消 | `EngineAnalysisPuller` / `PullProgressIndicator` || | 拉下来的表**保留远端的类型**（`INT` 落下来还是整数，`SUM(id)` 直接能跑） | 引擎的 `JdbcScanTableFunction` |
 | | 拉取可切到 DuckDB 的**原生扫描器**（可选加速，`SUNDAYS_DUCKDB_NATIVE_EXT=1` 才开）—— 走不通就**降级**回纯 Java 表函数，用户看到的仍是「拉取成功」 | 引擎的 `NativeExtensionScanner` |
 | | **SQL 编辑器**（固定 DuckDB 方言）+ **只读结果表**（结果不是一张可以改的表） | `CodeEditorWithToolbar` / `DataTable` |
+| | **编辑器的查询结果能导出** —— 工具条上的「导出」按钮打开**与浏览模式共用的那一个导出对话框**：五种格式（CSV / JSON_LINES / SQL_INSERT / EXCEL / PARQUET）**全在**、可编辑要导出的 SQL、**能预览**、能选目录与文件名。**不做**结果表的右键导出菜单 —— 右键菜单塞不下「格式 / 目录 / 文件名 / 可编辑 SQL / 预览」这一整套，而只给一个「导出为 CSV」会凭空多出一个只支持一种格式的出口。导出跑的是**引擎既有的导出链路**（`EXPORT.RUN_EXPORT`），不是前端自己写文件。**嵌入式连接（工作区 DuckDB）必须在本进程跑导出** —— 子进程打不开主进程占着的文件，内存库在子进程里是**另一个空库** | `desktopApp/ExportSupport.kt` / `ExportDialogs.kt` / `AnalysisSession.kt` / `engine/.../ExportHandler.kt` |
 | | 点远端表 → 拉取；点工作区的表 → 把表名加进编辑器；点工作区的字段 → 把「表.字段」加进编辑器 | `AnalysisSession` |
 | | **入口在连接管理的空闲面板**（顶栏的目标切换 chip 已去掉），分析工作台**没有返回按钮**（它是一块独立的工作区） | `ConnectionManagerScreen` / `AnalysisScreen` |
 | | **报表设计视图**（分析模式的第二个视图，与工作台**共用同一份工作区**）：一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。**最左是数据树、中间是部件画布、最右是报表列表**；加部件时打开**编辑页**（类型 / 标题 / SQL + **样例数据**）—— 样例数据是那条 SQL **真跑出来**的结果（原始行 + 图表预览并排），「约定」只有看得见数据才能被遵守 | `shared/analysis/report/` / `AnalysisSession` |

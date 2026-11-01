@@ -860,9 +860,15 @@ body{
           <div class="work-main">
             <div class="panel panel-editor">
               <div class="panel-head">SQL 编辑器<span class="sub">在本地工作区（DuckDB）上写分析 SQL</span></div>
-              <!-- 编辑器工具条：「格式化」与「▶ 运行」同一行（v1.8） -->
+              <!-- 编辑器工具条：「格式化」「导出」与「▶ 运行」同一行（v1.8 / v2.41）。
+                   「导出」与「运行」都是**对编辑器里这段 SQL 的动作** ——
+                   导出的是**这段 SQL 的查询结果**，所以它挨着编辑器，
+                   而不是摆在结果表的右键菜单里（§6.3.3 的口径更正）。
+                   「导出」打开的是**浏览模式那个共用导出对话框**，
+                   五种格式全在（CSV / JSON Lines / SQL INSERT / Excel / Parquet）。 -->
               <div class="editor-toolbar">
                 <button class="btn" type="button">格式化</button>
+                <button class="btn" type="button">导出</button>
                 <button class="btn btn-primary" type="button"><span class="glyph">▶</span>运行</button>
               </div>
               <div class="editor"><span class="kw">SELECT</span> region, count(*) <span class="kw">AS</span> 订单数, sum(amount) <span class="kw">AS</span> 金额
@@ -898,9 +904,16 @@ body{
               </table>
             </div>
 
+            <!-- 底栏：行数 / 导出状态 / 引擎。
+                 ⚠️ 这里**不写**「只读会话」—— 那是**远端**会话的属性，
+                 而这一栏说的是**工作区**（本地 DuckDB 文件），它是**可写**的。
+                 写上「只读会话」就是假信息（§6.3 的更正）。
+                 「导出状态」是 v2.41 新增的：导出可能跑好几秒，
+                 用户必须能看见「在跑」与「跑完了没有」。 -->
             <div class="status-bar">
               <span>行数 12</span><span>耗时 1.2 s</span><span>结果上限 1000 行</span>
-              <span class="right">引擎 DuckDB · 只读会话</span>
+              <span class="right">已导出 12 行 → C:\tmp\orders.csv</span>
+              <span class="right">引擎 DuckDB</span>
             </div>
           </div>
         </div>

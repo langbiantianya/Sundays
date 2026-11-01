@@ -140,6 +140,9 @@
 | [`ExportQueryValidationTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportQueryValidationTest.kt) | 导出参数校验：格式、目录、文件名、目标表 |
 | [`ExportAlwaysTerminatesTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportAlwaysTerminatesTest.kt) | **导出必定终止**：引擎只推进度帧永不推完成帧时必须返回失败而不是挂起 / 空文件名在发请求前被拒 / 成功结论带真实路径与行数 / 看门狗不短于一分钟 / 进度**逐帧**回调 |
 | [`ExportEndToEndIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportEndToEndIntegrationTest.kt) | 桌面层 → 引擎 → 真子进程 → 磁盘有文件；进度里出现过非零行数 |
+| [`ExportDialogSharedTest`](./src/test/kotlin/com/langbiantianya/sundays/ExportDialogSharedTest.kt) | **共用导出对话框**（浏览模式与分析模式**同一个组件**）：五种格式**全在**（逐个断言 —— 只给 CSV 就是把「能导出」缩成了「只能导出成 CSV」）、预览按钮把**编辑器里那条 SQL**（不是预设的）交给回调、确认时交回**用户选的那个格式**与路径 |
+| [`AnalysisQueryExportIntegrationTest`](./src/test/kotlin/com/langbiantianya/sundays/AnalysisQueryExportIntegrationTest.kt) | **分析模式导出查询结果**（真 DuckDB 工作区 + 真引擎）：导出**真的落文件**且文件里的行对得上；失败时状态带**原因**；预览**拒写语句**且**数据没被动过**（写语句必须在**发出去之前**被拒 —— 发出去了再拒就晚了）；预览能取回前几行 |
+| [`ExportEmbeddedLocalIntegrationTest`](../engine/src/test/kotlin/com/langbiantianya/integration/ExportEmbeddedLocalIntegrationTest.kt)（在 `:engine`） | **嵌入式连接的导出必须留在本进程**：内存库导出出来的内容必须是**本进程那两行**（子进程里是**另一个空库**）；DuckDB 工作区文件**被本进程占着**时照样导得出（子进程会撞上「另一个程序正在使用此文件」）。两条都断言 `ExportProcessManager.isRunning == false` —— 走主进程就**不该**拉起子进程 |
 | [`NativePathPickerTest`](./src/test/kotlin/com/langbiantianya/sundays/NativePathPickerTest.kt) | 系统路径选择器：headless / 对话框不可用时**不抛异常**，安静返回 `null` 保留手动输入这条路 |
 
 ### 2.6 后台任务、通知与外观

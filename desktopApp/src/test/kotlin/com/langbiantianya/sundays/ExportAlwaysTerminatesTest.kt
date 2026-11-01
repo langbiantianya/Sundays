@@ -146,7 +146,7 @@ class ExportAlwaysTerminatesTest {
         state: DatabaseBrowserState,
         dir: File,
         name: String,
-    ) = state.exportQuery("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, dir.absolutePath, name)
+    ) = state.exportQuery("SELECT 1", ExportFormat.CSV, dir.absolutePath, name)
 
     /**
      * 变异验证的看门狗：把挂死的实现**测出来**，而不是让整个测试任务卡住。
@@ -231,7 +231,7 @@ class ExportAlwaysTerminatesTest {
             val file = out.resolve("p.csv").also { it.writeText("id\n") }
             val seen = mutableListOf<Long>()
             val state = newState(SteppingEngine(file, listOf(100, 500, 1200)))
-            state.exportQuery("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, out.absolutePath, "p.csv") { p ->
+            state.exportQuery("SELECT 1", ExportFormat.CSV, out.absolutePath, "p.csv") { p ->
                 seen += p.rowsWritten
             }
             assertEquals(

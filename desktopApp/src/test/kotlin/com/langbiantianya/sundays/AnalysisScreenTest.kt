@@ -22,9 +22,12 @@ import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.analysis.ANALYSIS_ADD_SOURCE_BUTTON_TAG
+import com.langbiantianya.sundays.analysis.ANALYSIS_EXPORT_BUTTON_TAG
+import com.langbiantianya.sundays.analysis.ANALYSIS_EXPORT_STATUS_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RESULT_TABLE_TAG
 import com.langbiantianya.sundays.analysis.ANALYSIS_RUN_BUTTON_TAG
 import com.langbiantianya.sundays.analysis.AnalysisColumn
+import com.langbiantianya.sundays.analysis.AnalysisExportStatus
 import com.langbiantianya.sundays.analysis.AnalysisResult
 import com.langbiantianya.sundays.analysis.AnalysisScreen
 import com.langbiantianya.sundays.analysis.AnalysisSourceItem
@@ -397,6 +400,95 @@ class AnalysisScreenTest {
             // 编辑器把 SQL 放在**可写文本**里（BasicTextField）——
             // 断言落在那儿，才真的验到「SQL 进了编辑器」。
             onNode(hasSetTextAction()).assertTextContains("SELECT * FROM staging_shop_orders")
+        }
+    }
+
+    // ──────────────── 导出 ────────────────
+
+    @Test
+    fun `the export button calls back`() {
+        var asked = 0
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            sql = "SELECT 1",
+                            onExport = { asked++ },
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ANALYSIS_EXPORT_BUTTON_TAG).assertIsDisplayed().performClick()
+        }
+
+        assertEquals(1, asked, "点「导出」必须回调一次 —— 它是导出查询结果的入口")
+    }
+
+    @Test
+    fun `the export button is disabled while nothing can be exported`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            // 编辑器里没有 SQL —— 没什么可导的，
+                            // 给一个「点了必然失败」的入口是不该做的。
+                            sql = "",
+                            onExport = {},
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ANALYSIS_EXPORT_BUTTON_TAG).assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun `the export outcome is visible in the status bar`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            exportStatus = AnalysisExportStatus.Succeeded("C:/tmp/out.csv", 12),
+                        )
+                    }
+                }
+            }
+
+            // 「点了导出然后什么也没发生」与「导完了」必须分得清 ——
+            // 所以终态要**看得见**，而不是只存在某个状态变量里。
+            onNodeWithTag(ANALYSIS_EXPORT_STATUS_TAG).assertIsDisplayed()
+            onNodeWithText("已导出 12 行 → C:/tmp/out.csv").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `a failed export shows the reason in the status bar`() {
+        runComposeUiTest {
+            registerBuiltinEditors()
+            setContent {
+                SundaysTheme {
+                    ProvideStrings(AppLanguage.ZH_HANS) {
+                        AnalysisScreen(
+                            sources = sources,
+                            exportStatus = AnalysisExportStatus.Failed("Table 不存在"),
+                        )
+                    }
+                }
+            }
+
+            onNodeWithTag(ANALYSIS_EXPORT_STATUS_TAG).assertIsDisplayed()
+            onNodeWithText("导出失败：Table 不存在").assertIsDisplayed()
         }
     }
 }

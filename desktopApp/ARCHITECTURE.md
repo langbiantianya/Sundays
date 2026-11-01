@@ -59,6 +59,8 @@ desktopApp （本模块）
    │     ├── TablePreview.kt           表格预览区 + 新增行弹窗
 
    │     ├── ExportDialogs.kt          导出弹窗 + 进度 + 导出用的纯函数
+   │
+   │     ├── ExportSupport.kt          导出的公共件：格式 / 结果 / 进度 + 「跑一次导出」
 
    │     ├── SqlWorkbench.kt           SQL 工作台
 
@@ -164,7 +166,7 @@ desktopApp （本模块）
 
 | [`TablePreview.kt`](./src/main/kotlin/com/langbiantianya/sundays/TablePreview.kt) | 预览标签条、筛选排序搜索工具条、数据表格、新增行弹窗、待提交编辑条 |
 
-| [`ExportDialogs.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportDialogs.kt) | 危险语句确认框、导出配置弹窗、导出进度弹窗、结果预览表，及其纯函数（语句切分 / 文件名生成 / proto 值展开） |
+| [`ExportDialogs.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportDialogs.kt) | 危险语句确认框、导出配置弹窗、导出进度弹窗、结果预览表，及其纯函数（语句切分 / 文件名生成 / proto 值展开）。**弹窗不认模式** —— 它收一个「预览回调」而不是 `DatabaseBrowserState`，于是浏览模式与分析模式共用**同一个**对话框 |
 
 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) | SQL 工作台：多语句编辑、执行、事务开关、结果区、标签重命名；**编辑器高度可拖**（`HorizontalDragHandle`，双击复位） |
 
@@ -365,6 +367,9 @@ desktopApp （本模块）
 | 没有「取消」按钮 | 取消要一路传到引擎子进程，而那条链路是本项目最不可靠的一段 —— 与其摆一个按了没反应的按钮，不如给一个**一定做得到**的动作 | 同上 |
 
 | 成功提示走 `notice` 而不是 `error` | `error` 的渲染分支是把**整块表格**换成「读取失败」面板：导成功了显示「读取失败」、导失败了也显示「读取失败」 | 同上 |
+| **格式与「跑一次导出」抽到顶层** | 原来挂在 `DatabaseBrowserState` 下面（`ExportFormat` / `ExportResult` / `ExportProgress`）—— 分析模式要用它就得先造一个浏览模式的状态机，那不是复用，是借用一个不相干的对象。现在它们在 [`ExportSupport.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportSupport.kt)，两个模式共用**同一份** | [`ExportSupport.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportSupport.kt) |
+| **导出对话框不认模式** | 它收一个「预览回调」（`onPreview`）而不是 `DatabaseBrowserState` —— 浏览器模式打当前连接、分析模式打本地工作区，其余（格式 / 路径 / 可编辑 SQL / 预览）**完全共用** | [`ExportDialogs.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportDialogs.kt) 的 `ExportDialog` |
+| **分析模式的导出在编辑器工具条上**，不是结果表右键菜单 | 导出的是**编辑器里那段 SQL 的查询结果**；而右键菜单塞不下「格式 / 目录 / 文件名 / 可编辑 SQL / 预览」这一整套，做成「导出为 CSV」还会凭空多一个**只支持一种格式**的出口 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) + [`shared/.../analysis/AnalysisScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/AnalysisScreen.kt) |
 
 
 
@@ -532,6 +537,9 @@ desktopApp （本模块）
 | 「树面板外壳」改名「**侧边面板外壳**」 | `TreePaneShell` → `SidePaneShell`（并从 `tree/` 挪到 `ui/`）：它服务的是「**可折叠侧边面板**」这个概念，不再只是树 —— 名不副实的名字会让下一个人以为「树的东西不能乱用」。左右两侧的差异（分隔条位置、窄轨竖线位置、箭头朝向、拖动方向感）**全部由 `PaneEdge` 一个枚举驱动** —— 散成布尔参数的话，迟早漏掉一处箭头没镜像，而那种缺陷在界面上**极难看出来** | [`SidePaneShell.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/SidePaneShell.kt) |
 | 镜像的**拖动方向**由分隔条**自己**处理 | `DragHandle` 新增 `HandleSide`：受控块在分隔条右边时，往左拖才变宽。这件事**必须**在分隔条内部做 —— 调用方若在回调里反算（`旧值 + (旧值 - 新值)`），**钳位一旦发生就会算错**：拖到边界时新值已被钳过，再反算就把钳位抵消了 | [`DragHandle.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/ui/DragHandle.kt) |
 | 报表设计两侧面板的**宽度上限**是窗口宽的 **32%**，不是共享的 62% | 那个 62% 是给**只有一块**侧边面板的界面用的（浏览模式 / 分析工作台）—— 62% 留给主区还剩 38%，够用。这一页有**两块**：各占 62% 的话两块加起来 124%，画布被挤成 0 宽 —— 而画布才是这一页的主角 | [`ReportDesignerScreen.kt`](../shared/src/commonMain/kotlin/com/langbiantianya/sundays/analysis/report/ReportDesignerScreen.kt) |
+| 分析模式的查询导出**走引擎既有的导出链路** | `EXPORT.RUN_EXPORT` + `ExportEngine`，五种格式（CSV / JSON_LINES / SQL_INSERT / EXCEL / PARQUET）**全部复用** —— 前端自己写文件就得把五种格式各写一遍，而写出来的那份与浏览模式导出的那份**不是一个东西**（「同一个概念只能有一份实现」）。**报表**导出不走引擎（数据已经在前端手里，且要**先刷新再写**），那是另一回事 | [`ExportSupport.kt`](./src/main/kotlin/com/langbiantianya/sundays/ExportSupport.kt) |
+| 嵌入式连接的导出**必须留在主进程** | 子进程打不开**主进程正占着**的文件（Windows 直接报「另一个程序正在使用此文件」），内存库在子进程里是**另一个空库**。判据是方言声明的 `ConnectionType`（EMBEDDED / IN_MEMORY / FILE_BASED），不是**路径拓扑**去猜。远端连接维持子进程（隔离是那里才需要的）。这一条顺带修掉了一个真 bug：浏览模式**从 DuckDB / SQLite 文件连接导出**此前根本跑不通 | 引擎的 [`ExportHandler.kt`](../engine/src/main/kotlin/com/langbiantianya/handlers/ExportHandler.kt) |
+| 导出对话框画在**最外层**，不画在分析屏里 | 画在分析屏里的话，切去别的页面它就跟着消失 —— 而导出是个**跨页面也要看得见**的过程。放在最外层与「添加数据源」同一层级 | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) |
 
 
 ---

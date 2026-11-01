@@ -169,6 +169,52 @@ fun analysisColumnNodeId(
  */
 fun analysisSchemaNodeId(schema: String): String = "schema:$schema"
 
+// ──────────────── 导出查询结果 ────────────────
+
+/**
+ * 「导出查询结果」的**状态** —— 正在跑 / 已完成 / 失败，三者互斥。
+ *
+ * ## 为什么不是一个可空的字符串
+ *
+ * 「导完了」与「导挂了」要用**不同的颜色**呈现（常态 / 红），
+ * 而颜色不是字符串的一部分 —— 所以这里带一个**种类**，
+ * 由界面决定怎么画，界面自己不必去猜「这句话是成功还是失败」。
+ *
+ * 这与 [PullOutcome]、[DeleteSourceOutcome] 是同一个做法：
+ * **终态是一个穷举**，界面照着渲染即可，不必自己推断。
+ */
+sealed interface AnalysisExportStatus {
+    /**
+     * 正在跑。
+     *
+     * @property rows 已写出的行数；`null` = 还没收到第一帧（此时显示「正在导出」，
+     *   **不能显示「0 行」** —— 那会被读成「导出失败」）
+     */
+    data class Running(
+        val rows: Long?,
+    ) : AnalysisExportStatus
+
+    /**
+     * 导出成功。
+     *
+     * @property file 落盘文件的绝对路径
+     * @property rowsWritten 写出去的行数
+     */
+    data class Succeeded(
+        val file: String,
+        val rowsWritten: Long,
+    ) : AnalysisExportStatus
+
+    /**
+     * 导出失败。
+     *
+     * @property reason 失败原因（引擎给的原文）
+     */
+    data class Failed(
+        val reason: String,
+    ) : AnalysisExportStatus
+}
+
 // ──────────────── 结果 → 表格 ────────────────
 
 /**

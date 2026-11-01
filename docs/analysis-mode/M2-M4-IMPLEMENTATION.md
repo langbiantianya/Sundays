@@ -407,7 +407,7 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `engine/.../analysis/JdbcScanRegistry.kt` | 表函数的**幂等注册**（固定名 `jdbc_scan` + 查重 + 并发安全）与**扫描句柄表**（句柄 → 本次扫描的上下文） |
 | `engine/.../analysis/NativeExtensionScanner.kt` | **可选加速**：原生扫描器的挂载 / 建表 / 摘除三段式（§6.2.7）。默认**关** |
 | `engine/.../dispatcher/RequestDispatcher.kt` | **改动**：L4 闸门 + 五条新路由（`PULL_TABLE` 走流式路径） |
-| `engine/.../handlers/ExportHandler.kt` / `ImportHandler.kt` | **零改动**（浏览模式的导出 / 导入还在用；分析模式的拉取不再走它们） |
+| `engine/.../handlers/ExportHandler.kt` / `ImportHandler.kt` | `ImportHandler` **零改动**；`ExportHandler` **第 19 片起有改动**（嵌入式连接改在本进程直跑，见 §6.11） |
 
 ### 5.4 测试
 
@@ -439,6 +439,9 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 | `shared/.../commonTest/tree/TreeContextMenuStateTest.kt` | **共用右键菜单的状态机**：坐标换算（节点局部 → **root**，原样透传会让菜单偏整屏）、换算**不含宿主信息**、目标被替换而不是累积、`dismiss` 只清目标不清坐标 | ✅ 已落地（**第 18 片**） |
 | `shared/.../commonTest/analysis/AnalysisTreeMenuTest.kt` | **右键菜单判据**的纯规则：登记在册的源给删除项且删对名字；工作区自己的表 / 工作区根 / 没登记过的 schema / 空清单**都不给** | ✅ 已落地（**第 18 片**） |
 | `desktopApp/.../AnalysisRemoveSourceTest.kt` | **「删除数据源」在会话里的行为**（真 DuckDB + 真文件源）：schema 与登记**两处**都删掉、带进来的表一起没、不误伤工作区的表、工作区自己不能被删、没登记过的 schema 不能被删、成功与失败各留下一个结果 | ✅ 已落地（**第 18 片**，7 例；**变异验证 9 处全被抓住**） |
+| `engine/.../integration/ExportEmbeddedLocalIntegrationTest.kt` | **嵌入式连接必须在本进程导**（第 19 片）：内存库导出的内容是**本进程那两行**（子进程里是另一个空库）、工作区文件**被本进程占着**时照样导得出、两条都断言**没有拉起导出子进程** | ✅ 已落地（**第 19 片**，2 例；**变异验证**：判据改成「一律走子进程」→ 两条**挂死**，900 秒超时） |
+| `desktopApp/.../AnalysisQueryExportIntegrationTest.kt` | **导出查询结果**端到端（第 19 片，真 DuckDB 工作区 + 真引擎）：导出会**真的落一个文件**且**内容**是工作区里的那两行、失败必须**看得见**（状态里带原因）、预览**在发出去之前**拒写语句且**数据没被动过**、预览能取回前几行 | ✅ 已落地（**第 19 片**，4 例；**变异验证 2 处全被抓住**） |
+| `desktopApp/.../ExportDialogSharedTest.kt` | **共用导出对话框**的界面契约（第 19 片）：**五种格式全在**（逐个断言，不是数数量）、预览按钮把**编辑器里那段 SQL**交给回调、确认时交回**用户选的那个格式**与路径 | ✅ 已落地（**第 19 片**，3 例） |
 
 ### 5.5 i18n
 
@@ -500,6 +503,15 @@ L4 从「兜底」升为「主力」，正是它该在的位置。
 > 远端**恒为只读**这件事**没变**：保证在引擎的 L3 / L4 闸门与方言级只读上，
 > 徽标从来只是**表达**，删掉它不动那条保证。
 > 删除的键同样**六语言一起删** —— 少一个语言就留下一条悬空的文案。
+
+> ✅ **第 19 片再补 4 个键**（六语言同步，共 **40** 个）：
+> `ANALYSIS_EXPORT`（导出）、`ANALYSIS_EXPORT_RUNNING`（正在导出）、
+> `ANALYSIS_EXPORT_DONE`（已导出 {0} 行 → {1}）、`ANALYSIS_EXPORT_FAILED`（导出失败：{0}）。
+> 这四个是**「导出查询结果」落地时才发现缺**的 ——
+> 导出可能跑好几秒，用户必须能看见「在跑」与「跑完了没有」，
+> 而「成没成 / 失败原因」没有文案就无处可说。
+> 「已写出 N 行」那句**复用**既有的复数键 `EXPORT_PROGRESS_ROWS` ——
+> 同一个概念（「导出进行到第几行」）只有一份文案。
 
 ---
 
@@ -993,6 +1005,81 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 | 首屏选「数据分析」→ **直接**进分析工作台（不必先经过连接列表） | 同上（端到端那条） |
 
 
+### 6.11 导出查询结果（第 19 片）
+
+这一片把「分析工作台的查询结果能导出」落地 —— 复用**浏览模式那套既有导出**
+（`EXPORT.RUN_EXPORT` + 五种格式），不另造一条路、不只支持 CSV。
+
+#### 6.11.1 口径：导出的是**编辑器里那段 SQL 的查询结果**
+
+主设计 §6.3.3 原来写的是「结果表右键菜单 → 导出为 CSV」。这一片**更正**了它：
+
+| | 原来 | 现在 |
+|---|---|---|
+| 入口 | 结果表右键菜单 | 编辑器工具条上的「导出」 |
+| 格式 | 只有 CSV | **五种全在**（共用那个对话框） |
+| 位置 | 结果表 | 编辑器旁边（导出的是**那段 SQL** 的结果） |
+
+为什么不做右键菜单：右键菜单塞不下「格式 / 目录 / 文件名 / 可编辑 SQL / 预览」
+这一整套；而**对话框本来就有五种格式** —— 做成右键菜单里的「导出为 CSV」，
+等于凭空多了一个**只支持一种格式**的出口。
+
+#### 6.11.2 引擎侧：嵌入式连接**必须**在本进程导
+
+`ExportHandler.executeInMainProcess` 原来**只有一条路**：起导出子进程。
+这对远端连接是对的，对**嵌入式**连接（DuckDB / SQLite / H2）是错的 ——
+两条**实测**事实：
+
+1. **文件锁** —— DuckDB 的库文件被主进程开着时，子进程打开同一个文件会失败：
+   `IO Error: Cannot open file … 另一个程序正在使用此文件`。
+   分析模式的工作区正是这样一个被主进程占着的 DuckDB 文件。
+2. **内存库是另一个库** —— `jdbc:h2:mem:<name>` 只在**同一个 JVM** 里共享；
+   导出子进程是**另一个 JVM**，它看到的是一个**空库**。
+   导出于是「成功」了，但文件里是**另一份数据** —— 静默的错误比报错更糟。
+
+判据是**方言声明的连接类型**（`ConnectionType.EMBEDDED` / `IN_MEMORY` /
+`FILE_BASED`），不是「路径像不像本地文件」—— 用拓扑去猜，
+远程主机上的 DuckDB 就会被误判成本地。
+
+这一改**顺带修掉一个真 bug**：浏览模式「从 DuckDB / SQLite 文件连接导出」
+今天就是坏的。
+
+#### 6.11.3 前端侧：格式、跑一次导出、对话框 —— 各一份，两个模式共用
+
+| 原来 | 现在 |
+|---|---|
+| `DatabaseBrowserState.ExportFormat`（挂在浏览模式的状态机下面） | 顶层 `ExportFormat`（两个模式共用） |
+| `DatabaseBrowserState.exportQuery`（自带请求构造与看门狗） | 顶层 `runExport(...)`；`exportQuery` 只负责**决定打到哪个库** |
+| `ExportDialog(state: DatabaseBrowserState, …)` | `ExportDialog(presetSql, presetTableName, languageId, onPreview, …)` —— 收一个**预览回调**，不认模式 |
+
+**为什么把 `ExportFormat` 抽到顶层**：挂在 `DatabaseBrowserState` 下面时，
+分析模式要用它就得先造一个浏览模式的状态机 —— 那不是复用，是借用一个不相干的对象。
+
+#### 6.11.4 落点
+
+| 文件 | 内容 |
+|---|---|
+| `engine/.../handlers/ExportHandler.kt` | **改动**：`mustRunInMainProcess` + `executeLocally`（本进程直跑那条路） |
+| `desktopApp/.../ExportSupport.kt` | **新增**：顶层 `ExportFormat` / `ExportResult` / `ExportProgress` + `runExport(...)` |
+| `desktopApp/.../ExportDialogs.kt` | **改动**：`ExportDialog` 去绑 `DatabaseBrowserState`；格式单选钮加测试 tag |
+| `desktopApp/.../DatabaseBrowserState.kt` | **改动**：删掉嵌套的 `ExportFormat` / `ExportResult` / `ExportProgress`；`exportQuery` 改调 `runExport` |
+| `desktopApp/.../AnalysisSession.kt` | **新增**：`previewExportSql` / `startQueryExport` + `exportStatus` |
+| `shared/.../analysis/AnalysisModels.kt` | **新增**：`AnalysisExportStatus`（运行中 / 成功 / 失败，穷举） |
+| `shared/.../analysis/AnalysisScreen.kt` | **改动**：编辑器工具条加「导出」；底栏显示导出状态 |
+| `desktopApp/.../main.kt` | **改动**：最外层接上共用的 `ExportDialog` 与 `ExportProgressDialog` |
+
+#### 6.11.5 判据（各做过变异验证）
+
+| 判据 | 变异 |
+|---|---|
+| 嵌入式导出**在本进程**完成（内存库在子进程里是另一个空库） | 判据改成「一律走子进程」→ 引擎那条用例**挂死**（900 秒超时）—— 原来的嵌入式导出根本跑不通 |
+| 导出会真的落一个文件，**内容**是工作区里的那两行 | 把传给 `runExport` 的 SQL 掏空 → 桌面那条用例变红 |
+| 预览**在发出去之前**就拒写语句，且**数据没被动过** | 去掉 `DangerousSql.isReadOnlyQuery` 闸门 → 桌面那条用例变红 |
+| 五种格式**全在**共用对话框里 | 逐个断言（不是数数量） |
+| 导出按钮点了会回调；**没有 SQL 时禁用** | —— |
+| 导出状态在底栏**看得见**（在跑 / 成没成 / 失败原因） | —— |
+
+
 ---
 
 ## 7. 测试判据
@@ -1044,6 +1131,20 @@ PG 挂载（URI 带库）时限定名是 `别名."<schema>"."<表>"`。
 - 编辑器里能看到当前 SQL
 - 树：每行有标记、工作区那一行显示**固定名**、源行带方言标签、
   **点表走「选中」而不是「展开」**、展开后子节点出现、表行**没有扭子**
+
+### 7.6 导出查询结果（第 19 片）
+
+- **嵌入式导出在本进程完成** —— 内存库导出的内容是**本进程那两行**
+  （子进程里是另一个空库）；工作区文件**被本进程占着**时照样导得出；
+  两条都断言**没有拉起导出子进程**
+- 导出会**真的落一个文件**，且**内容**是工作区里的那两行（只看「文件存在」的话，
+  导出一个空文件也能过）
+- 导出会失败时，状态里**必须有原因**而不是静悄悄
+- 预览**在发出去之前**就拒写语句，**而且数据没被动过**
+  （只看「返回了失败」不够 —— 那是**发出去之后**才失败时也会绿的）
+- **五种格式全在**共用对话框里（**逐个断言**，不是数数量）
+- 导出按钮点了会回调；**没有 SQL 时禁用**（不给一个「点了必然失败」的入口）
+- 导出状态在底栏**看得见**（在跑 / 成没成 / 失败原因）
 
 ---
 

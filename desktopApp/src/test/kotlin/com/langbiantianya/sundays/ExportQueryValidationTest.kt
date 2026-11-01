@@ -60,7 +60,7 @@ class ExportQueryValidationTest {
 
     private fun failureMessage(
         sql: String,
-        format: DatabaseBrowserState.ExportFormat,
+        format: ExportFormat,
         dir: String,
         name: String,
         table: String = "",
@@ -75,7 +75,7 @@ class ExportQueryValidationTest {
     @Test
     fun `blank sql is rejected before reaching the engine`() {
         assertTrue(
-            failureMessage("   ", DatabaseBrowserState.ExportFormat.CSV, "/tmp", "a.csv").contains("SQL"),
+            failureMessage("   ", ExportFormat.CSV, "/tmp", "a.csv").contains("SQL"),
             "空 SQL 应在发出去之前被拒绝",
         )
     }
@@ -83,7 +83,7 @@ class ExportQueryValidationTest {
     @Test
     fun `blank output directory is rejected`() {
         assertTrue(
-            failureMessage("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, "  ", "a.csv")
+            failureMessage("SELECT 1", ExportFormat.CSV, "  ", "a.csv")
                 .contains("输出目录"),
             "空输出目录应被拒绝 —— 引擎会把它当相对路径，用户拿不到文件",
         )
@@ -92,7 +92,7 @@ class ExportQueryValidationTest {
     @Test
     fun `blank file name is rejected`() {
         assertTrue(
-            failureMessage("SELECT 1", DatabaseBrowserState.ExportFormat.CSV, "/tmp", "")
+            failureMessage("SELECT 1", ExportFormat.CSV, "/tmp", "")
                 .contains("文件名"),
             "空文件名应被拒绝",
         )
@@ -109,7 +109,7 @@ class ExportQueryValidationTest {
         val msg =
             failureMessage(
                 "SELECT 1",
-                DatabaseBrowserState.ExportFormat.SQL_INSERT,
+                ExportFormat.SQL_INSERT,
                 "/tmp",
                 "a.sql",
             )
@@ -121,10 +121,10 @@ class ExportQueryValidationTest {
         // 反向：CSV / JSON / EXCEL / PARQUET 都不该因为「没填表名」被拦 ——
         // 那会让用户在导出 CSV 时也被问一个无关的问题
         for (f in listOf(
-            DatabaseBrowserState.ExportFormat.CSV,
-            DatabaseBrowserState.ExportFormat.JSON_LINES,
-            DatabaseBrowserState.ExportFormat.EXCEL,
-            DatabaseBrowserState.ExportFormat.PARQUET,
+            ExportFormat.CSV,
+            ExportFormat.JSON_LINES,
+            ExportFormat.EXCEL,
+            ExportFormat.PARQUET,
         )) {
             val msg = failureMessage("   ", f, "/tmp", "a.out")
             assertTrue(
@@ -136,7 +136,7 @@ class ExportQueryValidationTest {
 
     @Test
     fun `every format maps to a distinct engine value`() {
-        val values = DatabaseBrowserState.ExportFormat.entries.map { it.protoValue }
+        val values = ExportFormat.entries.map { it.protoValue }
         assertTrue(
             values.size == values.toSet().size,
             "导出格式的引擎取值必须互不相同：$values",

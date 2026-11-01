@@ -76,7 +76,7 @@ internal const val EXPORT_CONFIRM_BTN_TAG = "exportConfirmBtn"
 private const val EXPORT_SQL_EDITOR_TAG = "exportSqlEditor"
 
 /** 导出对话框里「预览」按钮的 UI 测试 tag。 */
-private const val EXPORT_PREVIEW_BTN_TAG = "exportPreviewBtn"
+internal const val EXPORT_PREVIEW_BTN_TAG = "exportPreviewBtn"
 
 /** SQL 工作台「导出」按钮的 UI 测试 tag。 */
 internal const val SQL_EXPORT_BTN_TAG = "sqlExportBtn"
@@ -193,25 +193,29 @@ internal fun unwrapProtoValue(v: ProtoValue): String =
  *   以及无头/CI 环境下压根弹不出系统对话框时，手动输入是唯一能走通的路。
  *   把选择器做成「只能选」反而会在这些场景下把功能整个堵死。
  *
- * @param catalog 当前库 —— 预览要发到它上面。
+ * @param presetSql 起手导出 SQL（可编辑）
+ * @param presetTableName 目标表名预设（仅 `SQL_INSERT` 用得上）
+ * @param languageId 编辑器的 SQL 方言（决定高亮与补全）
+ * @param onPreview 跑一条 SQL 取前若干行回来预览。**由调用方决定打到哪儿** ——
+ *   浏览模式打当前连接，分析模式打本地工作区。
  * @param statementCount >1 时对话框会把 SQL 当脚本逐条导出（SQL 工作台的多语句入口）。
  */
 @Composable
 internal fun ExportDialog(
-    state: DatabaseBrowserState,
     presetSql: String,
     presetTableName: String,
-    catalog: String = "",
+    languageId: String,
+    onPreview: suspend (String) -> Result<SqlPreviewRows>,
     statementCount: Int = 1,
-    onConfirm: (DatabaseBrowserState.ExportFormat, String, String, String, String) -> Unit,
+    onConfirm: (ExportFormat, String, String, String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var format by remember { mutableStateOf(DatabaseBrowserState.ExportFormat.CSV) }
+    var format by remember { mutableStateOf(ExportFormat.CSV) }
     var dir by remember { mutableStateOf(System.getProperty("user.dir") ?: "") }
     // 文件名给一个**合法**的默认：中文 + 空格 + 斜杠在文件系统与 SQL 里都有特殊含义，
     // 让用户在一个已经能跑的值上去改，比让他从一个空框开始猜格式稳妥
-    var name by remember { mutableStateOf("export.${DatabaseBrowserState.ExportFormat.CSV.extension}") }
+    var name by remember { mutableStateOf("export.${ExportFormat.CSV.extension}") }
     var tableName by remember { mutableStateOf(presetTableName) }
     // 可编辑的导出 SQL。起手值 = 调用方拼好的（表预览 = 带上过滤与排序的整条 SELECT）。
     var sql by remember(presetSql) { mutableStateOf(presetSql) }
@@ -223,7 +227,7 @@ internal fun ExportDialog(
         name = "export.${format.extension}"
     }
     // 只有选 SQL INSERT 才问目标表；其余格式的「目标表」是参数校验里的硬要求
-    val needsTable = format == DatabaseBrowserState.ExportFormat.SQL_INSERT
+    val needsTable = format == ExportFormat.SQL_INSERT
     val canSubmit =
         dir.isNotBlank() && name.isNotBlank() &&
             (!needsTable || tableName.isNotBlank()) && sql.isNotBlank()
@@ -264,7 +268,7 @@ internal fun ExportDialog(
         previewing = true
         previewError = null
         scope.launch {
-            val result = state.previewExportSql(snapshot, catalog)
+            val result = onPreview(snapshot)
             if (gen != previewGen) return@launch // 迟到的响应直接丢
             result
                 .onSuccess {
@@ -325,9 +329,15 @@ internal fun ExportDialog(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        DatabaseBrowserState.ExportFormat.entries.forEach { f ->
+                        ExportFormat.entries.forEach { f ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = format == f, onClick = { format = f })
+                                RadioButton(
+                                    selected = format == f,
+                                    onClick = { format = f },
+                                    // 单选钮自己带 tag：点**它**才真的选中，
+                                    // 而旁边的文字只是标签（点文字不会切换）。
+                                    modifier = Modifier.testTag("exportFormatRadio_${f.name}"),
+                                )
                                 Text(
                                     str(f.labelKey),
                                     style = MaterialTheme.typography.bodySmall,
@@ -417,7 +427,7 @@ internal fun ExportDialog(
                             sql = it
                             invalidatePreview()
                         },
-                        languageId = state.sqlDialectProfile().languageId,
+                        languageId = languageId,
                         editorState = rememberCodeEditorState(sql),
                         showLanguageSwitcher = false,
                         minLines = 3,
@@ -586,7 +596,7 @@ private fun SqlPreviewTable(preview: SqlPreviewRows) {
  *
  * ## 为什么是**不确定**进度条
  *
- * 引擎只推「已导出 N 行」，没有总数（见 [DatabaseBrowserState.ExportProgress] 的说明）。
+ * 引擎只推「已导出 N 行」，没有总数（见 [ExportProgress] 的说明）。
  * 拿表预览的行数凑一个百分比是**撒谎**：预览可能带过滤，导出的是整张表。
  * 不确定态 + 如实的行数，是这两者之间唯一诚实的组合。
  *

@@ -119,10 +119,11 @@ internal fun PreviewTabArea(
                 var trackedTaskId by remember { mutableStateOf<String?>(null) }
                 if (exportSql != null) {
                     ExportDialog(
-                        state = state,
                         presetSql = exportSql!!,
                         presetTableName = current.tableName,
-                        catalog = current.database,
+                        languageId = state.sqlDialectProfile().languageId,
+                        // 预览打在**这张表所在的库**上 —— 与导出的落点一致。
+                        onPreview = { sql -> state.previewExportSql(sql, current.database) },
                         onDismiss = { exportSql = null },
                         onConfirm = { fmt, sql, dir, name, tbl ->
                             exportSql = null

@@ -113,7 +113,7 @@ class ExportEndToEndIntegrationTest {
                 withTimeoutOrNull(120_000) {
                     state.exportQuery(
                         sql = "SELECT id, label, amount FROM e2e_items ORDER BY id",
-                        format = DatabaseBrowserState.ExportFormat.CSV,
+                        format = ExportFormat.CSV,
                         outputDir = outDir.absolutePath,
                         fileName = "e2e.csv",
                         onProgress = { progress += it.rowsWritten },
