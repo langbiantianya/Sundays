@@ -210,6 +210,23 @@ shared/
 > 给下钻页一个「切换模式」的入口，会让人以为能从分析屏直接跳到「某个连接的浏览页」，
 > 而那件事的语义是「选一个连接」，不是「选一个模式」。
 
+> ✅ **v2.43：另有用户可见的「模式」概念** ——
+> 同一个文件里多了 `AppMode` 枚举（`NONE` / `DATABASE_MANAGEMENT` / `DATA_ANALYSIS`）
+> 与映射 `AppDestination.mode`。
+>
+> **为什么要两个枚举**：`AppDestination` 有 5 个取值 —— 那是**代码**的分派依据
+> （`when (destination)` 分支）；用户面对的却是**两种**模式。合成一个的话，
+> 界面上会出现「当前：连接管理」这种用户从没听说过的说法，
+> 而「设置页要显示当前在哪个模式」这件事也无从回答。
+>
+> **映射只写一处**（`AppDestination.mode` 一个扩展属性）—— 别处再写一遍就会漂移：
+> 改了一处忘了另一处，用户看到的「当前模式」就与实际所在的地方对不上。
+>
+> ⚠️ **`AppDestination.SETTINGS.mode` 恒为 `NONE`**：设置页是横切在两个模式之上的
+> **全局页**，它自己不属于任何一个。设置页显示的「当前模式」取自**进来之前那一屏**
+> （desktopApp 侧记着 `destinationBeforeSettings`）—— 否则设置页会永远显示「未选择模式」，
+> 而用户明明就在某个模式里。
+
 ### 5.2 三轴外观模型
 
 | 轴 | 取值 | 决定 | 源码 |
@@ -253,6 +270,8 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | 定时器登记在设置页内部 | `LaunchedEffect` 随组合，离开页面 / 切分类即自动停；回调必须用 `rememberUpdatedState` 包住，否则每次重组都重启定时器 | `settings/SettingsScreen.kt` |
 | 设置持久化 | `settings.json` 与 `connection.json` **分文件**；原子写（`.tmp` → `ATOMIC_MOVE`），读取永远降级（损坏文件顺手重写为默认值＝自愈） | [`settings/SettingsStorage.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsStorage.kt) |
 | 首启判据 | `resolveOnboardingCompleted(settings, fileExists)` —— 判据是**文件是否存在**而不是那个字段，否则老用户每次升级都会被拦一次 | `ui/ThemeMode.kt` + `onboarding/OnboardingScreen.kt` |
+| 「模式」**单独一栏**（v2.43） | 「个性化」里都是**外观**（配色、明暗、语言），而「切换模式」是**导航**动作 —— 按它会离开当前这一屏回到首屏。混在一起会让用户以为按下去改的是外观，而实际发生的是换了一整套工作环境。它放在**末尾**（偶尔才用的动作不该抢最前面的位置），**默认分类仍是「个性化」** | [`settings/SettingsCategory.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsCategory.kt) 的 `MODE` + [`settings/SettingsScreen.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/settings/SettingsScreen.kt) 的 `ModePane` |
+| 设置页**不知道**「切走之后去哪」 | `onSwitchMode` 是一个**回调**，`:shared` 不决定切到哪 —— 「回首屏重选」是**产品决定**（desktopApp 侧接到 `AppDestination.START`）。`:shared` 只管「什么时候用」，平台 / 应用侧管「切到哪」 | `settings/SettingsScreen.kt` 的 `onSwitchMode` |
 
 ---
 
@@ -433,6 +452,7 @@ ThemePalette ──uiTokens(useDark)──> UiThemeTokens（9 项决策）──
 | v2.34 | **① 树右键菜单上移** —— 新增 `tree/TreeContextMenu.kt`：浏览模式与分析模式**共用一份**右键菜单机制（状态 / 弹层 / 菜单项）。此前它只在 `desktopApp` 里，分析模式要么复制一份、要么没有菜单。菜单项各写各的（浏览模式六项、分析模式一项「删除数据源」），但「点了菜单项**先关菜单**再干活」这条规矩写在共享组件里 —— 漏了的后果是菜单杵在树上不消失、下一次右键被压在旧 Popup 底下。**② 分析模式的树能删数据源**：新增 `analysis/AnalysisTreeMenu.kt`（判据是纯函数 `analysisDeleteSourceTarget`）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`（终态是 sealed，与 `PullOutcome` 同一个做法）。菜单**只在节点属于登记在册的数据源时才弹** —— 弹一个空菜单比不弹更糟 |
 | v2.37 | **① 新增 `analysis/report/` 包（报表设计）** —— 一张报表 = 若干部件，每个部件 = **一条 SQL + 一种图表类型**（饼图 / 条形图 / 表格）。五个文件：`ReportModels.kt`（纯数据 + `chartDataOf` 的数据形状判据）、`ReportChart.kt`（**手绘**图表：`drawArc` + `drawRoundRect`，不用第三方库）、`ReportLabels.kt`（「种类 → 文案键」的**唯一**映射）、`ReportDesignerScreen.kt`（报表列表 + 部件画布）、`ReportWidgetEditor.kt`（部件编辑页：类型 / 标题 / SQL + **样例数据**）。**判据不静默截断**：值不是数字 / 有负值 / 缺列，一律**整张图都不画**并说清是哪一种。**② 新增 `analysis/AnalysisModeBar.kt`** —— 分析模式两个视图（工作台 / 报表设计）的切换条（两个平级视图，不是两个顶层页）。**③ 新增 `ui/ConfirmDialog.kt`** —— 通用「确认 / 取消」框（删报表 / 删部件共用一份）。**④ `ui/TabRenameDialog.kt` 加 `title` 参数** —— 报表重命名复用它，不再另做一个弹窗 |
 | v2.38 | **① 报表设计里有了数据树** —— 新增 `analysis/report/ReportDataTreePane.kt`：**复用**共享树组件 `ObjectTree`（不重画 —— 同一个东西两套画法，用户要学两遍「点表会发生什么」）。报表设计页（报表列表 + **数据树** + 画布）与部件编辑页（**数据树** / SQL / 样例数据）**各一棵、同一份数据与展开态**。**两种后果是上下文决定的**：画布上点表 = **开一个新部件**（画布上还没有正在写的 SQL，引用插给谁？），编辑页里点表 = **把引用插进正在写的那条 SQL**（写 SQL 的地方只有这一处，摆在画布上时用户看得见表名却插不进手边那条语句）。**② 新增 `analysis/AnalysisSqlRef.kt`** —— 「树上的一个对象」到「SQL 里的一段引用」的**纯规则**（`analysisTableRef` / `analysisColumnRef` / `appendAnalysisTableRef` / `appendAnalysisColumnRef`）。**放在 `:shared` 是因为它有两个调用方**：分析工作台（`desktopApp` 的 `AnalysisSession.appendToSql` / `appendColumnToSql` 改为调它）与报表设计 —— 规则只写一份，两份实现的话改一处忘了另一处必然发生，而**两边各自的测试都是绿的** |
+| v2.43 | **① 模式能切了** —— [`navigation/AppDestination.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/navigation/AppDestination.kt) 新增 `AppMode`（`NONE` / `DATABASE_MANAGEMENT` / `DATA_ANALYSIS`）与映射 `AppDestination.mode`：**代码**的分派依据（5 个 `AppDestination`）与**用户**看到的模式（2 种）是两个概念，合成一个就会出现「当前：连接管理」这种用户从没听说过的说法；映射**只写一处**，别处再写一遍就会漂移。设置页新增**第三个分类** `MODE`（`ModePane`）：「个性化」里都是外观，而切模式是**导航**动作，混在一起会让人以为改的是外观；它放末尾、默认分类仍是「个性化」。`SETTINGS.mode` 恒为 `NONE`（设置页是横切两个模式的全局页），「当前模式」取自**进来之前那一屏**。**② 浏览模式的表格接上右键复制** —— [`table/TableCopyMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/TableCopyMenu.kt) 的 `TableCopyMenuItems` 加 `canCopyAll` 开关：表预览是**引擎侧分页**（`rows` 只是当前页），在那里摆「复制整表」复制出来的却只有一页 —— **那比不给这个菜单项更糟**，所以它只给「复制此行」；SQL 工作台的结果集是本地分页（`rows` 全量），两项都给。**一个开关**，不是两份实现。**③ 连接向导第 3 步的红字只在用户动过字段后才出现** —— 判据是纯函数 `hasUserInput(connection)`，看**输入字段**而**不看**折算出来的 JDBC URL（那是**用结果判输入**：用户只填了主机名、URL 还折算不出来，红字却该出现）；顺带删掉与红字重复的占位符 `FIELDS_PENDING` |
 | v2.42 | **结果表能复制走了** —— 新增 [`table/TableCopyMenu.kt`](./src/commonMain/kotlin/com/langbiantianya/sundays/table/TableCopyMenu.kt)：纯函数 `tableCopyText()` / `rowCopyText()`（**TSV** —— 粘进 Excel 按列落格，而 CSV 会弹「文本导入向导」；转义规则与引擎侧 `CsvWriter.escapeField` **同一套**；`NULL` 变成**空串**）+ 菜单组件 `TableCopyMenuItems()`。它**不是**分析模式专属 —— 「把一张表复制成文本」是一个概念，浏览模式的表预览 / SQL 工作台结果表将来接**同一份**。**剪贴板是回调**（`java.awt` 是平台专属的，`commonMain` 里没有 `java.*`），且 `AnalysisScreen` 的 `onCopyToClipboard` 是**必填**参数 —— 默认值会让「忘了接线」在编译期看不出来。复制状态（`AnalysisCopyStatus`：成功 / 失败）显示在**底部状态栏** —— 剪贴板有三条真实的失败路径，失败时用户点了菜单**什么都不会发生**，界面必须**看得见** |
 | v2.41 | **分析工作台能导出查询结果** —— 编辑器工具条上多一个「导出」按钮，导出**编辑器里那条 SQL** 的结果。**不做**结果表的右键导出菜单（那个菜单塞不下「格式 / 目录 / 文件名 / 可编辑 SQL / 预览」这一整套；而只给「导出为 CSV」会凭空多出一个只支持一种格式的出口）。**导出对话框与浏览模式共用同一个组件** —— 对话框**不认模式**：它收 `onPreview` 回调 + `languageId`，两个模式各喂自己的预览实现；对话框若自己去摸浏览模式的状态，分析模式就得先造一个浏览模式状态机才能用它。**导出状态用 sealed（`AnalysisExportStatus`：Running / Succeeded / Failed）而不是布尔** —— 「导出中」与「导完了但失败了」是两回事，一个布尔表达不了；显示在**底部状态栏**（导出是编辑器自己的动作，不是从树上拉数据那种要抢注意力的过程） |
 | v2.40 | **① 报表落盘（新增 `analysis/report/ReportStorage.kt`）** —— `~/.config/sundays/reports.json`，与 `connection.json` 同构。**只存形状不存数**：部件查出来的数是派生数据，一落盘就开始过时，而**过时的数字比没有数字更危险**。写盘走「临时文件 + 原子替换」。**读不出来时绝不静默清空** —— 原文件改名保留成 `reports.json.corrupt-<时间戳>`，应用按空集继续并明确告知（把「文件坏了」变成「数据没了」是**不可逆**的）。**② 部件动作** —— 卡片头六个按钮（刷新 / 复制 / 上移 / 下移 / 编辑 / 删除）；排序用**按钮**不用拖拽（拖拽要给「部件 = 一条 SQL」之外再加一层几何信息）；能不能挪是**纯规则** `canMoveReportWidget()`（界面灰按钮与会话执行都问它）；单部件刷新与整张刷新、导出**共用一把锁**（工作区是**一个** DuckDB 文件）。**③ 导出 `.xlsx`** —— `desktopApp` 侧的 `ReportXlsxWriter`（POI 已在打包运行时里，不新增依赖、不动 jlink 清单）；第一个 Sheet 是「报表」（含**每个部件的 SQL**），每个部件一个 Sheet；表格部件原样铺开、图表部件输出「类别 \| 数值 \| 占比%」。**④ `config/AppConfigDir.kt`（新增）** —— 应用配置目录的**唯一**算法（原先四个文件各写一遍 `~/.config/sundays`）。**⑤ `ReportModels.kt` 加 `@Serializable`** |

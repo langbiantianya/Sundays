@@ -147,6 +147,16 @@ private fun tsvEscape(value: String): String =
  * @param menu 菜单状态（用来关掉自己）
  * @param onCopy 写剪贴板；返回 `false` = 失败（剪贴板不可用 / 被占用）
  * @param onCopied 结果回调：复制了几行、成没成
+ * @param canCopyAll 是否提供「复制整表」。默认 `true`。
+ *
+ *   ## 为什么浏览模式的表预览要传 `false`
+ *
+ *   浏览模式的表预览是**引擎侧分页** —— [rows] 只是**当前页**，整张表在引擎那边。
+ *   在那里给一个叫「复制整表」的菜单项，它复制出来的却只有一页：
+ *   用户以为把整张表拷走了，粘进 Excel 才发现少了几万行 —— 那比不给这个菜单项更糟。
+ *
+ *   那种场景只给「复制此行」（一行永远是完整的），把「整表」留给真的拿得到整表的场合
+ *   （分析模式的结果表、SQL 工作台的结果集）。
  */
 @Composable
 fun TableCopyMenuItems(
@@ -156,6 +166,7 @@ fun TableCopyMenuItems(
     menu: ContextMenuState,
     onCopy: (String) -> Boolean,
     onCopied: (rowCount: Int, ok: Boolean) -> Unit,
+    canCopyAll: Boolean = true,
 ) {
     if (target != null) {
         WinMenuItem(
@@ -167,12 +178,14 @@ fun TableCopyMenuItems(
             modifier = Modifier.testTag(TABLE_COPY_ROW_MENU_TAG),
         )
     }
-    WinMenuItem(
-        text = { Text(str(StrKey.COPY_ALL_ROWS)) },
-        onClick = {
-            menu.dismiss()
-            onCopied(rows.size, onCopy(tableCopyText(columns, rows)))
-        },
-        modifier = Modifier.testTag(TABLE_COPY_ALL_ROWS_MENU_TAG),
-    )
+    if (canCopyAll) {
+        WinMenuItem(
+            text = { Text(str(StrKey.COPY_ALL_ROWS)) },
+            onClick = {
+                menu.dismiss()
+                onCopied(rows.size, onCopy(tableCopyText(columns, rows)))
+            },
+            modifier = Modifier.testTag(TABLE_COPY_ALL_ROWS_MENU_TAG),
+        )
+    }
 }

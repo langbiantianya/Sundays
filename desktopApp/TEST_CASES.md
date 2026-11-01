@@ -78,6 +78,7 @@
 | [`SystemInfoFetchTest`](./src/test/kotlin/com/langbiantianya/sundays/SystemInfoFetchTest.kt) | `SYSTEM.INFO` 用空 `ConnectionConfig` 不会被当成真实连接去解析方言 |
 | [`DialectFormSpecRenderingTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormSpecRenderingTest.kt) | **凭据页按方言自描述的规格渲染**：假方言声明 3 个自定义字段 + 2 种认证方式 → 界面**自动**出现那 3 个字段与认证下拉，而 MySQL 的内置字段**不出现**（同一个方言换一份 spec 就换一套字段 ⇒ 前端没有按方言写死字段清单）；Kerberos 专属字段只在切到 Kerberos 后出现；只有一种认证方式时不渲染下拉；**没有规格时回退旧的枚举分支**；端到端：引擎 `SYSTEM.LIST_DRIVERS` → session → 界面 |
 | [`DialectFormContractTest`](./src/test/kotlin/com/langbiantianya/sundays/DialectFormContractTest.kt) | **连接类型名的三处一致性**（契约字符串 / `:api` 枚举 / `:shared` 枚举）：拼写一字不差、契约认的类型前端都认得、引擎用的类型契约都认得、内置方言声明的 form 前端都查得到、同一份 form 的字段 id 不重复、约定字段 id 就那六个 —— 三处漂移的症状是**静默回退旧分支**（界面正常、spec 失效、无报错），只能靠测试钉住 |
+| [`HasUserInputTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/connection/HasUserInputTest.kt)（在 `:shared`） | **「用户填过东西没有」这条判据**（v2.43）—— 连接向导第 3 步的红字「请补齐必填字段」只该在用户**动过字段却仍不合法**时出现；一进页面就红，是把「还没开始填」说成「你填错了」。判据是**纯函数** `hasUserInput(connection)`：什么都没填 = `false`（红字不出现）；填了主机 / 端口 / 库名 / 用户名 / 密码**任一项** = `true`。⚠️ 判据看**输入字段**、**不看**折算出来的 JDBC URL —— 那是**用结果判输入**：用户只填了主机名时 URL 还折算不出来，但红字**应该**出现。端口填 `0` 也算「动过」（用户确实按了键，只是内容还不合法） |
 
 ### 2.2 浏览屏
 
@@ -111,6 +112,7 @@
 
 | 测试类 | 覆盖的能力 |
 |---|---|
+| [`BrowseModeCopyMenuTest`](./src/test/kotlin/com/langbiantianya/sundays/BrowseModeCopyMenuTest.kt) | **浏览模式的表格右键复制**（v2.43）—— 此前浏览模式的 `DataTable` **没有接** `contextMenuItems` 插槽，右键弹出来是个**空菜单**（用户会以为程序坏了）。① 表预览的右键菜单**有**「复制此行」；② 表预览**没有**「复制整表」—— 它是**引擎侧分页**，`rows` 只是当前页，给一个「复制整表」复制出来的却只有一页，**那比不给这个菜单项更糟**；③ 复制出来的文本**就是那一行的值**；④ 复制**失败**时通知中心说**失败**（不是成功 —— 剪贴板有三条真实的失败路径）；⑤ `writeClipboard` 把文本交给注入的剪贴板并**如实返回成没成**；⑥ `notifyCopiedRows` 成时推 `SUCCESS` + 「已复制 N 行」、败时推 `ERROR` + 「复制失败」。⚠️ 剪贴板**必须注入替身** —— 直接调真剪贴板会让「无头必然失败」这个假设本地绿、CI 红 |
 | [`TableColumnAlignmentTest`](./src/test/kotlin/com/langbiantianya/sundays/TableColumnAlignmentTest.kt) | 12 列定宽：行宽铺满视口 / 五格横坐标互不相同 / 表体各列与表头对齐 |
 | [`TableWeightedColumnMinWidthTest`](./src/test/kotlin/com/langbiantianya/sundays/TableWeightedColumnMinWidthTest.kt) | 23 个加权列的最小宽度下限（能横滚）/ 4 列时不多滚 / **表头每一列都与表体对应列对齐**（量横坐标）/ 表头列宽不被视口摊薄 |
 | [`TableHorizontalScrollbarTest`](./src/test/kotlin/com/langbiantianya/sundays/TableHorizontalScrollbarTest.kt) | 横向滚动条拇指与轨道底色的 WCAG 对比度 ≥ 3:1，明暗两档分别断言 |
@@ -157,8 +159,9 @@
 | [`ThemeToggleVisibilityTest`](./src/test/kotlin/com/langbiantianya/sundays/ThemeToggleVisibilityTest.kt) | 主题切换入口的可见性 |
 | [`CompactThemeTest`](./src/test/kotlin/com/langbiantianya/sundays/CompactThemeTest.kt) | 紧凑模式（缩放 density） |
 | [`onboarding/OnboardingScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/onboarding/OnboardingScreenTest.kt) | 首次引导页 |
-| [`settings/SettingsScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/settings/SettingsScreenTest.kt) | 设置页 |
-| [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航（**端到端**）：启动落在**首屏** → 选「数据分析」**直接**进分析工作台；选「连接管理」→ 空闲面板的「数据分析」入口 → 分析工作台。组件级用例只能证明「回调被调用了」，证明不了**装配点真的接到了目标切换上** |
+| [`settings/SettingsScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/settings/SettingsScreenTest.kt) | 设置页：**左栏有「模式」这一栏**（v2.43 —— 少了它就没有切换入口）、模式面板显示**当前模式**的文案（传 `DATA_ANALYSIS` 就显示「数据分析模式」）、**「切换模式」按钮点了回调** `onSwitchMode` |
+| [`MainScreenNavTest`](./src/test/kotlin/com/langbiantianya/sundays/MainScreenNavTest.kt) | 顶层导航（**端到端**）：启动落在**首屏** → 选「数据分析」**直接**进分析工作台；选「连接管理」→ 空闲面板的「数据分析」入口 → 分析工作台。**v2.43 新增**：设置页 →「模式」分类 → 按「切换模式」→ **回到首屏**（首屏的两个模式卡片都在）—— 这一条是「模式能切了」最核心的判据：组件级用例只能证明「回调被调用了」，证明不了**装配点真的接到了目标切换上** |
+| [`AppModeTest`](../shared/src/commonTest/kotlin/com/langbiantianya/sundays/navigation/AppModeTest.kt)（在 `:shared`） | **用户可见的模式 ↔ 内部导航目标的映射**（v2.43，纯函数）：`START` → `NONE`、`SETTINGS` → `NONE`（设置页是横切两个模式的全局页）、`CONNECTIONS` / `DATABASE` → `DATABASE_MANAGEMENT`、`ANALYSIS` → `DATA_ANALYSIS`；每个模式都有**一个**界面文案键。⚠️ 判据打成**逐个枚举值**而不是数数量 —— 映射写错一个的症状是「界面上的『当前模式』与实际所在的地方对不上」，而那种错在集成层面看不出来 |
 | [`StartScreenTest`](./src/test/kotlin/com/langbiantianya/sundays/StartScreenTest.kt) | **启动首屏**：两个模式都在（少一个就等于把这个模式藏起来了），且**各点各的**（两个入口接错线的症状是「点了进错屏」，只有真的点才抓得住） |
 | [`TopNavBarTest`](./src/test/kotlin/com/langbiantianya/sundays/TopNavBarTest.kt) | **顶栏没有目标切换 chip**（只有品牌 + ⚙）：「连接管理」「数据分析」两个 chip 已去掉 —— 目标切换不再发生在顶栏，chip 很容易被「顺手加回来」，而「分析模式的入口在哪儿」是产品契约 |
 | [`H2GuiWalkthroughTest`](./src/test/kotlin/com/langbiantianya/sundays/H2GuiWalkthroughTest.kt) | 真 H2 内存库（6 表 / 250 行）走完整主流程并截图：schema 树 → 预览 → 分页 → SQL 补全（表候选优先于关键字、靠右翻转）→ SQL 执行 → 造数并回引擎侧复查 `COUNT(*)` → 树面板宽度拖拽 |
@@ -281,6 +284,26 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 
 > 结论：「探针测不到」**不等于**「功能没生效」。判据只能是**先把探针自己的坐标系与遮挡关系钉死**，再让代码去迎合探针。
 
+### 4.6 v2.43 的一次真窗口走查：截图看到什么、据此改了什么
+
+`runComposeUiTest` 验的是「同一条渲染 / 输入链路上的逻辑」；真窗口验的是「**用户实际看到的那个画面**」。
+本轮把程序跑起来、逐屏截图（`tools/shot-window.ps1` 等），走查了首屏 / 连接列表 / 分析工作台 / 设置页 /
+报表设计 / 新建连接向导 / 「添加数据源」对话框等界面，**截图里的四件事**直接变成了四个改动：
+
+| 截图里看到的 | 为什么难用 | 改法 | 回归测试 |
+|---|---|---|---|
+| 分析模式里**没有任何地方**能回到数据库管理模式 | 顶栏 chip 去掉后，连接管理空闲面板里的「数据分析」入口是**单向**的 —— 用户一旦进了分析模式就**回不去了**（除非重启应用） | 设置页加**第三个分类「模式」** + 「切换模式」按钮 → **回到首屏**重选 | `AppModeTest` / `SettingsScreenTest` / `MainScreenNavTest` |
+| 浏览模式的表格**右键弹出空菜单** | 菜单机制做了，**插槽没人接** —— 菜单能开、内容为空，用户会以为程序坏了 | 接上 `:shared` 的 `TableCopyMenuItems`（表预览**只给「复制此行」**） | `BrowseModeCopyMenuTest` |
+| 连接列表的地址被截断成 `MYSQL • 192.168.1.5…` | **端口没了** —— 而端口正是判断「连的是不是那个库」的关键 | 副标题包一层 `TooltipBox`，悬停显示**完整地址** | — |
+| 新建连接向导第 3 步**一进页面就报红字**「请补齐必填字段」+ 预览框写「(待补齐字段)」 | 两句**同一件事**；而且用户**还没动手**就被告知没填 | 红字**只在用户动过字段后**出现（判据是纯函数 `hasUserInput`，看**输入字段**而**不看**折算出来的 URL）；预览框换成中性说明，删掉重复的孤儿文案键 | `HasUserInputTest` |
+| 「添加数据源」对话框里有个**禁用**的「预览」按钮，下方空无一物 | 长得像**一块空标题** —— 用户不知道那个按钮是干什么的 | 按钮**上方**加一句说明 | — |
+
+> 教训：**截图能看见的缺陷，自动化测试看不见** —— 上面五条里没有一条是被测试发现的，
+> 它们全是「跑起来看一眼」才暴露的。判据也印证了同一件事：
+> 「复制整表」在表预览上是**骗人的**（引擎侧分页，拿不到整表），
+> 而这一点**只有把表预览和 SQL 工作台放在一起对比**才看得出来 —— 两处都是「复制」，
+> 给不给「整表」取决于**手里有没有整表**。
+
 ---
 
 ## 5. 跨模块缺陷留档
@@ -307,6 +330,8 @@ $ci = New-Object CURSORINFO; $ci.cbSize = [Marshal]::SizeOf($ci)
 | 跨库导出**必然失败** | `TablePreviewTab.schema` 装的其实是**库名**，而导出请求用的是「树里第一个展开的库」——两者不是同一个；再加上预填 SQL 是**裸表名**（按会话默认库解析），于是必然报 `Table '<别的库>.<表>' doesn't exist` | `ExportSqlBuildingTest` / `ExportCatalogTargetingTest` |
 | 小窗口下向导第 1 步走不完 | **两个根因**：按钮随内容一起滚走（整个向导列挂 `verticalScroll`）+ 默认窗口 720dp 比本机工作区（659dp）高 ⇒ 底边**在屏幕外**。只修布局那个，大窗口上好了、小屏照旧点不到 | `WizardSmallWindowTest` |
 | SQL 结果表数据行被压没 | 结果区按比例分高度（`maxHeight * 0.4f`）而**没有下限** ⇒ 小窗口下数据区 0 高度，标题却写着「查询结果 · 2 行」 | `SqlResultMinHeightTest` |
+| 浏览模式表格右键弹出**空菜单** | `DataTable` 的 `contextMenuItems` 插槽**没人接** —— 菜单机制在 `:shared` 里做了一份，浏览模式却没插上：菜单能开、内容为空，用户会以为程序坏了 | `BrowseModeCopyMenuTest` |
+| 向导第 3 步**一进页面就报红字** | 红字的判据用了**折算出来的 JDBC URL**（那是**结果**）：用户只填了主机名时 URL 还折算不出来，红字却**已经**在喊「请补齐必填字段」—— 一进页面就被告知自己没填 | `HasUserInputTest` |
 
 ---
 

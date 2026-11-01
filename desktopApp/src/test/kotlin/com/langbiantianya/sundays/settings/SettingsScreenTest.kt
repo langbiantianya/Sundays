@@ -18,6 +18,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -25,6 +26,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.sundays.ProvideTestStrings
+import com.langbiantianya.sundays.navigation.AppMode
 import com.langbiantianya.sundays.ui.AppearanceState
 import com.langbiantianya.sundays.ui.SystemInfoRefresh
 import com.langbiantianya.sundays.ui.ThemeMode
@@ -55,6 +57,8 @@ class SettingsScreenTest {
         onRequest: () -> Unit = {},
         onBack: () -> Unit = {},
         onOpenOnboarding: () -> Unit = {},
+        currentMode: AppMode = AppMode.NONE,
+        onSwitchMode: () -> Unit = {},
     ) {
         MaterialTheme {
             SettingsScreen(
@@ -70,6 +74,8 @@ class SettingsScreenTest {
                 compactMode = state.compactMode,
                 onCompactModeChange = state::selectCompactMode,
                 onOpenOnboarding = onOpenOnboarding,
+                currentMode = currentMode,
+                onSwitchMode = onSwitchMode,
             )
         }
     }
@@ -121,6 +127,63 @@ class SettingsScreenTest {
             onAllNodesWithText(zh(StrKey.PERSONALIZATION)).assertCountEquals(2)
             onAllNodesWithText(zh(StrKey.SYSTEM_INFO)).assertCountEquals(1)
             onNodeWithText(zh(StrKey.COLOR_THEME)).assertIsDisplayed()
+        }
+    }
+
+    // =========================================================================
+    // 「模式」分类 —— 切换数据库管理模式 / 数据分析模式
+    // =========================================================================
+
+    @Test
+    fun `the mode category is listed next to the other categories`() {
+        runComposeUiTest {
+            setContent { ProvideTestStrings { render(AppearanceState()) } }
+
+            // 左栏第三项就是「模式」。它**不该**是默认分类 ——
+            // 默认还是「个性化」，否则每次进设置先看到的是切模式而不是外观。
+            onAllNodesWithText(zh(StrKey.MODE)).assertCountEquals(1)
+            // 默认分类仍是「个性化」（左栏一行 + 右侧内容标题 = 2 处）
+            onAllNodesWithText(zh(StrKey.PERSONALIZATION)).assertCountEquals(2)
+        }
+    }
+
+    @Test
+    fun `the mode pane shows which mode the user is in`() {
+        runComposeUiTest {
+            setContent {
+                ProvideTestStrings {
+                    render(AppearanceState(), currentMode = AppMode.DATA_ANALYSIS)
+                }
+            }
+            onNodeWithText(zh(StrKey.MODE)).performClick()
+            waitForIdle()
+
+            // 「当前模式」那一行必须说清用户**现在在哪个模式** ——
+            // 不知道当前在哪，就没法判断「要不要切」。
+            onNodeWithText(zh(StrKey.MODE_CURRENT)).assertIsDisplayed()
+            onNodeWithText(zh(StrKey.MODE_DATA_ANALYSIS)).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `the switch mode button invokes its callback`() {
+        runComposeUiTest {
+            var switches = 0
+            setContent {
+                ProvideTestStrings {
+                    render(
+                        AppearanceState(),
+                        currentMode = AppMode.DATABASE_MANAGEMENT,
+                        onSwitchMode = { switches++ },
+                    )
+                }
+            }
+            onNodeWithText(zh(StrKey.MODE)).performClick()
+            waitForIdle()
+
+            onNodeWithText(zh(StrKey.MODE_DATABASE_MANAGEMENT)).assertIsDisplayed()
+            onNodeWithTag(SETTINGS_SWITCH_MODE_BUTTON_TAG).performClick()
+            assertEquals(1, switches, "「切换模式」按钮应触发 onSwitchMode")
         }
     }
 

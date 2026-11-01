@@ -8,6 +8,8 @@
 
 package com.langbiantianya.sundays.navigation
 
+import com.langbiantianya.i18n.StrKey
+
 /**
  * 顶层导航目标 —— 应用当前渲染哪个主屏幕。
  *
@@ -47,3 +49,66 @@ enum class AppDestination {
 
     SETTINGS,
 }
+
+/**
+ * 用户可见的**工作模式** —— 应用的两条主线。
+ *
+ * ## 为什么与 [AppDestination] 分成两个概念
+ *
+ * [AppDestination] 是**内部导航状态**，有五个取值；用户面对的却是**两种**模式。
+ * 把两者混成一个枚举，界面上就会出现「当前：连接管理」这种用户从没听说过的说法，
+ * 而「设置页要显示当前在哪个模式」这件事也无从回答。
+ *
+ * 所以这里显式地定义用户可见的那一份，并用 [AppDestination.mode] 把两者对上。
+ * 映射是**一处**定义 —— 别处再写一遍就会漂移（改了一处忘了另一处，
+ * 用户看到的「当前模式」就与实际所在的地方对不上）。
+ *
+ * ## 三个取值
+ *
+ * - [NONE]：还没选模式 —— 停在首屏，或者正站在横切所有模式的设置页上；
+ * - [DATABASE_MANAGEMENT]：数据库管理模式 —— 连接管理 + 浏览表结构与数据；
+ * - [DATA_ANALYSIS]：数据分析模式 —— 只读远端源 + 本地工作区里做分析。
+ */
+enum class AppMode {
+    /** 还没选模式（首屏），或正站在不属于任何模式的全局页上。 */
+    NONE,
+
+    /** 数据库管理模式：连库、浏览表结构与数据、SQL 工作台。 */
+    DATABASE_MANAGEMENT,
+
+    /** 数据分析模式：只读数据源 + 本地工作区里的 SQL 与报表。 */
+    DATA_ANALYSIS,
+}
+
+/**
+ * 这个导航目标属于哪个**用户可见的模式**。
+ *
+ * ## 为什么 [AppDestination.SETTINGS] 映射成 [AppMode.NONE]
+ *
+ * 设置页是横切在两个模式之上的**全局页** —— 它自己不属于任何一个。
+ * 设置页显示的「当前模式」取自**进来之前的那一屏**（desktopApp 侧记着
+ * `destinationBeforeSettings`），而不是这个值 —— 否则设置页会永远显示
+ * 「未选择模式」，而用户明明就在某个模式里。
+ */
+val AppDestination.mode: AppMode
+    get() =
+        when (this) {
+            AppDestination.START -> AppMode.NONE
+            AppDestination.CONNECTIONS, AppDestination.DATABASE -> AppMode.DATABASE_MANAGEMENT
+            AppDestination.ANALYSIS -> AppMode.DATA_ANALYSIS
+            AppDestination.SETTINGS -> AppMode.NONE
+        }
+
+/**
+ * 这个模式在界面上叫什么 —— 文案**跟着界面语言走**，所以这里给的是键而不是文案。
+ *
+ * 与 [SettingsCategory.labelKey] 同一套做法：文案表在 `i18n` 模块，
+ * 界面层只认键。
+ */
+val AppMode.labelKey: StrKey
+    get() =
+        when (this) {
+            AppMode.NONE -> StrKey.MODE_NONE
+            AppMode.DATABASE_MANAGEMENT -> StrKey.MODE_DATABASE_MANAGEMENT
+            AppMode.DATA_ANALYSIS -> StrKey.MODE_DATA_ANALYSIS
+        }

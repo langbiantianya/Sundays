@@ -1,6 +1,39 @@
 # 数据分析模式 —— 设计文档
 
-> **状态**：设计冻结待评审 · **v1.17** · 2026-11-01
+> **状态**：设计冻结待评审 · **v1.18** · 2026-11-02
+>
+> **v1.18 相对 v1.17 的修改**（**两个模式随时能切回来 · 真窗口走查一轮**）：
+>
+> 1. **「选模式」此前是一次性的** —— 选完就回不去了：
+>    分析工作台里**没有任何**通往数据库管理模式的入口；
+>    而设置页是横切在两个模式之上的**唯一全局页**，却**没有**切模式的按钮。
+>    真窗口走查时这一条最刺眼：从分析模式想看一眼某个连接，得**重启应用**。
+>    现在设置页新增第三个分类「**模式**」，里面是当前所在模式 + 一个「切换模式」按钮。
+> 2. **按下后回首屏**，不是直接跳到另一个模式。
+>    直接跳的话用户不知道自己换到了哪（两套界面差别不小），他多半会以为是应用坏了；
+>    回首屏让他**自己**再选一次 —— 切换才成了有意识的选择，而不是程序替他做的决定。
+> 3. **切走不丢现场** —— 连接、SQL、报表都由 `MainScreen` 层的会话持有，
+>    **不随顶层页面切换销毁**。说明里明写这一点：
+>    否则用户会以为「切模式 = 清空现场」，于是宁可不敢切。
+> 4. **「当前模式」是一个新概念，与导航状态分开** ——
+>    `AppMode`（`NONE` / `DATABASE_MANAGEMENT` / `DATA_ANALYSIS`）是**用户可见**的两种模式，
+>    `AppDestination`（五个）是**内部导航状态**；两者混成一个枚举，
+>    界面上就会出现「当前：连接管理」这种用户从没听说过的说法。
+>    映射写在一处（`AppDestination.mode`），别处再写一遍就会漂移。
+>    设置页显示的当前模式取**进设置之前的那一屏** —— 设置页本身不属于任何模式。
+> 5. **浏览模式的表格右键菜单接上了** —— 此前 `DataTable` 留着一个空的
+>    `contextMenuItems` 插槽而**一个调用方都没用过**，于是右键表格行弹的是**空菜单**。
+>    现在表预览与 SQL 工作台结果表都能右键复制。
+> 6. **但浏览模式的表预览只给「复制此行」** —— 它是**引擎侧分页**，
+>    `rows` 只是当前页；给一个叫「复制整表」的菜单项而它只复制一页，是**骗人**
+>    （用户以为拷走了整张表，粘进 Excel 才发现少了几万行）。
+>    SQL 工作台的结果集是**本地**分页（`rows` 就是全部），那边两项都给。
+> 7. **真窗口走查一轮，顺手修掉四处**（详见 §14.3）：
+>    连接列表的地址被截断成 `192.168.1.5…`（**端口没了**，同一台机器上的两个连接分不出来）→
+>    加 tooltip；「添加数据源」对话框里那个**禁用**的「预览」按钮长得像一块空标题 →
+>    补一句说明；连接向导第 3 步**一进页面就报红字**「请补齐必填字段」→
+>    红字只在用户**填过东西之后**才出现；以及那个写着「(待补齐字段)」的占位符 →
+>    换成中性的「填好上面的字段后，这里会显示折算出来的 JDBC URL」。
 >
 > **v1.17 相对 v1.16 的修改**（**分析模式的查询结果能复制走了**）：
 >
@@ -26,6 +59,7 @@
 >    浏览模式用**通知中心**报成功 / 失败，分析模式用**底栏**）。
 >    顺带收掉一件已有的事：浏览模式的 `DataTable` 早就有 `contextMenuItems` 插槽，
 >    但**一个调用方都没用过它** —— 于是右键表格行会弹一个**空菜单**。
+>    ✅ **v1.18 已接上**（表预览只给「复制此行」，SQL 工作台两项都给 —— 理由见 v1.18 第 6 条）。
 >
 > **v1.16 相对 v1.15 的修改**（**分析工作台能导出查询结果了**）：
 >
@@ -2214,6 +2248,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | ④ 连接管理器 | **整屏** | `ConnectionManagerScreen`（**同一个**，只换分组方式） | —— |
 | ⑤ 连接向导 | **整屏** | `AddConnectionDialog` / `ConnectionWizardContent`（**同一个**） | —— |
 | ⑤ 连接向导 | 认证方式下拉 | `WinDropdown` | ★ 新增（§6.3.4） |
+| ⓪ 启动选择 | **设置页的第三个分类「模式」**（左栏一行 + 右侧面板：当前所在模式 + 一个「切换模式」按钮 —— v2.43 新增） | `SettingsScreen` 的 `ModePane` + `WinOutlinedButton` + `Icons.Filled.SwapHoriz` | ——（**新增组件 0 项**：分类行是既有的 `SettingsCategoryRow`，面板是既有控件的组合） |
 | 全部 | 顶栏右上角 | `SettingsEntryButton`（⚙ 图标按钮） | —— |
 | 全部 | 主题 / 圆角 / 立体边 / 选中色 | `SundaysTheme` / `UiChrome` token | —— |
 | 全部 | 文案 | `str(StrKey)` + `i18n` 的 6 语言表 | —— |
@@ -2239,6 +2274,15 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 > 「把一张表复制成文本」是一个概念，浏览模式的表预览 / SQL 工作台结果表
 > 将来接的是**同一份**；菜单项本身用的是既有的 `WinMenuItem`，
 > 而剪贴板这个**平台专属**能力由 `desktopApp` 注入（`:shared` 里没有 `java.*`）。
+>
+> **v2.43 新增组件 0 项** —— 设置页的「模式」分类没有新组件：
+> 左栏那一行是既有的 `SettingsCategoryRow`，右侧面板是
+> `WinOutlinedButton` + `Text` + `Icons.Filled.SwapHoriz` 的组合。
+> 新增的只是**一个枚举**（`AppMode`）与**一份映射**（`AppDestination.mode`）——
+> 它们不是组件，是「当前在哪个模式」这份**状态**的读法。
+>
+> 浏览模式那一侧接的是**同一个** `TableCopyMenuItems`（v2.43）——
+> 「把一张表复制成文本」只有一个实现，两个模式共用。
 
 > ⚠️ **顶栏右上角只放一个 ⚙ 设置入口**（与浏览模式同一个 `SettingsEntryButton`），
 > **不放主题切换、不放语言切换**。理由跟真实应用一致：
@@ -2359,6 +2403,18 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `settings.gradle.kts` | `include(":dialect-hive")` / `include(":dialect-impala")` |
 | `desktopApp/build.gradle.kts` | `runtimeOnly(project(":dialect-hive"))` 等 + 驱动依赖；**加** `implementation(project(":api"))` —— 前端要按**引擎侧同一个** `DialectCapability` 枚举判「哪些方言可分析」，前端另写一份名单就是第二个真相源。**v2.40**：POI 从 `testImplementation` 改 `implementation`（`dialect-duckdb` 本就带着它 → **打包运行时不变**，jlink 清单不用动） |
 | `gradle/libs.versions.toml` | `hive-jdbc` 版本（spike 结论出来后定） |
+| `shared/.../navigation/AppDestination.kt` | **v2.43**：加 `AppMode` 枚举（用户可见的**两种**模式 + `NONE`）+ `AppDestination.mode` 映射 + `AppMode.labelKey`（界面上的名字走文案键） |
+| `shared/.../settings/SettingsCategory.kt` | **v2.43**：加第三个分类 `MODE`（「模式」）—— 它是**导航**动作，混进「个性化」会让人以为改的是外观 |
+| `shared/.../settings/SettingsScreen.kt` | **v2.43**：加参数 `currentMode` / `onSwitchMode` + 右侧的 `ModePane`（当前模式 + 「切换模式」按钮） |
+| `shared/.../table/TableCopyMenu.kt` | **v2.43**：`TableCopyMenuItems` 加 `canCopyAll` 开关 —— 服务端分页的场景（浏览模式表预览）**只给「复制此行」**，给一个名不副实的「复制整表」是骗人 |
+| `shared/.../connection/ConnectionManagerScreen.kt` | **v2.43**：连接列表副标题加 **tooltip**（地址被截断成 `192.168.1.5…` 时**端口没了**）；向导第 3 步的「请补齐必填字段」红字**只在用户填过东西之后**出现（判据是纯函数 `hasUserInput`）；JDBC URL 预览框的空态从占位符换成中性说明 |
+| `shared/.../connection/ConnectionFormFields.kt` | **v2.43**：同上一条 —— spec 驱动的那条路径上，JDBC URL 预览框的空态也换成中性说明 |
+| `desktopApp/.../main.kt` | **v2.43**：`SettingsScreen` 接上 `currentMode = destinationBeforeSettings.mode` 与 `onSwitchMode = { destination = AppDestination.START }` |
+| `desktopApp/.../DatabaseBrowserState.kt` | **v2.43**：暴露 `writeClipboard(text)` 与 `notifyCopiedRows(count, ok)` —— 复用**既有的**剪贴板注入点与通知中心（浏览模式的复制反馈走通知中心，分析模式走底栏） |
+| `desktopApp/.../TablePreview.kt` | **v2.43**：表预览的 `DataTable` 接上右键菜单（**只给「复制此行」** —— 它是引擎侧分页）；`PreviewTabContent` 从 `private` 改 `internal`，好让这条接线能被直接测 |
+| `desktopApp/.../SqlWorkbench.kt` | **v2.43**：SQL 工作台结果表接上右键菜单（**两项都给** —— 它的 `rows` 是全量结果集，本地分页） |
+| `desktopApp/.../AnalysisSourceDialog.kt` | **v2.43**：「预览」按钮（主机地址没填时是**禁用**的）补一句说明 —— 禁用按钮在界面上只是一块灰字，用户看不出那是个按钮 |
+| `i18n/src/main/.../StrKey` + 6 张文案表 | **v2.43**：加 9 个键（模式分类 / 当前模式 / 三种模式名 / 切换按钮 / 切换说明 / 预览按钮说明 / JDBC URL 空态说明），并**删掉** `FIELDS_PENDING`（占位符换成了中性说明，它成了孤儿键） |
 
 ### 10.3 打包要留意
 
@@ -2837,7 +2893,8 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 
 | 事实 | 出处 |
 |---|---|
-| 顶层导航现有 4 个目标（`CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`） | `shared/.../navigation/AppDestination.kt` |
+| 顶层导航现有 5 个目标（`START` / `CONNECTIONS` / `DATABASE` / `ANALYSIS` / `SETTINGS`） | `shared/.../navigation/AppDestination.kt` |
+| 用户可见的**模式**只有两种（数据库管理模式 / 数据分析模式）—— 与上面那 5 个**内部导航状态**不是一回事，映射在 `AppDestination.mode` | `shared/.../navigation/AppDestination.kt` |
 | 5 套配色 × 明暗 2 档 | `shared/.../ui/ThemePalette.kt` |
 | 10 套 `ColorScheme` + 9 条字号 | `shared/.../ui/SundaysPalette.kt` |
 | 连接配置模型与 `DialectType`（5 种方言） | `shared/.../connection/ConnectionConfig.kt` |
@@ -2864,7 +2921,7 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `DialectType` → 方言档位的又一份 if-else | `desktopApp/.../DatabaseBrowserState.kt:149-157` |
 | `TableColumn` / `TableRow` 是**通用键值模型**（不含「库表」语义） | `shared/.../table/TableModels.kt:52` `:88` |
 | `DataTable` 的 `cellEditable` 默认跟随 `onCellEdit != null`（只读用法零改动） | `shared/.../table/DataTable.kt:187` 的 KDoc |
-| `DataTable` 的 `contextMenuItems` **插槽**早已存在（目标行由 `ContextMenuState.payload` 给出）—— 此前**没有一个调用方用过它** | `shared/.../table/DataTable.kt:206` |
+| `DataTable` 的 `contextMenuItems` **插槽**早已存在（目标行由 `ContextMenuState.payload` 给出）—— **v2.43 起两个调用方都用上了它**（分析模式的结果表 / 浏览模式的表预览与 SQL 工作台结果表） | `shared/.../table/DataTable.kt:206` |
 | 剪贴板写入是**平台专属**的（`java.awt`），`:shared` 的 `commonMain` 里没有 `java.*` | `desktopApp/.../ClipboardWriter.kt` |
 | `WinControls.kt` 有 16 个控件，**唯独没有下拉选择器** | `shared/.../ui/WinControls.kt` |
 | `ColumnTypeCatalog` 是**数据库类型**目录（与报表的「呈现类型」不是一回事） | `shared/.../table/ColumnTypeCatalog.kt` |
@@ -2874,3 +2931,22 @@ AI 的模型端点 / 模型名 / API Key 等，**放在现有设置页的新增�
 | `SchemaTree` / `TablePreview` / `ExportDialogs` / `GenerateWorkbench` 深度耦合 `DatabaseBrowserState` | `desktopApp/.../SchemaTree.kt:296` `:445`、`TablePreview.kt:156`、`ExportDialogs.kt:267`、`GenerateWorkbench.kt:157` `:303` |
 | 「平台无关的纯 UI 上移到 `:shared`」是本项目**既定做法** | `desktopApp/.../main.kt:78-79` 的 KDoc（`TopNavBar` / `SundaysTheme` 已上移） |
 | **M2 + M4' 的实现设计**（协议字段 / 模块落点 / 判据 / 提交切分） | [`M2-M4-IMPLEMENTATION.md`](./M2-M4-IMPLEMENTATION.md) |
+
+### 14.3 真窗口走查发现（v2.43 · 2026-11-02）
+
+这一轮**先启动真程序、逐屏截图**，再据此改代码 —— 不是先想改哪儿再去实现。
+走查覆盖：首屏 → 连接管理 → 新建连接向导（4 步）→ 分析工作台 → 报表设计 →
+设置页（个性化 / 系统信息）→ 浏览模式（库表树 / SQL 工作台）。
+
+| # | 发现 | 症状 | 这一轮怎么改 |
+|---|---|---|---|
+| 1 | **模式切换没有回头路** | 分析模式里**完全没有**通往数据库管理模式的入口；浏览模式想换分析模式要绕「关 tab → 连接管理 → 空闲面板 → 数据分析」 | 设置页新增第三个分类「模式」，一个按钮回首屏（v1.18 第 1–4 条） |
+| 2 | **右键弹的是空菜单** | 浏览模式的 `DataTable` 留着一个空的 `contextMenuItems` 插槽没人接 | 接上 v2.42 那份 `TableCopyMenuItems`（v1.18 第 5–6 条） |
+| 3 | **连接列表的地址被截断** | `MYSQL • 192.168.1.5…` —— **端口没了**，同一台机器上的 3306 与 5432 两个连接分不出来 | 副标题加 tooltip（悬停看全文） |
+| 4 | **「添加数据源」里那个禁用按钮像块空标题** | 主机地址没填时，「预览」是**禁用**的 —— 界面上只是一块灰字，看不出那是个按钮，也看不出「填了主机就能用」 | 补一句说明 |
+| 5 | **向导第 3 步一进页面就报红字** | 「请补齐必填字段」+ 预览框里的「(待补齐字段)」—— 两句说的是同一件事，而用户**还没做任何事** | 红字只在用户**填过东西之后**才出现；占位符换成中性说明 |
+
+> **走查方法**：`desktopApp/tools/` 下那几支脚本（`shot-window` / `click-window` /
+> `right-click` / `fill-fields`）—— 真窗口截图 + 真点击，比 `runComposeUiTest`
+> 多看见的是**布局**问题：截断、空盒子、禁用控件长得像标题。
+> 详见 `desktopApp/TEST_CASES.md` §4。

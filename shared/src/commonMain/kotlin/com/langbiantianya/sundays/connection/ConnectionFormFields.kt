@@ -206,7 +206,9 @@ private fun DisplayField(
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Text(
-            text = value.ifBlank { str(StrKey.FIELDS_PENDING) },
+            // 折算不出来时是「**还没填**」，不是「填错了」——
+            // 所以给一句中性的说明，而不是像报错那样的占位符。
+            text = value.ifBlank { str(StrKey.JDBC_URL_PENDING_HINT) },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(10.dp),

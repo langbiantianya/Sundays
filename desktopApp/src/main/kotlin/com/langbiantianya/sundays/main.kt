@@ -56,6 +56,7 @@ import com.langbiantianya.sundays.editor.ui.registerBuiltinEditors
 import com.langbiantianya.sundays.navigation.AppDestination
 import com.langbiantianya.sundays.navigation.StartScreen
 import com.langbiantianya.sundays.navigation.TopNavBar
+import com.langbiantianya.sundays.navigation.mode
 import com.langbiantianya.sundays.notifications.NotificationCenter
 import com.langbiantianya.sundays.onboarding.OnboardingScreen
 import com.langbiantianya.sundays.settings.SettingsScreen
@@ -689,6 +690,17 @@ internal fun MainScreen(
                         onOpenOnboarding = { onboardingReplay = true },
                         language = appearance.language,
                         onLanguageChange = appearance::selectLanguage,
+                        // 「当前模式」取**进设置之前的那一屏** —— 设置页本身不属于任何模式。
+                        currentMode = destinationBeforeSettings.mode,
+                        // 「切换模式」= 回到首屏重新选。
+                        //
+                        // 为什么是 START 而不是直接跳到另一个模式：直接跳的话用户不知道自己
+                        // 换到了哪（两套界面差别不小），他多半以为是应用坏了。回首屏让他
+                        // 自己选一次，切换才是**有意识**的选择。
+                        //
+                        // 切走**不丢现场**：连接、SQL、报表都由这一层（MainScreen）持有的
+                        // 会话与浏览器 state 保管，不随顶层页面切换销毁。
+                        onSwitchMode = { destination = AppDestination.START },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

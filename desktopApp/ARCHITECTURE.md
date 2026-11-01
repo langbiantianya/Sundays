@@ -250,6 +250,11 @@ desktopApp （本模块）
 
 | 外观状态在 `SundaysTheme` **之外** | 配色由主题的 `darkTheme` 参数注入，是组合最外层；状态落在屏幕内部会出现「按钮变了、界面没变」 | 同上 |
 
+| 设置页能**切模式**：按下 → 回到**首屏**重选（v2.43） | 走查发现：进了分析模式之后界面上**没有任何地方能回到数据库管理模式** —— 顶栏 chip 早先（v1.4）去掉后，连接管理空闲面板里的「数据分析」入口是**单向**的，于是用户**回不去了**（除非重启）。切模式**不是**「直接跳到另一个模式」：那会让用户突然换了一整套环境却**不知道换到哪了**；「切换模式」这个说法本身就暗含「我还没决定要哪个」，所以给它一个「先回到选择页」的动作，**选哪个仍是用户的决定** | [`main.kt`](./src/main/kotlin/com/langbiantianya/sundays/main.kt) 的 `onSwitchMode = { destination = AppDestination.START }` |
+
+| 「当前模式」取 `destinationBeforeSettings.mode` | 设置页**不属于**任何模式（`AppDestination.SETTINGS.mode` 恒为 `NONE`）—— 直接用它会永远显示「未选择模式」，而用户明明就在某个模式里 | 同上 |
+| 切走**不丢现场** | 连接 / SQL / 报表由 `MainScreen` 层的 `AnalysisSession` 与 `browsers` map 持有，**不随顶层页面切换销毁** —— 换模式回来，连接还在、工作区还在。说明文案里把这件事明写出来，用户才敢按 | 同上 |
+
 
 
 ### 3.3 浏览状态机
@@ -331,6 +336,10 @@ desktopApp （本模块）
 | 建表 DDL 必须走引擎 | 五个方言的建表语句没有共性：PG 回填主键/UNIQUE/CHECK，SQLite 读 `sqlite_master.sql` 原文，MySQL 拼 ENGINE 与字符集。**对不上的 DDL 是静默的** | 同上 |
 
 | 错误区顶对齐 + 可纵向滚动 | 引擎报错常是几百字符且 `Caused by` 恰在末尾；「`fillMaxSize` + 居中」在溢出时**首尾同时被裁** | 同上 |
+
+| 表预览的右键菜单接上**复制**（v2.43） | 此前 `DataTable` 的 `contextMenuItems` 插槽**没人接** —— 右键弹出来是个**空菜单**，用户会以为程序坏了。接上 `:shared` 的 `TableCopyMenuItems`，但**只给「复制此行」**：表预览是**引擎侧真分页**（`rows` 只是当前页，整张表在引擎那边），摆一个叫「复制整表」的项，它复制出来的却只有一页 —— **那比不给这个菜单项更糟** | [`TablePreview.kt`](./src/main/kotlin/com/langbiantianya/sundays/TablePreview.kt) 的 `PreviewTabContent`（`canCopyAll = false`） |
+| SQL 工作台结果集的右键菜单**两项都给** | 与表预览相反：SQL 结果集是**本地分页**（`rows` 全量），「复制整表」给得出真的整张表 | [`SqlWorkbench.kt`](./src/main/kotlin/com/langbiantianya/sundays/SqlWorkbench.kt) 的 `SqlResultArea` |
+| 右键菜单状态建在 `when` **之外** | `copyMenuState` 建在 `when (activeTab)` 的**分支里**的话，菜单状态会随分支重建 —— 弹出来的菜单会丢掉自己的定位信息，表现为「菜单闪一下就没了」 | 同上 |
 
 
 
@@ -426,6 +435,10 @@ desktopApp （本模块）
 | `ClipboardWriter` 捕获 `Throwable` | 无头的 `HeadlessException`、剪贴板被占的 `IllegalStateException`、AWT 未初始化的 `AWTError`（是 `Error` 不是 `Exception`）三种都不该带走主流程 | [`ClipboardWriter.kt`](./src/main/kotlin/com/langbiantianya/sundays/ClipboardWriter.kt) |
 
 | 空串直接返回 `false` | 「复制成功但剪贴板没变」比明确失败更糟 | 同上 |
+
+| 浏览模式的复制反馈走**通知中心**（v2.43） | 浏览模式没有底栏状态位（那是分析模式的做法），所以复制成没成推到**通知中心** —— 与浏览模式自己的错误出口是同一条。**文案与实现都复用同一份**（`PluralStrKey.COPIED_ROWS` / `StrKey.COPY_TABLE_FAILED`），两个模式复制同一张表时用户看到的话是同一句 | [`DatabaseBrowserState.kt`](./src/main/kotlin/com/langbiantianya/sundays/DatabaseBrowserState.kt) 的 `writeClipboard` / `notifyCopiedRows` |
+
+| `writeClipboard` **如实返回**成没成 | 返回一个「大概成功」的布尔会让上层把失败报成成功 —— 用户看到「已复制 1 行」，剪贴板里却什么都没有 | 同上 |
 
 
 

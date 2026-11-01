@@ -1146,6 +1146,136 @@ CSV 粘进 Excel 会弹「文本导入向导」，TSV 直接按列落格。
 | 点菜单项之后**菜单消失** | 去掉 `menu.dismiss()` → 那条用例变红 |
 | 复制**失败**时底栏明说失败 | 失败分支改成成功文案 → 那条用例变红 |
 
+### 6.13 模式切换 + 真窗口走查的小修（第 21 片）
+
+这一片来自一次**真窗口走查**（把程序跑起来、截图、照着截图里的问题改），
+外加用户明确要求的一条：**设置页里能切换「数据库管理模式 / 数据分析模式」**。
+
+#### 6.13.1 口径：切换模式 = **回到首屏重选**，不是「直接跳到另一个模式」
+
+主设计 §6.10 把「选模式」放在**启动首屏** —— 应用问一次「这次干哪种活儿」，
+之后一路走下去。这一片补的是**回头路**：当时只有进、没有出。
+
+走查时看到的事实是：进了分析模式之后，**界面上没有任何地方能回到数据库管理模式**。
+而顶栏的两个 chip 早先（v1.4）已经去掉了，连接管理的空闲面板里那个「数据分析」
+入口是**单向**的。于是用户一旦进了分析模式，就**回不去了** —— 除非重启应用。
+
+**为什么按下按钮是「回首屏」而不是「直接跳到另一个模式」**：
+
+| | 直接跳到另一个模式 | 回到首屏重选（**本片采用**） |
+|---|---|---|
+| 用户看到什么 | 突然换了一整套工作环境，**不知道换到哪了** | 回到那张熟悉的选择页，**由自己再选一次** |
+| 要不要再点一下 | 不用 | 要（一次） |
+| 误触的代价 | 一按就换环境 | 一按只是回到选择页 |
+
+「切换模式」这个说法本身就暗含「**我还没决定要哪个**」——
+所以给它一个「先回到选择页」的动作是对的：选**哪**个仍然是用户的决定。
+而且首屏是**已经存在**的那一屏（§6.10），复用它不用新造一个。
+
+**切走不丢现场**：连接 / SQL / 报表由 `MainScreen` 层的 `AnalysisSession` 与
+`browsers` map 持有，**不随顶层页面切换销毁** —— 换模式回来，连接还在、
+工作区还在。说明文案里把这件事明写出来，用户才敢按。
+
+#### 6.13.2 `AppMode` 与 `AppDestination` **分成两个概念**
+
+设置页要显示「当前模式」——但「当前模式」不是导航目标：
+
+| | 取值 | 给谁看 |
+|---|---|---|
+| `AppDestination` | 5 个（START / CONNECTIONS / DATABASE / ANALYSIS / SETTINGS） | **代码**（`when (destination)` 分支） |
+| `AppMode` | 3 个（NONE / DATABASE_MANAGEMENT / DATA_ANALYSIS） | **用户**（设置页那一行「当前模式」） |
+
+⚠️ **为什么不把两者合成一个枚举**：`AppDestination` 有五个取值，用户面对的却是**两种**模式。
+合成一个的话，界面上就会出现「当前：连接管理」这种用户从没听说过的说法，
+而「设置页要显示当前在哪个模式」也无从回答。
+
+⚠️ **映射必须只写一处**：`AppDestination.mode` 一个扩展属性把五个目标映射到两个模式。
+别处再写一遍就会漂移（改了一处忘了另一处，用户看到的「当前模式」就与实际所在的地方对不上）。
+
+⚠️ **`AppDestination.SETTINGS.mode` 恒为 `NONE`**：设置页是横切在两个模式之上的**全局页**，
+它自己不属于任何一个。所以设置页显示的「当前模式」取自**进来之前的那一屏**
+（desktopApp 侧记着 `destinationBeforeSettings`）—— 否则设置页会永远显示「未选择模式」，
+而用户明明就在某个模式里。
+
+#### 6.13.3 为什么设置页的「模式」**单独一栏**
+
+设置页左栏原本只有「个性化」与「系统信息」两栏。
+「切换模式」塞进「个性化」是最省事的做法，**但那是错的**：
+
+- 「个性化」里都是**外观**（配色、明暗、语言）；
+- 「切换模式」是**导航**动作 —— 按它会离开当前这一屏回到首屏。
+
+混在一起，用户按下去时预期的是「改了点什么」，实际发生的是「换了一整套工作环境」。
+所以它**单独一栏**，图标用 `SwapHoriz`（双向箭头，语义上就是「换一个」）。
+
+⚠️ 它放在**末尾**而不是开头：前两栏是「打开设置先看的那两样」，
+而切模式是一个**偶尔**才用的动作，不该在每次进设置时抢最前面的位置。
+
+⚠️ 默认分类仍是「个性化」——新加的分类不抢默认位。
+
+#### 6.13.4 浏览模式的右键菜单接上复制：表预览**只给「复制此行」**
+
+走查发现：浏览模式 `DataTable` 的 `contextMenuItems` 插槽**没人接** ——
+右键弹出来是个**空菜单**。（分析模式那套 `TableCopyMenuItems` 是上一片落的，
+浏览模式的表预览 / SQL 工作台只是**没接上**。）
+
+⚠️ **为什么表预览只给「复制此行」，不给「复制整表」**：
+
+浏览模式的表预览是**引擎侧分页** —— `rows` 只是**当前页**，整张表在引擎那边。
+在那里摆一个叫「复制整表」的菜单项，它复制出来的却只有一页：
+用户以为把整张表拷走了，粘进 Excel 才发现少了几万行 —— **那比不给这个菜单项更糟**。
+
+SQL 工作台的结果集是**本地分页**（`rows` 全量），所以那里**两项都给**。
+
+实现上靠 `TableCopyMenuItems(canCopyAll = false)` —— **一个开关**，不是两份实现。
+
+#### 6.13.5 走查四处小修
+
+| # | 走查看到的 | 为什么难用 | 改法 |
+|---|---|---|---|
+| 1 | 「添加数据源」对话框里有一个**禁用**的「预览」按钮 | 它长得像**一块空标题**（按钮 + 下方什么都没有） | 按钮**上面**加一句说明：预览是干什么的 |
+| 2 | 连接列表的地址被截断成 `MYSQL • 192.168.1.5…` | **端口没了** —— 而端口是判断「连的是不是那个库」的关键 | 副标题包一层 `TooltipBox`，**悬停显示完整地址** |
+| 3 | 浏览模式表格右键弹出**空菜单** | 菜单能开、内容为空 → 用户以为程序坏了 | 接上复制（见 6.13.4） |
+| 4 | 新建连接向导第 3 步**一进页面就报红字**「请补齐必填字段」+ 预览框写「(待补齐字段)」 | 两句**同一件事**；而且用户**还没动手**就被告知没填 | 红字**只在用户填过东西之后**出现；预览框换成中性说明 |
+
+⚠️ **向导红字的判据是「用户填过东西」，不是「字段齐不齐」**：
+判据用纯函数 `hasUserInput(connection)` —— 看**输入字段**（host / port / database /
+username / password 任一非空），**不看**折算出来的 JDBC URL。
+
+为什么不能用 URL 判断：URL 是**结果**。用户只填了主机名时，URL 还折算不出来，
+但红字**应该**出现 —— 用结果判输入是循环的。
+
+⚠️ **「(待补齐字段)」这个占位符被删掉**：它和上面的红字说的是同一件事，
+两处各说一遍等于两处都可能说错。预览框改用中性说明 `JDBC_URL_PENDING_HINT`
+（「填完上面的字段后，这里会显示 JDBC URL」），孤儿 i18n 键 `FIELDS_PENDING` 一并删除。
+
+#### 6.13.6 落点
+
+| 文件 | 内容 |
+|---|---|
+| `shared/.../navigation/AppDestination.kt` | **新增** `AppMode` 枚举 + `AppDestination.mode` 映射 + `AppMode.labelKey` |
+| `shared/.../settings/SettingsCategory.kt` | **新增**第三个分类 `MODE`（放末尾） |
+| `shared/.../settings/SettingsScreen.kt` | **新增**参数 `currentMode` / `onSwitchMode` + `ModePane` + `SETTINGS_SWITCH_MODE_BUTTON_TAG`；分类图标 `SwapHoriz` |
+| `shared/.../table/TableCopyMenu.kt` | **新增**参数 `canCopyAll`（默认 `true`）—— 浏览模式表预览传 `false` |
+| `shared/.../connection/ConnectionManagerScreen.kt` | 副标题包 `TooltipBox`；红字条件改成 `hasUserInput`；**新增**顶层纯函数 `hasUserInput`；空态换 `JDBC_URL_PENDING_HINT` |
+| `shared/.../connection/ConnectionFormFields.kt` | JDBC URL 预览空态换 `JDBC_URL_PENDING_HINT` |
+| `desktopApp/.../main.kt` | `SettingsScreen(...)` 接 `currentMode = destinationBeforeSettings.mode` / `onSwitchMode = { destination = AppDestination.START }` |
+| `desktopApp/.../DatabaseBrowserState.kt` | **新增** `writeClipboard(text)` / `notifyCopiedRows(rowCount, ok)`（浏览模式的复制反馈走**通知中心**） |
+| `desktopApp/.../TablePreview.kt` | 表预览接右键菜单（**只给「复制此行」**） |
+| `desktopApp/.../SqlWorkbench.kt` | SQL 结果集接右键菜单（**两项都给**） |
+| `desktopApp/.../AnalysisSourceDialog.kt` | REMOTE 分支的「预览」按钮**上方**加一句说明 |
+| `i18n/.../StrKey.kt` + 六张表 | **新增** 9 个键（`MODE` / `MODE_CURRENT` / `MODE_NONE` / `MODE_DATABASE_MANAGEMENT` / `MODE_DATA_ANALYSIS` / `MODE_SWITCH_HINT` / `MODE_SWITCH_BUTTON` / `ANALYSIS_SOURCE_PREVIEW_HINT` / `JDBC_URL_PENDING_HINT`）；**删除**孤儿键 `FIELDS_PENDING` |
+
+#### 6.13.7 判据（都做过变异验证）
+
+| 判据 | 变异 |
+|---|---|
+| 按下「切换模式」→ **回到首屏** | `onSwitchMode = {}` → 端到端那条用例变红 |
+| 表预览的右键菜单**没有**「复制整表」 | `canCopyAll = true` → 那条用例变红 |
+| 复制**失败**时通知中心明说失败（不报成功） | 失败分支改成 `SUCCESS` → 那条用例变红 |
+| `AppDestination.ANALYSIS` 映射到 `DATA_ANALYSIS` | 改成 `DATABASE_MANAGEMENT` → `AppModeTest` 变红 |
+| 设置页显示的**当前模式**是传进来的那个 | `currentMode` 写死 → 那条用例变红 |
+
 ---
 
 ## 7. 测试判据
@@ -1227,6 +1357,39 @@ CSV 粘进 Excel 会弹「文本导入向导」，TSV 直接按列落格。
   不关的话它会杵在表上，下一次右键被压在旧菜单底下，表现为「右键没反应了」
 - **没跑出结果时没有复制菜单可点**（不给一个「点了复制空表」的入口）
 
+### 7.8 模式切换 + 浏览模式右键复制（第 21 片）
+
+**模式映射**（`AppModeTest`，`:shared` 的 `commonTest`，纯函数不打 UI）：
+
+- `START` → `NONE`；`SETTINGS` → `NONE`（设置页是横切两个模式的全局页）
+- `CONNECTIONS` / `DATABASE` → `DATABASE_MANAGEMENT`
+- `ANALYSIS` → `DATA_ANALYSIS`
+- 每个模式都有**一个**界面文案键（`labelKey`）
+
+**设置页**（`SettingsScreenTest`）：
+
+- 左栏**有**「模式」这一栏（`SettingsCategory.MODE` 在枚举里）
+- 模式面板显示**当前模式**的文案（传 `DATA_ANALYSIS` 就显示「数据分析模式」）
+- 「切换模式」按钮点了**回调** `onSwitchMode`
+
+**端到端**（`MainScreenNavTest`）：设置页 →「模式」分类 → 按「切换模式」→ **回到首屏**
+（首屏的两个模式卡片都在）—— 这一条是本片**最核心**的判据。
+
+**浏览模式右键复制**（`BrowseModeCopyMenuTest`）：
+
+- 表预览的右键菜单**有**「复制此行」
+- 表预览的右键菜单**没有**「复制整表」（引擎侧分页，整表拿不到 —— 给了就是骗人）
+- 复制出来的文本**就是那一行的值**
+- 复制**失败**时通知中心说**失败**，不是成功
+- 状态机两条：`writeClipboard` 把文本交给剪贴板并**如实返回成没成**；
+  `notifyCopiedRows` 成时推 `SUCCESS` + 「已复制 N 行」，败时推 `ERROR` + 「复制失败」
+
+**向导措辞**（`HasUserInputTest`，`:shared` 的 `commonTest`，纯函数）：
+
+- 什么都没填 → `hasUserInput` = `false`（红字**不出现**）
+- 填了 host / port / database / username / password **任一项** → `true`
+- 判据看**输入字段**，**不看**折算出来的 JDBC URL（那是用结果判输入）
+
 ---
 
 ## 8. 提交切分
@@ -1255,6 +1418,7 @@ CSV 粘进 Excel 会弹「文本导入向导」，TSV 直接按列落格。
 | 18 | `feat(analysis): 分析模式的树能删掉数据源 —— 右键表 → 菜单 → 确认 → 删除` | 新增 `:shared` 的 `tree/TreeContextMenu.kt`（**两棵树共用的右键菜单机制**，从 `desktopApp` 上移）+ `analysis/AnalysisTreeMenu.kt`（判据是纯函数）+ `analysis/AnalysisModels.kt` 里的 `DeleteSourceOutcome`；会话新增 `removeSource()`（`DROP SCHEMA … CASCADE` + 删登记 + 刷树）与 `deletableSourceNames`；i18n 加 7 个键 × 六语言；UI 设计图补上菜单 | 右键**表**能弹菜单、菜单里能删数据源；删得掉（schema 与登记**两处**都没）；**工作区自己不能被删**；**没登记过的 schema 不能被删**；**变异验证 9 处全被抓住**（其中一处原本是**假绿** —— 前置条件不成立，改成「特意登记一个叫 `main` 的源」之后才抓住） | ✅ **本轮落地** |
 | 19 | `feat(analysis): 查询结果能导出了 —— 五种格式全在 / 共用那个对话框 / 嵌入式留在本进程` | 引擎的 `ExportHandler` 按**方言声明的连接类型**分叉（嵌入式**本进程直跑**，远端维持子进程）+ 顶层 `ExportSupport.kt`（格式与「跑一次导出」各一份，两个模式共用）+ `ExportDialog` 去绑 `DatabaseBrowserState` + 分析工作台的「导出」按钮与底栏状态 + i18n 4 个键 × 六语言 | §7.6 全绿；**变异验证** 3 处全被抓住（其中引擎那处是**挂死 900 秒**才暴露的）；顺带修掉「从 DuckDB / SQLite 文件连接导出」这个**真 bug** | ✅ **已提交**（`a27fab3`） |
 | 20 | `feat(analysis): 结果表能复制走了 —— 右键复制此行 / 复制整表` | 新增 `:shared` 的 `table/TableCopyMenu.kt`（纯函数 `tableCopyText()` / `rowCopyText()` + 共用的菜单组件）+ `AnalysisCopyStatus` + 结果表的右键菜单与底栏状态 + `onCopyToClipboard` 接线（`desktopApp` 侧接 `ClipboardWriter`）+ i18n 4 个键 × 六语言 | §7.7 全绿；**变异验证** 5 处全被抓住 | ✅ **本轮落地** |
+| 21 | `feat(app): 模式能切了 —— 设置页加「模式」一栏，按下回首屏重选` | 新增 `:shared` 的 `AppMode` 枚举 + `AppDestination.mode` 映射 + 设置页第三个分类 `MODE` 与 `ModePane`（`currentMode` / `onSwitchMode`）+ `main.kt` 接线（`destination = START`）+ 浏览模式表格接上右键复制（表预览 `canCopyAll = false`，SQL 工作台两项都给）+ 走查四处小修（连接列表 Tooltip / 添加数据源预览说明 / 向导第 3 步红字时机）+ i18n 9 个键 × 六语言（删孤儿键 `FIELDS_PENDING`） | §7.8 全绿；**变异验证** 5 处全被抓住；**真窗口走查**截图逐项复验 | ✅ **本轮落地** |
 
 > 📌 **第 3 片的实际落点比原文多两处**，都是实现时定下来的：
 > 一是**方言能力位声明**（`dialect-mysql` / `dialect-postgresql` 声明 `ANALYSIS_SOURCE`）——

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,12 +50,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.langbiantianya.i18n.AppLanguage
 import com.langbiantianya.i18n.PluralStrKey
 import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.i18n.Strings
+import com.langbiantianya.sundays.navigation.AppMode
+import com.langbiantianya.sundays.navigation.labelKey
 import com.langbiantianya.sundays.ui.LanguagePicker
 import com.langbiantianya.sundays.ui.LocalStrings
 import com.langbiantianya.sundays.ui.SundaysPalette
@@ -107,6 +111,11 @@ import kotlinx.coroutines.delay
  * @param onRequestSystemInfo 请求系统信息；切到 [SettingsCategory.SYSTEM_INFO] 或点「刷新」、
  *   以及自动刷新到点时触发
  * @param onBack 返回上一屏（左上角按钮）
+ * @param currentMode 当前所在的**用户可见模式**（数据库管理模式 / 数据分析模式 / 未选择）。
+ *   由调用方从「进入设置之前的那一屏」算出来 —— 设置页本身不属于任何模式，
+ *   它只是横切在两个模式之上的全局页。
+ * @param onSwitchMode 「切换模式」—— 回到首屏重新选模式。
+ *   默认 `{}` = 该调用方不提供这个入口（如只读的预览 / 测试）。
  */
 @Composable
 fun SettingsScreen(
@@ -124,6 +133,8 @@ fun SettingsScreen(
     onOpenOnboarding: () -> Unit = {},
     language: AppLanguage = AppLanguage.DEFAULT,
     onLanguageChange: (AppLanguage) -> Unit = {},
+    currentMode: AppMode = AppMode.NONE,
+    onSwitchMode: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var category by remember { mutableStateOf(SettingsCategory.PERSONALIZATION) }
@@ -208,6 +219,13 @@ fun SettingsScreen(
                         onRefreshNow = onRequestSystemInfo,
                     )
                 }
+
+                SettingsCategory.MODE -> {
+                    ModePane(
+                        currentMode = currentMode,
+                        onSwitchMode = onSwitchMode,
+                    )
+                }
             }
         }
     }
@@ -257,7 +275,88 @@ private fun SettingsCategory.icon(): ImageVector =
     when (this) {
         SettingsCategory.PERSONALIZATION -> Icons.Filled.Palette
         SettingsCategory.SYSTEM_INFO -> Icons.Filled.Computer
+        SettingsCategory.MODE -> Icons.Filled.SwapHoriz
     }
+
+/**
+ * 「模式」内容 —— 当前在哪个模式 + 一个「切换模式」按钮。
+ *
+ * ## 为什么这个按钮住在**设置页**，而不是顶栏
+ *
+ * 顶栏只有品牌与 ⚙ —— 它是**每屏都在**的地方。在那里塞一个「切模式」按钮，
+ * 等于让一个会**离开当前界面**的动作常驻在每个界面里；而浏览模式的顶栏
+ * 根本不是同一个（它有连接标签页），要在两套顶栏里各放一份，那又是两份实现。
+ *
+ * 设置页是横切在两个模式之上的**唯一全局页** —— 按钮放这儿，两个方向都够得着，
+ * 而且只有一处。
+ *
+ * ## 为什么按下之后是**回首屏**而不是直接跳到另一个模式
+ *
+ * 直接跳的话，用户点了却不知道自己换到了哪 —— 两套模式的界面差别不小，
+ * 他多半会以为是应用坏了。回首屏让他**自己**选一次，切换就成了一个
+ * 有意识的选择，而不是一个被程序替他做的决定。
+ *
+ * ## 为什么说明里要写「不会丢」
+ *
+ * 切走再切回来，连接、SQL、报表都还在（它们由 `MainScreen` 层的会话持有，
+ * 不随顶层页面切换销毁）。不写清楚的话，用户会以为切模式等于清空现场，
+ * 于是宁可不敢切。
+ */
+@Composable
+private fun ModePane(
+    currentMode: AppMode,
+    onSwitchMode: () -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+    ) {
+        Text(text = str(StrKey.MODE), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = str(StrKey.MODE_SWITCH_HINT),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(24.dp))
+
+        Text(text = str(StrKey.MODE_CURRENT), style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.SwapHoriz,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(text = str(currentMode.labelKey), style = MaterialTheme.typography.bodyMedium)
+        }
+        Spacer(Modifier.height(24.dp))
+        WinDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(16.dp))
+
+        WinOutlinedButton(
+            onClick = onSwitchMode,
+            shape = SundaysPalette.buttonShape,
+            modifier = Modifier.testTag(SETTINGS_SWITCH_MODE_BUTTON_TAG),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.SwapHoriz,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(str(StrKey.MODE_SWITCH_BUTTON))
+        }
+    }
+}
+
+/** 设置页「切换模式」按钮的测试标记。 */
+const val SETTINGS_SWITCH_MODE_BUTTON_TAG: String = "settingsSwitchModeButton"
 
 /**
  * 「个性化」内容 —— 配色主题 + 明暗档位（两个正交的单选组）+ 紧凑模式（一个开关）+ 重进引导的入口。

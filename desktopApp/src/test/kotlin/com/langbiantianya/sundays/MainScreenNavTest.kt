@@ -11,6 +11,7 @@ package com.langbiantianya.sundays
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -20,6 +21,7 @@ import com.langbiantianya.i18n.StrKey
 import com.langbiantianya.pool.PoolManager
 import com.langbiantianya.sundays.navigation.START_MODE_ANALYSIS_TAG
 import com.langbiantianya.sundays.navigation.START_MODE_CONNECTIONS_TAG
+import com.langbiantianya.sundays.settings.SETTINGS_SWITCH_MODE_BUTTON_TAG
 import com.langbiantianya.sundays.ui.rememberAppearanceState
 import org.junit.After
 import org.junit.Before
@@ -115,6 +117,38 @@ class MainScreenNavTest {
             // 点它 → 切到分析模式（分析工作台的编辑器标题是它的锚点）
             onNodeWithText(zh(StrKey.NAV_ANALYSIS)).performClick()
             onNodeWithText(zh(StrKey.ANALYSIS_EDITOR_TITLE)).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `the settings page sends the user back to the start screen to pick another mode`() {
+        runComposeUiTest {
+            setContent {
+                ProvideTestStrings {
+                    MaterialTheme {
+                        MainScreen(engine, rememberAppearanceState())
+                    }
+                }
+            }
+
+            // 先进「数据分析」—— 它是**回不了头**的那个模式：
+            // 分析工作台里没有任何通往数据库管理模式的入口。
+            onNodeWithTag(START_MODE_ANALYSIS_TAG).performClick()
+            onNodeWithText(zh(StrKey.ANALYSIS_EDITOR_TITLE)).assertIsDisplayed()
+
+            // 顶栏 ⚙ → 设置页 → 「模式」分类
+            onNodeWithContentDescription("设置").performClick()
+            onNodeWithText(zh(StrKey.MODE)).performClick()
+            waitForIdle()
+
+            // 设置页要**说清当前在哪个模式** —— 不知道在哪就判断不了要不要切
+            onNodeWithText(zh(StrKey.MODE_DATA_ANALYSIS)).assertIsDisplayed()
+
+            // 按「切换模式」→ 回到首屏，让用户重新选一次
+            onNodeWithTag(SETTINGS_SWITCH_MODE_BUTTON_TAG).performClick()
+            waitForIdle()
+            onNodeWithTag(START_MODE_CONNECTIONS_TAG).assertIsDisplayed()
+            onNodeWithTag(START_MODE_ANALYSIS_TAG).assertIsDisplayed()
         }
     }
 }

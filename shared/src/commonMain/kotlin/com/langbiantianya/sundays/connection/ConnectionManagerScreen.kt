@@ -458,6 +458,7 @@ private fun ConnectionListPanel(
 /**
  * 连接列表项.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConnectionListItem(
     connection: ConnectionConfig,
@@ -521,13 +522,29 @@ private fun ConnectionListItem(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Text(
-                    text = "${connection.dialect.name} • ${connection.connectionString(str(StrKey.NO_FILE_SPECIFIED), str(StrKey.IN_MEMORY_DB_LABEL))}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // 副标题（方言 · 地址）—— **悬停能看到完整内容**。
+                //
+                // 为什么需要 tooltip：左栏宽度有限，而 `192.168.1.5:3306` 这种
+                // 「主机 + 端口」被截成 `192.168.1.5…` 之后**端口就没了** ——
+                // 同一台机器上的两个连接（3306 与 5432）就分不出来了。
+                // 截断本身不能去掉（去掉会撑破布局），那就让完整内容在需要时拿得到。
+                val subtitle =
+                    "${connection.dialect.name} • " +
+                        connection.connectionString(str(StrKey.NO_FILE_SPECIFIED), str(StrKey.IN_MEMORY_DB_LABEL))
+                TooltipBox(
+                    positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                    tooltip = { PlainTooltip { Text(subtitle) } },
+                    state = rememberTooltipState(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
             Box {
@@ -1572,7 +1589,10 @@ private fun CredentialsStep(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Text(
-                            text = editingConnection.jdbcUrl.ifBlank { str(StrKey.FIELDS_PENDING) },
+                            // 算不出来时给一句**中性**说明，而不是「(待补齐字段)」这种
+                            // 占位符 —— 后者看着像一句报错，其实只是「还没填」。
+                            // 真正的报错在下面：只有用户**填过东西却仍不合法**时才红。
+                            text = editingConnection.jdbcUrl.ifBlank { str(StrKey.JDBC_URL_PENDING_HINT) },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(10.dp),
@@ -1612,7 +1632,16 @@ private fun CredentialsStep(
             }
         }
 
-        if (!canProceed) {
+        if (!canProceed && hasUserInput(editingConnection)) {
+            // 红字只在用户**已经动过字段却仍不合法**时才出现。
+            //
+            // 为什么：一进这一步就红字，是把「还没开始填」说成「你填错了」——
+            // 用户还没做任何事就被告知自己错了，那条红字就只是噪音；
+            // 而且它与预览框里那句「填好上面的字段后…」说的是同一件事，
+            // 等于把同一句话说两遍，一遍中性一遍报错。
+            //
+            // 那「还没填」时用户怎么知道下一步为什么点不了？靠预览框里那句中性说明 ——
+            // 它就摆在要填的字段下面，说的正是「填完会发生什么」。
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = str(StrKey.REQUIRED_FIELDS_HINT),
@@ -1622,6 +1651,30 @@ private fun CredentialsStep(
         }
     }
 }
+
+/**
+ * 这一步里用户**已经填过东西**没有。
+ *
+ * ## 为什么要有它
+ *
+ * 「请补齐必填字段」那条红字只在用户**动过字段**之后才该出现（见 [CredentialsStep]）。
+ * 判据必须是「有没有填过」，而不是「现在合不合法」—— 后者在用户还没动手时
+ * 同样为假，于是红字会先于用户的任何动作出现，把「还没开始」说成「你填错了」。
+ *
+ * ## 为什么它覆盖**所有**输入字段而不是只看 URL
+ *
+ * URL 是折算出来的**结果**，不是输入。用「URL 为空」当判据，等于用结果判输入 ——
+ * 而结果为空的原因恰恰可能是输入还没填。逐个看输入字段才是「用户动过没有」的真判据。
+ *
+ * @param connection 当前正在编辑的连接配置
+ * @return 用户是否已经填过至少一个字段
+ */
+internal fun hasUserInput(connection: ConnectionConfig): Boolean =
+    connection.host.isNotBlank() ||
+        connection.port != null ||
+        connection.database.isNotBlank() ||
+        connection.username.isNotBlank() ||
+        connection.password.isNotBlank()
 
 /**
  * H2 内存库的字段名 —— **尚未收录进文案表**（表里有 `DATABASE`＝「数据库」，

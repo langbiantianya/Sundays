@@ -65,6 +65,7 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | 领域 | 能力 | 落点 |
 |---|---|---|
 | **入口** | **启动首屏**：进应用先选一个模式（**连接管理** / **数据分析**）—— 两种活儿是两套会话、两种心智模型，「选模式」在进应用时问一次 | `StartScreen`（`:shared` 的 `navigation/`） |
+| | **设置页里能换模式**（**v2.43**）—— 设置页左栏第三栏「模式」写着**当前在哪个模式**，下面一个「切换模式」按钮；按下后**回到首屏**让用户重新选。**不是**直接跳到另一个模式（那会让人突然换了一整套环境、却不知道换到哪了），**也不是**把两个模式混在一起（模式是**导航**动作，与「个性化」那栏的外观设置不是一回事）。**切走不丢现场**：连接 / SQL / 报表都还在，回来接着干 | `shared/navigation/AppDestination.kt`（`AppMode`）/ `shared/settings/SettingsScreen.kt`（`ModePane`）/ `desktopApp/main.kt` |
 | **连接** | 5 个方言：MySQL / PostgreSQL / H2 / DuckDB / SQLite | `dialect-*` SPI 插件 |
 | | 4 步引导 + 快速连接 | `ConnectionManagerScreen` |
 | | **自定义 JDBC URL 连接方式**（每个方言都能选；只给一个 URL 输入框，不给主机/端口/库名 —— 避免两处真相源打架） | `ConnectionType.CUSTOM_URL` → `ConnectionManagerScreen` |
@@ -84,6 +85,8 @@ macOS / Linux / Windows 三端共享同一套 Compose Desktop Skia 渲染；数�
 | | 引擎侧真分页（每页 10/20/50/100/200/300/500） | `DATA.LIST` + `DataTable` |
 | | **过滤 / 排序 / 表内搜索**（全部下推给引擎，零本地筛） | `setTabFilter` / `setTabOrderBy` / `setTabSearch` |
 | | 数据表格：虚拟滚动、列宽对齐、单元格可选中、右键菜单 | `shared/table/DataTable.kt` |
+| | **表格右键能复制了**（**v2.43**）—— 此前浏览模式的表格右键弹出来是个**空菜单**（菜单机制做了，插槽没人接），用户会以为程序坏了。现在接上与分析模式**同一份**复制实现（`:shared` 的 `table/TableCopyMenu.kt`），复制出来的是 **TSV**：粘进 Excel / Sheets **按列落格**。表预览**只给「复制此行」** —— 它是**引擎侧分页**的，`rows` 只是当前页，摆一个「复制整表」复制出来的却只有一页，**那比不给这个菜单项更糟**；SQL 工作台的结果集是本地分页（`rows` 全量），所以那里**两项都给**。**成没成看得见**：浏览模式没有底栏状态位，成败推到**通知中心**（与浏览模式自己的错误出口同一条），文案与分析模式**共用同一份** | `shared/table/TableCopyMenu.kt` / `desktopApp/TablePreview.kt` / `desktopApp/SqlWorkbench.kt` / `desktopApp/DatabaseBrowserState.kt` |
+| | 连接列表的地址被截断时**悬停显示完整地址**（**v2.43**）—— 截断会把**端口**吞掉，而端口正是判断「连的是不是那个库」的关键 | `shared/connection/ConnectionManagerScreen.kt` |
 | | 选中行详情面板（宽度可调） | `DataTable.detailPanel` |
 | | 树面板宽度**可拖拽**（双击复位，范围钳位），悬停显示**左右拉伸指针** | `shared/ui/DragHandle.kt` |
 | | 树面板**可折叠到侧边** —— 收成贴到左边的 44dp 窄轨（一个展开按钮 + 一枚图标），**把宽度让给右边**（表格 / SQL 都少横向滚动）；再点一下原样回来，**不丢**拖好的宽度，**也不丢**滚动位置 | `shared/ui/SidePaneShell.kt` |

@@ -65,7 +65,9 @@ import com.langbiantianya.sundays.table.DataTable
 import com.langbiantianya.sundays.table.DataTableTheme
 import com.langbiantianya.sundays.table.PageSize
 import com.langbiantianya.sundays.table.TableColumn
+import com.langbiantianya.sundays.table.TableCopyMenuItems
 import com.langbiantianya.sundays.table.TableRow
+import com.langbiantianya.sundays.table.rememberContextMenuState
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.SundaysPalette
 import com.langbiantianya.sundays.ui.WinButton
@@ -241,6 +243,10 @@ internal fun PreviewTabArea(
                     onOrderByChange = { state.setTabOrderBy(current, it) },
                     onSearchChange = { state.setTabSearch(current, it) },
                     onExport = { sql -> exportSql = sql },
+                    // 「复制此行」—— 写剪贴板与反馈都走 state：它持有剪贴板注入点
+                    // 与通知中心，测试里注入的替身也正是从这里生效。
+                    onCopyRows = { text -> state.writeClipboard(text) },
+                    onCopiedRows = { count, ok -> state.notifyCopiedRows(count, ok) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -480,8 +486,18 @@ private const val TABLE_INSERT_REMOVE_ROW_BTN_TAG = "tableInsertRemoveRowBtn"
 
 private const val TABLE_INSERT_CONFIRM_BTN_TAG = "tableInsertConfirmBtn"
 
+/**
+ * 表预览标签页的内容 —— 工具条 + 表格。
+ *
+ * ## 为什么是 `internal` 而不是 `private`
+ *
+ * 「复制此行」的右键菜单是**浏览模式自己的接线**（只给复制此行，不给复制整表），
+ * 而这条接线最容易被「顺手改成和别处一样」而改错。把这个 composable 开放到
+ * 模块内，测试就能**直接渲染它**并断言菜单里有什么 —— 否则只能靠端到端点
+ * 真引擎的表才能验到那条接线。
+ */
 @Composable
-private fun PreviewTabContent(
+internal fun PreviewTabContent(
     tab: TablePreviewTab,
     onPageChange: (Int) -> Unit,
     onPageSizeChange: (PageSize) -> Unit,
@@ -513,11 +529,21 @@ private fun PreviewTabContent(
     onSearchChange: (String) -> Unit = {},
     /** 导出回调，入参是要导出的 SQL（由 [TableFilterBar] 按整表拼好）。 */
     onExport: ((String) -> Unit)? = null,
+    /**
+     * 写剪贴板 —— 给「复制此行」用；返回 `false` = 失败（剪贴板不可用 / 被占用）。
+     * `null` = 这一屏不提供复制入口。
+     */
+    onCopyRows: ((String) -> Boolean)? = null,
+    /** 复制结果的反馈（复制了几行、成没成）。 */
+    onCopiedRows: ((rowCount: Int, ok: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // 弹窗的开关状态放这里而不是 `InsertRowsDialog` 内部：弹窗是模态浮层，它的内容要拿到
     // **每次翻页后刷新的** `insertableColumns`，放在外面就不会有一份记过期的列名。
     var insertDialogOpen by remember { mutableStateOf(false) }
+    // 右键菜单状态建在 `when` **之外**：建在分支里的话，一换分支（读失败 → 有数据）
+    // 菜单状态就被丢掉，用户接着右键会发现菜单不弹。
+    val copyMenuState = rememberContextMenuState()
     Column(modifier = modifier) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -695,6 +721,25 @@ private fun PreviewTabContent(
                     rowSelectable = rowSelectable,
                     selectedRowIds = selectedRowIds,
                     onSelectedRowIdsChange = onSelectedRowIdsChange,
+                    // 右键菜单：只给「复制此行」。
+                    //
+                    // 为什么**不给**「复制整表」：表预览是**引擎侧分页**（`DATA.LIST` 带
+                    // page / pageSize，回包里只有当前页），整张表在引擎那边。
+                    // 在这里给一个叫「复制整表」的菜单项，它复制出来的却只有一页 ——
+                    // 用户以为把整张表拷走了，粘进 Excel 才发现少了几万行。
+                    // 那比不给这个菜单项更糟。
+                    contextMenuState = copyMenuState,
+                    contextMenuItems = { row ->
+                        TableCopyMenuItems(
+                            columns = tab.columns,
+                            rows = tab.displayRows(),
+                            target = row,
+                            menu = copyMenuState,
+                            onCopy = { text -> onCopyRows?.invoke(text) ?: false },
+                            onCopied = { count, ok -> onCopiedRows?.invoke(count, ok) },
+                            canCopyAll = false,
+                        )
+                    },
                 )
             }
 

@@ -69,6 +69,8 @@ import com.langbiantianya.sundays.editor.ui.CodeEditorWithToolbar
 import com.langbiantianya.sundays.sql.DangerousSql
 import com.langbiantianya.sundays.sql.DangerousSqlConfirmDialog
 import com.langbiantianya.sundays.table.DataTable
+import com.langbiantianya.sundays.table.TableCopyMenuItems
+import com.langbiantianya.sundays.table.rememberContextMenuState
 import com.langbiantianya.sundays.ui.EmptyHint
 import com.langbiantianya.sundays.ui.HorizontalDragHandle
 import com.langbiantianya.sundays.ui.SundaysPalette
@@ -629,6 +631,7 @@ internal fun SqlWorkbenchPane(
                     hoverIcon = nsResizePointerIcon(),
                 )
                 SqlResultArea(
+                    state = state,
                     sheet = sheet,
                     modifier =
                         Modifier
@@ -815,9 +818,13 @@ private fun Modifier.verticalWheelScrollsHorizontally(state: ScrollState): Modif
  */
 @Composable
 private fun SqlResultArea(
+    state: DatabaseBrowserState,
     sheet: DatabaseBrowserState.SqlSheet?,
     modifier: Modifier = Modifier,
 ) {
+    // 右键菜单状态建在 `when` **之外**：建在分支里的话，一换分支（执行中 → 出结果）
+    // 菜单状态就被丢掉，用户接着右键会发现菜单不弹。
+    val copyMenuState = rememberContextMenuState()
     Surface(
         color = MaterialTheme.colorScheme.surface,
         modifier = modifier,
@@ -950,6 +957,22 @@ private fun SqlResultArea(
                         selectedRowId = sheet.selectedRowId,
                         onSelectedRowChange = { sheet.selectedRowId = it?.id },
                         fillParentHeight = false,
+                        // 右键菜单：「复制此行」与「复制整表」都给。
+                        //
+                        // 与表预览不同 —— 这里的结果集是**本地**分页（`sheet.rows` 就是
+                        // 引擎回的全部行），所以「复制整表」复制到的确实是整张结果表。
+                        // （引擎侧有截断上限，超过时界面上已经明写「最多 N 行」。）
+                        contextMenuState = copyMenuState,
+                        contextMenuItems = { row ->
+                            TableCopyMenuItems(
+                                columns = sheet.columns,
+                                rows = sheet.rows,
+                                target = row,
+                                menu = copyMenuState,
+                                onCopy = { text -> state.writeClipboard(text) },
+                                onCopied = { count, ok -> state.notifyCopiedRows(count, ok) },
+                            )
+                        },
                     )
                 }
             }

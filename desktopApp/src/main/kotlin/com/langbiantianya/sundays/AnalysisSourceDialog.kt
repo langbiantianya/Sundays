@@ -292,6 +292,17 @@ internal fun AnalysisSourceDialog(
                     }
 
                     if (kind == AnalysisSourceKind.REMOTE) {
+                        // 先说清这个按钮是干什么的，再放按钮。
+                        //
+                        // 为什么：一个**禁用**的按钮在界面上只是一块灰字 —— 用户看不出
+                        // 「那是个按钮」，更看不出「填了主机地址它就能用」。
+                        // 没说明的禁用控件等于没有：用户只会觉得这个对话框坏了。
+                        Text(
+                            text = str(StrKey.ANALYSIS_SOURCE_PREVIEW_HINT),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
                         WinOutlinedButton(
                             onClick = {
                                 error = null

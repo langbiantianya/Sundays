@@ -142,7 +142,6 @@ enum class StrKey {
     USERNAME,
     PASSWORD,
     JDBC_URL_DERIVED,
-    FIELDS_PENDING,
     REQUIRED_FIELDS_HINT,
     DATABASE_FILE_PATH,
     DATABASE_FILE_PATH_HINT_H2,
@@ -922,6 +921,35 @@ enum class StrKey {
     START_MODE_TITLE,
     START_MODE_CONNECTIONS_HINT,
     START_MODE_ANALYSIS_HINT,
+
+    // ──────────────── 模式切换（设置页） ────────────────
+
+    /** 设置页左侧分类「模式」。 */
+    MODE,
+
+    /** 模式面板里的「当前模式」标签。 */
+    MODE_CURRENT,
+
+    /** 当前还没选模式（停在首屏）。 */
+    MODE_NONE,
+
+    /** 数据库管理模式。 */
+    MODE_DATABASE_MANAGEMENT,
+
+    /** 数据分析模式。 */
+    MODE_DATA_ANALYSIS,
+
+    /** 模式面板的说明文字 —— 说清「切过去会怎样」。 */
+    MODE_SWITCH_HINT,
+
+    /** 「切换模式」按钮。 */
+    MODE_SWITCH_BUTTON,
+
+    /** 「添加数据源」对话框里那个「预览」按钮的说明。 */
+    ANALYSIS_SOURCE_PREVIEW_HINT,
+
+    /** 连接向导里 JDBC URL 算不出来时的**中性**说明（不是错误）。 */
+    JDBC_URL_PENDING_HINT,
     ;
 
     companion object {

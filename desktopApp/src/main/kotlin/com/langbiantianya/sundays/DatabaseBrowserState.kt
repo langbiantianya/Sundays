@@ -854,6 +854,54 @@ class DatabaseBrowserState(
     }
 
     /**
+     * 写剪贴板 —— 给「复制表格行」用。
+     *
+     * ## 为什么把剪贴板单独开一个出口
+     *
+     * 复制**表格行**与分析模式的「复制此行 / 复制整表」是**同一个概念**，
+     * 所以剪贴板写入必须走**同一条**通道（同一个注入点、同一个替身）——
+     * 否则测试里注入的替身在这条路上不生效，「复制失败要报错」那条契约就测不到。
+     *
+     * 而**报什么**是两回事：复制树节点名报「已复制 引用名」，复制表格行报「已复制 12 行」，
+     * 所以文案由 [notifyCopiedRows] 单独决定。
+     *
+     * @param text 要写进剪贴板的文本
+     * @return 是否写成功
+     */
+    fun writeClipboard(text: String): Boolean = clipboard(text)
+
+    /**
+     * 推一条「已复制 N 行 / 复制失败」的通知。
+     *
+     * ## 为什么走**通知中心**而不是底栏
+     *
+     * 浏览模式没有分析模式那条底栏状态位（底栏在那里放的是堆内存与通知铃铛），
+     * 而浏览模式本来就有一个**通知中心**（跨连接共享的那一个）——
+     * 「刚才复制成功没有」正是它该管的事。
+     *
+     * 文案复用分析模式那两条（`COPIED_ROWS` / `COPY_TABLE_FAILED`），
+     * 免得同一个动作在两个模式里说法不一样。
+     *
+     * @param rowCount 复制了几行
+     * @param ok 成没成
+     */
+    fun notifyCopiedRows(
+        rowCount: Int,
+        ok: Boolean,
+    ) {
+        val center = notifications ?: return
+        center.push(
+            if (ok) AppNotification.Severity.SUCCESS else AppNotification.Severity.ERROR,
+            if (ok) {
+                Msg.plural(PluralStrKey.COPIED_ROWS, rowCount, rowCount)
+            } else {
+                Msg.text(StrKey.COPY_TABLE_FAILED)
+            },
+            "",
+        )
+    }
+
+    /**
      * 「复制建表 DDL」—— 发 `TABLE.GET_DDL` 取引擎侧的建表语句再复制。
      *
      * ## 为什么 DDL **不能**前端拼
