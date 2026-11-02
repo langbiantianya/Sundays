@@ -17,7 +17,12 @@ param(
     # ⚠️ Windows WHEEL_DELTA 的方向与直觉相反：**正数向上滚，负数向下滚**。
     # 早期版本这里直接传 `Scroll * 120`，于是「向下滚」其实在往上滚 ——
     # 而内容本来就在顶部，看起来就像「滚不动」，误判成 verticalScroll 失效。
-    # （真机复盘见 TEST_CASES.md §9.25。）
+    # （真机复盘见 TEST_CASES.md §4.2 第 4 条。）
+    #
+    # ⚠️ 还有一条更隐蔽的：**旧版的 `dwData` 声明成 `uint`，于是只有「向下滚」会炸**
+    # （向下要传 `-120`，向上传 `+120` 不触发转换错误）—— 也就是滚轮是「半坏」的，
+    # 往上滚正常、往下滚毫无反应，很容易被当成偶发问题而错过。
+    # （真机复盘见 TEST_CASES.md §4.2 第 6 条。）
     [int]$Scroll = 0,
     [string]$OutDir = "C:\Users\lbty\project\Sundays\build\tmp\shots",
     [string]$Name = "click"
@@ -35,7 +40,26 @@ public class CS {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
+    // ⚠️ `dwData` 声明成 **int**（有符号）而不是 uint ——
+    //
+    // mouse_event 的第 4 个参数在 Win32 里是 DWORD（无符号），但滚轮那一位
+    // （MOUSEEVENTF_WHEEL）装的是 **WHEEL_DELTA**，那是个**有符号**增量：
+    // 正数向上滚、负数向下滚。位模式一样，两种声明传过去的字节相同 ——
+    // 所以这里直接声明成 `int`，调用点就能老老实实写 `-120`。
+    //
+    // 原来声明成 `uint` 时，PowerShell 在把 `-120` 转成 UInt32 的那一步就抛
+    // 「Cannot convert -120 to UInt32」，**滚轮事件根本没发出去**：
+    // 脚本继续往下跑、照样截图、照样打印「滚动 (x,y) xN」——
+    // 看上去一切正常，实际上**页面一动没动**。
+    //
+    // 实测（2026-11，AWT 探针 + sundays 真窗口）：
+    //   - 变异回 `uint` 后向下滚：像素差分 **0**（一个事件都没发出去），
+    //     但脚本照样打印「滚动 x3」；
+    //   - 同一变异体向上滚：像素差分 **21904**（正常）——
+    //     因为向上传的是 `+120`，压根不触发类型转换。
+    //   - 改回 `int` 后向下滚：像素差分 **51429**（真滚了）。
+    // （真机复盘见 TEST_CASES.md §4.2 第 6 条。）
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, int d, IntPtr e);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, IntPtr e);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -79,7 +103,18 @@ $absY = $r.Top + $Y
 Start-Sleep -Milliseconds 350
 
 if ($Scroll -ne 0) {
-    # MOUSEEVENTF_WHEEL(0x0800)，一格 = 120；向下滚要传**负值**（正数是向上）
+    # MOUSEEVENTF_WHEEL(0x0800)，一格 = 120。
+    #
+    # ⚠️ **方向**：WHEEL_DELTA 是**有符号**的 —— 正数向上滚、负数向下滚。
+    # 本脚本的 `-Scroll` 参数约定是「**正数向下**」，所以这里要把符号**反过来**：
+    # `$Scroll > 0`（要往下）→ 传 `-120`；`$Scroll < 0`（要往上）→ 传 `120`。
+    # 早先直接传 `Scroll * 120` 时两者搞反，「向下滚」其实在往上滚 ——
+    # 内容本来就在顶部，看上去就像「滚不动」，一度差点当成产品缺陷去改布局。
+    #
+    # 实测（2026-11）：AWT 探针里传 `-120` 时垂直滚动条 value **增大**（往下），
+    # 传 `+120` 时 **减小**（往上）；sundays 设置页上 `-Scroll 3` 内容确实下移。
+    # 结论：这里的符号映射是**对的**，别再改。
+    # （真机复盘见 TEST_CASES.md §4.2 第 4 条。）
     $notches = [Math]::Abs($Scroll)
     $delta = if ($Scroll -gt 0) { -120 } else { 120 }
     for ($i = 0; $i -lt $notches; $i++) {
